@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#6D1B9E">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Vaapty — Ficha e Negociacao</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>html,body{margin:0;padding:0;background:#EFECF3}</style>
+</head>
+<body>
+<div id="raiz"></div>
+<script>
+(function () {
+  var memoria = {}, temLS = false;
+  try { localStorage.setItem('__t','1'); localStorage.removeItem('__t'); temLS = true; } catch (e) {}
+  window.storage = {
+    get: function (k) { return new Promise(function (res, rej) {
+      var v = temLS ? localStorage.getItem('vp:'+k) : memoria[k];
+      v == null ? rej(new Error('nao encontrado')) : res({ key:k, value:v }); }); },
+    set: function (k, v) { return new Promise(function (res, rej) {
+      try { temLS ? localStorage.setItem('vp:'+k, v) : (memoria[k]=v); res({key:k,value:v}); } catch (e) { rej(e); } }); },
+    delete: function (k) { return new Promise(function (res) {
+      temLS ? localStorage.removeItem('vp:'+k) : delete memoria[k]; res({key:k,deleted:true}); }); }
+  };
+})();
+</script>
+<script type="text/babel" data-type="module">
+const { useState, useEffect, useMemo, useRef } = React;
+
+
+/* ===================== tokens ===================== */
+const C = {
+  bg: "#EFECF3", paper: "#FFFFFF", ink: "#181221", mute: "#6B6478",
+  line: "#DCD6E4", roxo: "#6D1B9E", roxoFraco: "#F1E8F7",
+  laranja: "#EA5423", verde: "#1D7F58",
+};
+const F = {
+  disp: "'Archivo', system-ui, sans-serif",
+  body: "'Public Sans', system-ui, sans-serif",
+  mono: "'Roboto Mono', ui-monospace, monospace",
+};
+
+const brl = (n) =>
+  n === "" || n == null || isNaN(n) ? "—"
+    : Number(n).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+
+const PNEU = ["Novo", "Bom", "Médio", "Fraco"];
+const CAMBIO = ["", "Manual", "Automático", "Automatizado", "CVT"];
+const OPCIONAIS = ["Completo", "Ar condicionado", "Direção hid./elét.", "ABS", "Som / Multimídia", "Sensor de ré", "Câmera de ré", "Rodas de liga", "Bancos em couro"];
+const MOTIVOS = ["", "Quitar dívida", "Comprar outro carro", "Investir", "Saúde", "Mudança", "Carro sobrando", "Só vender"];
+const OBJECOES = ["", "Valor abaixo da pretensão", "Decisor ausente", "Não tem tempo", "Proposta de concorrente", "Quitação maior que o carro", "Só especulando"];
+const FECHAMENTO = ["", "Limpo", "Com quitação", "Assumir financiamento", "Consignado"];
+const MAX_FOTOS = 12;
+const ESPERA_SEG = 15 * 60;
+
+/* ===================== API ===================== */
+async function consultarPlaca(placa) {
+  const r = await fetch(`/api/placa?placa=${encodeURIComponent(placa)}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Falha na consulta.");
+  return d;
+}
+async function consultarCota() {
+  try { const r = await fetch("/api/cota"); return r.ok ? await r.json() : null; } catch (e) { return null; }
+}
+
+const RX_AUT = /\b(AUT|AUTOM|CVT|DCT|AT)\b\.?/i;
+const RX_MEC = /\b(MEC|MANUAL|MT)\b\.?/i;
+function filtrarPorCambio(vs, cambio) {
+  if (!cambio) return vs;
+  const quer = cambio !== "Manual";
+  const f = vs.filter((v) => (quer ? RX_AUT.test(v.nome) : RX_MEC.test(v.nome) || !RX_AUT.test(v.nome)));
+  return f.length ? f : vs;
+}
+function alertaDispersao(vs) {
+  if (vs.length < 2) return null;
+  const a = vs.map((v) => v.valor);
+  const d = Math.max(...a) - Math.min(...a);
+  return d < 2000 ? null : `As versões variam ${brl(d)} entre si. Confirme no documento.`;
+}
+
+/* ===================== fotos ===================== */
+function comprimir(file, max = 1280, q = 0.72) {
+  return new Promise((res, rej) => {
+    const l = new FileReader();
+    l.onerror = () => rej(new Error("Não consegui ler a imagem."));
+    l.onload = () => {
+      const img = new Image();
+      img.onerror = () => rej(new Error("Arquivo inválido."));
+      img.onload = () => {
+        const e = Math.min(1, max / Math.max(img.width, img.height));
+        const cv = document.createElement("canvas");
+        cv.width = Math.round(img.width * e); cv.height = Math.round(img.height * e);
+        cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+        res(cv.toDataURL("image/jpeg", q));
+      };
+      img.src = l.result;
+    };
+    l.readAsDataURL(file);
+  });
+}
+
+/* ===================== estado ===================== */
+const VAZIO = {
+  // veículo
+  modelo: "", ano: "", cambio: "", km: "", kmEntrada: "", placa: "",
+  fipe: "", fipeCodigo: "", pedida: "", por: "", gastos: "",
+  chassi: "", cor: "", combustivel: "",
+  pneus: ["", "", "", ""], leilao: false, gnv: false, opcionais: [],
+  lataria: "", mecanica: "", positivos: "", ressalvas: "", internas: "",
+  negociador: "",
+  // A
+  chegada: "", carroSubiu: false, tempoCombinado: false,
+  // P
+  motivo: "", pretensao: "", quitacao: "", debitos: "", decisorPresente: false,
+  temPropostaFora: false, propostaForaValor: "", propostaForaOnde: "",
+  // O
+  mostrouProcesso: false, mostrouTestemunhal: false, necessidadeCliente: "",
+  // pausa
+  publicado: false,
+  // espera
+  esperaIniciadaEm: null, notasEspera: "",
+  // N
+  rodadas: [], objecao: "",
+  // T
+  aceiteFinal: false, valorFechado: "", formaFechamento: "",
+  cautelarEnviado: false, contratoAssinado: false,
+  // E
+  avaliacaoGoogle: false, indicacoes: [],
+};
+
+const OBRIGATORIOS = [
+  ["modelo", "Modelo"], ["ano", "Ano / modelo"], ["cambio", "Câmbio"],
+  ["km", "KM atual"], ["placa", "Placa"], ["fipe", "Valor FIPE"],
+  ["por", "Valor POR"], ["pneus", "Condição dos 4 pneus"],
+  ["opcionais", "Opcionais"], ["gastos", "Gastos / peças"],
+];
+function faltando(f, fotos) {
+  const l = OBRIGATORIOS.filter(([k]) => {
+    const v = f[k];
+    if (k === "pneus") return v.some((p) => !p);
+    if (k === "opcionais") return v.length === 0;
+    return v === "" || v == null;
+  });
+  if (!fotos.length) l.push(["fotos", "Ao menos 1 foto"]);
+  return l;
+}
+
+/* ===================== etapas ===================== */
+const ETAPAS = [
+  { id: "A", letra: "A", nome: "Abordagem positiva", curto: "Abordagem" },
+  { id: "P", letra: "P", nome: "Pesquise o cliente e o carro", curto: "Pesquisa" },
+  { id: "O", letra: "O", nome: "Ofereça uma demonstração envolvente", curto: "Demonstração" },
+  { id: "PUB", letra: "▸", nome: "Ficha, descritivo e lançamento", curto: "Lançamento" },
+  { id: "ESP", letra: "⏱", nome: "Espera das propostas", curto: "Espera" },
+  { id: "N", letra: "N", nome: "Negocie e neutralize objeções", curto: "Negociação" },
+  { id: "T", letra: "T", nome: "Tome a iniciativa e feche", curto: "Fechamento" },
+  { id: "E", letra: "E", nome: "Estenda o relacionamento", curto: "Relacionamento" },
+];
+
+function etapaConcluida(id, f, fotos) {
+  switch (id) {
+    case "A": return !!f.chegada && f.carroSubiu && f.tempoCombinado;
+    case "P": return !!f.motivo && !!f.pretensao && f.decisorPresente;
+    case "O": return f.mostrouProcesso && f.mostrouTestemunhal;
+    case "PUB": return faltando(f, fotos).length === 0 && f.publicado;
+    case "ESP": return !!f.esperaIniciadaEm;
+    case "N": return f.rodadas.length > 0;
+    case "T": return f.aceiteFinal && !!f.valorFechado;
+    case "E": return f.avaliacaoGoogle || f.indicacoes.length > 0;
+    default: return false;
+  }
+}
+
+/* ===================== UI ===================== */
+const inputCls = "w-full rounded-md border px-3 py-2 text-[14px] outline-none";
+const inputSty = { borderColor: C.line, background: "#fff", color: C.ink };
+
+const Rotulo = ({ children, req }) => (
+  <span className="block text-[10px] uppercase tracking-[0.13em]" style={{ color: C.mute }}>
+    {children}{req && <span style={{ color: C.laranja }}> *</span>}
+  </span>
+);
+const Campo = ({ label, req, children }) => (
+  <label className="block"><Rotulo req={req}>{label}</Rotulo><div className="mt-1">{children}</div></label>
+);
+function Toggle({ label, valor, onChange, nota }) {
+  return (
+    <button onClick={() => onChange(!valor)} className="flex w-full items-start gap-3 rounded-md border px-3 py-2.5 text-left"
+      style={{ borderColor: valor ? C.verde : C.line, background: valor ? "#F0F8F4" : "#fff" }}>
+      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded"
+        style={{ background: valor ? C.verde : "#fff", border: `1.5px solid ${valor ? C.verde : C.line}`, color: "#fff", fontSize: 12 }}>
+        {valor ? "✓" : ""}
+      </span>
+      <span>
+        <span className="block text-[13px] font-medium leading-snug">{label}</span>
+        {nota && <span className="mt-0.5 block text-[11px]" style={{ color: C.mute }}>{nota}</span>}
+      </span>
+    </button>
+  );
+}
+const Bloco = ({ titulo, sub, children }) => (
+  <section className="rounded-lg p-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+    <div className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.roxo, fontFamily: F.disp, fontWeight: 700 }}>{titulo}</div>
+    {sub && <p className="mt-1 text-[11px] leading-relaxed" style={{ color: C.mute }}>{sub}</p>}
+    <div className="mt-3">{children}</div>
+  </section>
+);
+const Pendente = ({ children }) => (
+  <div className="rounded-md border border-dashed p-3 text-[11px] leading-relaxed" style={{ borderColor: C.line, color: C.mute }}>
+    {children}
+  </div>
+);
+
+/* ===================== saídas ===================== */
+const mascararPlaca = (p) => (!p || p.length < 2 ? "—" : `${p[0]}-${p[p.length - 1]}`);
+function resumoPneus(a) {
+  const c = {};
+  a.forEach((p) => p && (c[p] = (c[p] || 0) + 1));
+  return Object.entries(c).map(([k, v]) => `${v} ${k.toUpperCase()}`).join(" / ") || "—";
+}
+function gerarDescritivo(f, n) {
+  const L = ["🏦 VAAPTY / JOINVILLE 🏦", "", `🚗 Modelo: ${f.modelo}`, ""];
+  L.push(`🔢 Ano ou Mod: ${f.ano}`);
+  L.push(`⚙️ Câmbio: ${(f.cambio || "").toUpperCase()}.`);
+  L.push(`⭕ Km: ${Number(f.km).toLocaleString("pt-BR")}${f.kmEntrada ? ` (Pegou c/${Math.round(f.kmEntrada / 1000)}k)` : ""}`);
+  L.push(`🗺 Placa: ${mascararPlaca(f.placa)}`);
+  L.push(`🍩 Pneus: ${resumoPneus(f.pneus)}`);
+  L.push(`💵 FIPE: ${brl(f.fipe)}`);
+  L.push(`💵 POR: ${brl(f.por)}`, "");
+  L.push(`🛠 GASTOS: ${(f.gastos || "").toUpperCase()}`, "");
+  L.push(`❎ OPCIONAIS: ${f.opcionais.join(" / ").toUpperCase()}`);
+  if (f.leilao) L.push("", "⚠️ LEILÃO / SINISTRO");
+  if (f.gnv) L.push("⛽ GNV");
+  if ((f.ressalvas || "").trim()) {
+    L.push("", "📌 RESSALVAS:");
+    f.ressalvas.split("\n").filter(Boolean).forEach((r) => L.push(`• ${r}`));
+  }
+  L.push("", `📷 ${n} fotos`, "", "💥💥💥💥💥💥💥💥💥💥", "");
+  L.push("💼 NEGOCIADOR", `📲 ${f.negociador || "—"}`, "");
+  L.push("☑️ Gerente: THIAGO", "📲 Whats/ligação: (21) 96467-3445", "");
+  L.push("☑️ Gerente: WEBERT", "📲 Whats/ligação: (47) 9213-2434");
+  return L.join("\n");
+}
+const payloadShinkai = (f, n) => ({
+  origem: "vaapty-joinville",
+  veiculo: {
+    placa: f.placa, chassi: f.chassi, marca_modelo: f.modelo, ano_modelo: f.ano,
+    cor: f.cor, combustivel: f.combustivel, cambio: f.cambio, km_atual: Number(f.km) || null,
+    fipe_codigo: f.fipeCodigo, fipe_valor: Number(f.fipe) || null,
+    leilao_sinistro: f.leilao, gnv: f.gnv,
+    pneus: { diant_esq: f.pneus[0], diant_dir: f.pneus[1], tras_esq: f.pneus[2], tras_dir: f.pneus[3] },
+    opcionais: f.opcionais, detalhes_lataria: f.lataria, detalhes_mecanica: f.mecanica,
+  },
+  oferta: {
+    valor_por: Number(f.por) || null, gastos: f.gastos,
+    pontos_positivos: (f.positivos || "").split("\n").filter(Boolean),
+    ressalvas_lojista: (f.ressalvas || "").split("\n").filter(Boolean),
+  },
+  midia: { fotos: n },
+  interno: { observacoes: f.internas, negociador: f.negociador },
+});
+
+/* ===================== app ===================== */
+function VaaptyAponte() {
+  const [f, setF] = useState(VAZIO);
+  const [fotos, setFotos] = useState([]);
+  const [etapa, setEtapa] = useState("A");
+  const [copiado, setCopiado] = useState("");
+  const [agora, setAgora] = useState(Date.now());
+
+  const [placaBusca, setPlacaBusca] = useState("");
+  const [buscando, setBuscando] = useState(false);
+  const [erroBusca, setErroBusca] = useState("");
+  const [achado, setAchado] = useState(null);
+  const [cambioBusca, setCambioBusca] = useState("");
+  const [cota, setCota] = useState(null);
+
+  const [novaRodada, setNovaRodada] = useState({ impresso: "", contra: "" });
+  const [novaInd, setNovaInd] = useState({ nome: "", fone: "" });
+  const [erroFoto, setErroFoto] = useState("");
+  const camRef = useRef(null); const galRef = useRef(null);
+
+  useEffect(() => {
+    (async () => {
+      try { const r = await window.storage.get("vaapty:at"); if (r && r.value) setF({ ...VAZIO, ...JSON.parse(r.value) }); } catch (e) {}
+      try { const r = await window.storage.get("vaapty:fotos"); if (r && r.value) setFotos(JSON.parse(r.value)); } catch (e) {}
+      setCota(await consultarCota());
+    })();
+  }, []);
+
+  useEffect(() => {
+    const t = setInterval(() => setAgora(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const set = (k, v) => {
+    const n = { ...f, [k]: v };
+    setF(n); window.storage.set("vaapty:at", JSON.stringify(n)).catch(() => {});
+  };
+  const setVarios = (o) => {
+    const n = { ...f, ...o };
+    setF(n); window.storage.set("vaapty:at", JSON.stringify(n)).catch(() => {});
+  };
+  const salvarFotos = (a) => {
+    setFotos(a);
+    window.storage.set("vaapty:fotos", JSON.stringify(a)).catch(() => setErroFoto("Não coube no armazenamento local."));
+  };
+
+  const buscar = async () => {
+    setErroBusca(""); setAchado(null); setBuscando(true); setCambioBusca(f.cambio || "");
+    try { setAchado(await consultarPlaca(placaBusca)); setCota(await consultarCota()); }
+    catch (e) { setErroBusca(e.message); }
+    setBuscando(false);
+  };
+  const escolherVersao = (v) => {
+    setVarios({
+      placa: achado.placa, modelo: `${achado.marca} ${v.nome}`,
+      ano: `${achado.anoFabricacao || ""}/${v.anoModelo || achado.anoModelo || ""}`,
+      fipe: String(Math.round(v.valor)), fipeCodigo: v.codigoFipe,
+      chassi: achado.chassiCompleto ? achado.chassi : "",
+      cor: achado.cor || "", combustivel: v.combustivel || achado.combustivel || "",
+      cambio: cambioBusca || f.cambio,
+    });
+    setAchado(null); setPlacaBusca("");
+  };
+
+  const receberFotos = async (ev) => {
+    setErroFoto("");
+    const arqs = Array.from(ev.target.files || []);
+    if (!arqs.length) return;
+    const espaco = MAX_FOTOS - fotos.length;
+    if (espaco <= 0) { setErroFoto(`Limite de ${MAX_FOTOS} fotos.`); return; }
+    const novas = [];
+    for (const a of arqs.slice(0, espaco)) {
+      try { novas.push(await comprimir(a)); } catch (e) { setErroFoto(e.message); }
+    }
+    if (novas.length) salvarFotos([...fotos, ...novas]);
+    ev.target.value = "";
+  };
+
+  const copiar = (t, tag) => {
+    const ta = document.createElement("textarea");
+    ta.value = t; document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); } catch (e) {}
+    document.body.removeChild(ta);
+    setCopiado(tag); setTimeout(() => setCopiado(""), 1800);
+  };
+
+  const faltas = useMemo(() => faltando(f, fotos), [f, fotos]);
+  const liberado = faltas.length === 0;
+  const descritivo = gerarDescritivo(f, fotos.length);
+
+  const restante = f.esperaIniciadaEm ? Math.max(0, ESPERA_SEG - Math.floor((agora - f.esperaIniciadaEm) / 1000)) : null;
+  const mmss = (s) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+
+  const gap = useMemo(() => {
+    if (!f.pretensao || !f.rodadas.length) return null;
+    return Math.round(((Number(f.pretensao) - Number(f.rodadas[0].impresso)) / Number(f.pretensao)) * 100);
+  }, [f.pretensao, f.rodadas]);
+
+  const idx = ETAPAS.findIndex((e) => e.id === etapa);
+  const et = ETAPAS[idx];
+
+  return (
+    <div className="min-h-screen w-full pb-24" style={{ background: C.bg, fontFamily: F.body, color: C.ink }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Public+Sans:wght@400;500;600&family=Roboto+Mono:wght@500;700&display=swap');
+        input:focus,textarea:focus,select:focus{border-color:${C.roxo}!important;box-shadow:0 0 0 3px ${C.roxoFraco}}
+        .rolar::-webkit-scrollbar{height:0}
+        @media (prefers-reduced-motion: reduce){*{transition:none!important}}
+      `}</style>
+
+      {/* cabeçalho */}
+      <header className="px-4 pt-4 pb-3" style={{ background: C.roxo, color: "#fff" }}>
+        <div className="flex items-baseline justify-between">
+          <span className="text-[10px] uppercase tracking-[0.22em]" style={{ opacity: 0.7 }}>Vaapty Joinville</span>
+          {cota && (
+            <span className="text-[10px]" style={{ fontFamily: F.mono, opacity: cota.restantes <= 3 ? 1 : 0.7, color: cota.restantes <= 3 ? "#FFC9B4" : "#fff" }}>
+              {cota.usadas}/{cota.limiteDiario} consultas
+            </span>
+          )}
+        </div>
+        <h1 className="mt-1 text-[17px] leading-tight" style={{ fontFamily: F.disp, fontWeight: 800 }}>
+          {f.modelo || "Novo atendimento"}
+        </h1>
+        {f.placa && (
+          <div className="mt-1 text-[11px]" style={{ fontFamily: F.mono, opacity: 0.85 }}>
+            {f.placa} · {f.ano} · FIPE {brl(f.fipe)}
+          </div>
+        )}
+      </header>
+
+      {/* trilho */}
+      <div className="rolar flex gap-1.5 overflow-x-auto px-3 py-3" style={{ background: C.paper, borderBottom: `1px solid ${C.line}` }}>
+        {ETAPAS.map((e) => {
+          const ok = etapaConcluida(e.id, f, fotos);
+          const ativa = e.id === etapa;
+          return (
+            <button key={e.id} onClick={() => setEtapa(e.id)} className="flex shrink-0 flex-col items-center gap-1" style={{ width: 56 }}>
+              <span className="flex h-9 w-9 items-center justify-center rounded-full text-[15px]"
+                style={{
+                  background: ativa ? C.roxo : ok ? C.verde : C.roxoFraco,
+                  color: ativa || ok ? "#fff" : C.roxo,
+                  fontFamily: F.disp, fontWeight: 800,
+                }}>
+                {ok && !ativa ? "✓" : e.letra}
+              </span>
+              <span className="text-center text-[9px] leading-tight" style={{ color: ativa ? C.roxo : C.mute, fontWeight: ativa ? 700 : 400 }}>
+                {e.curto}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="px-4 pt-4">
+        <h2 className="text-[16px] font-semibold leading-tight">{et.nome}</h2>
+      </div>
+
+      <div className="space-y-4 p-4">
+
+        {/* ---------- A ---------- */}
+        {etapa === "A" && (
+          <Bloco titulo="Chegada" sub="“Cliente não aguardou na loja” é o motivo de perda mais repetido no CRM. Combinar o tempo do processo agora é o que evita isso.">
+            <div className="space-y-2.5">
+              <Campo label="Negociador"><input className={inputCls} style={inputSty} value={f.negociador} onChange={(e) => set("negociador", e.target.value)} placeholder="Seu nome" /></Campo>
+              <Campo label="Hora de chegada">
+                <div className="flex gap-2">
+                  <input type="time" className={inputCls} style={inputSty} value={f.chegada} onChange={(e) => set("chegada", e.target.value)} />
+                  <button onClick={() => set("chegada", new Date().toTimeString().slice(0, 5))}
+                    className="shrink-0 rounded-md border px-3 text-[13px] font-semibold" style={{ borderColor: C.line, color: C.roxo }}>Agora</button>
+                </div>
+              </Campo>
+              <Toggle label="Carro subiu pro pátio" valor={f.carroSubiu} onChange={(v) => set("carroSubiu", v)} />
+              <Toggle label="Combinei o tempo do processo com o cliente" nota="“A avaliação leva cerca de 40 minutos, tudo bem?”" valor={f.tempoCombinado} onChange={(v) => set("tempoCombinado", v)} />
+            </div>
+          </Bloco>
+        )}
+
+        {/* ---------- P ---------- */}
+        {etapa === "P" && (
+          <>
+            <Bloco titulo="O carro" sub="Digite a placa: vem marca, modelo, ano, cor, chassi e as versões FIPE.">
+              <div className="flex gap-2">
+                <input placeholder="ABC1D23" className={inputCls} style={{ ...inputSty, fontFamily: F.mono, letterSpacing: "0.08em" }}
+                  value={placaBusca} onChange={(e) => setPlacaBusca(e.target.value.toUpperCase())} maxLength={8} />
+                <button onClick={buscar} disabled={buscando || placaBusca.length < 7}
+                  className="shrink-0 rounded-md px-4 text-[13px] font-semibold"
+                  style={{ background: placaBusca.length < 7 ? C.line : C.roxo, color: "#fff" }}>
+                  {buscando ? "…" : "Consultar"}
+                </button>
+              </div>
+              {erroBusca && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erroBusca}</p>}
+
+              {achado && (() => {
+                const lista = filtrarPorCambio(achado.versoes || [], cambioBusca);
+                const aviso = alertaDispersao(lista);
+                return (
+                  <div className="mt-3 rounded-md p-3" style={{ background: C.roxoFraco }}>
+                    <div className="text-[13px] font-semibold">{achado.marca} {achado.modeloAbreviado}</div>
+                    <div className="mt-0.5 text-[11px]" style={{ color: C.mute }}>
+                      {achado.anoFabricacao}/{achado.anoModelo} · {achado.cor} · {achado.municipio} {achado.uf}
+                    </div>
+                    {achado.chassiCompleto && (
+                      <div className="mt-1 text-[11px]" style={{ color: C.verde, fontFamily: F.mono }}>Chassi {achado.chassi}</div>
+                    )}
+                    <div className="mt-3 text-[10px] uppercase tracking-[0.13em]" style={{ color: C.mute }}>Câmbio</div>
+                    <div className="mt-1.5 flex gap-1.5">
+                      {["Manual", "Automático", "Todos"].map((op) => {
+                        const val = op === "Todos" ? "" : op;
+                        const on = cambioBusca === val;
+                        return (
+                          <button key={op} onClick={() => setCambioBusca(val)} className="rounded-full px-3 py-1.5 text-[12px]"
+                            style={{ background: on ? C.roxo : "#fff", color: on ? "#fff" : C.mute, border: `1px solid ${on ? C.roxo : C.line}` }}>{op}</button>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-3 text-[10px] uppercase tracking-[0.13em]" style={{ color: C.mute }}>
+                      {lista.length === 1 ? "Versão encontrada" : `${lista.length} versões — escolha`}
+                    </div>
+                    <div className="mt-1.5 space-y-1.5">
+                      {lista.map((v) => (
+                        <button key={v.codigoFipe + v.nome} onClick={() => escolherVersao(v)}
+                          className="flex w-full items-center justify-between gap-3 rounded-md border px-3 py-2.5 text-left"
+                          style={{ borderColor: C.line, background: "#fff" }}>
+                          <span>
+                            <span className="block text-[12px] leading-snug">{v.nome}</span>
+                            <span className="text-[10px]" style={{ color: C.mute, fontFamily: F.mono }}>{v.codigoFipe} · {v.mesReferencia} · {v.confianca}%</span>
+                          </span>
+                          <span className="shrink-0 text-[12px] font-bold" style={{ fontFamily: F.mono, color: C.roxo }}>{brl(v.valor)}</span>
+                        </button>
+                      ))}
+                    </div>
+                    {aviso && <p className="mt-2 rounded px-2 py-1.5 text-[11px]" style={{ background: "#FDEDE6", color: C.laranja }}>{aviso}</p>}
+                  </div>
+                );
+              })()}
+
+              <div className="mt-3">
+                <Pendente>
+                  Desvalorizômetro e preço anunciado no mercado entram aqui. O desvalorizômetro já vem no retorno da Placa Fipe; o dado de mercado depende de definirmos a fonte.
+                </Pendente>
+              </div>
+            </Bloco>
+
+            <Bloco titulo="O cliente" sub="Descobrir que falta o decisor depois de 40 minutos de avaliação é perda certa.">
+              <div className="space-y-2.5">
+                <Campo label="Motivo da venda">
+                  <select className={inputCls} style={inputSty} value={f.motivo} onChange={(e) => set("motivo", e.target.value)}>
+                    {MOTIVOS.map((m) => <option key={m}>{m}</option>)}
+                  </select>
+                </Campo>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <Campo label="Pretensão"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.pretensao} onChange={(e) => set("pretensao", e.target.value)} /></Campo>
+                  <Campo label="Quitação"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.quitacao} onChange={(e) => set("quitacao", e.target.value)} /></Campo>
+                </div>
+                <Toggle label="O decisor está na loja" nota="Se não estiver, resolva antes de rodar o carro." valor={f.decisorPresente} onChange={(v) => set("decisorPresente", v)} />
+                <Toggle label="Já recebeu proposta de outro lugar" valor={f.temPropostaFora} onChange={(v) => set("temPropostaFora", v)} />
+                {f.temPropostaFora && (
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <Campo label="Quanto"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.propostaForaValor} onChange={(e) => set("propostaForaValor", e.target.value)} /></Campo>
+                    <Campo label="Onde"><input className={inputCls} style={inputSty} value={f.propostaForaOnde} onChange={(e) => set("propostaForaOnde", e.target.value)} /></Campo>
+                  </div>
+                )}
+              </div>
+            </Bloco>
+          </>
+        )}
+
+        {/* ---------- O ---------- */}
+        {etapa === "O" && (
+          <>
+            <Bloco titulo="Mostre como funciona" sub="O cliente aceita um número menor quando entende de onde ele veio.">
+              <div className="space-y-2.5">
+                <Pendente>
+                  Aqui entra o vídeo explicando o processo do início ao fim: avaliação, rede de lojistas, propostas, negociação. Me manda o vídeo quando gravar e eu coloco pra tocar direto nesta tela.
+                </Pendente>
+                <Toggle label="Mostrei o processo completo ao cliente" valor={f.mostrouProcesso} onChange={(v) => set("mostrouProcesso", v)} />
+              </div>
+            </Bloco>
+
+            <Bloco titulo="Prova social" sub="Depoimento de quem vendeu pelo mesmo motivo que esse cliente.">
+              <div className="space-y-2.5">
+                <Campo label="Necessidade principal do cliente">
+                  <input className={inputCls} style={inputSty} value={f.necessidadeCliente} onChange={(e) => set("necessidadeCliente", e.target.value)}
+                    placeholder="Ex.: precisa quitar dívida rápido" />
+                </Campo>
+                <Pendente>
+                  A biblioteca de testemunhais — prints do Google, fotos e vídeos de clientes que fecharam — entra aqui, filtrada pela necessidade acima. Preciso que vocês reúnam esse material; sem ele a tela fica vazia.
+                </Pendente>
+                <Toggle label="Mostrei um caso parecido com o dele" valor={f.mostrouTestemunhal} onChange={(v) => set("mostrouTestemunhal", v)} />
+              </div>
+            </Bloco>
+          </>
+        )}
+
+        {/* ---------- PUB ---------- */}
+        {etapa === "PUB" && (
+          <>
+            <div className="rounded-lg p-3" style={{ background: liberado ? "#E7F4EE" : "#FDEDE6", border: `1px solid ${liberado ? C.verde : C.laranja}` }}>
+              <div className="text-[12px] font-semibold" style={{ color: liberado ? C.verde : C.laranja }}>
+                {liberado ? "Ficha completa — descritivo liberado" : `Faltam ${faltas.length} campos`}
+              </div>
+              {!liberado && <div className="mt-1 text-[11px]" style={{ color: C.mute }}>{faltas.map((x) => x[1]).join(" · ")}</div>}
+            </div>
+
+            <Bloco titulo="Fotos" sub={`Primeira é a capa. Até ${MAX_FOTOS}.`}>
+              <input ref={camRef} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={receberFotos} />
+              <input ref={galRef} type="file" accept="image/*" multiple className="hidden" onChange={receberFotos} />
+              <div className="flex gap-2">
+                <button onClick={() => camRef.current && camRef.current.click()} className="flex-1 rounded-md py-2.5 text-[13px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>Tirar foto</button>
+                <button onClick={() => galRef.current && galRef.current.click()} className="flex-1 rounded-md border py-2.5 text-[13px] font-semibold" style={{ borderColor: C.line, color: C.roxo }}>Galeria</button>
+              </div>
+              {erroFoto && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erroFoto}</p>}
+              {!!fotos.length && (
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  {fotos.map((src, i) => (
+                    <div key={i} className="relative overflow-hidden rounded-md" style={{ border: `1px solid ${C.line}`, background: "#000" }}>
+                      <img src={src} alt={`Foto ${i + 1}`} className="block h-20 w-full object-cover" />
+                      {i === 0 && <span className="absolute left-1 top-1 rounded px-1 py-0.5 text-[8px] font-bold uppercase" style={{ background: C.roxo, color: "#fff" }}>Capa</span>}
+                      <div className="absolute bottom-0 left-0 right-0 flex" style={{ background: "rgba(24,18,33,.72)" }}>
+                        {i !== 0 && <button onClick={() => { const n = [...fotos]; const [x] = n.splice(i, 1); n.unshift(x); salvarFotos(n); }} className="flex-1 py-1 text-[9px] text-white">Capa</button>}
+                        <button onClick={() => salvarFotos(fotos.filter((_, x) => x !== i))} className="flex-1 py-1 text-[9px]" style={{ color: "#FFB39A" }}>Excluir</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Bloco>
+
+            <Bloco titulo="Completar a ficha">
+              <div className="space-y-3">
+                <Campo label="Modelo" req><input className={inputCls} style={inputSty} value={f.modelo} onChange={(e) => set("modelo", e.target.value)} /></Campo>
+                <div className="grid grid-cols-2 gap-3">
+                  <Campo label="Ano / modelo" req><input className={inputCls} style={inputSty} value={f.ano} onChange={(e) => set("ano", e.target.value)} /></Campo>
+                  <Campo label="Câmbio" req>
+                    <select className={inputCls} style={inputSty} value={f.cambio} onChange={(e) => set("cambio", e.target.value)}>
+                      {CAMBIO.map((c) => <option key={c}>{c}</option>)}
+                    </select>
+                  </Campo>
+                  <Campo label="KM atual" req><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.km} onChange={(e) => set("km", e.target.value)} /></Campo>
+                  <Campo label="KM na entrada"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.kmEntrada} onChange={(e) => set("kmEntrada", e.target.value)} /></Campo>
+                  <Campo label="Placa" req><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} value={f.placa} onChange={(e) => set("placa", e.target.value.toUpperCase())} /></Campo>
+                  <Campo label="Cor"><input className={inputCls} style={inputSty} value={f.cor} onChange={(e) => set("cor", e.target.value)} /></Campo>
+                  <Campo label="FIPE" req><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.fipe} onChange={(e) => set("fipe", e.target.value)} /></Campo>
+                  <Campo label="POR" req><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.por} onChange={(e) => set("por", e.target.value)} /></Campo>
+                </div>
+                <Campo label="Gastos / peças" req><input className={inputCls} style={inputSty} value={f.gastos} onChange={(e) => set("gastos", e.target.value)} /></Campo>
+                <div>
+                  <Rotulo req>Condição dos pneus</Rotulo>
+                  <div className="mt-1 grid grid-cols-2 gap-2">
+                    {["Diant. esq.", "Diant. dir.", "Tras. esq.", "Tras. dir."].map((p, i) => (
+                      <select key={p} className={inputCls} style={inputSty} value={f.pneus[i]}
+                        onChange={(e) => { const n = [...f.pneus]; n[i] = e.target.value; set("pneus", n); }}>
+                        <option value="">{p}</option>
+                        {PNEU.map((x) => <option key={x}>{x}</option>)}
+                      </select>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => set("leilao", !f.leilao)} className="flex-1 rounded-md border px-3 py-2 text-[13px]"
+                    style={{ borderColor: f.leilao ? C.laranja : C.line, color: f.leilao ? C.laranja : C.mute, background: f.leilao ? "#FDEDE6" : "#fff" }}>Leilão / sinistro</button>
+                  <button onClick={() => set("gnv", !f.gnv)} className="flex-1 rounded-md border px-3 py-2 text-[13px]"
+                    style={{ borderColor: f.gnv ? C.roxo : C.line, color: f.gnv ? C.roxo : C.mute, background: f.gnv ? C.roxoFraco : "#fff" }}>GNV</button>
+                </div>
+                <div>
+                  <Rotulo req>Opcionais</Rotulo>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {OPCIONAIS.map((o) => {
+                      const on = f.opcionais.includes(o);
+                      return (
+                        <button key={o} onClick={() => set("opcionais", on ? f.opcionais.filter((x) => x !== o) : [...f.opcionais, o])}
+                          className="rounded-full px-3 py-1.5 text-[12px]"
+                          style={{ background: on ? C.roxo : "#fff", color: on ? "#fff" : C.mute, border: `1px solid ${on ? C.roxo : C.line}` }}>{o}</button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <Campo label="Ressalvas — vai pro lojista">
+                  <textarea rows={2} className={inputCls} style={inputSty} value={f.ressalvas} onChange={(e) => set("ressalvas", e.target.value)} />
+                </Campo>
+                <Campo label="Internas — nunca sai da loja">
+                  <textarea rows={2} className={inputCls} style={{ ...inputSty, background: "#FBF7FD" }} value={f.internas} onChange={(e) => set("internas", e.target.value)} />
+                </Campo>
+              </div>
+            </Bloco>
+
+            <section className="rounded-lg" style={{ background: C.paper, border: `1px solid ${C.line}`, opacity: liberado ? 1 : 0.45 }}>
+              <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: C.line }}>
+                <span className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.roxo, fontFamily: F.disp, fontWeight: 700 }}>Descritivo</span>
+                <button disabled={!liberado} onClick={() => copiar(descritivo, "d")} className="rounded-md px-3 py-1.5 text-[12px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>
+                  {copiado === "d" ? "Copiado" : "Copiar"}
+                </button>
+              </div>
+              <pre className="overflow-x-auto whitespace-pre-wrap px-4 py-3 text-[12px] leading-relaxed" style={{ fontFamily: F.body }}>{descritivo}</pre>
+              <div className="border-t px-4 py-3" style={{ borderColor: C.line }}>
+                <button disabled={!liberado} onClick={() => copiar(JSON.stringify(payloadShinkai(f, fotos.length), null, 2), "s")}
+                  className="w-full rounded-md border py-2 text-[12px] font-semibold" style={{ borderColor: C.line, color: C.roxo }}>
+                  {copiado === "s" ? "JSON copiado" : "Copiar JSON do Shinkai"}
+                </button>
+              </div>
+            </section>
+
+            <Toggle label="Lancei o carro na plataforma" nota="Marque depois de publicar no grupo e no Shinkai." valor={f.publicado} onChange={(v) => { set("publicado", v); if (v && !f.esperaIniciadaEm) setVarios({ publicado: v, esperaIniciadaEm: Date.now() }); }} />
+          </>
+        )}
+
+        {/* ---------- ESPERA ---------- */}
+        {etapa === "ESP" && (
+          <>
+            <Bloco titulo="Enquanto as propostas chegam" sub="O carro está lançado. Este é o tempo de conversa que decide o fechamento.">
+              {restante == null ? (
+                <button onClick={() => set("esperaIniciadaEm", Date.now())} className="w-full rounded-md py-3 text-[14px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>
+                  Iniciar os 15 minutos
+                </button>
+              ) : (
+                <div className="text-center">
+                  <div className="text-[46px] leading-none" style={{ fontFamily: F.mono, fontWeight: 700, color: restante === 0 ? C.verde : C.roxo }}>
+                    {mmss(restante)}
+                  </div>
+                  <p className="mt-2 text-[12px]" style={{ color: restante === 0 ? C.verde : C.mute }}>
+                    {restante === 0 ? "Tempo encerrado — siga para a negociação." : "Fique com o cliente. Não deixe ele sozinho na mesa."}
+                  </p>
+                  <button onClick={() => set("esperaIniciadaEm", null)} className="mt-3 text-[12px] underline" style={{ color: C.mute }}>Reiniciar</button>
+                </div>
+              )}
+            </Bloco>
+
+            <Bloco titulo="Anote o que ouvir" sub="O que ele falar aqui é o argumento que você usa na hora do extrato.">
+              <textarea rows={5} className={inputCls} style={inputSty} value={f.notasEspera} onChange={(e) => set("notasEspera", e.target.value)}
+                placeholder="Precisa do dinheiro até sexta. Mulher não sabe da dívida. Já tentou vender há 2 meses…" />
+              <div className="mt-3">
+                <Pendente>
+                  A escuta por microfone com IA que você pediu entra aqui. Antes de construir, precisa passar pelo jurídico: gravar e processar conversa é tratamento de dado pessoal e exige aviso ao cliente e base legal definida.
+                </Pendente>
+              </div>
+            </Bloco>
+          </>
+        )}
+
+        {/* ---------- N ---------- */}
+        {etapa === "N" && (
+          <>
+            {gap != null && (
+              <div className="rounded-lg p-3" style={{ background: C.roxoFraco, border: `1px solid ${C.line}` }}>
+                <div className="text-[10px] uppercase tracking-[0.14em]" style={{ color: C.mute }}>Gap de abertura</div>
+                <div className="mt-0.5 text-[22px] leading-none" style={{ fontFamily: F.mono, fontWeight: 700, color: C.roxo }}>{gap}%</div>
+                <div className="mt-1 text-[11px]" style={{ color: C.mute }}>
+                  Primeiro extrato {brl(f.rodadas[0].impresso)} contra pretensão de {brl(f.pretensao)}.
+                </div>
+              </div>
+            )}
+
+            <Bloco titulo="Extratos e contrapropostas" sub="Cada rodada vira número comparável — é assim que se acha o valor de abertura certo por faixa de FIPE.">
+              <div className="space-y-2.5">
+                {f.rodadas.map((r, i) => (
+                  <div key={i} className="rounded-md p-3" style={{ background: "#FBFAFC", border: `1px dashed ${C.line}` }}>
+                    <div className="text-[10px] uppercase tracking-[0.14em]" style={{ color: C.mute }}>
+                      {i + 1}º extrato{i > 0 ? " · menos compradores" : ""}
+                    </div>
+                    <div className="mt-1 flex items-baseline justify-between">
+                      <span className="text-[17px]" style={{ fontFamily: F.mono, fontWeight: 700 }}>{brl(r.impresso)}</span>
+                      <span className="text-[11px]" style={{ color: C.mute }}>impresso</span>
+                    </div>
+                    {r.contra && (
+                      <div className="mt-1 flex items-baseline justify-between">
+                        <span className="text-[17px]" style={{ fontFamily: F.mono, fontWeight: 700, color: C.laranja }}>{brl(r.contra)}</span>
+                        <span className="text-[11px]" style={{ color: C.mute }}>contra do cliente</span>
+                      </div>
+                    )}
+                    <button className="mt-2 w-full rounded-md border py-1.5 text-[11px]" style={{ borderColor: C.line, color: C.mute }} disabled>
+                      Termo de aceite — aguardando modelo
+                    </button>
+                  </div>
+                ))}
+                <div className="grid grid-cols-2 gap-2">
+                  <input placeholder="Impresso" className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={novaRodada.impresso} onChange={(e) => setNovaRodada({ ...novaRodada, impresso: e.target.value })} />
+                  <input placeholder="Contra" className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={novaRodada.contra} onChange={(e) => setNovaRodada({ ...novaRodada, contra: e.target.value })} />
+                </div>
+                <button onClick={() => { if (!novaRodada.impresso) return; set("rodadas", [...f.rodadas, novaRodada]); setNovaRodada({ impresso: "", contra: "" }); }}
+                  className="w-full rounded-md py-2.5 text-[13px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>Registrar extrato</button>
+                <Campo label="Objeção principal">
+                  <select className={inputCls} style={inputSty} value={f.objecao} onChange={(e) => set("objecao", e.target.value)}>
+                    {OBJECOES.map((o) => <option key={o}>{o}</option>)}
+                  </select>
+                </Campo>
+                <Pendente>
+                  Os argumentos sugeridos por IA para cada objeção entram aqui. Precisam da matéria-prima: quais objeções aparecem e o que funciona contra cada uma, coletado com os negociadores.
+                </Pendente>
+              </div>
+            </Bloco>
+          </>
+        )}
+
+        {/* ---------- T ---------- */}
+        {etapa === "T" && (
+          <>
+            <Bloco titulo="Aceite e cautelar">
+              <div className="space-y-2.5">
+                <div className="grid grid-cols-2 gap-2.5">
+                  <Campo label="Valor fechado"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.valorFechado} onChange={(e) => set("valorFechado", e.target.value)} /></Campo>
+                  <Campo label="Forma">
+                    <select className={inputCls} style={inputSty} value={f.formaFechamento} onChange={(e) => set("formaFechamento", e.target.value)}>
+                      {FECHAMENTO.map((o) => <option key={o}>{o}</option>)}
+                    </select>
+                  </Campo>
+                </div>
+                <Toggle label="Aceite final assinado" valor={f.aceiteFinal} onChange={(v) => set("aceiteFinal", v)} />
+                <Toggle label="Carro enviado para a cautelar" valor={f.cautelarEnviado} onChange={(v) => set("cautelarEnviado", v)} />
+                <Pendente>
+                  Autorização de cautelar e pré-contrato saem preenchidos daqui, com os dados que já estão na ficha. Preciso dos modelos que vocês usam hoje — pode ser o Word ou uma foto do papel.
+                </Pendente>
+              </div>
+            </Bloco>
+
+            <Bloco titulo="Depois da cautelar">
+              <div className="space-y-2.5">
+                <Toggle label="Contrato assinado" valor={f.contratoAssinado} onChange={(v) => set("contratoAssinado", v)} />
+                <Pendente>
+                  Assinatura pelo ZapSign entra neste ponto, junto com o anexo dos documentos da negociação. Depende do backend: contrato assinado precisa ficar guardado e recuperável.
+                </Pendente>
+              </div>
+            </Bloco>
+          </>
+        )}
+
+        {/* ---------- E ---------- */}
+        {etapa === "E" && (
+          <>
+            <Bloco titulo="Avaliação">
+              <Toggle label="Pedi a avaliação no Google" nota="Entra no score do negociador." valor={f.avaliacaoGoogle} onChange={(v) => set("avaliacaoGoogle", v)} />
+            </Bloco>
+
+            <Bloco titulo={`Indicações — ${f.indicacoes.length} de 10`} sub="Quem ele conhece que tem carro. A lista vai para a pré-venda com a promessa do brinde.">
+              <div className="space-y-2">
+                {f.indicacoes.map((p, i) => (
+                  <div key={i} className="flex items-center justify-between rounded-md px-3 py-2" style={{ background: "#FBFAFC", border: `1px solid ${C.line}` }}>
+                    <span className="text-[13px]">{p.nome}<span className="ml-2 text-[11px]" style={{ color: C.mute, fontFamily: F.mono }}>{p.fone}</span></span>
+                    <button onClick={() => set("indicacoes", f.indicacoes.filter((_, x) => x !== i))} className="text-[11px]" style={{ color: C.laranja }}>remover</button>
+                  </div>
+                ))}
+                {f.indicacoes.length < 10 && (
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input placeholder="Nome" className={inputCls} style={inputSty} value={novaInd.nome} onChange={(e) => setNovaInd({ ...novaInd, nome: e.target.value })} />
+                      <input placeholder="Telefone" className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="tel" value={novaInd.fone} onChange={(e) => setNovaInd({ ...novaInd, fone: e.target.value })} />
+                    </div>
+                    <button onClick={() => { if (!novaInd.nome.trim()) return; set("indicacoes", [...f.indicacoes, novaInd]); setNovaInd({ nome: "", fone: "" }); }}
+                      className="w-full rounded-md py-2.5 text-[13px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>Adicionar indicação</button>
+                  </>
+                )}
+                <Pendente>
+                  O envio automático para a fila da pré-venda depende do backend. Por enquanto a lista fica aqui e precisa ser repassada à mão.
+                </Pendente>
+              </div>
+            </Bloco>
+          </>
+        )}
+      </div>
+
+      {/* navegação */}
+      <div className="fixed bottom-0 left-0 right-0 flex gap-2 px-4 py-3" style={{ background: C.paper, borderTop: `1px solid ${C.line}` }}>
+        <button onClick={() => idx > 0 && setEtapa(ETAPAS[idx - 1].id)} disabled={idx === 0}
+          className="rounded-md border px-4 py-2.5 text-[13px] font-semibold" style={{ borderColor: C.line, color: idx === 0 ? C.line : C.mute }}>
+          Voltar
+        </button>
+        <button onClick={() => idx < ETAPAS.length - 1 && setEtapa(ETAPAS[idx + 1].id)} disabled={idx === ETAPAS.length - 1}
+          className="flex-1 rounded-md py-2.5 text-[13px] font-semibold"
+          style={{ background: idx === ETAPAS.length - 1 ? C.line : C.roxo, color: "#fff" }}>
+          {idx === ETAPAS.length - 1 ? "Fim do atendimento" : `Ir para ${ETAPAS[idx + 1].curto}`}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
+ReactDOM.createRoot(document.getElementById('raiz')).render(<VaaptyAponte />);
+</script>
+</body>
+</html>
