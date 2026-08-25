@@ -11,14 +11,21 @@ veículo, registra as rodadas de negociação e gera as duas saídas que
 alimentam a rede — o descritivo do WhatsApp e o JSON do Shinkai.
 
 Protótipo em produção-leve. Uma página estática mais duas funções de
-servidor na Vercel. **Sem banco, sem login, sem backend.** Os dados
-ficam no `localStorage` de cada aparelho.
+servidor na Vercel. **Sem login ainda.** O atendimento inteiro vive no
+`localStorage` do aparelho; só a ficha do veículo tem persistência de
+verdade, gravada no Supabase pela etapa de Lançamento.
 
 ```
-index.html        aplicação inteira (React 18 + Babel via CDN, sem build)
-api/placa.js      GET /api/placa?placa= — consulta a Placa Fipe
-api/cota.js       GET /api/cota — consumo diário (não gasta consulta)
+index.html                       aplicação inteira (React 18 + Babel via CDN, sem build)
+api/placa.js                     GET  /api/placa?placa= — consulta a Placa Fipe
+api/cota.js                      GET  /api/cota — consumo diário (não gasta consulta)
+api/veiculo.js                   POST /api/veiculo — grava a ficha · GET — as 20 últimas
+supabase/migrations/*.sql        esquema do banco, versionado
 ```
+
+Sem `package.json`, de propósito: nenhuma função usa biblioteca. O
+Supabase é chamado pela API REST (PostgREST) com `fetch`. Manter assim
+— dependência nova precisa de uma boa razão.
 
 ## Rodar e publicar
 
@@ -30,11 +37,22 @@ vercel dev
 vercel --prod
 ```
 
-O token da Placa Fipe vive em `PLACAFIPE_TOKEN` (Vercel → Settings →
-Environment Variables, e um `.env` local para o `vercel dev`). **Ele
-nunca chega ao navegador** — é essa a razão de `api/placa.js` existir
-em vez de o `index.html` chamar a Placa Fipe direto. Qualquer mudança
-que faça o token cruzar para o cliente está errada.
+Três variáveis de ambiente (Vercel → Settings → Environment Variables,
+e um `.env` local para o `vercel dev`):
+
+| variável | usada por |
+|----------|-----------|
+| `PLACAFIPE_TOKEN` | `api/placa.js`, `api/cota.js` |
+| `SUPABASE_URL` | `api/veiculo.js` |
+| `SUPABASE_SERVICE_KEY` | `api/veiculo.js` |
+
+**Nenhuma das três pode chegar ao navegador** — é essa a razão de as
+funções em `api/` existirem em vez de o `index.html` chamar os serviços
+direto. A chave de serviço do Supabase é a mais grave: ela passa por
+cima do RLS, então quem a tiver lê e escreve a tabela inteira. Em
+`api/veiculo.js` todo texto que volta ao cliente passa por `limpar()` e
+nada é escrito em log. Qualquer mudança que faça um segredo cruzar para
+o cliente está errada.
 
 ## O trilho: método APONTE
 
@@ -161,6 +179,54 @@ consultas restantes.
 `/api/cota` é livre — o endpoint `getquotas` da Placa Fipe não desconta
 consulta, então pode ser chamado no carregamento e depois de cada busca.
 
+### 5. Gravação no banco: uma ficha por placa em avaliação
+
+`POST /api/veiculo` não cria uma linha por clique. Antes de inserir, ele
+procura linha com a **mesma placa e status `em_avaliacao`**; se achar,
+faz `PATCH` nela.
+
+**Por quê:** o negociador salva a ficha, volta, corrige o KM, salva de
+novo. Sem isso, o mesmo carro apareceria três vezes na lista e ninguém
+saberia qual é a boa. A chave é (placa, em_avaliacao) e não a placa
+sozinha porque o mesmo carro pode voltar meses depois — aí é atendimento
+novo, linha nova.
+
+Não há índice único cobrindo essa regra: são duas requisições
+(`select` e depois `insert`/`patch`), então dois aparelhos salvando a
+mesma placa no mesmo segundo criam duas linhas. Aceitável enquanto um
+atendimento é de um negociador; se virar problema, o conserto é um
+índice único parcial em `veiculo (placa) where status = 'em_avaliacao'`.
+
+**Update não apaga o que a tela não mandou.** `status` e
+`fipe_consultada_em` ficam de fora do `PATCH` — quem corrige o KM não
+reconsultou a FIPE nem mudou o carro de etapa. E `somenteEnviadas()`
+descarta toda coluna cuja origem não veio no corpo, olhando o mapa
+`FONTE`: sem isso, cada salvamento zeraria `renavam`, que tem coluna e
+ainda não tem campo. **Coluna nova exige entrada em `FONTE`** — sem ela
+a coluna nunca é gravada.
+
+**Mapeamento tela → coluna** (`paraColunas()`, [api/veiculo.js:77](api/veiculo.js:77)),
+onde os formatos não batem:
+
+| tela | banco | conversão |
+|------|-------|-----------|
+| `ano` `"2019/2020"` | `ano_fabricacao`, `ano_modelo` | corta no `/`; valor sozinho vale pelos dois |
+| `pneus[4]` `"Novo"…` | `pneu_de/dd/te/td` | enum `estado_pneu`, minúsculo e sem acento |
+| `opcionais[]` | `opcionais text[]` | direto |
+| `positivos`, `ressalvas` (texto multilinha) | `pontos_positivos`, `ressalvas_lojista` `text[]` | quebra por linha |
+| `internas` | `observacoes_internas` | direto |
+| `modelo` | `marca_modelo` | nome diferente |
+| `fipe`, `por` | `fipe_valor`, `valor_por` | `decimal()` aceita `51371`, `51.371` e `51.371,50` |
+
+O recorte do que sai da tela é `fichaParaBanco()`
+([index.html:262](index.html:262)) — só campos de veículo, nada do
+atendimento. O mapeamento nome → coluna mora no servidor; a tela não
+conhece nome de coluna.
+
+**Sem destino hoje:** `negociador` e `pretensao` não têm coluna na 0001,
+e `renavam` tem coluna mas não tem campo na tela. Quem for resolver: os
+dois primeiros pedem migração nova, o terceiro é só UI.
+
 ## Convenções do código
 
 - **Português no domínio.** Estado, funções e rótulos em pt-BR
@@ -189,14 +255,18 @@ consulta, então pode ser chamado no carregamento e depois de cada busca.
 
 - **Endereço público, sem login.** Não colocar dado real de cliente
   antes de o backend existir.
-- **Dados presos ao aparelho.** Um atendimento por celular; trocou de
-  aparelho, perdeu.
+- **Dados presos ao aparelho.** Fora a ficha do veículo salva no banco,
+  tudo o mais do atendimento — fotos, rodadas, notas da espera — vive no
+  celular. Trocou de aparelho, perdeu.
+- **Fotos não vão para o banco.** `POST /api/veiculo` grava a ficha, não
+  as imagens; elas continuam como data URL no `localStorage`. Storage é
+  o próximo passo.
 - **Chassi às vezes parcial.** Preenche sozinho só com 17 caracteres
   válidos (`chassiCompleto`); fora disso, digitar do CRLV. Renavam nunca
   vem da consulta.
 - **Babel no navegador** custa ~1 s no primeiro carregamento.
 - O README cita `vaapty_schema.sql` e `.env.example`; **nenhum dos dois
-  está no repositório.**
+  está no repositório** — o esquema agora vive em `supabase/migrations/`.
 
 ## Próximo passo planejado
 
