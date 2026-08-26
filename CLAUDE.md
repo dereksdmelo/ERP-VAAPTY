@@ -20,6 +20,7 @@ index.html                       aplicação inteira (React 18 + Babel via CDN, 
 api/placa.js                     GET  /api/placa?placa= — consulta a Placa Fipe
 api/cota.js                      GET  /api/cota — consumo diário (não gasta consulta)
 api/veiculo.js                   POST /api/veiculo — grava a ficha · GET — as 20 últimas
+api/foto.js                      POST/GET/PATCH/DELETE — imagens no Storage
 supabase/migrations/*.sql        esquema do banco, versionado
 ```
 
@@ -227,6 +228,37 @@ conhece nome de coluna.
 e `renavam` tem coluna mas não tem campo na tela. Quem for resolver: os
 dois primeiros pedem migração nova, o terceiro é só UI.
 
+### 6. Fotos: sobem na hora e não ficam no aparelho
+
+A imagem é comprimida, sobe para o bucket `fotos-veiculo` e some do
+`localStorage` assim que o servidor confirma. O caminho é
+`{placa}/{timestamp}-{aleatório}.jpg`.
+
+**Por quê:** data URL de 12 fotos estoura a cota do `localStorage` e
+some quando o negociador troca de aparelho. E foto de carro de cliente
+não tem por que ficar guardada em celular de ninguém.
+
+**A ordem obrigatória:** a ficha vai ao banco **antes** das fotos —
+é o `veiculo_id` que dá destino ao upload, e é dele que
+`api/foto.js` tira a placa que nomeia a pasta. Foto tirada antes disso
+fica `aguardando` e sobe sozinha assim que a ficha é salva.
+
+**Consequência no gate:** o botão "Salvar no banco" **não** exige foto
+(`podeSalvar`, [index.html:531](index.html:531)) — se exigisse, nada
+subiria nunca, porque a foto precisa do id que só o salvamento cria. O
+gate do descritivo continua exigindo foto, só que agora conta as que
+estão **no servidor** (`enviadas`), não as que estão no aparelho.
+
+**Falha não perde imagem:** upload que quebra marca a foto como `erro`
+e mantém o data URL no aparelho, com botão "Tentar". A chave
+`vaapty:fotos` só é apagada quando não sobra nenhuma pendente.
+
+**Nada fica órfão:** se a linha na tabela `foto` falhar depois do
+upload, `api/foto.js` apaga o arquivo do bucket antes de devolver erro.
+No DELETE a ordem é inversa — arquivo primeiro, linha depois — para que
+repetir a chamada convirja em vez de deixar linha apontando para arquivo
+que não existe.
+
 ## Convenções do código
 
 - **Português no domínio.** Estado, funções e rótulos em pt-BR
@@ -237,12 +269,17 @@ dois primeiros pedem migração nova, o terceiro é só UI.
   componente único `VaaptyAponte`. Não há build — não introduzir um sem
   necessidade.
 - **Persistência.** Só via `window.storage` (wrapper com prefixo `vp:` e
-  fallback em memória, [index.html:21](index.html:21)). Duas chaves:
-  `vaapty:at` (ficha) e `vaapty:fotos`. `set()` e `setVarios()` gravam a
-  cada alteração; não chamar `setF` direto.
-- **Fotos.** Sempre por `comprimir()` — 1280 px, JPEG 0.72, máximo 12.
-  Data URL grande no `localStorage` estoura; o erro de espaço é tratado
-  em `salvarFotos()`.
+  fallback em memória, [index.html:21](index.html:21)). Três chaves:
+  `vaapty:at` (ficha), `vaapty:veiculo` (id da linha no banco) e
+  `vaapty:fotos` — esta última guarda **só o que ainda não subiu**.
+  `set()` e `setVarios()` gravam a cada alteração; não chamar `setF`
+  direto.
+- **Fotos.** Sempre por `comprimir()` — 1280 px, JPEG 0.72, máximo 12 —
+  e sobem para o Storage assim que são tiradas. O estado de cada uma
+  (`aguardando` → `enviando` → `ok` | `erro`) mora no objeto da foto;
+  `fotosRef` é a versão autoritativa, porque upload assíncrono não pode
+  ler estado velho de closure. Nunca voltar a guardar data URL de foto
+  já enviada.
 - **Placa mascarada.** `mascararPlaca()` deixa só primeira e última
   letra no descritivo público. Não expor placa cheia em material que vai
   para grupo.
@@ -258,9 +295,9 @@ dois primeiros pedem migração nova, o terceiro é só UI.
 - **Dados presos ao aparelho.** Fora a ficha do veículo salva no banco,
   tudo o mais do atendimento — fotos, rodadas, notas da espera — vive no
   celular. Trocou de aparelho, perdeu.
-- **Fotos não vão para o banco.** `POST /api/veiculo` grava a ficha, não
-  as imagens; elas continuam como data URL no `localStorage`. Storage é
-  o próximo passo.
+- **Link de foto vence em 1 h.** As miniaturas usam URL assinada; um
+  atendimento que passe disso sem recarregar a tela mostra imagem
+  quebrada. Recarregar refaz os links.
 - **Chassi às vezes parcial.** Preenche sozinho só com 17 caracteres
   válidos (`chassiCompleto`); fora disso, digitar do CRLV. Renavam nunca
   vem da consulta.
