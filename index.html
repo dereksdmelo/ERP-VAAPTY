@@ -78,6 +78,38 @@ async function salvarFicha(ficha) {
   if (!r.ok) throw new Error(d.erro || "Não consegui salvar no banco.");
   return d;
 }
+async function subirFoto(veiculoId, imagem, ordem) {
+  const r = await fetch("/api/foto", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ veiculo_id: veiculoId, imagem_base64: imagem, ordem }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui subir a foto.");
+  return d;
+}
+async function listarFotos(veiculoId) {
+  const r = await fetch(`/api/foto?veiculo_id=${encodeURIComponent(veiculoId)}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui carregar as fotos.");
+  return d.fotos || [];
+}
+async function apagarFotoServidor(id) {
+  const r = await fetch(`/api/foto?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui apagar a foto.");
+  return d;
+}
+async function gravarOrdemFotos(ordens) {
+  const r = await fetch("/api/foto", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ordens }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui salvar a ordem.");
+  return d;
+}
 
 const RX_AUT = /\b(AUT|AUTOM|CVT|DCT|AT)\b\.?/i;
 const RX_MEC = /\b(MEC|MANUAL|MT)\b\.?/i;
@@ -306,6 +338,9 @@ function VaaptyAponte() {
   const [novaRodada, setNovaRodada] = useState({ impresso: "", contra: "" });
   const [novaInd, setNovaInd] = useState({ nome: "", fone: "" });
   const [erroFoto, setErroFoto] = useState("");
+  const [veiculoId, setVeiculoId] = useState(null);
+  const [pronto, setPronto] = useState(false);
+  const fotosRef = useRef([]);
   const [salvando, setSalvando] = useState(false);
   const [salvo, setSalvo] = useState(null);
   const [erroSalvar, setErroSalvar] = useState("");
@@ -314,7 +349,36 @@ function VaaptyAponte() {
   useEffect(() => {
     (async () => {
       try { const r = await window.storage.get("vaapty:at"); if (r && r.value) setF({ ...VAZIO, ...JSON.parse(r.value) }); } catch (e) {}
-      try { const r = await window.storage.get("vaapty:fotos"); if (r && r.value) setFotos(JSON.parse(r.value)); } catch (e) {}
+
+      let vid = null;
+      try {
+        const r = await window.storage.get("vaapty:veiculo");
+        if (r && r.value) { vid = JSON.parse(r.value).id || null; setVeiculoId(vid); }
+      } catch (e) {}
+
+      // No aparelho só sobra o que ainda não subiu.
+      let pendentes = [];
+      try { const r = await window.storage.get("vaapty:fotos"); if (r && r.value) pendentes = JSON.parse(r.value); } catch (e) {}
+      pendentes = (Array.isArray(pendentes) ? pendentes : [])
+        .filter((p) => p && p.local)
+        .map((p, i) => ({
+          chave: p.chave || `p${i}-${Math.random().toString(36).slice(2, 7)}`,
+          local: p.local, id: null, url: null,
+          estado: "erro", erro: p.erro || "Ficou pendente do atendimento anterior.",
+        }));
+
+      let doServidor = [];
+      if (vid) {
+        try {
+          doServidor = (await listarFotos(vid)).map((x) => ({
+            chave: `s-${x.id}`, id: x.id, caminho: x.caminho, url: x.url,
+            local: null, estado: "ok", erro: "",
+          }));
+        } catch (e) { setErroFoto(e.message); }
+      }
+
+      aplicar(() => [...doServidor, ...pendentes]);
+      setPronto(true);
       setCota(await consultarCota());
     })();
   }, []);
@@ -324,6 +388,18 @@ function VaaptyAponte() {
     return () => clearInterval(t);
   }, []);
 
+  // O celular não guarda foto que já está no servidor. Quando a última
+  // sobe, a chave sai do localStorage inteira.
+  useEffect(() => {
+    if (!pronto) return;
+    const pend = fotos
+      .filter((p) => p.estado !== "ok" && p.local)
+      .map((p) => ({ chave: p.chave, local: p.local, erro: p.erro || "" }));
+    if (!pend.length) window.storage.delete("vaapty:fotos").catch(() => {});
+    else window.storage.set("vaapty:fotos", JSON.stringify(pend))
+      .catch(() => setErroFoto("Não coube no armazenamento local."));
+  }, [fotos, pronto]);
+
   const set = (k, v) => {
     const n = { ...f, [k]: v };
     setF(n); window.storage.set("vaapty:at", JSON.stringify(n)).catch(() => {});
@@ -332,10 +408,11 @@ function VaaptyAponte() {
     const n = { ...f, ...o };
     setF(n); window.storage.set("vaapty:at", JSON.stringify(n)).catch(() => {});
   };
-  const salvarFotos = (a) => {
-    setFotos(a);
-    window.storage.set("vaapty:fotos", JSON.stringify(a)).catch(() => setErroFoto("Não coube no armazenamento local."));
-  };
+  // fotosRef é a versão autoritativa: o upload é assíncrono e não pode
+  // ler estado velho de dentro de uma closure.
+  const aplicar = (fn) => { const n = fn(fotosRef.current); fotosRef.current = n; setFotos(n); };
+  const mudarFoto = (chave, mud) =>
+    aplicar((prev) => prev.map((p) => (p.chave === chave ? { ...p, ...mud } : p)));
 
   const buscar = async () => {
     setErroBusca(""); setAchado(null); setBuscando(true); setCambioBusca(f.cambio || "");
@@ -355,18 +432,64 @@ function VaaptyAponte() {
     setAchado(null); setPlacaBusca("");
   };
 
+  const enviarFoto = async (chave, vid) => {
+    const alvo = fotosRef.current.find((p) => p.chave === chave);
+    if (!alvo || alvo.estado === "ok" || alvo.estado === "enviando" || !alvo.local) return;
+    mudarFoto(chave, { estado: "enviando", erro: "" });
+    try {
+      const ordem = Math.max(0, fotosRef.current.findIndex((p) => p.chave === chave));
+      const d = await subirFoto(vid, alvo.local, ordem);
+      mudarFoto(chave, { estado: "ok", id: d.id, caminho: d.caminho, url: d.url, local: null, erro: "" });
+    } catch (e) {
+      // A imagem continua no aparelho: "tentar de novo" reaproveita.
+      mudarFoto(chave, { estado: "erro", erro: e.message });
+    }
+  };
+
   const receberFotos = async (ev) => {
     setErroFoto("");
     const arqs = Array.from(ev.target.files || []);
     if (!arqs.length) return;
-    const espaco = MAX_FOTOS - fotos.length;
+    const espaco = MAX_FOTOS - fotosRef.current.length;
     if (espaco <= 0) { setErroFoto(`Limite de ${MAX_FOTOS} fotos.`); return; }
     const novas = [];
     for (const a of arqs.slice(0, espaco)) {
-      try { novas.push(await comprimir(a)); } catch (e) { setErroFoto(e.message); }
+      try {
+        novas.push({
+          chave: `n-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          local: await comprimir(a), id: null, url: null,
+          estado: "aguardando", erro: "",
+        });
+      } catch (e) { setErroFoto(e.message); }
     }
-    if (novas.length) salvarFotos([...fotos, ...novas]);
+    if (novas.length) {
+      aplicar((prev) => [...prev, ...novas]);
+      if (veiculoId) for (const n of novas) await enviarFoto(n.chave, veiculoId);
+    }
     ev.target.value = "";
+  };
+
+  const salvarOrdem = async (lista) => {
+    const ordens = lista.map((p, i) => ({ id: p.id, ordem: i })).filter((o) => o.id);
+    if (!ordens.length) return;
+    try { await gravarOrdemFotos(ordens); } catch (e) { setErroFoto(e.message); }
+  };
+  const definirCapa = async (i) => {
+    const n = [...fotosRef.current];
+    const [x] = n.splice(i, 1); n.unshift(x);
+    aplicar(() => n);
+    await salvarOrdem(n);
+  };
+  const removerFoto = async (i) => {
+    const alvo = fotosRef.current[i];
+    if (!alvo) return;
+    if (alvo.id) {
+      try { await apagarFotoServidor(alvo.id); }
+      catch (e) { setErroFoto(e.message); return; }
+    }
+    const n = fotosRef.current.filter((_, x) => x !== i);
+    aplicar(() => n);
+    await salvarOrdem(n);
   };
 
   const copiar = (t, tag) => {
@@ -386,13 +509,27 @@ function VaaptyAponte() {
       const d = await salvarFicha(JSON.parse(corpoBanco));
       const t = new Date(d.salvo_em);
       setSalvo({ hora: isNaN(t.getTime()) ? new Date() : t, criado: !!d.criado, corpo: corpoBanco });
+      if (d.id) {
+        setVeiculoId(d.id);
+        window.storage.set("vaapty:veiculo", JSON.stringify({ id: d.id, placa: d.placa })).catch(() => {});
+        // Foto tirada antes de existir veículo estava só esperando por isto.
+        for (const p of fotosRef.current.filter((x) => x.estado !== "ok" && x.local)) {
+          await enviarFoto(p.chave, d.id);
+        }
+      }
     } catch (e) { setErroSalvar(e.message); }
     setSalvando(false);
   };
 
-  const faltas = useMemo(() => faltando(f, fotos), [f, fotos]);
+  const enviadas = useMemo(() => fotos.filter((p) => p.estado === "ok"), [fotos]);
+  const subindo = fotos.some((p) => p.estado === "enviando");
+  const faltas = useMemo(() => faltando(f, enviadas), [f, enviadas]);
   const liberado = faltas.length === 0;
-  const descritivo = gerarDescritivo(f, fotos.length);
+  // A ficha precisa ir ao banco antes das fotos: é o id dela que dá
+  // destino ao upload. Por isso o botão de salvar não espera foto.
+  const faltasFicha = faltas.filter((x) => x[0] !== "fotos");
+  const podeSalvar = faltasFicha.length === 0;
+  const descritivo = gerarDescritivo(f, enviadas.length);
 
   const restante = f.esperaIniciadaEm ? Math.max(0, ESPERA_SEG - Math.floor((agora - f.esperaIniciadaEm) / 1000)) : null;
   const mmss = (s) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
@@ -436,7 +573,7 @@ function VaaptyAponte() {
       {/* trilho */}
       <div className="rolar flex gap-1.5 overflow-x-auto px-3 py-3" style={{ background: C.paper, borderBottom: `1px solid ${C.line}` }}>
         {ETAPAS.map((e) => {
-          const ok = etapaConcluida(e.id, f, fotos);
+          const ok = etapaConcluida(e.id, f, enviadas);
           const ativa = e.id === etapa;
           return (
             <button key={e.id} onClick={() => setEtapa(e.id)} className="flex shrink-0 flex-col items-center gap-1" style={{ width: 56 }}>
@@ -607,7 +744,7 @@ function VaaptyAponte() {
               {!liberado && <div className="mt-1 text-[11px]" style={{ color: C.mute }}>{faltas.map((x) => x[1]).join(" · ")}</div>}
             </div>
 
-            <Bloco titulo="Fotos" sub={`Primeira é a capa. Até ${MAX_FOTOS}.`}>
+            <Bloco titulo="Fotos" sub={`Primeira é a capa. Até ${MAX_FOTOS}. Cada foto sobe para o servidor na hora; o aparelho não guarda nada depois que sobe.`}>
               <input ref={camRef} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={receberFotos} />
               <input ref={galRef} type="file" accept="image/*" multiple className="hidden" onChange={receberFotos} />
               <div className="flex gap-2">
@@ -616,18 +753,45 @@ function VaaptyAponte() {
               </div>
               {erroFoto && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erroFoto}</p>}
               {!!fotos.length && (
-                <div className="mt-3 grid grid-cols-3 gap-2">
-                  {fotos.map((src, i) => (
-                    <div key={i} className="relative overflow-hidden rounded-md" style={{ border: `1px solid ${C.line}`, background: "#000" }}>
-                      <img src={src} alt={`Foto ${i + 1}`} className="block h-20 w-full object-cover" />
-                      {i === 0 && <span className="absolute left-1 top-1 rounded px-1 py-0.5 text-[8px] font-bold uppercase" style={{ background: C.roxo, color: "#fff" }}>Capa</span>}
-                      <div className="absolute bottom-0 left-0 right-0 flex" style={{ background: "rgba(24,18,33,.72)" }}>
-                        {i !== 0 && <button onClick={() => { const n = [...fotos]; const [x] = n.splice(i, 1); n.unshift(x); salvarFotos(n); }} className="flex-1 py-1 text-[9px] text-white">Capa</button>}
-                        <button onClick={() => salvarFotos(fotos.filter((_, x) => x !== i))} className="flex-1 py-1 text-[9px]" style={{ color: "#FFB39A" }}>Excluir</button>
+                <>
+                  <div className="mt-3 text-[11px]" style={{ color: subindo ? C.roxo : C.mute }}>
+                    {enviadas.length} de {fotos.length} no servidor{subindo ? " · enviando…" : ""}
+                  </div>
+                  <div className="mt-2 grid grid-cols-3 gap-2">
+                    {fotos.map((p, i) => (
+                      <div key={p.chave} className="relative overflow-hidden rounded-md" style={{ border: `1px solid ${p.estado === "erro" ? C.laranja : C.line}`, background: "#000" }}>
+                        <img src={p.url || p.local} alt={`Foto ${i + 1}`} className="block h-20 w-full object-cover"
+                          style={{ opacity: p.estado === "ok" ? 1 : 0.55 }} />
+                        {i === 0 && <span className="absolute left-1 top-1 rounded px-1 py-0.5 text-[8px] font-bold uppercase" style={{ background: C.roxo, color: "#fff" }}>Capa</span>}
+                        {p.estado !== "ok" && (
+                          <span className="absolute right-1 top-1 rounded px-1 py-0.5 text-[8px] font-bold uppercase"
+                            style={{ background: p.estado === "erro" ? C.laranja : "rgba(24,18,33,.8)", color: "#fff" }}>
+                            {p.estado === "enviando" ? "Subindo" : p.estado === "aguardando" ? "Aguarda" : "Falhou"}
+                          </span>
+                        )}
+                        <div className="absolute bottom-0 left-0 right-0 flex" style={{ background: "rgba(24,18,33,.72)" }}>
+                          {p.estado === "erro" && veiculoId && (
+                            <button onClick={() => enviarFoto(p.chave, veiculoId)} className="flex-1 py-1 text-[9px]" style={{ color: "#FFD9A8" }}>Tentar</button>
+                          )}
+                          {i !== 0 && p.estado === "ok" && (
+                            <button onClick={() => definirCapa(i)} className="flex-1 py-1 text-[9px] text-white">Capa</button>
+                          )}
+                          <button onClick={() => removerFoto(i)} className="flex-1 py-1 text-[9px]" style={{ color: "#FFB39A" }}>Excluir</button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                  {!veiculoId && fotos.some((p) => p.estado === "aguardando") && (
+                    <p className="mt-2 text-[11px]" style={{ color: C.mute }}>
+                      Fotos esperando a ficha ir para o banco. Salve a ficha abaixo e elas sobem sozinhas.
+                    </p>
+                  )}
+                  {fotos.some((p) => p.estado === "erro") && (
+                    <p className="mt-2 text-[11px]" style={{ color: C.laranja }}>
+                      {fotos.filter((p) => p.estado === "erro")[0].erro}
+                    </p>
+                  )}
+                </>
               )}
             </Bloco>
 
@@ -698,24 +862,29 @@ function VaaptyAponte() {
               </div>
               <pre className="overflow-x-auto whitespace-pre-wrap px-4 py-3 text-[12px] leading-relaxed" style={{ fontFamily: F.body }}>{descritivo}</pre>
               <div className="border-t px-4 py-3" style={{ borderColor: C.line }}>
-                <button disabled={!liberado} onClick={() => copiar(JSON.stringify(payloadShinkai(f, fotos.length), null, 2), "s")}
+                <button disabled={!liberado} onClick={() => copiar(JSON.stringify(payloadShinkai(f, enviadas.length), null, 2), "s")}
                   className="w-full rounded-md border py-2 text-[12px] font-semibold" style={{ borderColor: C.line, color: C.roxo }}>
                   {copiado === "s" ? "JSON copiado" : "Copiar JSON do Shinkai"}
                 </button>
               </div>
             </section>
 
-            <section className="rounded-lg p-4" style={{ background: C.paper, border: `1px solid ${C.line}`, opacity: liberado ? 1 : 0.45 }}>
+            <section className="rounded-lg p-4" style={{ background: C.paper, border: `1px solid ${C.line}`, opacity: podeSalvar ? 1 : 0.45 }}>
               <div className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.roxo, fontFamily: F.disp, fontWeight: 700 }}>Banco</div>
               <p className="mt-1 text-[11px] leading-relaxed" style={{ color: C.mute }}>
                 Grava a ficha no Supabase. Salvar de novo na mesma placa atualiza a ficha em avaliação em vez de criar outra.
+                As fotos só sobem depois que a ficha existe no banco.
               </p>
-              <button disabled={!liberado || salvando} onClick={salvarNoBanco}
+              <button disabled={!podeSalvar || salvando} onClick={salvarNoBanco}
                 className="mt-3 w-full rounded-md py-2.5 text-[13px] font-semibold"
-                style={{ background: liberado && !salvando ? C.roxo : C.line, color: "#fff" }}>
-                {salvando ? "Salvando…" : "Salvar no banco"}
+                style={{ background: podeSalvar && !salvando ? C.roxo : C.line, color: "#fff" }}>
+                {salvando ? "Salvando…" : veiculoId ? "Salvar de novo" : "Salvar no banco"}
               </button>
-              {!liberado && <p className="mt-2 text-[11px]" style={{ color: C.mute }}>Complete a ficha para liberar.</p>}
+              {!podeSalvar && (
+                <p className="mt-2 text-[11px]" style={{ color: C.mute }}>
+                  Falta {faltasFicha.map((x) => x[1]).join(" · ")}.
+                </p>
+              )}
               {salvo && salvoAtual && (
                 <p className="mt-2 text-[12px]" style={{ color: C.verde }}>
                   {salvo.criado ? "Ficha criada" : "Ficha atualizada"} às {salvo.hora.toTimeString().slice(0, 5)}.
