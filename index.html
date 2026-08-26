@@ -68,6 +68,16 @@ async function consultarPlaca(placa) {
 async function consultarCota() {
   try { const r = await fetch("/api/cota"); return r.ok ? await r.json() : null; } catch (e) { return null; }
 }
+async function salvarFicha(ficha) {
+  const r = await fetch("/api/veiculo", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(ficha),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui salvar no banco.");
+  return d;
+}
 
 const RX_AUT = /\b(AUT|AUTOM|CVT|DCT|AT)\b\.?/i;
 const RX_MEC = /\b(MEC|MANUAL|MT)\b\.?/i;
@@ -247,6 +257,18 @@ function gerarDescritivo(f, n) {
   L.push("☑️ Gerente: WEBERT", "📲 Whats/ligação: (47) 9213-2434");
   return L.join("\n");
 }
+// Só o que tem coluna em supabase/migrations/0001_veiculo.sql. O
+// mapeamento nome → coluna mora no servidor, em api/veiculo.js.
+const fichaParaBanco = (f) => ({
+  placa: f.placa, chassi: f.chassi, modelo: f.modelo, ano: f.ano,
+  cor: f.cor, combustivel: f.combustivel, cambio: f.cambio,
+  km: f.km, kmEntrada: f.kmEntrada,
+  fipe: f.fipe, fipeCodigo: f.fipeCodigo, por: f.por, gastos: f.gastos,
+  pneus: f.pneus, leilao: f.leilao, gnv: f.gnv, opcionais: f.opcionais,
+  lataria: f.lataria, mecanica: f.mecanica,
+  positivos: f.positivos, ressalvas: f.ressalvas, internas: f.internas,
+});
+
 const payloadShinkai = (f, n) => ({
   origem: "vaapty-joinville",
   veiculo: {
@@ -284,6 +306,9 @@ function VaaptyAponte() {
   const [novaRodada, setNovaRodada] = useState({ impresso: "", contra: "" });
   const [novaInd, setNovaInd] = useState({ nome: "", fone: "" });
   const [erroFoto, setErroFoto] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  const [salvo, setSalvo] = useState(null);
+  const [erroSalvar, setErroSalvar] = useState("");
   const camRef = useRef(null); const galRef = useRef(null);
 
   useEffect(() => {
@@ -350,6 +375,19 @@ function VaaptyAponte() {
     try { document.execCommand("copy"); } catch (e) {}
     document.body.removeChild(ta);
     setCopiado(tag); setTimeout(() => setCopiado(""), 1800);
+  };
+
+  const corpoBanco = useMemo(() => JSON.stringify(fichaParaBanco(f)), [f]);
+  const salvoAtual = !!salvo && salvo.corpo === corpoBanco;
+
+  const salvarNoBanco = async () => {
+    setErroSalvar(""); setSalvando(true);
+    try {
+      const d = await salvarFicha(JSON.parse(corpoBanco));
+      const t = new Date(d.salvo_em);
+      setSalvo({ hora: isNaN(t.getTime()) ? new Date() : t, criado: !!d.criado, corpo: corpoBanco });
+    } catch (e) { setErroSalvar(e.message); }
+    setSalvando(false);
   };
 
   const faltas = useMemo(() => faltando(f, fotos), [f, fotos]);
@@ -665,6 +703,30 @@ function VaaptyAponte() {
                   {copiado === "s" ? "JSON copiado" : "Copiar JSON do Shinkai"}
                 </button>
               </div>
+            </section>
+
+            <section className="rounded-lg p-4" style={{ background: C.paper, border: `1px solid ${C.line}`, opacity: liberado ? 1 : 0.45 }}>
+              <div className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.roxo, fontFamily: F.disp, fontWeight: 700 }}>Banco</div>
+              <p className="mt-1 text-[11px] leading-relaxed" style={{ color: C.mute }}>
+                Grava a ficha no Supabase. Salvar de novo na mesma placa atualiza a ficha em avaliação em vez de criar outra.
+              </p>
+              <button disabled={!liberado || salvando} onClick={salvarNoBanco}
+                className="mt-3 w-full rounded-md py-2.5 text-[13px] font-semibold"
+                style={{ background: liberado && !salvando ? C.roxo : C.line, color: "#fff" }}>
+                {salvando ? "Salvando…" : "Salvar no banco"}
+              </button>
+              {!liberado && <p className="mt-2 text-[11px]" style={{ color: C.mute }}>Complete a ficha para liberar.</p>}
+              {salvo && salvoAtual && (
+                <p className="mt-2 text-[12px]" style={{ color: C.verde }}>
+                  {salvo.criado ? "Ficha criada" : "Ficha atualizada"} às {salvo.hora.toTimeString().slice(0, 5)}.
+                </p>
+              )}
+              {salvo && !salvoAtual && (
+                <p className="mt-2 text-[12px]" style={{ color: C.mute }}>
+                  Salva às {salvo.hora.toTimeString().slice(0, 5)} e alterada depois. Salve de novo.
+                </p>
+              )}
+              {erroSalvar && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erroSalvar}</p>}
             </section>
 
             <Toggle label="Lancei o carro na plataforma" nota="Marque depois de publicar no grupo e no Shinkai." valor={f.publicado} onChange={(v) => { set("publicado", v); if (v && !f.esperaIniciadaEm) setVarios({ publicado: v, esperaIniciadaEm: Date.now() }); }} />
