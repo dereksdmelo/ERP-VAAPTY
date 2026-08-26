@@ -1,0 +1,7 @@
+# Segredos: PLACAFIPE_TOKEN, SUPABASE_URL, SUPABASE_SERVICE_KEY
+.env
+.env.*
+!.env.example
+
+.vercel
+.DS_Store

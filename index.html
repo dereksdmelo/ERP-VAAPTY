@@ -78,11 +78,14 @@ async function salvarFicha(ficha) {
   if (!r.ok) throw new Error(d.erro || "Não consegui salvar no banco.");
   return d;
 }
-async function subirFoto(veiculoId, imagem, ordem) {
+async function subirFoto(veiculoId, foto, ordem) {
   const r = await fetch("/api/foto", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ veiculo_id: veiculoId, imagem_base64: imagem, ordem }),
+    body: JSON.stringify({
+      veiculo_id: veiculoId, imagem_base64: foto.local, ordem,
+      largura: foto.largura, altura: foto.altura,
+    }),
   });
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.erro || "Não consegui subir a foto.");
@@ -139,7 +142,7 @@ function comprimir(file, max = 1280, q = 0.72) {
         const cv = document.createElement("canvas");
         cv.width = Math.round(img.width * e); cv.height = Math.round(img.height * e);
         cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
-        res(cv.toDataURL("image/jpeg", q));
+        res({ src: cv.toDataURL("image/jpeg", q), largura: cv.width, altura: cv.height });
       };
       img.src = l.result;
     };
@@ -363,7 +366,7 @@ function VaaptyAponte() {
         .filter((p) => p && p.local)
         .map((p, i) => ({
           chave: p.chave || `p${i}-${Math.random().toString(36).slice(2, 7)}`,
-          local: p.local, id: null, url: null,
+          local: p.local, largura: p.largura, altura: p.altura, id: null, url: null,
           estado: "erro", erro: p.erro || "Ficou pendente do atendimento anterior.",
         }));
 
@@ -394,7 +397,7 @@ function VaaptyAponte() {
     if (!pronto) return;
     const pend = fotos
       .filter((p) => p.estado !== "ok" && p.local)
-      .map((p) => ({ chave: p.chave, local: p.local, erro: p.erro || "" }));
+      .map((p) => ({ chave: p.chave, local: p.local, largura: p.largura, altura: p.altura, erro: p.erro || "" }));
     if (!pend.length) window.storage.delete("vaapty:fotos").catch(() => {});
     else window.storage.set("vaapty:fotos", JSON.stringify(pend))
       .catch(() => setErroFoto("Não coube no armazenamento local."));
@@ -438,7 +441,7 @@ function VaaptyAponte() {
     mudarFoto(chave, { estado: "enviando", erro: "" });
     try {
       const ordem = Math.max(0, fotosRef.current.findIndex((p) => p.chave === chave));
-      const d = await subirFoto(vid, alvo.local, ordem);
+      const d = await subirFoto(vid, alvo, ordem);
       mudarFoto(chave, { estado: "ok", id: d.id, caminho: d.caminho, url: d.url, local: null, erro: "" });
     } catch (e) {
       // A imagem continua no aparelho: "tentar de novo" reaproveita.
@@ -455,10 +458,11 @@ function VaaptyAponte() {
     const novas = [];
     for (const a of arqs.slice(0, espaco)) {
       try {
+        const img = await comprimir(a);
         novas.push({
           chave: `n-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          local: await comprimir(a), id: null, url: null,
-          estado: "aguardando", erro: "",
+          local: img.src, largura: img.largura, altura: img.altura,
+          id: null, url: null, estado: "aguardando", erro: "",
         });
       } catch (e) { setErroFoto(e.message); }
     }

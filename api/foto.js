@@ -9,8 +9,11 @@
  * Mesmas regras do api/veiculo.js: fetch puro, sem biblioteca, e a
  * chave de serviço não sai daqui — nem em resposta, nem em log.
  *
- * Depende da migração 0002: tabela `foto` com as colunas
- * id, veiculo_id, caminho, ordem.
+ * Depende da migração 0002: tabela `foto` (id, veiculo_id, caminho,
+ * ordem, largura, altura, bytes) e o bucket privado `fotos-veiculo`.
+ *
+ * A 0002 tem índice único em (veiculo_id, ordem) — "evita duas capas".
+ * Isso é o que torna a reordenação um caso especial: ver o PATCH.
  */
 
 const URL_BASE = (process.env.SUPABASE_URL || "").replace(/\/+$/, "");
@@ -18,7 +21,7 @@ const CHAVE = process.env.SUPABASE_SERVICE_KEY || "";
 
 const BUCKET = "fotos-veiculo";
 const VALIDADE = 3600;                 // 1 hora de link assinado
-const MAX_BYTES = 6 * 1024 * 1024;     // uma foto de 1280 px pesa ~300 KB
+const MAX_BYTES = 5 * 1024 * 1024;     // o mesmo file_size_limit do bucket
 
 const REST = (tabela) => `${URL_BASE}/rest/v1/${tabela}`;
 const STORAGE = () => `${URL_BASE}/storage/v1`;
@@ -162,6 +165,7 @@ module.exports = async function handler(req, res) {
       if (!placa) return res.status(404).json({ erro: "Veículo não encontrado. Salve a ficha antes das fotos." });
 
       const ordem = Number.isFinite(Number(corpo.ordem)) ? Math.trunc(Number(corpo.ordem)) : 0;
+      const medida = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.trunc(Number(v)) : null);
       const caminho = `${String(placa).replace(/[^A-Za-z0-9]/g, "")}/${Date.now()}-${sufixo()}.jpg`;
 
       await arquivos(`${STORAGE()}/object/${BUCKET}/${paraURL(caminho)}`, {
@@ -175,7 +179,11 @@ module.exports = async function handler(req, res) {
         const r = await banco(REST("foto"), {
           method: "POST",
           headers: json({ Prefer: "return=representation" }),
-          body: JSON.stringify({ veiculo_id: vid, caminho, ordem }),
+          body: JSON.stringify({
+            veiculo_id: vid, caminho, ordem,
+            largura: medida(corpo.largura), altura: medida(corpo.altura),
+            bytes: imagem.length,
+          }),
         });
         linha = Array.isArray(r) ? r[0] : r;
       } catch (e) {
@@ -202,16 +210,27 @@ module.exports = async function handler(req, res) {
       const ordens = corpo && Array.isArray(corpo.ordens) ? corpo.ordens : null;
       if (!ordens || !ordens.length) return res.status(400).json({ erro: "Mande ordens: [{ id, ordem }]." });
 
+      const alvos = [];
       for (const o of ordens) {
-        const id = String(o && o.id || "");
+        const id = String((o && o.id) || "");
         if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id de foto inválido." });
-        await banco(`${REST("foto")}?id=eq.${id}`, {
-          method: "PATCH",
-          headers: json(),
-          body: JSON.stringify({ ordem: Math.trunc(Number(o.ordem) || 0) }),
-        });
+        alvos.push({ id, ordem: Math.trunc(Number(o.ordem) || 0) });
       }
-      return res.status(200).json({ ok: true, atualizadas: ordens.length });
+
+      // O índice único (veiculo_id, ordem) não é deferrable: trocar a
+      // capa passando 2→0 esbarra em quem ainda está no 0. Por isso a
+      // troca acontece em duas voltas — todo mundo estaciona no
+      // negativo, que ninguém usa, e só depois assume a posição final.
+      const mover = (id, ordem) => banco(`${REST("foto")}?id=eq.${id}`, {
+        method: "PATCH",
+        headers: json(),
+        body: JSON.stringify({ ordem }),
+      });
+
+      for (let i = 0; i < alvos.length; i++) await mover(alvos[i].id, -(i + 1));
+      for (const a of alvos) await mover(a.id, a.ordem);
+
+      return res.status(200).json({ ok: true, atualizadas: alvos.length });
     }
 
     /* ---------- DELETE: some do Storage e da tabela ---------- */

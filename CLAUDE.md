@@ -259,6 +259,24 @@ No DELETE a ordem é inversa — arquivo primeiro, linha depois — para que
 repetir a chamada convirja em vez de deixar linha apontando para arquivo
 que não existe.
 
+**Reordenar é em duas voltas.** A 0002 cria índice único em
+`foto (veiculo_id, ordem)` para evitar duas capas. Ele não é
+`deferrable`, então mandar a terceira foto para a posição 0 esbarra em
+quem ainda está lá. O `PATCH` estaciona todas em ordens negativas e só
+depois grava as finais. **Quem mexer nessa rotina precisa manter as duas
+voltas** — um laço simples de update quebra na primeira troca de capa.
+
+**O bucket é privado** e limita 5 MB por arquivo; `MAX_BYTES` repete o
+mesmo número para que o erro venha da nossa função, com mensagem
+legível, em vez de vir do Storage. O bucket aceita jpeg, png e webp;
+`api/foto.js` aceita **só JPEG**, conferindo os magic bytes, porque é o
+que `comprimir()` produz.
+
+**Apagar o veículo deixa arquivo para trás.** O `on delete cascade` da
+0002 limpa as linhas de `foto`, não os objetos do Storage. Hoje não há
+tela que apague veículo; quando houver, ela precisa varrer o bucket
+antes.
+
 ## Convenções do código
 
 - **Português no domínio.** Estado, funções e rótulos em pt-BR
