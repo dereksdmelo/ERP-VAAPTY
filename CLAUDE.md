@@ -21,6 +21,8 @@ api/placa.js                     GET  /api/placa?placa= — consulta a Placa Fip
 api/cota.js                      GET  /api/cota — consumo diário (não gasta consulta)
 api/veiculo.js                   POST /api/veiculo — grava a ficha · GET — as 20 últimas
 api/foto.js                      POST/GET/PATCH/DELETE — imagens no Storage
+api/documento.js                 POST/GET — registro dos documentos gerados
+documentos.js                    CÓPIA MORTA: o que roda é o bloco colado no index.html
 supabase/migrations/*.sql        esquema do banco, versionado
 ```
 
@@ -277,6 +279,51 @@ que `comprimir()` produz.
 tela que apague veículo; quando houver, ela precisa varrer o bucket
 antes.
 
+### 7. Documentos: o original é o bloco colado, não o arquivo
+
+`documentos.js` está na raiz e **ninguém o carrega** — não há
+`<script src>` apontando para ele. O que roda é o bloco
+`===== documentos =====` dentro do `index.html`. Editar o arquivo da
+raiz não muda uma vírgula na tela.
+
+**Por quê:** foi decisão do Derek em 26/08/2026, para manter o original
+como referência. O risco é evidente e por isso está anotado nos dois
+lugares — no topo do arquivo morto e no topo do bloco vivo. Quem for
+mexer no texto de um contrato precisa acertar o alvo na primeira
+tentativa.
+
+**Uma diferença em relação ao arquivo:** o `brl()` de lá virou
+`brlDoc()` aqui. Os dois existiam com regras diferentes — o do
+`index.html` corta os centavos, o do documento imprime
+`____________` quando não há valor — e duas declarações do mesmo nome no
+mesmo escopo do Babel derrubam a aplicação inteira, não só o documento.
+
+**O texto jurídico é rascunho.** Sai com tarja laranja na folha e não
+vai para a mesa de cliente. Quando os modelos reais chegarem, troca-se
+só o corpo das funções; o encanamento fica. O `<Pendente>` da etapa T
+pede esses modelos — **só sair de lá junto com o texto real**.
+
+**A janela precisa abrir no clique.** `abrirDocumento()` é chamado antes
+de qualquer `await` em `gerarDocumento()`
+([index.html:755](index.html:755)): pop-up disparado depois de um await
+é bloqueado pelo navegador. Quem inverter essa ordem quebra a impressão
+em silêncio.
+
+**O protocolo liga papel e banco.** Ele é gerado dentro do HTML, no
+rodapé, e `extrairProtocolo()` o tira de lá por regex — assim as funções
+de documento continuam devolvendo só o HTML, como no arquivo original.
+Se o rodapé mudar de texto, o protocolo passa a ser nulo, e o registro
+perde a única coisa que o amarra à folha impressa.
+
+**Cada geração é uma linha.** Segunda via é evento novo, com protocolo
+novo: é assim que se sabe quantas vias existem circulando. Por isso a
+0003 não tem índice único.
+
+**Documento gerado antes de a ficha ir ao banco** entra no registro
+quando o veículo é salvo, mas **sem o conteúdo** — o HTML não fica no
+aparelho. Sabe-se que existiu, não o que dizia. Na prática o Lançamento
+vem antes da Negociação, então é caso de borda.
+
 ## Convenções do código
 
 - **Português no domínio.** Estado, funções e rótulos em pt-BR
@@ -288,10 +335,13 @@ antes.
   necessidade.
 - **Persistência.** Só via `window.storage` (wrapper com prefixo `vp:` e
   fallback em memória, [index.html:21](index.html:21)). Três chaves:
-  `vaapty:at` (ficha), `vaapty:veiculo` (id da linha no banco) e
+  `vaapty:at` (ficha, incluindo o registro dos documentos gerados),
+  `vaapty:veiculo` (id da linha no banco) e
   `vaapty:fotos` — esta última guarda **só o que ainda não subiu**.
   `set()` e `setVarios()` gravam a cada alteração; não chamar `setF`
-  direto.
+  direto. `fRef` acompanha a ficha porque o registro de documento
+  acontece depois de um `await` e não pode escrever por cima de estado
+  velho.
 - **Fotos.** Sempre por `comprimir()` — 1280 px, JPEG 0.72, máximo 12 —
   e sobem para o Storage assim que são tiradas. O estado de cada uma
   (`aguardando` → `enviando` → `ok` | `erro`) mora no objeto da foto;
