@@ -343,10 +343,10 @@ e cinco botões abrem o anúncio em cada canal (`CANAIS`,
 quebra sozinho e ainda esbarra em bloqueio de robô. Abrir a busca pronta
 custa um toque e mostra o dado vivo.
 
-**Os quatro canais têm busca própria, conferida um a um** em
-27/08/2026 com HYUNDAI/I30, num navegador de verdade — o navegador de
-teste é barrado por detecção de robô, e foi por isso que a primeira
-versão caiu em busca do Google.
+**Os sete canais foram conferidos um a um** em 27/08/2026 com
+HYUNDAI/I30, num navegador de verdade — o navegador de teste é barrado
+por detecção de robô, e foi por isso que a primeira versão caiu em
+busca do Google.
 
 | canal | formato |
 |-------|---------|
@@ -354,12 +354,28 @@ versão caiu em busca do Google.
 | Webmotors | `/carros/estoque/{marca}/{modelo}` |
 | iCarros | `/comprar/usados/{marca}/{modelo}` |
 | Mercado Livre | `carros.mercadolivre.com.br/{marca}/{modelo}/` |
+| Marketplace | `/marketplace/search/?query=` (localiza sozinho) |
+| KBB | `/sp/marcas/{marca}/` — só a marca |
+| AutoAvaliar | home |
 
-**Chaves na Mão ficou de fora**: não responde a nenhum dos dois padrões
-e devolve "página não encontrada". Link quebrado na frente do cliente é
-pior que canal a menos. O iCarros, aliás, **ignora `?q=`** e cai na home
-genérica — parece "não existe esse carro". **Quem mexer aqui confere o
-resultado antes de publicar.**
+**KBB para na marca** porque o modelo lá fica sob a carroceria
+(`/hatchback/i30/`), que a FIPE não devolve. **AutoAvaliar para na
+home** porque é B2B, exige login e não tem endereço por modelo. Os dois
+estão assim de propósito, não por descuido.
+
+**Chaves na Mão ficou de fora**: não responde a nenhum padrão e devolve
+"página não encontrada". Link quebrado na frente do cliente é pior que
+canal a menos — e agora seria pior ainda, porque travaria a etapa. O
+iCarros, aliás, **ignora `?q=`** e cai na home genérica. **Quem mexer
+aqui confere o resultado antes de publicar.**
+
+**A etapa P só fecha depois de abrir todos os canais.** É regra de
+processo pedida pela casa: o negociador tem que ter visto o preço
+anunciado antes de sentar. `faltamCanais()` conta só os canais que
+**têm endereço** para o carro em questão — exigir clique em link
+inexistente travaria o atendimento. O botão "abrir todos" marca apenas
+o que o navegador realmente abriu; dar por visto o que foi bloqueado
+liberaria a etapa sem ninguém ter olhado.
 
 Os três de caminho precisam de marca e modelo **separados**, e por isso
 `escolherVersao()` guarda `marca` e `modeloCurto` na ficha. Em ficha

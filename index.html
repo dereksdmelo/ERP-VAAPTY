@@ -64,7 +64,8 @@ const OPCIONAIS = [
   "Teto solar", "Faróis de neblina", "Farol de LED",
   "Engate", "Chave reserva",
 ];
-const MOTIVOS = ["", "Quitar dívida", "Comprar outro carro", "Investir", "Saúde", "Mudança", "Carro sobrando", "Só vender"];
+const MOTIVOS = ["", "Quitar dívida", "Comprar outro carro", "Investir", "Saúde",
+                 "Mudança", "Divórcio", "Carro sobrando", "Só vender", "Outros"];
 const OBJECOES = ["", "Valor abaixo da pretensão", "Decisor ausente", "Não tem tempo", "Proposta de concorrente", "Quitação maior que o carro", "Só especulando"];
 const FECHAMENTO = ["", "Limpo", "Com quitação", "Assumir financiamento", "Consignado"];
 const ORIGENS = [
@@ -376,15 +377,54 @@ const semAcento = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036
 const fatia = (t) => semAcento(t).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 const CANAIS = [
-  { nome: "OLX", cor: "#6D1B9E", tipo: "texto",
+  { chave: "olx", nome: "OLX", cor: "#6D1B9E", tipo: "texto",
     url: (t) => `https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios?q=${encodeURIComponent(t)}` },
-  { nome: "Webmotors", tipo: "caminho",
+  { chave: "webmotors", nome: "Webmotors", tipo: "caminho",
     url: (ma, mo) => `https://www.webmotors.com.br/carros/estoque/${fatia(ma)}/${fatia(mo)}` },
-  { nome: "iCarros", tipo: "caminho",
+  { chave: "icarros", nome: "iCarros", tipo: "caminho",
     url: (ma, mo) => `https://www.icarros.com.br/comprar/usados/${fatia(ma)}/${fatia(mo)}` },
-  { nome: "Mercado Livre", tipo: "caminho",
+  { chave: "mercadolivre", nome: "Mercado Livre", tipo: "caminho",
     url: (ma, mo) => `https://carros.mercadolivre.com.br/${fatia(ma)}/${fatia(mo)}/` },
+  { chave: "facebook", nome: "Marketplace", tipo: "texto",
+    url: (t) => `https://www.facebook.com/marketplace/search/?query=${encodeURIComponent(t)}` },
+  // O modelo no KBB fica sob a carroceria (/hatchback/i30/), que a FIPE
+  // não devolve. A página da marca sempre existe e está a um clique.
+  { chave: "kbb", nome: "KBB", tipo: "marca",
+    url: (ma) => `https://www.kbb.com.br/sp/marcas/${fatia(ma)}/` },
+  // B2B, exige login e não tem endereço por modelo.
+  { chave: "autoavaliar", nome: "AutoAvaliar", tipo: "fixo",
+    url: () => "https://www.autoavaliar.com.br/" },
 ];
+
+const enderecoCanal = (c, termo, marca, modelo) => {
+  if (c.tipo === "fixo") return c.url();
+  if (c.tipo === "texto") return c.url(termo);
+  if (c.tipo === "marca") return marca ? c.url(marca) : null;
+  return marca && modelo ? c.url(marca, modelo) : null;
+};
+
+const marcaModeloDa = (f) => {
+  const partes = String(f.modelo || "").split(/\s+/);
+  return [f.marca || partes[0] || "", f.modeloCurto || partes[1] || ""];
+};
+
+/**
+ * A pesquisa de mercado faz parte do processo: o negociador precisa ter
+ * olhado o preço anunciado antes de sentar para negociar. Por isso a
+ * etapa P só fecha depois de abrir todos os canais possíveis.
+ *
+ * "Possíveis" e não "todos": sem marca e modelo separados, os canais de
+ * caminho não têm endereço, e exigir clique em link inexistente
+ * travaria o atendimento.
+ */
+function canaisPossiveis(f) {
+  const [ma, mo] = marcaModeloDa(f);
+  return CANAIS.filter((c) => !!enderecoCanal(c, "x", ma, mo)).map((c) => c.chave);
+}
+function faltamCanais(f) {
+  const vistos = f.canaisVistos || [];
+  return canaisPossiveis(f).filter((c) => vistos.indexOf(c) < 0);
+}
 
 /* ===================== desvalorizômetro ===================== */
 
@@ -522,7 +562,8 @@ const VAZIO = {
   // A
   chegada: "", carroSubiu: false, tempoCombinado: false,
   // P
-  motivo: "", pretensao: "", quitacao: "", debitos: "", decisorPresente: false,
+  motivo: "", motivoDetalhe: "", pretensao: "", quitacao: "", debitos: "",
+  decisorPresente: false, entregaHoje: false, canaisVistos: [],
   temPropostaFora: false, propostaForaValor: "", propostaForaOnde: "",
   // O
   mostrouProcesso: false, mostrouTestemunhal: false, necessidadeCliente: "",
@@ -573,7 +614,7 @@ const ETAPAS = [
 function etapaConcluida(id, f, fotos) {
   switch (id) {
     case "A": return !!f.chegada && f.carroSubiu && f.tempoCombinado;
-    case "P": return !!f.motivo && !!f.pretensao && f.decisorPresente;
+    case "P": return !!f.motivo && !!f.pretensao && f.decisorPresente && faltamCanais(f).length === 0;
     case "O": return f.mostrouProcesso && f.mostrouTestemunhal;
     case "PUB": return faltando(f, fotos).length === 0 && f.publicado;
     case "ESP": return !!f.esperaIniciadaEm;
@@ -944,6 +985,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   const [cota, setCota] = useState(null);
 
   const [termoMercado, setTermoMercado] = useState("");
+  const [erroCanais, setErroCanais] = useState("");
   const [propostas, setPropostas] = useState((atendimento && atendimento.proposta) || []);
   const melhorProposta = useMemo(() => {
     const v = propostas.map((p) => Number(p.valor) || 0);
@@ -1373,37 +1415,86 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
 
               {!!f.modelo && (() => {
                 const termo = termoMercado || termoMercadoPadrao(f);
+                const [ma, mo] = marcaModeloDa(f);
+                const vistos = f.canaisVistos || [];
+                const possiveis = canaisPossiveis(f);
+                const faltam = faltamCanais(f);
+
+                const marcarVisto = (chave) => {
+                  if (vistos.indexOf(chave) >= 0) return;
+                  set("canaisVistos", [...vistos, chave]);
+                };
+
+                // Navegador bloqueia abertura em série. Marco só o que
+                // realmente abriu — dar por visto o que não abriu seria
+                // liberar a etapa sem ninguém ter olhado.
+                const abrirTodos = () => {
+                  const abertos = [];
+                  CANAIS.forEach((c) => {
+                    const url = enderecoCanal(c, termo, ma, mo);
+                    if (!url) return;
+                    const j = window.open(url, "_blank", "noopener");
+                    if (j) abertos.push(c.chave);
+                  });
+                  if (abertos.length) set("canaisVistos", [...new Set([...vistos, ...abertos])]);
+                  setErroCanais(abertos.length < possiveis.length
+                    ? "O navegador bloqueou parte das abas. Libere pop-ups para este site ou abra um a um."
+                    : "");
+                };
+
                 return (
-                  <div className="mt-3 rounded-md p-3" style={{ background: "#FBFAFC", border: `1px solid ${C.line}` }}>
-                    <div className="text-[10px] uppercase tracking-[0.13em]" style={{ color: C.mute }}>
-                      Preço anunciado no mercado
+                  <div className="mt-3 rounded-md p-3" style={{ background: "#FBFAFC", border: `1px solid ${faltam.length ? C.laranja : C.verde}` }}>
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-[10px] uppercase tracking-[0.13em]" style={{ color: C.mute }}>
+                        Pesquisa de mercado
+                      </span>
+                      <span className="text-[10px]" style={{ fontFamily: F.mono, color: faltam.length ? C.laranja : C.verde }}>
+                        {possiveis.length - faltam.length}/{possiveis.length}
+                      </span>
                     </div>
                     <p className="mt-1 text-[11px] leading-relaxed" style={{ color: C.mute }}>
-                      Abre a busca pronta em cada canal. O que o dono viu na internet é o número com que ele chegou na mesa — melhor você ver antes.
+                      Abra os canais antes de sentar para negociar. O que o dono viu na internet é o número com que ele chegou — e a etapa só fecha depois que você olhou todos.
                     </p>
+
                     <input className={`${inputCls} mt-2`} style={inputSty} value={termo}
                       onChange={(e) => setTermoMercado(e.target.value)} placeholder="O que buscar" />
+
+                    <button onClick={abrirTodos}
+                      className="mt-2 w-full rounded-md py-2 text-[12px] font-semibold"
+                      style={{ background: C.roxo, color: "#fff" }}>
+                      Abrir todos
+                    </button>
+
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {CANAIS.map((c) => {
-                        // Sem marca e modelo separados não dá para montar o
-                        // caminho; a busca por texto sempre dá.
-                        const partes = f.modelo.split(/\s+/);
-                        const ma = f.marca || partes[0] || "";
-                        const mo = f.modeloCurto || partes[1] || "";
-                        const pode = c.tipo === "texto" || (ma && mo);
-                        if (!pode) return null;
-                        const href = c.tipo === "texto" ? c.url(termo) : c.url(ma, mo);
+                        const href = enderecoCanal(c, termo, ma, mo);
+                        if (!href) return null;
+                        const visto = vistos.indexOf(c.chave) >= 0;
                         return (
-                          <a key={c.nome} href={href} target="_blank" rel="noopener noreferrer"
+                          <a key={c.chave} href={href} target="_blank" rel="noopener noreferrer"
+                            onClick={() => marcarVisto(c.chave)}
                             className="rounded-full px-3 py-1.5 text-[12px] font-medium"
-                            style={{ background: c.cor || "#fff", color: c.cor ? "#fff" : C.roxo, border: `1px solid ${c.cor || C.line}` }}>
-                            {c.nome}
+                            style={{ background: visto ? "#F0F8F4" : "#fff",
+                                     color: visto ? C.verde : C.roxo,
+                                     border: `1px solid ${visto ? C.verde : C.line}` }}>
+                            {visto ? "✓ " : ""}{c.nome}
                           </a>
                         );
                       })}
                     </div>
-                    <p className="mt-2 text-[10px]" style={{ color: C.mute }}>
+
+                    {erroCanais && <p className="mt-2 text-[11px]" style={{ color: C.laranja }}>{erroCanais}</p>}
+
+                    {!!faltam.length && (
+                      <p className="mt-2 text-[11px]" style={{ color: C.laranja }}>
+                        Falta abrir: {CANAIS.filter((c) => faltam.indexOf(c.chave) >= 0).map((c) => c.nome).join(", ")}.
+                      </p>
+                    )}
+
+                    <p className="mt-2 text-[10px] leading-relaxed" style={{ color: C.mute }}>
                       Anúncio é preço pedido, não preço de venda. Serve de teto, não de referência.
+                      {" "}KBB abre na marca — o modelo lá fica sob a carroceria, que a FIPE não informa.
+                      {" "}AutoAvaliar abre na home, porque é B2B e exige login.
                     </p>
                   </div>
                 );
@@ -1419,11 +1510,23 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                     {MOTIVOS.map((m) => <option key={m}>{m}</option>)}
                   </select>
                 </Campo>
-                <div className="grid grid-cols-2 gap-2.5">
+                <Campo label="Detalhe do motivo — opcional">
+                  <textarea rows={2} className={inputCls} style={inputSty} value={f.motivoDetalhe}
+                    onChange={(e) => set("motivoDetalhe", e.target.value)}
+                    placeholder="A história por trás. Vai separando divórcio de mudança de emprego, e é o que dá argumento na hora do extrato." />
+                </Campo>
+                <div className="grid grid-cols-3 gap-2.5">
                   <Campo label="Pretensão"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.pretensao} onChange={(e) => set("pretensao", e.target.value)} /></Campo>
                   <Campo label="Quitação"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.quitacao} onChange={(e) => set("quitacao", e.target.value)} /></Campo>
+                  <Campo label="Débitos"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.debitos} onChange={(e) => set("debitos", e.target.value)} /></Campo>
                 </div>
+                <p className="text-[10px] leading-relaxed" style={{ color: C.mute }}>
+                  Quitação é o saldo do financiamento. Débitos é IPVA, multa e licenciamento em aberto — os dois saem do valor que o cliente recebe.
+                </p>
                 <Toggle label="O decisor está na loja" nota="Se não estiver, resolva antes de rodar o carro." valor={f.decisorPresente} onChange={(v) => set("decisorPresente", v)} />
+                <Toggle label="Cliente entrega o carro hoje"
+                  nota="Ciente de que, fechando negócio, o carro já fica na loja."
+                  valor={f.entregaHoje} onChange={(v) => set("entregaHoje", v)} />
                 <Toggle label="Já recebeu proposta de outro lugar" valor={f.temPropostaFora} onChange={(v) => set("temPropostaFora", v)} />
                 {f.temPropostaFora && (
                   <div className="grid grid-cols-2 gap-2.5">
