@@ -190,6 +190,12 @@ async function consultarPlaca(placa) {
   if (!r.ok) throw new Error(d.erro || "Falha na consulta.");
   return d;
 }
+async function consultarDesvalorizacao(chave) {
+  const r = await fetch(`/api/desvalorizacao?chave=${encodeURIComponent(chave)}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Histórico indisponível.");
+  return d;
+}
 async function consultarCota() {
   try { const r = await fetch("/api/cota"); return r.ok ? await r.json() : null; } catch (e) { return null; }
 }
@@ -336,20 +342,115 @@ function termoMercadoPadrao(f) {
 }
 
 /**
- * Canais de anúncio. A OLX aceita busca por query e foi conferida.
- * Webmotors, iCarros e Mercado Livre não: o iCarros ignora o ?q= e cai
- * na home genérica — pior que erro, porque parece "não existe esse
- * carro" —, e os outros dois barram acesso automatizado, então não deu
- * para confirmar o formato. Nesses três a busca vai pelo Google
- * restrita ao site, que sempre cai em anúncio de verdade.
+ * Canais de anúncio. * Canais de anúncio, todos com busca própria — conferi um por um em
+ * 27/08/2026 com HYUNDAI/I30.
+ *
+ * A OLX busca por texto livre; os outros três montam o caminho com
+ * marca e modelo separados, e por isso `marca` e `modeloCurto` são
+ * guardados na ficha quando a versão FIPE é escolhida.
+ *
+ * Chaves na Mão ficou de fora: não responde a nenhum dos dois padrões
+ * e devolve "página não encontrada". Link quebrado na frente do
+ * cliente é pior que canal a menos.
  */
+const semAcento = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+const fatia = (t) => semAcento(t).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
 const CANAIS = [
-  { nome: "OLX", cor: "#6D1B9E", url: (t) => `https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios?q=${encodeURIComponent(t)}` },
-  { nome: "Webmotors", url: (t) => `https://www.google.com/search?q=${encodeURIComponent(`${t} site:webmotors.com.br`)}` },
-  { nome: "iCarros", url: (t) => `https://www.google.com/search?q=${encodeURIComponent(`${t} site:icarros.com.br`)}` },
-  { nome: "Mercado Livre", url: (t) => `https://www.google.com/search?q=${encodeURIComponent(`${t} site:mercadolivre.com.br`)}` },
-  { nome: "Chaves na Mão", url: (t) => `https://www.google.com/search?q=${encodeURIComponent(`${t} site:chavesnamao.com.br`)}` },
+  { nome: "OLX", cor: "#6D1B9E", tipo: "texto",
+    url: (t) => `https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios?q=${encodeURIComponent(t)}` },
+  { nome: "Webmotors", tipo: "caminho",
+    url: (ma, mo) => `https://www.webmotors.com.br/carros/estoque/${fatia(ma)}/${fatia(mo)}` },
+  { nome: "iCarros", tipo: "caminho",
+    url: (ma, mo) => `https://www.icarros.com.br/comprar/usados/${fatia(ma)}/${fatia(mo)}` },
+  { nome: "Mercado Livre", tipo: "caminho",
+    url: (ma, mo) => `https://carros.mercadolivre.com.br/${fatia(ma)}/${fatia(mo)}/` },
 ];
+
+/* ===================== desvalorizômetro ===================== */
+
+/**
+ * O histórico FIPE do carro, mês a mês. Vale mais na mesa do que
+ * qualquer argumento: o cliente ancora no que pagou, e a curva mostra
+ * quanto custa continuar esperando.
+ *
+ * Gráfico em SVG na mão — o projeto não tem build nem biblioteca.
+ */
+function Desvalorizometro({ chave }) {
+  const [d, setD] = useState(null);
+  const [erro, setErro] = useState("");
+  const [indo, setIndo] = useState(false);
+
+  useEffect(() => {
+    if (!chave) { setD(null); setErro(""); return; }
+    let vivo = true;
+    setIndo(true); setErro("");
+    consultarDesvalorizacao(chave)
+      .then((x) => { if (vivo) setD(x); })
+      .catch((e) => { if (vivo) setErro(e.message); })
+      .then(() => { if (vivo) setIndo(false); });
+    return () => { vivo = false; };
+  }, [chave]);
+
+  if (!chave) return null;
+  if (indo) return <p className="mt-3 text-[11px]" style={{ color: C.mute }}>Carregando o histórico FIPE…</p>;
+  if (erro) return <p className="mt-3 text-[11px]" style={{ color: C.laranja }}>{erro}</p>;
+  if (!d || !d.serie || d.serie.length < 2) return null;
+
+  const L = 300, A = 70, m = 4;
+  const vals = d.serie.map((x) => x.valor);
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const faixa = max - min || 1;
+  const px = (i) => m + (i * (L - 2 * m)) / (d.serie.length - 1);
+  const py = (v) => m + (A - 2 * m) * (1 - (v - min) / faixa);
+  const linha = d.serie.map((x, i) => `${px(i).toFixed(1)},${py(x.valor).toFixed(1)}`).join(" ");
+  const area = `${m},${A - m} ${linha} ${(L - m).toFixed(1)},${A - m}`;
+
+  const doze = d.doze_meses;
+
+  return (
+    <div className="mt-3 rounded-md p-3" style={{ background: "#FBFAFC", border: `1px solid ${C.line}` }}>
+      <div className="text-[10px] uppercase tracking-[0.13em]" style={{ color: C.mute }}>
+        Desvalorizômetro · FIPE mês a mês
+      </div>
+
+      <svg viewBox={`0 0 ${L} ${A}`} className="mt-2 block w-full" style={{ height: 70 }} preserveAspectRatio="none">
+        <polygon points={area} fill={C.roxoFraco} />
+        <polyline points={linha} fill="none" stroke={C.roxo} strokeWidth="1.5" strokeLinejoin="round" />
+        <circle cx={px(d.serie.length - 1)} cy={py(vals[vals.length - 1])} r="2.5" fill={C.roxo} />
+      </svg>
+
+      <div className="flex justify-between text-[9px]" style={{ color: C.mute, fontFamily: F.mono }}>
+        <span>{d.serie[0].mes}</span>
+        <span>{d.atual.mes}</span>
+      </div>
+
+      {doze && (
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <div>
+            <div className="text-[9px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>Perdeu em 12 meses</div>
+            <div className="text-[17px] leading-tight" style={{ fontFamily: F.mono, fontWeight: 700, color: C.laranja }}>
+              {brl(Math.abs(doze.reais))}
+            </div>
+            <div className="text-[10px]" style={{ color: C.mute }}>{Math.abs(doze.pct)}% desde {doze.de}</div>
+          </div>
+          <div>
+            <div className="text-[9px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>Por mês parado</div>
+            <div className="text-[17px] leading-tight" style={{ fontFamily: F.mono, fontWeight: 700, color: C.laranja }}>
+              {brl(Math.abs(doze.por_mes))}
+            </div>
+            <div className="text-[10px]" style={{ color: C.mute }}>é o custo de esperar</div>
+          </div>
+        </div>
+      )}
+
+      <p className="mt-2 text-[10px] leading-relaxed" style={{ color: C.mute }}>
+        Do topo ({brl(d.pico.valor)}, {d.pico.mes}) até hoje: {brl(Math.abs(d.desde_o_pico.reais))} a menos.
+        {" "}São {d.meses_disponiveis} meses de tabela.
+      </p>
+    </div>
+  );
+}
 
 /* ===================== fotos ===================== */
 function comprimir(file, max = 1280, q = 0.72) {
@@ -376,7 +477,8 @@ function comprimir(file, max = 1280, q = 0.72) {
 const VAZIO = {
   // veículo
   modelo: "", ano: "", cambio: "", km: "", kmEntrada: "", placa: "",
-  fipe: "", fipeCodigo: "", pedida: "", por: "", gastos: "",
+  fipe: "", fipeCodigo: "", fipeDesval: "", pedida: "", por: "", gastos: "",
+  marca: "", modeloCurto: "",
   chassi: "", cor: "", combustivel: "",
   pneus: ["", "", "", ""], leilao: false, gnv: false, opcionais: [],
   lataria: "", mecanica: "", positivos: "", ressalvas: "", internas: "",
@@ -903,6 +1005,9 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
       placa: achado.placa, modelo: `${achado.marca} ${v.nome}`,
       ano: `${achado.anoFabricacao || ""}/${v.anoModelo || achado.anoModelo || ""}`,
       fipe: String(Math.round(v.valor)), fipeCodigo: v.codigoFipe,
+      fipeDesval: v.desvalorizometro || "",
+      marca: achado.marca || "",
+      modeloCurto: String(achado.modeloAbreviado || "").split(/\s+/)[0] || "",
       chassi: achado.chassiCompleto ? achado.chassi : "",
       cor: achado.cor || "", combustivel: v.combustivel || achado.combustivel || "",
       cambio: cambioBusca || f.cambio,
@@ -1236,13 +1341,23 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                     <input className={`${inputCls} mt-2`} style={inputSty} value={termo}
                       onChange={(e) => setTermoMercado(e.target.value)} placeholder="O que buscar" />
                     <div className="mt-2 flex flex-wrap gap-1.5">
-                      {CANAIS.map((c) => (
-                        <a key={c.nome} href={c.url(termo)} target="_blank" rel="noopener noreferrer"
-                          className="rounded-full px-3 py-1.5 text-[12px] font-medium"
-                          style={{ background: c.cor || "#fff", color: c.cor ? "#fff" : C.roxo, border: `1px solid ${c.cor || C.line}` }}>
-                          {c.nome}
-                        </a>
-                      ))}
+                      {CANAIS.map((c) => {
+                        // Sem marca e modelo separados não dá para montar o
+                        // caminho; a busca por texto sempre dá.
+                        const partes = f.modelo.split(/\s+/);
+                        const ma = f.marca || partes[0] || "";
+                        const mo = f.modeloCurto || partes[1] || "";
+                        const pode = c.tipo === "texto" || (ma && mo);
+                        if (!pode) return null;
+                        const href = c.tipo === "texto" ? c.url(termo) : c.url(ma, mo);
+                        return (
+                          <a key={c.nome} href={href} target="_blank" rel="noopener noreferrer"
+                            className="rounded-full px-3 py-1.5 text-[12px] font-medium"
+                            style={{ background: c.cor || "#fff", color: c.cor ? "#fff" : C.roxo, border: `1px solid ${c.cor || C.line}` }}>
+                            {c.nome}
+                          </a>
+                        );
+                      })}
                     </div>
                     <p className="mt-2 text-[10px]" style={{ color: C.mute }}>
                       Anúncio é preço pedido, não preço de venda. Serve de teto, não de referência.
@@ -1251,11 +1366,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 );
               })()}
 
-              <div className="mt-3">
-                <Pendente>
-                  O desvalorizômetro entra aqui. Preciso ver uma resposta crua da Placa Fipe para saber com que nome esse dado vem — hoje o api/placa.js só repassa marca, modelo, ano, cor, chassi e as versões FIPE, e descarta o resto do retorno.
-                </Pendente>
-              </div>
+              <Desvalorizometro chave={f.fipeDesval} />
             </Bloco>
 
             <Bloco titulo="O cliente" sub="Descobrir que falta o decisor depois de 40 minutos de avaliação é perda certa.">

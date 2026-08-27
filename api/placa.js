@@ -78,6 +78,8 @@ module.exports = async function handler(req, res) {
       valor: num(f.valor) || 0,
       mesReferencia: f.mes_referencia,
       confianca: num(f.similaridade) || 0,
+      // Chave do histórico FIPE desta versão, para /api/desvalorizacao.
+      desvalorizometro: f.desvalorizometro || null,
     }))
     .sort((a, b) => b.confianca - a.confianca);
 

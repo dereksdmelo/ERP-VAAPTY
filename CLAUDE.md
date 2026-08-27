@@ -26,6 +26,7 @@ api/config.js                    GET  — URL e chave anônima para o navegador
 api/perfil.js                    GET  — quem sou eu; para gerente, a equipe
 api/atendimento.js               GET/POST/PATCH — a lista do CRM
 api/proposta.js                  GET/POST/PATCH/DELETE — ofertas dos lojistas
+api/desvalorizacao.js            GET  — histórico FIPE mês a mês do veículo
 documentos.js                    CÓPIA MORTA: o que roda é o bloco colado no index.html
 supabase/migrations/*.sql        esquema do banco, versionado
 ```
@@ -340,14 +341,29 @@ e cinco botões abrem o anúncio em cada canal (`CANAIS`,
 quebra sozinho e ainda esbarra em bloqueio de robô. Abrir a busca pronta
 custa um toque e mostra o dado vivo.
 
-**Só a OLX usa busca nativa.** Conferi em 26/08/2026: a OLX aceita
-`?q=` e devolve o que se espera. O iCarros **ignora** o `?q=` e cai na
-home genérica — o que é pior que um erro, porque parece "não existe esse
-carro". Webmotors e Mercado Livre barram acesso automatizado e não deu
-para confirmar o formato. Nesses quatro a busca vai pelo Google com
-`site:`, que sempre cai em anúncio real. **Quem for trocar por busca
-nativa precisa conferir o resultado antes** — link que devolve página
-genérica é armadilha na frente do cliente.
+**Os quatro canais têm busca própria, conferida um a um** em
+27/08/2026 com HYUNDAI/I30, num navegador de verdade — o navegador de
+teste é barrado por detecção de robô, e foi por isso que a primeira
+versão caiu em busca do Google.
+
+| canal | formato |
+|-------|---------|
+| OLX | `?q=` texto livre |
+| Webmotors | `/carros/estoque/{marca}/{modelo}` |
+| iCarros | `/comprar/usados/{marca}/{modelo}` |
+| Mercado Livre | `carros.mercadolivre.com.br/{marca}/{modelo}/` |
+
+**Chaves na Mão ficou de fora**: não responde a nenhum dos dois padrões
+e devolve "página não encontrada". Link quebrado na frente do cliente é
+pior que canal a menos. O iCarros, aliás, **ignora `?q=`** e cai na home
+genérica — parece "não existe esse carro". **Quem mexer aqui confere o
+resultado antes de publicar.**
+
+Os três de caminho precisam de marca e modelo **separados**, e por isso
+`escolherVersao()` guarda `marca` e `modeloCurto` na ficha. Em ficha
+preenchida à mão, caem para o primeiro e o segundo token de `modelo` —
+o que erra em marca de duas palavras (Land Rover, Alfa Romeo). Nesse
+caso o botão some, em vez de levar a um link quebrado.
 
 **O termo é derivado, não o nome da FIPE.** `termoMercadoPadrao()`
 tira motor e câmbio do nome ("CHEVROLET ONIX HATCH LTZ 1.4 8V FlexPower
@@ -435,6 +451,32 @@ salvou.
 **A busca escapa vírgula e parêntese.** O `or=` do PostgREST usa esses
 caracteres como sintaxe; um cliente chamado "Silva, João" quebraria a
 consulta inteira.
+
+### 11. Desvalorizômetro: a chave vinha, o dado não
+
+A consulta de placa devolve, por versão FIPE, um campo
+`desvalorizometro`: um base64 que decodifica para
+`ano#codigo_modelo#tipo#codigo_marca#combustivel#versão#assinatura`.
+**É uma chave, não o dado** — foi isso que confundiu o `<Pendente>`
+antigo, que dizia "já vem no retorno".
+
+Quem consome a chave é `POST /getdesvalorizometro`, e ele devolve o
+histórico FIPE **mês a mês desde o lançamento** — 206 tabelas num carro
+de 2010. `api/desvalorizacao.js` chama essa rota e entrega os últimos
+60 meses para o gráfico, mais as contas prontas.
+
+**Por que isso vale na mesa:** o cliente ancora no que pagou. O número
+que muda a conversa não é o valor de hoje, é **quanto o carro perde por
+mês parado** — transforma "quanto eu quero" em "quanto custa esperar".
+
+**Como o número foi achado:** o `api/placa.js` montava a resposta campo
+a campo e descartava o resto do retorno. Passou a devolver o não
+mapeado em `extras`, e a resposta apareceu na primeira consulta.
+`extras` continua lá para a próxima pergunta desse tipo.
+
+**Cache de 7 dias na borda:** a tabela FIPE muda uma vez por mês e a
+consulta gasta cota. O endpoint é aberto, como `/api/placa` — os dois
+precisam de login junto, quando for a hora.
 
 ## Convenções do código
 
