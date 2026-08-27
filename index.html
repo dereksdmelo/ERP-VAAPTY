@@ -51,7 +51,19 @@ const brl = (n) =>
 
 const PNEU = ["Novo", "Bom", "Médio", "Fraco"];
 const CAMBIO = ["", "Manual", "Automático", "Automatizado", "CVT"];
-const OPCIONAIS = ["Completo", "Ar condicionado", "Direção hid./elét.", "ABS", "Som / Multimídia", "Sensor de ré", "Câmera de ré", "Rodas de liga", "Bancos em couro"];
+const OPCIONAIS = [
+  "Completo",
+  "Ar condicionado", "Ar digital", "Direção hid./elét.",
+  "Vidros elétricos", "Travas elétricas", "Retrovisor elétrico",
+  "ABS", "Airbag duplo", "Controle de estabilidade",
+  "Som / Multimídia", "Central com CarPlay", "Volante multifuncional",
+  "Sensor de ré", "Sensor dianteiro", "Câmera de ré", "Sensor de chuva",
+  "Piloto automático", "Computador de bordo", "Partida sem chave",
+  "Rodas de liga", "Rodas aro 17+",
+  "Bancos em couro", "Bancos elétricos",
+  "Teto solar", "Faróis de neblina", "Farol de LED",
+  "Engate", "Chave reserva",
+];
 const MOTIVOS = ["", "Quitar dívida", "Comprar outro carro", "Investir", "Saúde", "Mudança", "Carro sobrando", "Só vender"];
 const OBJECOES = ["", "Valor abaixo da pretensão", "Decisor ausente", "Não tem tempo", "Proposta de concorrente", "Quitação maior que o carro", "Só especulando"];
 const FECHAMENTO = ["", "Limpo", "Com quitação", "Assumir financiamento", "Consignado"];
@@ -1369,7 +1381,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                     </select>
                   </Campo>
                   <Campo label="KM atual" req><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.km} onChange={(e) => set("km", e.target.value)} /></Campo>
-                  <Campo label="KM na entrada"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.kmEntrada} onChange={(e) => set("kmEntrada", e.target.value)} /></Campo>
+                  <Campo label="KM quando o cliente pegou"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.kmEntrada} onChange={(e) => set("kmEntrada", e.target.value)} /></Campo>
                   <Campo label="Placa" req><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} value={f.placa} onChange={(e) => set("placa", e.target.value.toUpperCase())} /></Campo>
                   <Campo label="Cor"><input className={inputCls} style={inputSty} value={f.cor} onChange={(e) => set("cor", e.target.value)} /></Campo>
                   <Campo label="FIPE" req><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.fipe} onChange={(e) => set("fipe", e.target.value)} /></Campo>
@@ -1823,35 +1835,61 @@ function CRM({ perfil, aoAbrir }) {
           </p>
         )}
 
-        {lista.map((a) => {
-          const v = (a.veiculo || [])[0];
-          const props = a.proposta || [];
-          const melhor = props.length ? Math.max(...props.map((p) => Number(p.valor) || 0)) : 0;
-          return (
-            <button key={a.id} onClick={() => aoAbrir(a.id)}
-              className="block w-full rounded-lg p-3 text-left"
-              style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="text-[13px] font-semibold leading-snug">
-                  {a.cliente_nome || "Sem nome"}
-                </span>
-                <Etiqueta status={a.status} />
-              </div>
-              <div className="mt-0.5 text-[12px]" style={{ color: C.mute }}>
-                {(v && v.marca_modelo) || a.carro_descricao || "Carro não informado"}
-                {v && v.placa ? ` · ${v.placa}` : ""}
-              </div>
-              <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px]" style={{ color: C.mute, fontFamily: F.mono }}>
-                <span>{soData(a.data)}</span>
-                <span>{rotulo(ORIGENS, a.origem)}</span>
-                {a.negociador_nome && <span>{a.negociador_nome}</span>}
-                {a.pretensao ? <span>pede {brl(a.pretensao)}</span> : null}
-                {melhor ? <span style={{ color: C.verde }}>melhor {brl(melhor)}</span> : null}
-                {props.length ? <span>{props.length} proposta{props.length > 1 ? "s" : ""}</span> : null}
-              </div>
-            </button>
-          );
-        })}
+        {!!lista.length && (
+          <div className="rolar overflow-x-auto rounded-lg" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+            <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 1180 }}>
+              <thead>
+                <tr style={{ background: "#F6F4F8" }}>
+                  {["Data", "Negociador", "Prospec", "Carro", "Placa", "Ano/Mod", "KM",
+                    "Cliente", "Telefone", "Origem", "Status", "FIPE", "Pretensão", "Propostas"].map((h, i) => (
+                    <th key={h} className="whitespace-nowrap px-2.5 py-2 text-left text-[9px] uppercase tracking-[0.1em]"
+                      style={{ color: C.mute, borderBottom: `1px solid ${C.line}`, textAlign: i >= 11 ? "right" : "left" }}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {lista.map((a) => {
+                  const v = (a.veiculo || [])[0] || {};
+                  const props = a.proposta || [];
+                  const melhor = props.length ? Math.max(...props.map((p) => Number(p.valor) || 0)) : 0;
+                  const anoMod = [v.ano_fabricacao, v.ano_modelo].filter(Boolean).join("/");
+                  const td = "whitespace-nowrap px-2.5 py-2 text-[12px]";
+                  const num = { fontFamily: F.mono, textAlign: "right" };
+                  return (
+                    <tr key={a.id} onClick={() => aoAbrir(a.id)} style={{ borderBottom: `1px solid ${C.line}`, cursor: "pointer" }}>
+                      <td className={td} style={{ fontFamily: F.mono, color: C.mute }}>{soData(a.data)}</td>
+                      <td className={td}>{a.negociador_nome || "—"}</td>
+                      <td className={td} style={{ color: C.mute }}>{a.prospec || "—"}</td>
+                      <td className={td} style={{ fontWeight: 600 }}>
+                        {v.marca_modelo || a.carro_descricao || "—"}
+                      </td>
+                      <td className={td} style={{ fontFamily: F.mono }}>{v.placa || "—"}</td>
+                      <td className={td} style={{ fontFamily: F.mono, color: C.mute }}>{anoMod || "—"}</td>
+                      <td className={td} style={num}>{v.km_atual ? Number(v.km_atual).toLocaleString("pt-BR") : "—"}</td>
+                      <td className={td}>{a.cliente_nome || "—"}</td>
+                      <td className={td} style={{ fontFamily: F.mono, color: C.mute }}>{a.cliente_telefone || "—"}</td>
+                      <td className={td} style={{ color: C.mute }}>{rotulo(ORIGENS, a.origem)}</td>
+                      <td className={td}><Etiqueta status={a.status} /></td>
+                      <td className={td} style={num}>{v.fipe_valor ? brl(v.fipe_valor) : "—"}</td>
+                      <td className={td} style={num}>{a.pretensao ? brl(a.pretensao) : "—"}</td>
+                      <td className={td} style={{ ...num, color: melhor ? C.verde : C.mute }}>
+                        {melhor ? brl(melhor) : "—"}
+                        {props.length > 1 ? <span style={{ color: C.mute }}> ({props.length})</span> : null}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {!!lista.length && (
+          <p className="text-[10px]" style={{ color: C.mute }}>
+            Arraste a tabela para o lado para ver o resto das colunas. Toque na linha para abrir o atendimento.
+          </p>
+        )}
       </div>
     </div>
   );

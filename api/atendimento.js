@@ -139,7 +139,7 @@ async function lerCorpo(req) {
 
 // O veículo e as propostas vêm junto na mesma consulta: uma ida ao
 // banco em vez de três, e a lista já mostra placa e melhor proposta.
-const EMBUTIDO = "*,veiculo(id,placa,marca_modelo,fipe_valor,valor_por,status),proposta(id,lojista,valor,apresentada)";
+const EMBUTIDO = "*,veiculo(id,placa,marca_modelo,ano_fabricacao,ano_modelo,km_atual,fipe_valor,valor_por,status),proposta(id,lojista,valor,apresentada)";
 
 module.exports = async function handler(req, res) {
   if (!URL_BASE || !ANON) {

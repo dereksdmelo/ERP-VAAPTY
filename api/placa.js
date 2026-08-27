@@ -44,6 +44,31 @@ module.exports = async function handler(req, res) {
   const iv = d.informacoes_veiculo;
   const chassi = iv.chassi || "";
 
+  /**
+   * Tudo que a Placa Fipe manda e este arquivo não mapeia. Existe para
+   * responder uma pergunta concreta: o desvalorizômetro vem no retorno?
+   * Sem isto a resposta era descartada antes de alguém poder olhar.
+   *
+   * Só chaves desconhecidas, e nada de token: o que a gente envia não
+   * volta no corpo.
+   */
+  const CONHECIDAS = ["codigo", "msg", "informacoes_veiculo", "fipe"];
+  const extras = {};
+  Object.keys(d).forEach((k) => { if (CONHECIDAS.indexOf(k) < 0) extras[k] = d[k]; });
+
+  const ivExtras = {};
+  const IV_CONHECIDAS = ["marca", "modelo", "ano", "ano_modelo", "cor", "combustivel",
+                         "cilindradas", "municipio", "uf", "chassi"];
+  Object.keys(iv).forEach((k) => { if (IV_CONHECIDAS.indexOf(k) < 0) ivExtras[k] = iv[k]; });
+  if (Object.keys(ivExtras).length) extras.informacoes_veiculo = ivExtras;
+
+  const fipeExtras = {};
+  const F_CONHECIDAS = ["codigo_fipe", "modelo", "ano_modelo", "combustivel", "valor",
+                        "mes_referencia", "similaridade"];
+  const primeira = (d.fipe || [])[0] || {};
+  Object.keys(primeira).forEach((k) => { if (F_CONHECIDAS.indexOf(k) < 0) fipeExtras[k] = primeira[k]; });
+  if (Object.keys(fipeExtras).length) extras.fipe_primeira_versao = fipeExtras;
+
   const versoes = (d.fipe || [])
     .map((f) => ({
       codigoFipe: f.codigo_fipe,
@@ -74,5 +99,6 @@ module.exports = async function handler(req, res) {
     chassiCompleto: /^[A-HJ-NPR-Z0-9]{17}$/.test(chassi),
     versoes,
     ambiguo: versoes.length !== 1,
+    extras,
   });
 };
