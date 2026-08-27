@@ -324,6 +324,36 @@ quando o veículo é salvo, mas **sem o conteúdo** — o HTML não fica no
 aparelho. Sabe-se que existiu, não o que dizia. Na prática o Lançamento
 vem antes da Negociação, então é caso de borda.
 
+### 8. Preço de mercado: link pronto, não raspagem
+
+Na etapa P, abaixo da consulta de placa, um campo editável monta a busca
+e cinco botões abrem o anúncio em cada canal (`CANAIS`,
+[index.html:165](index.html:165)).
+
+**Por quê link e não raspagem:** o número que interessa é o preço
+*pedido* nos anúncios, e ele muda todo dia. Raspar site de classificado
+quebra sozinho e ainda esbarra em bloqueio de robô. Abrir a busca pronta
+custa um toque e mostra o dado vivo.
+
+**Só a OLX usa busca nativa.** Conferi em 26/08/2026: a OLX aceita
+`?q=` e devolve o que se espera. O iCarros **ignora** o `?q=` e cai na
+home genérica — o que é pior que um erro, porque parece "não existe esse
+carro". Webmotors e Mercado Livre barram acesso automatizado e não deu
+para confirmar o formato. Nesses quatro a busca vai pelo Google com
+`site:`, que sempre cai em anúncio real. **Quem for trocar por busca
+nativa precisa conferir o resultado antes** — link que devolve página
+genérica é armadilha na frente do cliente.
+
+**O termo é derivado, não o nome da FIPE.** `termoMercadoPadrao()`
+tira motor e câmbio do nome ("CHEVROLET ONIX HATCH LTZ 1.4 8V FlexPower
+5p Mec." não acha nada) e deixa marca, modelo, versão e ano. O campo é
+editável porque nenhuma heurística acerta todo nome, e o negociador sabe
+o que procurar.
+
+**Preço anunciado é teto, não referência** — está escrito na tela, e
+precisa continuar escrito. Anúncio é o que o dono pede, não o que o
+carro vende.
+
 ## Convenções do código
 
 - **Português no domínio.** Estado, funções e rótulos em pt-BR

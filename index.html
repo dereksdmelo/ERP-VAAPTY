@@ -139,6 +139,37 @@ function alertaDispersao(vs) {
   return d < 2000 ? null : `As versões variam ${brl(d)} entre si. Confirme no documento.`;
 }
 
+/* ===================== mercado ===================== */
+
+/**
+ * O nome que a FIPE devolve é comprido demais para busca de anúncio
+ * ("CHEVROLET ONIX HATCH LTZ 1.4 8V FlexPower 5p Mec." não acha nada).
+ * Tira a parte que descreve motor e câmbio e fica com marca, modelo,
+ * versão e ano — que é como o anúncio costuma ser escrito.
+ */
+const RX_RUIDO = /^(\d+[.,]\d+|\d+v|\d+p|mec|aut|autom|automatico|flex|flexpower|power|cvt)\.?$/i;
+function termoMercadoPadrao(f) {
+  const toks = String(f.modelo || "").split(/\s+/).filter((t) => t && !RX_RUIDO.test(t));
+  const ano = String(f.ano || "").split("/")[0];
+  return [...toks.slice(0, 4), ano].filter(Boolean).join(" ").trim();
+}
+
+/**
+ * Canais de anúncio. A OLX aceita busca por query e foi conferida.
+ * Webmotors, iCarros e Mercado Livre não: o iCarros ignora o ?q= e cai
+ * na home genérica — pior que erro, porque parece "não existe esse
+ * carro" —, e os outros dois barram acesso automatizado, então não deu
+ * para confirmar o formato. Nesses três a busca vai pelo Google
+ * restrita ao site, que sempre cai em anúncio de verdade.
+ */
+const CANAIS = [
+  { nome: "OLX", cor: "#6D1B9E", url: (t) => `https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios?q=${encodeURIComponent(t)}` },
+  { nome: "Webmotors", url: (t) => `https://www.google.com/search?q=${encodeURIComponent(`${t} site:webmotors.com.br`)}` },
+  { nome: "iCarros", url: (t) => `https://www.google.com/search?q=${encodeURIComponent(`${t} site:icarros.com.br`)}` },
+  { nome: "Mercado Livre", url: (t) => `https://www.google.com/search?q=${encodeURIComponent(`${t} site:mercadolivre.com.br`)}` },
+  { nome: "Chaves na Mão", url: (t) => `https://www.google.com/search?q=${encodeURIComponent(`${t} site:chavesnamao.com.br`)}` },
+];
+
 /* ===================== fotos ===================== */
 function comprimir(file, max = 1280, q = 0.72) {
   return new Promise((res, rej) => {
@@ -586,6 +617,7 @@ function VaaptyAponte() {
   const [cambioBusca, setCambioBusca] = useState("");
   const [cota, setCota] = useState(null);
 
+  const [termoMercado, setTermoMercado] = useState("");
   const [novaRodada, setNovaRodada] = useState({ impresso: "", contra: "" });
   const [novaInd, setNovaInd] = useState({ nome: "", fone: "" });
   const [erroFoto, setErroFoto] = useState("");
@@ -988,9 +1020,37 @@ function VaaptyAponte() {
                 );
               })()}
 
+              {!!f.modelo && (() => {
+                const termo = termoMercado || termoMercadoPadrao(f);
+                return (
+                  <div className="mt-3 rounded-md p-3" style={{ background: "#FBFAFC", border: `1px solid ${C.line}` }}>
+                    <div className="text-[10px] uppercase tracking-[0.13em]" style={{ color: C.mute }}>
+                      Preço anunciado no mercado
+                    </div>
+                    <p className="mt-1 text-[11px] leading-relaxed" style={{ color: C.mute }}>
+                      Abre a busca pronta em cada canal. O que o dono viu na internet é o número com que ele chegou na mesa — melhor você ver antes.
+                    </p>
+                    <input className={`${inputCls} mt-2`} style={inputSty} value={termo}
+                      onChange={(e) => setTermoMercado(e.target.value)} placeholder="O que buscar" />
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {CANAIS.map((c) => (
+                        <a key={c.nome} href={c.url(termo)} target="_blank" rel="noopener noreferrer"
+                          className="rounded-full px-3 py-1.5 text-[12px] font-medium"
+                          style={{ background: c.cor || "#fff", color: c.cor ? "#fff" : C.roxo, border: `1px solid ${c.cor || C.line}` }}>
+                          {c.nome}
+                        </a>
+                      ))}
+                    </div>
+                    <p className="mt-2 text-[10px]" style={{ color: C.mute }}>
+                      Anúncio é preço pedido, não preço de venda. Serve de teto, não de referência.
+                    </p>
+                  </div>
+                );
+              })()}
+
               <div className="mt-3">
                 <Pendente>
-                  Desvalorizômetro e preço anunciado no mercado entram aqui. O desvalorizômetro já vem no retorno da Placa Fipe; o dado de mercado depende de definirmos a fonte.
+                  O desvalorizômetro entra aqui. Preciso ver uma resposta crua da Placa Fipe para saber com que nome esse dado vem — hoje o api/placa.js só repassa marca, modelo, ano, cor, chassi e as versões FIPE, e descarta o resto do retorno.
                 </Pendente>
               </div>
             </Bloco>
