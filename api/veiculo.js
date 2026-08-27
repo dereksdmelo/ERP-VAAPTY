@@ -96,6 +96,7 @@ function anos(ano) {
 // update o que a tela nem mandou — renavam, por exemplo, tem coluna
 // mas ainda não tem campo.
 const FONTE = {
+  atendimento_id: "atendimento_id",
   placa: "placa", chassi: "chassi", renavam: "renavam", marca_modelo: "modelo",
   ano_fabricacao: "ano", ano_modelo: "ano", cor: "cor", combustivel: "combustivel",
   cambio: "cambio", km_atual: "km", km_entrada: "kmEntrada",
@@ -117,7 +118,11 @@ const somenteEnviadas = (linha, f) => {
 
 function paraColunas(f) {
   const pneus = Array.isArray(f.pneus) ? f.pneus : [];
+  const RX_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   return {
+    // Liga a ficha à linha do CRM. Fica nulo nas fichas antigas e nas
+    // que vierem de importação sem atendimento.
+    atendimento_id: RX_UUID.test(String(f.atendimento_id || "")) ? f.atendimento_id : null,
     placa: normalizarPlaca(f.placa),
     chassi: texto(f.chassi),
     renavam: texto(f.renavam),
@@ -209,9 +214,14 @@ module.exports = async function handler(req, res) {
         return res.status(400).json({ erro: "Placa fora do formato ABC1234 ou ABC1D23." });
       }
 
-      // Uma ficha por placa enquanto o carro está em avaliação.
+      // Uma ficha por placa enquanto o carro está em avaliação. Com
+      // atendimento, a chave é ele: o mesmo carro pode voltar no mesmo
+      // dia por outro atendimento, e são duas linhas.
+      const chave = linha.atendimento_id
+        ? `atendimento_id=eq.${encodeURIComponent(linha.atendimento_id)}`
+        : `placa=eq.${encodeURIComponent(linha.placa)}&status=eq.em_avaliacao`;
       const abertas = await supa(
-        `${REST()}?select=id&placa=eq.${encodeURIComponent(linha.placa)}&status=eq.em_avaliacao&limit=1`,
+        `${REST()}?select=id&${chave}&limit=1`,
         { headers: cabecalhos(tok) }
       );
       const existente = Array.isArray(abertas) && abertas[0] ? abertas[0].id : null;

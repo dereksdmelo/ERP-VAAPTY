@@ -24,6 +24,8 @@ api/foto.js                      POST/GET/PATCH/DELETE — imagens no Storage
 api/documento.js                 POST/GET — registro dos documentos gerados
 api/config.js                    GET  — URL e chave anônima para o navegador
 api/perfil.js                    GET  — quem sou eu; para gerente, a equipe
+api/atendimento.js               GET/POST/PATCH — a lista do CRM
+api/proposta.js                  GET/POST/PATCH/DELETE — ofertas dos lojistas
 documentos.js                    CÓPIA MORTA: o que roda é o bloco colado no index.html
 supabase/migrations/*.sql        esquema do banco, versionado
 ```
@@ -399,6 +401,40 @@ liberado".
 login, porque mexer neles estava fora do combinado. Consequência real:
 quem descobrir a URL queima as 20 consultas diárias da Placa Fipe.
 Fechar é uma linha em cada arquivo, o mesmo `tokenDe()`.
+
+### 10. O atendimento é o dono; a ficha é filha dele
+
+Até a etapa 3 o sistema era **um** atendimento por aparelho, no
+`localStorage`. Agora a tela de entrada é a lista (`CRM`), e o fluxo
+APONTE roda dentro de um atendimento escolhido.
+
+**As chaves do `localStorage` passaram a ter o id junto** —
+`vaapty:at:<id>`, `vaapty:fotos:<id>`, `vaapty:veiculo:<id>`. Sem isso,
+abrir o segundo carro sobrescreveria a ficha do primeiro. **Quem
+adicionar chave nova precisa fazer o mesmo.**
+
+**O `veiculo` ganhou `atendimento_id`,** e é ele que passa a ser a
+chave do "uma ficha por atendimento" no `api/veiculo.js`. Antes a chave
+era (placa, em_avaliacao); com atendimento, o mesmo carro pode voltar
+no mesmo dia por outro atendimento, e são duas linhas — o que a chave
+antiga impediria.
+
+**A lista traz veículo e propostas na mesma consulta**, pelo
+`select=*,veiculo(...),proposta(...)` do PostgREST. Uma ida ao banco em
+vez de três, e o cartão já mostra placa e melhor proposta. Isso depende
+do PostgREST enxergar as chaves estrangeiras — se um dia a lista vier
+sem `veiculo`, é aí que se olha primeiro.
+
+**PATCH que volta vazio é RLS, não erro.** A política deixa qualquer um
+da equipe *ler* todo atendimento, mas só o dono (ou o gerente)
+*escrever*. Quando alguém tenta editar o atendimento de outro, o
+PostgREST responde 200 com lista vazia. O `api/atendimento.js` traduz
+isso em 403 com mensagem legível — sem essa tradução, a tela diria que
+salvou.
+
+**A busca escapa vírgula e parêntese.** O `or=` do PostgREST usa esses
+caracteres como sintaxe; um cliente chamado "Silva, João" quebraria a
+consulta inteira.
 
 ## Convenções do código
 

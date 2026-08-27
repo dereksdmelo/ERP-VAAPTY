@@ -55,6 +55,22 @@ const OPCIONAIS = ["Completo", "Ar condicionado", "Direção hid./elét.", "ABS"
 const MOTIVOS = ["", "Quitar dívida", "Comprar outro carro", "Investir", "Saúde", "Mudança", "Carro sobrando", "Só vender"];
 const OBJECOES = ["", "Valor abaixo da pretensão", "Decisor ausente", "Não tem tempo", "Proposta de concorrente", "Quitação maior que o carro", "Só especulando"];
 const FECHAMENTO = ["", "Limpo", "Com quitação", "Assumir financiamento", "Consignado"];
+const ORIGENS = [
+  ["fluxo_loja", "Fluxo de loja"], ["prospeccao", "Prospecção"], ["indicacao", "Indicação"],
+  ["tv", "TV"], ["google", "Google / site"], ["facebook", "Facebook / Instagram"],
+  ["outdoor", "Outdoor"], ["recuperacao", "Recuperação"], ["faceleads", "Faceleads"],
+  ["outro", "Outro"],
+];
+const STATUS_AT = [
+  ["aberto", "Em atendimento", "#6D1B9E"],
+  ["aguardando_propostas", "Aguardando propostas", "#B26B00"],
+  ["em_negociacao", "Em negociação", "#1B5FA8"],
+  ["fechado", "Fechado", "#1D7F58"],
+  ["perdido", "Perdido", "#8A8394"],
+];
+const rotulo = (lista, v) => (lista.filter((x) => x[0] === v)[0] || [v, v])[1];
+const corStatus = (v) => (STATUS_AT.filter((x) => x[0] === v)[0] || [0, 0, "#6B6478"])[2];
+
 const MAX_FOTOS = 12;
 const ESPERA_SEG = 15 * 60;
 
@@ -200,6 +216,62 @@ async function apagarFotoServidor(id) {
   if (!r.ok) throw new Error(d.erro || "Não consegui apagar a foto.");
   return d;
 }
+/* ----------- CRM: atendimentos e propostas ----------- */
+
+const comoQuery = (o) =>
+  Object.keys(o).filter((k) => o[k] !== "" && o[k] != null)
+    .map((k) => `${k}=${encodeURIComponent(o[k])}`).join("&");
+
+async function listarAtendimentos(filtros) {
+  const q = comoQuery(filtros || {});
+  const r = await fetchAut(`/api/atendimento${q ? `?${q}` : ""}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui carregar os atendimentos.");
+  return d.atendimentos || [];
+}
+async function lerAtendimento(id) {
+  const r = await fetchAut(`/api/atendimento?id=${encodeURIComponent(id)}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui abrir o atendimento.");
+  return d.atendimento;
+}
+async function criarAtendimento(dados) {
+  const r = await fetchAut("/api/atendimento", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(dados),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui abrir o atendimento.");
+  return d.atendimento;
+}
+async function atualizarAtendimento(id, dados) {
+  const r = await fetchAut(`/api/atendimento?id=${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(dados),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui salvar o atendimento.");
+  return d.atendimento;
+}
+async function criarProposta(dados) {
+  const r = await fetchAut("/api/proposta", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(dados),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui registrar a proposta.");
+  return d.proposta;
+}
+async function apagarProposta(id) {
+  const r = await fetchAut(`/api/proposta?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui apagar a proposta.");
+  return d;
+}
+
 async function registrarDocumento(reg) {
   const r = await fetchAut("/api/documento", {
     method: "POST",
@@ -700,7 +772,14 @@ const extrairProtocolo = (html) => {
 };
 
 /* ===================== app ===================== */
-function VaaptyAponte({ perfil }) {
+function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
+  // Cada atendimento tem o seu canto no aparelho. Sem isto, abrir o
+  // segundo carro sobrescreveria a ficha do primeiro.
+  const aid = (atendimento && atendimento.id) || "solto";
+  const CH_AT = `vaapty:at:${aid}`;
+  const CH_FOTOS = `vaapty:fotos:${aid}`;
+  const CH_VEIC = `vaapty:veiculo:${aid}`;
+
   const [f, setF] = useState(VAZIO);
   const [fotos, setFotos] = useState([]);
   const [etapa, setEtapa] = useState("A");
@@ -731,19 +810,23 @@ function VaaptyAponte({ perfil }) {
   useEffect(() => {
     (async () => {
       try {
-        const r = await window.storage.get("vaapty:at");
+        const r = await window.storage.get(CH_AT);
         if (r && r.value) { const n = { ...VAZIO, ...JSON.parse(r.value) }; fRef.current = n; setF(n); }
       } catch (e) {}
 
       let vid = null;
-      try {
-        const r = await window.storage.get("vaapty:veiculo");
-        if (r && r.value) { vid = JSON.parse(r.value).id || null; setVeiculoId(vid); }
-      } catch (e) {}
+      const vEmbutido = atendimento && (atendimento.veiculo || [])[0];
+      if (vEmbutido && vEmbutido.id) { vid = vEmbutido.id; setVeiculoId(vid); }
+      else {
+        try {
+          const r = await window.storage.get(CH_VEIC);
+          if (r && r.value) { vid = JSON.parse(r.value).id || null; setVeiculoId(vid); }
+        } catch (e) {}
+      }
 
       // No aparelho só sobra o que ainda não subiu.
       let pendentes = [];
-      try { const r = await window.storage.get("vaapty:fotos"); if (r && r.value) pendentes = JSON.parse(r.value); } catch (e) {}
+      try { const r = await window.storage.get(CH_FOTOS); if (r && r.value) pendentes = JSON.parse(r.value); } catch (e) {}
       pendentes = (Array.isArray(pendentes) ? pendentes : [])
         .filter((p) => p && p.local)
         .map((p, i) => ({
@@ -780,14 +863,14 @@ function VaaptyAponte({ perfil }) {
     const pend = fotos
       .filter((p) => p.estado !== "ok" && p.local)
       .map((p) => ({ chave: p.chave, local: p.local, largura: p.largura, altura: p.altura, erro: p.erro || "" }));
-    if (!pend.length) window.storage.delete("vaapty:fotos").catch(() => {});
-    else window.storage.set("vaapty:fotos", JSON.stringify(pend))
+    if (!pend.length) window.storage.delete(CH_FOTOS).catch(() => {});
+    else window.storage.set(CH_FOTOS, JSON.stringify(pend))
       .catch(() => setErroFoto("Não coube no armazenamento local."));
   }, [fotos, pronto]);
 
   const guardarFicha = (n) => {
     fRef.current = n;
-    setF(n); window.storage.set("vaapty:at", JSON.stringify(n)).catch(() => {});
+    setF(n); window.storage.set(CH_AT, JSON.stringify(n)).catch(() => {});
   };
   const set = (k, v) => guardarFicha({ ...fRef.current, [k]: v });
   const setVarios = (o) => guardarFicha({ ...fRef.current, ...o });
@@ -921,12 +1004,12 @@ function VaaptyAponte({ perfil }) {
   const salvarNoBanco = async () => {
     setErroSalvar(""); setSalvando(true);
     try {
-      const d = await salvarFicha(JSON.parse(corpoBanco));
+      const d = await salvarFicha({ ...JSON.parse(corpoBanco), atendimento_id: atendimento ? atendimento.id : null });
       const t = new Date(d.salvo_em);
       setSalvo({ hora: isNaN(t.getTime()) ? new Date() : t, criado: !!d.criado, corpo: corpoBanco });
       if (d.id) {
         setVeiculoId(d.id);
-        window.storage.set("vaapty:veiculo", JSON.stringify({ id: d.id, placa: d.placa })).catch(() => {});
+        window.storage.set(CH_VEIC, JSON.stringify({ id: d.id, placa: d.placa })).catch(() => {});
         // Foto tirada antes de existir veículo estava só esperando por isto.
         for (const p of fotosRef.current.filter((x) => x.estado !== "ok" && x.local)) {
           await enviarFoto(p.chave, d.id);
@@ -1011,7 +1094,15 @@ function VaaptyAponte({ perfil }) {
             {f.placa} · {f.ano} · FIPE {brl(f.fipe)}
           </div>
         )}
-        <button onClick={sair} className="mt-2 text-[10px] underline" style={{ color: "#fff", opacity: 0.7 }}>Sair</button>
+        <div className="mt-2 flex items-center gap-3">
+          {aoVoltar && (
+            <button onClick={aoVoltar} className="text-[11px] font-semibold" style={{ color: "#fff" }}>‹ Atendimentos</button>
+          )}
+          {atendimento && atendimento.cliente_nome && (
+            <span className="text-[10px]" style={{ opacity: 0.75 }}>{atendimento.cliente_nome}</span>
+          )}
+          <button onClick={sair} className="ml-auto text-[10px] underline" style={{ color: "#fff", opacity: 0.7 }}>Sair</button>
+        </div>
       </header>
 
       {/* trilho */}
@@ -1585,6 +1676,187 @@ function VaaptyAponte({ perfil }) {
 }
 
 
+/* ===================== CRM ===================== */
+
+const soData = (iso) => {
+  const d = new Date(`${String(iso || "").slice(0, 10)}T12:00:00`);
+  return isNaN(d.getTime()) ? "—" : d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+};
+
+function Etiqueta({ status }) {
+  return (
+    <span className="rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.08em]"
+      style={{ background: `${corStatus(status)}1A`, color: corStatus(status) }}>
+      {rotulo(STATUS_AT.map((x) => [x[0], x[1]]), status)}
+    </span>
+  );
+}
+
+function NovoAtendimento({ perfil, aoCriar, aoCancelar }) {
+  const [d, setD] = useState({
+    cliente_nome: "", cliente_telefone: "", carro_descricao: "",
+    origem: "fluxo_loja", prospec: "", pretensao: "",
+  });
+  const [indo, setIndo] = useState(false);
+  const [erro, setErro] = useState("");
+  const set = (k, v) => setD({ ...d, [k]: v });
+
+  const criar = async () => {
+    setErro(""); setIndo(true);
+    try {
+      const novo = await criarAtendimento({
+        ...d,
+        status: "aberto",
+        negociador_id: perfil ? perfil.id : null,
+        negociador_nome: perfil ? perfil.nome : null,
+        data: new Date().toISOString().slice(0, 10),
+      });
+      await aoCriar(novo);
+    } catch (e) { setErro(e.message); setIndo(false); }
+  };
+
+  return (
+    <Bloco titulo="Novo atendimento" sub="O mínimo para abrir a linha. O resto entra durante o atendimento.">
+      <div className="space-y-2.5">
+        <div className="grid grid-cols-2 gap-2.5">
+          <Campo label="Cliente"><input className={inputCls} style={inputSty} value={d.cliente_nome} onChange={(e) => set("cliente_nome", e.target.value)} /></Campo>
+          <Campo label="Telefone"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="tel" value={d.cliente_telefone} onChange={(e) => set("cliente_telefone", e.target.value)} /></Campo>
+        </div>
+        <Campo label="Carro" ><input className={inputCls} style={inputSty} placeholder="Como o cliente chamou: Onix, Ford Ka…" value={d.carro_descricao} onChange={(e) => set("carro_descricao", e.target.value)} /></Campo>
+        <div className="grid grid-cols-2 gap-2.5">
+          <Campo label="Origem">
+            <select className={inputCls} style={inputSty} value={d.origem} onChange={(e) => set("origem", e.target.value)}>
+              {ORIGENS.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
+            </select>
+          </Campo>
+          <Campo label="Quem prospectou"><input className={inputCls} style={inputSty} placeholder="ou FLUXO" value={d.prospec} onChange={(e) => set("prospec", e.target.value)} /></Campo>
+        </div>
+        <Campo label="Pretensão do cliente"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={d.pretensao} onChange={(e) => set("pretensao", e.target.value)} /></Campo>
+        {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+        <div className="flex gap-2">
+          <button onClick={aoCancelar} className="rounded-md border px-4 py-2.5 text-[13px]" style={{ borderColor: C.line, color: C.mute }}>Cancelar</button>
+          <button onClick={criar} disabled={indo}
+            className="flex-1 rounded-md py-2.5 text-[13px] font-semibold"
+            style={{ background: indo ? C.line : C.roxo, color: "#fff" }}>
+            {indo ? "Abrindo…" : "Abrir atendimento"}
+          </button>
+        </div>
+      </div>
+    </Bloco>
+  );
+}
+
+function CRM({ perfil, aoAbrir }) {
+  const [lista, setLista] = useState([]);
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState("");
+  const [status, setStatus] = useState("");
+  const [busca, setBusca] = useState("");
+  const [novo, setNovo] = useState(false);
+
+  const carregar = async (filtros) => {
+    setCarregando(true); setErro("");
+    try { setLista(await listarAtendimentos(filtros || {})); }
+    catch (e) { setErro(e.message); }
+    setCarregando(false);
+  };
+
+  useEffect(() => { carregar({ status, q: busca }); }, [status]);
+
+  const buscar = (ev) => { if (ev) ev.preventDefault(); carregar({ status, q: busca }); };
+
+  const contas = useMemo(() => {
+    const c = { total: lista.length };
+    STATUS_AT.forEach(([v]) => { c[v] = lista.filter((a) => a.status === v).length; });
+    return c;
+  }, [lista]);
+
+  return (
+    <div className="min-h-screen w-full pb-24" style={{ background: C.bg, fontFamily: F.body, color: C.ink }}>
+      <header className="px-4 pt-4 pb-3" style={{ background: C.roxo, color: "#fff" }}>
+        <div className="flex items-baseline justify-between">
+          <span className="text-[10px] uppercase tracking-[0.22em]" style={{ opacity: 0.7 }}>
+            {perfil ? `${perfil.nome} · ${perfil.papel}` : "Vaapty Joinville"}
+          </span>
+          <button onClick={sair} className="text-[10px] underline" style={{ color: "#fff", opacity: 0.7 }}>Sair</button>
+        </div>
+        <h1 className="mt-1 text-[17px] leading-tight" style={{ fontFamily: F.disp, fontWeight: 800 }}>
+          Atendimentos
+        </h1>
+        <div className="mt-1 text-[11px]" style={{ fontFamily: F.mono, opacity: 0.85 }}>
+          {contas.total} na lista · {contas.fechado || 0} fechados · {contas.aguardando_propostas || 0} esperando proposta
+        </div>
+      </header>
+
+      <div className="rolar flex gap-1.5 overflow-x-auto px-3 py-3" style={{ background: C.paper, borderBottom: `1px solid ${C.line}` }}>
+        {[["", "Todos"]].concat(STATUS_AT.map((x) => [x[0], x[1]])).map(([v, r]) => (
+          <button key={v || "todos"} onClick={() => setStatus(v)}
+            className="shrink-0 rounded-full px-3 py-1.5 text-[12px]"
+            style={{ background: status === v ? C.roxo : "#fff", color: status === v ? "#fff" : C.mute, border: `1px solid ${status === v ? C.roxo : C.line}` }}>
+            {r}
+          </button>
+        ))}
+      </div>
+
+      <div className="space-y-3 p-4">
+        <form onSubmit={buscar} className="flex gap-2">
+          <input className={inputCls} style={inputSty} placeholder="Cliente, carro ou telefone"
+            value={busca} onChange={(e) => setBusca(e.target.value)} />
+          <button type="submit" className="shrink-0 rounded-md border px-4 text-[13px] font-semibold" style={{ borderColor: C.line, color: C.roxo }}>Buscar</button>
+        </form>
+
+        {novo ? (
+          <NovoAtendimento perfil={perfil} aoCancelar={() => setNovo(false)}
+            aoCriar={async (a) => { setNovo(false); await aoAbrir(a.id); }} />
+        ) : (
+          <button onClick={() => setNovo(true)} className="w-full rounded-md py-3 text-[14px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>
+            Novo atendimento
+          </button>
+        )}
+
+        {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+        {carregando && <p className="text-[12px]" style={{ color: C.mute }}>Carregando…</p>}
+
+        {!carregando && !lista.length && !erro && (
+          <p className="text-[12px] leading-relaxed" style={{ color: C.mute }}>
+            Nenhum atendimento ainda. O primeiro carro que entrar no pátio começa aqui.
+          </p>
+        )}
+
+        {lista.map((a) => {
+          const v = (a.veiculo || [])[0];
+          const props = a.proposta || [];
+          const melhor = props.length ? Math.max(...props.map((p) => Number(p.valor) || 0)) : 0;
+          return (
+            <button key={a.id} onClick={() => aoAbrir(a.id)}
+              className="block w-full rounded-lg p-3 text-left"
+              style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-[13px] font-semibold leading-snug">
+                  {a.cliente_nome || "Sem nome"}
+                </span>
+                <Etiqueta status={a.status} />
+              </div>
+              <div className="mt-0.5 text-[12px]" style={{ color: C.mute }}>
+                {(v && v.marca_modelo) || a.carro_descricao || "Carro não informado"}
+                {v && v.placa ? ` · ${v.placa}` : ""}
+              </div>
+              <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px]" style={{ color: C.mute, fontFamily: F.mono }}>
+                <span>{soData(a.data)}</span>
+                <span>{rotulo(ORIGENS, a.origem)}</span>
+                {a.negociador_nome && <span>{a.negociador_nome}</span>}
+                {a.pretensao ? <span>pede {brl(a.pretensao)}</span> : null}
+                {melhor ? <span style={{ color: C.verde }}>melhor {brl(melhor)}</span> : null}
+                {props.length ? <span>{props.length} proposta{props.length > 1 ? "s" : ""}</span> : null}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /* ===================== entrada ===================== */
 
 function Login({ aoEntrar }) {
@@ -1648,6 +1920,7 @@ function App() {
   const [estado, setEstado] = useState("carregando");   // carregando | fora | esperando | dentro | erro
   const [perfil, setPerfil] = useState(null);
   const [erro, setErro] = useState("");
+  const [aberto, setAberto] = useState(null);           // atendimento em foco, ou a lista
 
   const verQuemSou = async () => {
     try {
@@ -1688,7 +1961,14 @@ function App() {
     </Aviso>
   );
 
-  return <VaaptyAponte perfil={perfil} />;
+  if (aberto) {
+    return <VaaptyAponte perfil={perfil} atendimento={aberto}
+             aoVoltar={() => setAberto(null)}
+             aoRecarregar={async () => { try { setAberto(await lerAtendimento(aberto.id)); } catch (e) {} }} />;
+  }
+  return <CRM perfil={perfil} aoAbrir={async (id) => {
+    try { setAberto(await lerAtendimento(id)); } catch (e) { alert(e.message); }
+  }} />;
 }
 
 ReactDOM.createRoot(document.getElementById('raiz')).render(<App />);
