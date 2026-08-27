@@ -425,27 +425,44 @@ function Desvalorizometro({ chave }) {
         <span>{d.atual.mes}</span>
       </div>
 
-      {doze && (
-        <div className="mt-2 grid grid-cols-2 gap-2">
-          <div>
-            <div className="text-[9px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>Perdeu em 12 meses</div>
-            <div className="text-[17px] leading-tight" style={{ fontFamily: F.mono, fontWeight: 700, color: C.laranja }}>
-              {brl(Math.abs(doze.reais))}
+      {doze && (() => {
+        // Carro velho no Brasil tem subido de tabela. Tratar tudo como
+        // perda seria mentira na frente do cliente — e o argumento de
+        // negociação é outro em cada caso.
+        const caiu = doze.reais < 0;
+        const cor = caiu ? C.laranja : C.verde;
+        return (
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <div>
+              <div className="text-[9px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>
+                {caiu ? "Perdeu em 12 meses" : "Subiu em 12 meses"}
+              </div>
+              <div className="text-[17px] leading-tight" style={{ fontFamily: F.mono, fontWeight: 700, color: cor }}>
+                {caiu ? "−" : "+"}{brl(Math.abs(doze.reais))}
+              </div>
+              <div className="text-[10px]" style={{ color: C.mute }}>
+                {Math.abs(doze.pct)}% desde {doze.de}
+              </div>
             </div>
-            <div className="text-[10px]" style={{ color: C.mute }}>{Math.abs(doze.pct)}% desde {doze.de}</div>
-          </div>
-          <div>
-            <div className="text-[9px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>Por mês parado</div>
-            <div className="text-[17px] leading-tight" style={{ fontFamily: F.mono, fontWeight: 700, color: C.laranja }}>
-              {brl(Math.abs(doze.por_mes))}
+            <div>
+              <div className="text-[9px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>
+                {caiu ? "Por mês parado" : "Por mês"}
+              </div>
+              <div className="text-[17px] leading-tight" style={{ fontFamily: F.mono, fontWeight: 700, color: cor }}>
+                {caiu ? "−" : "+"}{brl(Math.abs(doze.por_mes))}
+              </div>
+              <div className="text-[10px]" style={{ color: C.mute }}>
+                {caiu ? "é o custo de esperar" : "acompanhando a tabela"}
+              </div>
             </div>
-            <div className="text-[10px]" style={{ color: C.mute }}>é o custo de esperar</div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       <p className="mt-2 text-[10px] leading-relaxed" style={{ color: C.mute }}>
-        Do topo ({brl(d.pico.valor)}, {d.pico.mes}) até hoje: {brl(Math.abs(d.desde_o_pico.reais))} a menos.
+        {d.desde_o_pico.reais < 0
+          ? `Do topo (${brl(d.pico.valor)}, ${d.pico.mes}) até hoje: ${brl(Math.abs(d.desde_o_pico.reais))} a menos — ${Math.abs(d.desde_o_pico.pct)}%.`
+          : `Está no maior valor da série (${d.pico.mes}).`}
         {" "}São {d.meses_disponiveis} meses de tabela.
       </p>
     </div>
