@@ -290,6 +290,14 @@ async function apagarProposta(id) {
   return d;
 }
 
+async function consultarFunil(de, ate) {
+  const q = comoQuery({ de, ate });
+  const r = await fetchAut(`/api/funil${q ? `?${q}` : ""}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui carregar o funil.");
+  return d;
+}
+
 async function registrarDocumento(reg) {
   const r = await fetchAut("/api/documento", {
     method: "POST",
@@ -925,6 +933,11 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   const [cota, setCota] = useState(null);
 
   const [termoMercado, setTermoMercado] = useState("");
+  const [propostas, setPropostas] = useState((atendimento && atendimento.proposta) || []);
+  const melhorProposta = useMemo(() => {
+    const v = propostas.map((p) => Number(p.valor) || 0);
+    return v.length ? Math.max(...v) : 0;
+  }, [propostas]);
   const [novaRodada, setNovaRodada] = useState({ impresso: "", contra: "" });
   const [novaInd, setNovaInd] = useState({ nome: "", fone: "" });
   const [erroFoto, setErroFoto] = useState("");
@@ -1238,6 +1251,8 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
           <button onClick={sair} className="ml-auto text-[10px] underline" style={{ color: "#fff", opacity: 0.7 }}>Sair</button>
         </div>
       </header>
+
+      {atendimento && <StatusAtendimento atendimento={atendimento} />}
 
       {/* trilho */}
       <div className="rolar flex gap-1.5 overflow-x-auto px-3 py-3" style={{ background: C.paper, borderBottom: `1px solid ${C.line}` }}>
@@ -1626,6 +1641,11 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               )}
             </Bloco>
 
+            <Bloco titulo="Propostas dos lojistas" sub="Registre conforme chegam. A maior é a que vai impressa para a mesa.">
+              <Propostas atendimentoId={atendimento ? atendimento.id : null}
+                iniciais={propostas} aoMudar={setPropostas} />
+            </Bloco>
+
             <Bloco titulo="Anote o que ouvir" sub="O que ele falar aqui é o argumento que você usa na hora do extrato.">
               <textarea rows={5} className={inputCls} style={inputSty} value={f.notasEspera} onChange={(e) => set("notasEspera", e.target.value)}
                 placeholder="Precisa do dinheiro até sexta. Mulher não sabe da dívida. Já tentou vender há 2 meses…" />
@@ -1681,6 +1701,13 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                   </div>
                 ))}
                 {erroDoc && <p className="text-[12px]" style={{ color: C.laranja }}>{erroDoc}</p>}
+                {!!melhorProposta && (
+                  <button onClick={() => setNovaRodada({ ...novaRodada, impresso: String(melhorProposta) })}
+                    className="w-full rounded-md border py-2 text-[12px] font-semibold"
+                    style={{ borderColor: C.verde, color: C.verde, background: "#F0F8F4" }}>
+                    Usar a maior proposta — {brl(melhorProposta)}
+                  </button>
+                )}
                 <div className="grid grid-cols-2 gap-2">
                   <input placeholder="Impresso" className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={novaRodada.impresso} onChange={(e) => setNovaRodada({ ...novaRodada, impresso: e.target.value })} />
                   <input placeholder="Contra" className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={novaRodada.contra} onChange={(e) => setNovaRodada({ ...novaRodada, contra: e.target.value })} />
@@ -1816,6 +1843,123 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
 }
 
 
+/* ===================== propostas ===================== */
+
+/**
+ * As ofertas dos lojistas, registradas conforme chegam durante a
+ * espera. Na planilha isso eram quatro pares de colunas; aqui não tem
+ * teto.
+ *
+ * A melhor proposta é o número que vai impresso para a mesa, então ela
+ * fica destacada — é o que o negociador procura com o cliente olhando.
+ */
+function Propostas({ atendimentoId, iniciais, aoMudar }) {
+  const [lista, setLista] = useState(iniciais || []);
+  const [nova, setNova] = useState({ lojista: "", valor: "" });
+  const [indo, setIndo] = useState(false);
+  const [erro, setErro] = useState("");
+
+  const ordenada = [...lista].sort((a, b) => (Number(b.valor) || 0) - (Number(a.valor) || 0));
+  const melhor = ordenada.length ? Number(ordenada[0].valor) || 0 : 0;
+
+  const avisar = (n) => { setLista(n); if (aoMudar) aoMudar(n); };
+
+  const adicionar = async () => {
+    if (!nova.lojista.trim()) { setErro("Diga de qual lojista é."); return; }
+    setErro(""); setIndo(true);
+    try {
+      const p = await criarProposta({ atendimento_id: atendimentoId, lojista: nova.lojista, valor: nova.valor });
+      avisar([...lista, p]);
+      setNova({ lojista: "", valor: "" });
+    } catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+
+  const remover = async (id) => {
+    setErro("");
+    try { await apagarProposta(id); avisar(lista.filter((x) => x.id !== id)); }
+    catch (e) { setErro(e.message); }
+  };
+
+  if (!atendimentoId) {
+    return (
+      <p className="text-[11px] leading-relaxed" style={{ color: C.mute }}>
+        As propostas ficam presas ao atendimento. Abra este carro pela lista de atendimentos para registrá-las.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-2.5">
+      {ordenada.map((p, i) => (
+        <div key={p.id} className="flex items-center justify-between gap-2 rounded-md px-3 py-2.5"
+          style={{ background: i === 0 ? "#F0F8F4" : "#FBFAFC", border: `1px solid ${i === 0 ? C.verde : C.line}` }}>
+          <span>
+            <span className="block text-[13px] font-medium">{p.lojista}</span>
+            {i === 0 && <span className="text-[9px] uppercase tracking-[0.1em]" style={{ color: C.verde }}>maior oferta</span>}
+          </span>
+          <span className="flex items-center gap-3">
+            <span className="text-[15px]" style={{ fontFamily: F.mono, fontWeight: 700, color: i === 0 ? C.verde : C.ink }}>
+              {brl(p.valor)}
+            </span>
+            <button onClick={() => remover(p.id)} className="text-[11px]" style={{ color: C.laranja }}>remover</button>
+          </span>
+        </div>
+      ))}
+
+      <div className="grid grid-cols-2 gap-2">
+        <input placeholder="Lojista" className={inputCls} style={inputSty}
+          value={nova.lojista} onChange={(e) => setNova({ ...nova, lojista: e.target.value })} />
+        <input placeholder="Valor" className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric"
+          value={nova.valor} onChange={(e) => setNova({ ...nova, valor: e.target.value })} />
+      </div>
+      <button onClick={adicionar} disabled={indo}
+        className="w-full rounded-md py-2.5 text-[13px] font-semibold"
+        style={{ background: indo ? C.line : C.roxo, color: "#fff" }}>
+        {indo ? "Registrando…" : "Registrar proposta"}
+      </button>
+      {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+      {!!melhor && (
+        <p className="text-[11px]" style={{ color: C.mute }}>
+          {ordenada.length} proposta{ordenada.length > 1 ? "s" : ""} · maior {brl(melhor)}. É este o número que vai impresso.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * O status é o que faz a lista do CRM valer. Sem isto tudo fica
+ * "aberto" para sempre e o funil não conta nada.
+ */
+function StatusAtendimento({ atendimento, aoMudar }) {
+  const [v, setV] = useState(atendimento.status);
+  const [erro, setErro] = useState("");
+
+  const mudar = async (novo) => {
+    const antes = v;
+    setV(novo); setErro("");
+    try { await atualizarAtendimento(atendimento.id, { status: novo }); if (aoMudar) aoMudar(novo); }
+    catch (e) { setV(antes); setErro(e.message); }
+  };
+
+  return (
+    <div className="px-4 pt-3">
+      <div className="rolar flex gap-1.5 overflow-x-auto">
+        {STATUS_AT.map(([val, rot]) => (
+          <button key={val} onClick={() => mudar(val)}
+            className="shrink-0 rounded-full px-3 py-1.5 text-[11px]"
+            style={{ background: v === val ? corStatus(val) : "#fff", color: v === val ? "#fff" : C.mute,
+                     border: `1px solid ${v === val ? corStatus(val) : C.line}` }}>
+            {rot}
+          </button>
+        ))}
+      </div>
+      {erro && <p className="mt-1 text-[11px]" style={{ color: C.laranja }}>{erro}</p>}
+    </div>
+  );
+}
+
 /* ===================== CRM ===================== */
 
 const soData = (iso) => {
@@ -1886,6 +2030,104 @@ function NovoAtendimento({ perfil, aoCriar, aoCancelar }) {
   );
 }
 
+/**
+ * O funil da aba PIPELINE: quantos entraram, quantos viraram ficha,
+ * quantos receberam proposta e quantos fecharam — no mês e por origem.
+ *
+ * É o número que diz onde o dinheiro está sendo perdido: fluxo alto com
+ * avaliação baixa é problema de abordagem; avaliação alta com proposta
+ * baixa é problema de ficha; proposta alta com venda baixa é preço.
+ */
+function Funil() {
+  const [d, setD] = useState(null);
+  const [erro, setErro] = useState("");
+  const [aberto, setAberto] = useState(false);
+
+  useEffect(() => {
+    if (!aberto || d) return;
+    consultarFunil().then(setD).catch((e) => setErro(e.message));
+  }, [aberto]);
+
+  const Num = ({ rot, v, sub, cor }) => (
+    <div>
+      <div className="text-[9px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>{rot}</div>
+      <div className="text-[19px] leading-tight" style={{ fontFamily: F.mono, fontWeight: 700, color: cor || C.ink }}>{v}</div>
+      {sub && <div className="text-[10px]" style={{ color: C.mute }}>{sub}</div>}
+    </div>
+  );
+
+  if (!aberto) {
+    return (
+      <button onClick={() => setAberto(true)} className="w-full rounded-md border py-2.5 text-[13px] font-semibold"
+        style={{ borderColor: C.line, color: C.roxo }}>
+        Ver o funil do mês
+      </button>
+    );
+  }
+
+  return (
+    <div className="rounded-lg p-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+      <div className="flex items-baseline justify-between">
+        <span className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.roxo, fontFamily: F.disp, fontWeight: 700 }}>Funil do mês</span>
+        <button onClick={() => setAberto(false)} className="text-[11px]" style={{ color: C.mute }}>fechar</button>
+      </div>
+
+      {erro && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+      {!d && !erro && <p className="mt-2 text-[12px]" style={{ color: C.mute }}>Calculando…</p>}
+
+      {d && (
+        <>
+          <div className="mt-3 grid grid-cols-4 gap-2">
+            <Num rot="Fluxo" v={d.total.fluxo} />
+            <Num rot="Avaliações" v={d.total.avaliacoes} sub={d.total.avaliacoes_sobre_fluxo != null ? `${d.total.avaliacoes_sobre_fluxo}%` : null} />
+            <Num rot="Com proposta" v={d.total.com_proposta} />
+            <Num rot="Vendas" v={d.total.vendas} cor={C.verde}
+              sub={d.total.conversao != null ? `${d.total.conversao}% do fluxo` : null} />
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <Num rot="FIPE médio" v={d.fipe_medio ? brl(d.fipe_medio) : "—"} />
+            <Num rot="Venda média" v={d.venda_media ? brl(d.venda_media) : "—"} />
+          </div>
+
+          {!!d.por_origem.length && (
+            <div className="rolar mt-3 overflow-x-auto">
+              <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 420 }}>
+                <thead>
+                  <tr>
+                    {["Origem", "Fluxo", "Aval.", "Prop.", "Vendas", "Conv."].map((h, i) => (
+                      <th key={h} className="whitespace-nowrap px-2 py-1.5 text-[9px] uppercase tracking-[0.1em]"
+                        style={{ color: C.mute, borderBottom: `1px solid ${C.line}`, textAlign: i ? "right" : "left" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {d.por_origem.map((o) => (
+                    <tr key={o.origem} style={{ borderBottom: `1px solid ${C.line}` }}>
+                      <td className="whitespace-nowrap px-2 py-1.5 text-[12px]">{rotulo(ORIGENS, o.origem)}</td>
+                      {[o.fluxo, o.avaliacoes, o.com_proposta, o.vendas].map((v, i) => (
+                        <td key={i} className="px-2 py-1.5 text-[12px]" style={{ fontFamily: F.mono, textAlign: "right" }}>{v}</td>
+                      ))}
+                      <td className="px-2 py-1.5 text-[12px]" style={{ fontFamily: F.mono, textAlign: "right", color: o.conversao ? C.verde : C.mute }}>
+                        {o.conversao != null ? `${o.conversao}%` : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <p className="mt-2 text-[10px] leading-relaxed" style={{ color: C.mute }}>
+            De {d.de} a {d.ate}. Avaliação conta ficha com valor FIPE, não só cliente que entrou.
+            {d.truncado ? " Atenção: bateu no teto de 2000 e o número está incompleto." : ""}
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
 function CRM({ perfil, aoAbrir }) {
   const [lista, setLista] = useState([]);
   const [carregando, setCarregando] = useState(true);
@@ -1953,6 +2195,8 @@ function CRM({ perfil, aoAbrir }) {
             Novo atendimento
           </button>
         )}
+
+        <Funil />
 
         {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
         {carregando && <p className="text-[12px]" style={{ color: C.mute }}>Carregando…</p>}

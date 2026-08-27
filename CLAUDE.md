@@ -27,6 +27,7 @@ api/perfil.js                    GET  — quem sou eu; para gerente, a equipe
 api/atendimento.js               GET/POST/PATCH — a lista do CRM
 api/proposta.js                  GET/POST/PATCH/DELETE — ofertas dos lojistas
 api/desvalorizacao.js            GET  — histórico FIPE mês a mês do veículo
+api/funil.js                     GET  — a aba PIPELINE: fluxo → venda por origem
 documentos.js                    CÓPIA MORTA: o que roda é o bloco colado no index.html
 supabase/migrations/*.sql        esquema do banco, versionado
 ```
@@ -477,6 +478,28 @@ mapeado em `extras`, e a resposta apareceu na primeira consulta.
 **Cache de 7 dias na borda:** a tabela FIPE muda uma vez por mês e a
 consulta gasta cota. O endpoint é aberto, como `/api/placa` — os dois
 precisam de login junto, quando for a hora.
+
+### 12. O funil: onde o dinheiro se perde
+
+`api/funil.js` reproduz a aba PIPELINE: fluxo → avaliações → propostas
+→ vendas, por origem, com conversão e valores médios.
+
+**Conta no servidor, não na tela.** A lista do CRM é paginada; contar
+em cima do que coube na página daria número errado — no mês da planilha
+foram 173 atendimentos. A consulta do funil é enxuta (sem observação,
+sem foto) e cabe de uma vez, com teto de 2000. **Se bater no teto, a
+resposta diz `truncado: true` e a tela avisa** — número incompleto sem
+aviso é pior que número nenhum.
+
+**"Avaliação" é ficha com valor FIPE**, não cliente que entrou. Foi a
+tradução mais fiel de "Nº de avaliações" da planilha: o que ela contava
+era carro avaliado, não porta que abriu.
+
+**Status é manual, e precisa ser.** Sem alguém marcar fechado ou
+perdido, tudo fica "aberto" e o funil não conta nada. A faixa de status
+fica no topo do atendimento, sempre visível, por isso. Automatizar a
+transição foi considerado e descartado: o sistema não tem como saber
+que o cliente desistiu.
 
 ## Convenções do código
 
