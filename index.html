@@ -290,6 +290,17 @@ async function apagarProposta(id) {
   return d;
 }
 
+async function importarLinhas(linhas) {
+  const r = await fetchAut("/api/importar", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ linhas }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Falha na importação.");
+  return d;
+}
+
 async function consultarFunil(de, ate) {
   const q = comoQuery({ de, ate });
   const r = await fetchAut(`/api/funil${q ? `?${q}` : ""}`);
@@ -2038,6 +2049,203 @@ function NovoAtendimento({ perfil, aoCriar, aoCancelar }) {
  * avaliação baixa é problema de abordagem; avaliação alta com proposta
  * baixa é problema de ficha; proposta alta com venda baixa é preço.
  */
+/* ----------- importação da planilha ----------- */
+
+const semAcentoMaiusc = (t) =>
+  String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+
+const DE_ORIGEM = {
+  "FLUXO LOJA": "fluxo_loja", "FLUXO DE LOJA": "fluxo_loja", "FLUXO": "fluxo_loja",
+  "PROSPECCAO": "prospeccao", "INDICACAO": "indicacao", "TV": "tv",
+  "GOOGLE": "google", "GOOGLE/SITE": "google", "SITE": "google",
+  "FACEBOOK": "facebook", "FACELEADS": "faceleads", "INSTAGRAM": "facebook",
+  "OUTDOOR": "outdoor", "RECUPERACAO": "recuperacao",
+  "TELEFONE RECEPTIVO": "outro", "RADIO": "outro",
+};
+const DE_STATUS = {
+  "AGUARDANDO PROPOSTAS": "aguardando_propostas",
+  "EM NEGOCIACAO": "em_negociacao",
+  "FECHADO": "fechado", "PERDIDO": "perdido",
+};
+
+const ehNumero = (v) => {
+  const s = String(v || "").replace(/R\$|\s|\./g, "").replace(",", ".");
+  return s !== "" && Number.isFinite(Number(s));
+};
+
+/**
+ * Lê o que o Google Sheets põe na área de transferência: colunas
+ * separadas por tabulação.
+ *
+ * Duas coisas da planilha real que o leitor precisa aguentar:
+ *
+ *  - PROPOSTAS e LOJISTA se repetem quatro vezes. As colunas são
+ *    pareadas na ordem em que aparecem.
+ *  - Essas células misturam valor com recado ("02/06/23/Não atendeu",
+ *    "Vendeu", "Carro está no Mato Grosso"). O que não é número vira
+ *    observação em vez de proposta — e nada se perde.
+ */
+function lerPlanilha(texto) {
+  const linhas = String(texto || "").split(/\r?\n/).map((l) => l.split("\t"));
+  const iCab = linhas.findIndex((l) => {
+    const c = l.map(semAcentoMaiusc);
+    return c.indexOf("PLACA") >= 0 && c.indexOf("CLIENTE") >= 0;
+  });
+  if (iCab < 0) return { erro: "Não achei o cabeçalho. Copie incluindo a linha com DATA, NEGOCIADOR, CARRO, PLACA…" };
+
+  const cab = linhas[iCab].map(semAcentoMaiusc);
+  const um = (nome) => cab.indexOf(nome);
+  const todos = (nome) => cab.map((c, i) => (c === nome ? i : -1)).filter((i) => i >= 0);
+
+  const iProp = todos("PROPOSTAS");
+  const iLoj = todos("LOJISTA");
+
+  const col = {
+    data: um("DATA"), negociador: um("NEGOCIADOR"), prospec: um("PROSPEC"),
+    carro: um("CARRO"), placa: um("PLACA"), ano: um("ANO/MOD"), km: um("KM"),
+    cliente: um("CLIENTE"), telefone: um("TELEFONE"), origem: um("ORIGEM"),
+    status: um("STATUS"), fipe: um("FIPE"), pretensao: um("PRETENSAO"),
+  };
+  const pega = (l, i) => (i >= 0 && l[i] != null ? String(l[i]).trim() : "");
+
+  const fora = [];
+  const prontas = [];
+
+  linhas.slice(iCab + 1).forEach((l) => {
+    if (!l.length || l.every((c) => !String(c || "").trim())) return;
+    const cliente = pega(l, col.cliente);
+    const carro = pega(l, col.carro);
+    if (!cliente && !carro) return;   // linha de rodapé ou de total
+
+    const propostas = [];
+    const recados = [];
+    iProp.forEach((ip, k) => {
+      const valor = pega(l, ip);
+      const lojista = pega(l, iLoj[k] >= 0 ? iLoj[k] : -1);
+      if (valor && ehNumero(valor)) propostas.push({ valor, lojista });
+      else if (valor) recados.push(valor);
+      if (lojista && !ehNumero(valor) && !propostas.some((p) => p.lojista === lojista)) {
+        if (lojista.length > 3) recados.push(lojista);
+      }
+    });
+
+    const origemBruta = semAcentoMaiusc(pega(l, col.origem));
+    const statusBruto = semAcentoMaiusc(pega(l, col.status));
+    if (origemBruta && !DE_ORIGEM[origemBruta]) fora.push(`origem "${pega(l, col.origem)}"`);
+    if (statusBruto && !DE_STATUS[statusBruto]) fora.push(`status "${pega(l, col.status)}"`);
+
+    prontas.push({
+      data: pega(l, col.data),
+      negociador_nome: pega(l, col.negociador),
+      prospec: pega(l, col.prospec),
+      cliente_nome: cliente,
+      cliente_telefone: pega(l, col.telefone),
+      carro_descricao: carro,
+      placa: pega(l, col.placa),
+      ano: pega(l, col.ano),
+      km: pega(l, col.km),
+      fipe: pega(l, col.fipe),
+      pretensao: pega(l, col.pretensao),
+      origem: DE_ORIGEM[origemBruta] || "outro",
+      status: DE_STATUS[statusBruto] || "aberto",
+      observacoes: recados.join(" · ") || "",
+      propostas,
+    });
+  });
+
+  return { linhas: prontas, desconhecidos: [...new Set(fora)] };
+}
+
+function Importar({ aoTerminar }) {
+  const [texto, setTexto] = useState("");
+  const [lido, setLido] = useState(null);
+  const [indo, setIndo] = useState(false);
+  const [erro, setErro] = useState("");
+  const [feito, setFeito] = useState(null);
+
+  const ler = () => {
+    setErro(""); setFeito(null);
+    const r = lerPlanilha(texto);
+    if (r.erro) { setErro(r.erro); setLido(null); return; }
+    if (!r.linhas.length) { setErro("Achei o cabeçalho, mas nenhuma linha com cliente ou carro."); setLido(null); return; }
+    setLido(r);
+  };
+
+  const enviar = async () => {
+    setErro(""); setIndo(true);
+    try {
+      const lotes = [];
+      for (let i = 0; i < lido.linhas.length; i += 400) lotes.push(lido.linhas.slice(i, i + 400));
+      const soma = { atendimentos: 0, veiculos: 0, propostas: 0, sem_data: 0 };
+      for (const lote of lotes) {
+        const r = await importarLinhas(lote);
+        soma.atendimentos += r.atendimentos; soma.veiculos += r.veiculos;
+        soma.propostas += r.propostas; soma.sem_data += r.sem_data;
+      }
+      setFeito(soma); setLido(null); setTexto("");
+      if (aoTerminar) await aoTerminar();
+    } catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+
+  const comData = lido ? lido.linhas.filter((l) => l.data).length : 0;
+  const comPlaca = lido ? lido.linhas.filter((l) => /^[A-Za-z]{3}[0-9][A-Za-z0-9][0-9]{2}$/.test(String(l.placa).replace(/[^A-Za-z0-9]/g, ""))).length : 0;
+  const nProp = lido ? lido.linhas.reduce((a, l) => a + l.propostas.length, 0) : 0;
+
+  return (
+    <Bloco titulo="Importar a planilha" sub="No Google Sheets: selecione da linha de cabeçalho até a última, ⌘C, e cole aqui.">
+      <div className="space-y-2.5">
+        <textarea rows={4} className={inputCls} style={{ ...inputSty, fontFamily: F.mono, fontSize: 11 }}
+          placeholder="Cole aqui" value={texto} onChange={(e) => setTexto(e.target.value)} />
+
+        <div className="flex gap-2">
+          <button onClick={ler} disabled={!texto.trim()}
+            className="flex-1 rounded-md border py-2.5 text-[13px] font-semibold"
+            style={{ borderColor: C.line, color: texto.trim() ? C.roxo : C.mute }}>
+            Conferir
+          </button>
+          {lido && (
+            <button onClick={enviar} disabled={indo}
+              className="flex-1 rounded-md py-2.5 text-[13px] font-semibold"
+              style={{ background: indo ? C.line : C.roxo, color: "#fff" }}>
+              {indo ? "Importando…" : `Importar ${lido.linhas.length}`}
+            </button>
+          )}
+        </div>
+
+        {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+
+        {lido && (
+          <div className="rounded-md p-3 text-[11px] leading-relaxed" style={{ background: "#FBFAFC", border: `1px solid ${C.line}`, color: C.mute }}>
+            <b style={{ color: C.ink }}>{lido.linhas.length} linhas</b> · {comData} com data válida ·
+            {" "}{comPlaca} com placa válida · {nProp} propostas com valor.
+            {comData < lido.linhas.length && (
+              <div className="mt-1" style={{ color: C.laranja }}>
+                {lido.linhas.length - comData} sem data legível entram sem data — a planilha tem "06/052022" e "18/05/0202". Inventar dia seria pior.
+              </div>
+            )}
+            {comPlaca < lido.linhas.length && (
+              <div className="mt-1">
+                {lido.linhas.length - comPlaca} sem placa válida entram só como atendimento, sem ficha de veículo.
+              </div>
+            )}
+            {!!lido.desconhecidos.length && (
+              <div className="mt-1">Valores fora da lista viram "outro"/"aberto": {lido.desconhecidos.slice(0, 6).join(", ")}.</div>
+            )}
+            <div className="mt-1">Texto que estava nas colunas de proposta e não era número virou observação.</div>
+          </div>
+        )}
+
+        {feito && (
+          <div className="rounded-md p-3 text-[12px]" style={{ background: "#E7F4EE", border: `1px solid ${C.verde}`, color: C.verde }}>
+            {feito.atendimentos} atendimentos, {feito.veiculos} veículos e {feito.propostas} propostas gravados.
+          </div>
+        )}
+      </div>
+    </Bloco>
+  );
+}
+
 function Funil() {
   const [d, setD] = useState(null);
   const [erro, setErro] = useState("");
@@ -2135,6 +2343,7 @@ function CRM({ perfil, aoAbrir }) {
   const [status, setStatus] = useState("");
   const [busca, setBusca] = useState("");
   const [novo, setNovo] = useState(false);
+  const [mostrarImportar, setMostrarImportar] = useState(false);
 
   const carregar = async (filtros) => {
     setCarregando(true); setErro("");
@@ -2197,6 +2406,15 @@ function CRM({ perfil, aoAbrir }) {
         )}
 
         <Funil />
+
+        {perfil && perfil.papel === "gerente" && (
+          mostrarImportar
+            ? <Importar aoTerminar={async () => { setMostrarImportar(false); await carregar({ status, q: busca }); }} />
+            : <button onClick={() => setMostrarImportar(true)} className="w-full rounded-md border py-2.5 text-[13px]"
+                style={{ borderColor: C.line, color: C.mute }}>
+                Importar planilha do CRM
+              </button>
+        )}
 
         {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
         {carregando && <p className="text-[12px]" style={{ color: C.mute }}>Carregando…</p>}

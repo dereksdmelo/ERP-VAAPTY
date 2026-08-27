@@ -28,6 +28,7 @@ api/atendimento.js               GET/POST/PATCH — a lista do CRM
 api/proposta.js                  GET/POST/PATCH/DELETE — ofertas dos lojistas
 api/desvalorizacao.js            GET  — histórico FIPE mês a mês do veículo
 api/funil.js                     GET  — a aba PIPELINE: fluxo → venda por origem
+api/importar.js                  POST — traz a planilha do CRM para o banco
 documentos.js                    CÓPIA MORTA: o que roda é o bloco colado no index.html
 supabase/migrations/*.sql        esquema do banco, versionado
 ```
@@ -500,6 +501,38 @@ perdido, tudo fica "aberto" e o funil não conta nada. A faixa de status
 fica no topo do atendimento, sempre visível, por isso. Automatizar a
 transição foi considerado e descartado: o sistema não tem como saber
 que o cliente desistiu.
+
+### 13. Importar a planilha: colar, não subir arquivo
+
+A tela de importação recebe **texto colado** — o negociador seleciona
+no Google Sheets, ⌘C, e cola. É tabulação separando colunas, que é o
+que o Sheets põe na área de transferência.
+
+**Por que colar e não subir arquivo:** sem build e sem biblioteca, ler
+`.xlsx` significaria trazer dependência para decodificar zip e XML. E
+colar é o gesto que a pessoa já faz.
+
+**A planilha é suja, e o importador assume isso:**
+
+- **Data quebrada** ("06/052022", "18/05/0202") entra como nula. A tela
+  diz quantas foram. Inventar dia é pior que não ter.
+- **Placa inválida** ("HNK983") não gera ficha de veículo — só o
+  atendimento, com o carro em `carro_descricao`.
+- **PROPOSTAS e LOJISTA se repetem quatro vezes** e são pareadas na
+  ordem em que aparecem.
+- **Essas células misturam valor com recado** ("02/06/23/Não atendeu",
+  "Vendeu"). O que não é número vira `observacoes` em vez de proposta.
+  **Nada é descartado em silêncio.**
+- Origem e status fora da lista viram `outro` e `aberto`, e a tela
+  mostra quais foram.
+
+**Três lotes, não 3×N requisições:** um `insert` de atendimentos, um de
+veículos e um de propostas. 173 linhas por chamada individual levaria
+minutos. **Não é transação** — se o lote de veículos falhar, os
+atendimentos ficam. Aceitável numa importação que se faz uma vez e dá
+para conferir na lista.
+
+O importador só aparece para gerente.
 
 ## Convenções do código
 
