@@ -22,6 +22,8 @@ api/cota.js                      GET  /api/cota — consumo diário (não gasta 
 api/veiculo.js                   POST /api/veiculo — grava a ficha · GET — as 20 últimas
 api/foto.js                      POST/GET/PATCH/DELETE — imagens no Storage
 api/documento.js                 POST/GET — registro dos documentos gerados
+api/config.js                    GET  — URL e chave anônima para o navegador
+api/perfil.js                    GET  — quem sou eu; para gerente, a equipe
 documentos.js                    CÓPIA MORTA: o que roda é o bloco colado no index.html
 supabase/migrations/*.sql        esquema do banco, versionado
 ```
@@ -46,8 +48,9 @@ e um `.env` local para o `vercel dev`):
 | variável | usada por |
 |----------|-----------|
 | `PLACAFIPE_TOKEN` | `api/placa.js`, `api/cota.js` |
-| `SUPABASE_URL` | `api/veiculo.js` |
-| `SUPABASE_SERVICE_KEY` | `api/veiculo.js` |
+| `SUPABASE_URL` | todas as funções de dados |
+| `SUPABASE_ANON_KEY` | `api/config.js` e as chamadas ao banco |
+| `SUPABASE_SERVICE_KEY` | só `api/foto.js`, e só para o Storage |
 
 **Nenhuma das três pode chegar ao navegador** — é essa a razão de as
 funções em `api/` existirem em vez de o `index.html` chamar os serviços
@@ -354,6 +357,49 @@ o que procurar.
 precisa continuar escrito. Anúncio é o que o dono pede, não o que o
 carro vende.
 
+### 9. Login: o navegador fala pelo usuário, não pela chave de serviço
+
+Até a 0004 as funções em `api/` usavam a `SUPABASE_SERVICE_KEY` para
+tudo. Ela passa por cima da RLS, então as políticas eram decoração.
+Com o login isso inverte: o navegador entra pelo Supabase Auth, guarda
+o token, e cada chamada a `api/` o envia. As funções **repassam esse
+token ao PostgREST** — e aí a RLS decide de verdade.
+
+**Quem valida o token é o banco.** `tokenDe()` só confere o formato do
+cabeçalho; verificar assinatura aqui seria reimplementar, sem
+biblioteca, o que o PostgREST já faz. Token falso volta 401 de lá.
+
+**O token não pode virar variável de módulo.** As funções da Vercel
+reaproveitam a instância entre requisições: duas chamadas simultâneas
+trocariam de usuário. Por isso `cabecalhos(tok, ...)` recebe o token
+como argumento em vez de lê-lo de um escopo compartilhado. **Quem
+"simplificar" isso para uma variável global cria vazamento entre
+usuários** — e é o tipo de bug que não aparece em teste com uma pessoa.
+
+**O Storage é a exceção.** A 0002 criou o bucket privado sem política
+em `storage.objects`, então o token de usuário não abre nem para ler.
+`api/foto.js` mantém a chave de serviço **só para o Storage**
+([api/foto.js:56](api/foto.js:56)); o banco continua indo pelo usuário.
+Quem protege é a ordem: toda ida ao Storage acontece depois de uma
+consulta ao banco feita pelo usuário — se a RLS não devolver a linha,
+a função para antes de tocar no arquivo. Se um dia houver política em
+`storage.objects`, esta exceção sai.
+
+**Sessão morta renova uma vez.** O token dura uma hora. Em vez de
+vigiar relógio, `fetchAut()` deixa o 401 acontecer, renova e repete.
+Falhou de novo, é sessão morta: derruba para a tela de login.
+
+**Conta sem perfil ativo enxerga tela de espera, não erro.** A RLS não
+devolve nem a própria linha de `perfil` para quem está inativo — o que
+sem tratamento viraria uma tela vazia inexplicável. `api/perfil.js`
+devolve `liberado: false` nesse caso, e o App mostra "acesso ainda não
+liberado".
+
+**`/api/placa` e `/api/cota` continuam abertos.** São os únicos sem
+login, porque mexer neles estava fora do combinado. Consequência real:
+quem descobrir a URL queima as 20 consultas diárias da Placa Fipe.
+Fechar é uma linha em cada arquivo, o mesmo `tokenDe()`.
+
 ## Convenções do código
 
 - **Português no domínio.** Estado, funções e rótulos em pt-BR
@@ -366,7 +412,8 @@ carro vende.
 - **Persistência.** Só via `window.storage` (wrapper com prefixo `vp:` e
   fallback em memória, [index.html:21](index.html:21)). Três chaves:
   `vaapty:at` (ficha, incluindo o registro dos documentos gerados),
-  `vaapty:veiculo` (id da linha no banco) e
+  `vaapty:sessao` (token do Supabase), `vaapty:veiculo` (id da linha no
+  banco) e
   `vaapty:fotos` — esta última guarda **só o que ainda não subiu**.
   `set()` e `setVarios()` gravam a cada alteração; não chamar `setF`
   direto. `fRef` acompanha a ficha porque o registro de documento
@@ -388,8 +435,9 @@ carro vende.
 
 ## Limites conhecidos
 
-- **Endereço público, sem login.** Não colocar dado real de cliente
-  antes de o backend existir.
+- **O login existe, o CRM ainda não.** Nome e telefone de cliente já
+  têm coluna (0004) mas ainda não têm tela. Enquanto a etapa 3 não
+  chega, o sistema segue sem dado pessoal dentro.
 - **Dados presos ao aparelho.** Fora a ficha do veículo salva no banco,
   tudo o mais do atendimento — fotos, rodadas, notas da espera — vive no
   celular. Trocou de aparelho, perdeu.

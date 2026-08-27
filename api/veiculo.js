@@ -18,9 +18,27 @@ const URL_BASE = (process.env.SUPABASE_URL || "").replace(/\/+$/, "");
 const CHAVE = process.env.SUPABASE_SERVICE_KEY || "";
 
 const REST = () => `${URL_BASE}/rest/v1/veiculo`;
-const cabecalhos = (extra) => ({
-  apikey: CHAVE,
-  Authorization: `Bearer ${CHAVE}`,
+const ANON = process.env.SUPABASE_ANON_KEY || "";
+
+/**
+ * O token do usuário logado, repassado como veio. Quem valida é o
+ * PostgREST: token inválido volta 401 e a gente devolve isso ao
+ * cliente. Verificar assinatura aqui seria refazer, sem biblioteca, o
+ * que o banco já faz.
+ *
+ * O token NÃO pode virar variável de módulo: duas requisições
+ * simultâneas na mesma instância trocariam de usuário.
+ */
+const tokenDe = (req) => {
+  const h = String((req.headers && req.headers.authorization) || "");
+  return /^Bearer\s+\S+/.test(h) ? h : null;
+};
+
+const SEM_LOGIN = { erro: "Sessão expirada. Entre de novo." };
+
+const cabecalhos = (tok, extra) => ({
+  apikey: ANON,
+  Authorization: tok,
   "Content-Type": "application/json",
   ...extra,
 });
@@ -161,16 +179,19 @@ async function supa(url, opcoes) {
 /* ------------------ handler ------------------ */
 
 module.exports = async function handler(req, res) {
-  if (!URL_BASE || !CHAVE) {
-    return res.status(500).json({ erro: "SUPABASE_URL ou SUPABASE_SERVICE_KEY não configurados." });
+  if (!URL_BASE || !ANON) {
+    return res.status(500).json({ erro: "SUPABASE_URL ou SUPABASE_ANON_KEY não configurados." });
   }
+
+  const tok = tokenDe(req);
+  if (!tok) return res.status(401).json(SEM_LOGIN);
 
   try {
     if (req.method === "GET") {
       const campos = "placa,marca_modelo,valor_por,status,criado_em";
       const lista = await supa(
         `${REST()}?select=${campos}&order=criado_em.desc&limit=20`,
-        { headers: cabecalhos() }
+        { headers: cabecalhos(tok) }
       );
       return res.status(200).json({ fichas: lista || [] });
     }
@@ -191,7 +212,7 @@ module.exports = async function handler(req, res) {
       // Uma ficha por placa enquanto o carro está em avaliação.
       const abertas = await supa(
         `${REST()}?select=id&placa=eq.${encodeURIComponent(linha.placa)}&status=eq.em_avaliacao&limit=1`,
-        { headers: cabecalhos() }
+        { headers: cabecalhos(tok) }
       );
       const existente = Array.isArray(abertas) && abertas[0] ? abertas[0].id : null;
 
@@ -201,14 +222,14 @@ module.exports = async function handler(req, res) {
         // ficha não reconsultou a FIPE nem mudou o carro de etapa.
         const r = await supa(`${REST()}?id=eq.${encodeURIComponent(existente)}`, {
           method: "PATCH",
-          headers: cabecalhos({ Prefer: "return=representation" }),
+          headers: cabecalhos(tok, { Prefer: "return=representation" }),
           body: JSON.stringify(linha),
         });
         salvo = Array.isArray(r) ? r[0] : r;
       } else {
         const r = await supa(REST(), {
           method: "POST",
-          headers: cabecalhos({ Prefer: "return=representation" }),
+          headers: cabecalhos(tok, { Prefer: "return=representation" }),
           body: JSON.stringify({
             ...linha,
             // A consulta de placa acontece no mesmo atendimento.

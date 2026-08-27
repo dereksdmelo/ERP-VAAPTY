@@ -20,8 +20,26 @@ const TIPOS = ["termo_aceite", "autorizacao_cautelar", "pre_contrato"];
 const MAX_CONTEUDO = 200 * 1024;   // o modelo maior hoje dá ~9 KB
 
 const REST = (tabela) => `${URL_BASE}/rest/v1/${tabela}`;
-const cabecalhos = (extra) => ({ apikey: CHAVE, Authorization: `Bearer ${CHAVE}`, ...extra });
-const json = (extra) => cabecalhos({ "Content-Type": "application/json", ...extra });
+const ANON = process.env.SUPABASE_ANON_KEY || "";
+
+/**
+ * O token do usuário logado, repassado como veio. Quem valida é o
+ * PostgREST: token inválido volta 401 e a gente devolve isso ao
+ * cliente. Verificar assinatura aqui seria refazer, sem biblioteca, o
+ * que o banco já faz.
+ *
+ * O token NÃO pode virar variável de módulo: duas requisições
+ * simultâneas na mesma instância trocariam de usuário.
+ */
+const tokenDe = (req) => {
+  const h = String((req.headers && req.headers.authorization) || "");
+  return /^Bearer\s+\S+/.test(h) ? h : null;
+};
+
+const SEM_LOGIN = { erro: "Sessão expirada. Entre de novo." };
+
+const cabecalhos = (tok, extra) => ({ apikey: ANON, Authorization: tok, ...extra });
+const json = (tok, extra) => cabecalhos(tok, { "Content-Type": "application/json", ...extra });
 
 const limpar = (s) => {
   const t = String(s == null ? "" : s);
@@ -57,9 +75,12 @@ async function banco(url, opcoes) {
 }
 
 module.exports = async function handler(req, res) {
-  if (!URL_BASE || !CHAVE) {
-    return res.status(500).json({ erro: "SUPABASE_URL ou SUPABASE_SERVICE_KEY não configurados." });
+  if (!URL_BASE || !ANON) {
+    return res.status(500).json({ erro: "SUPABASE_URL ou SUPABASE_ANON_KEY não configurados." });
   }
+
+  const tok = tokenDe(req);
+  if (!tok) return res.status(401).json(SEM_LOGIN);
 
   try {
     if (req.method === "GET") {
@@ -68,7 +89,7 @@ module.exports = async function handler(req, res) {
 
       const linhas = await banco(
         `${REST("documento")}?select=id,tipo,rodada,protocolo,gerado_em&veiculo_id=eq.${vid}&order=gerado_em.desc`,
-        { headers: cabecalhos() }
+        { headers: cabecalhos(tok) }
       );
       return res.status(200).json({ documentos: linhas || [] });
     }
@@ -99,7 +120,7 @@ module.exports = async function handler(req, res) {
 
       const r = await banco(REST("documento"), {
         method: "POST",
-        headers: json({ Prefer: "return=representation" }),
+        headers: json(tok, { Prefer: "return=representation" }),
         body: JSON.stringify({
           veiculo_id: vid, tipo, rodada,
           protocolo: texto(corpo.protocolo),

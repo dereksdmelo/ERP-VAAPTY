@@ -26,8 +26,35 @@ const MAX_BYTES = 5 * 1024 * 1024;     // o mesmo file_size_limit do bucket
 const REST = (tabela) => `${URL_BASE}/rest/v1/${tabela}`;
 const STORAGE = () => `${URL_BASE}/storage/v1`;
 
-const cabecalhos = (extra) => ({ apikey: CHAVE, Authorization: `Bearer ${CHAVE}`, ...extra });
-const json = (extra) => cabecalhos({ "Content-Type": "application/json", ...extra });
+const ANON = process.env.SUPABASE_ANON_KEY || "";
+
+/**
+ * O token do usuário logado, repassado como veio. Quem valida é o
+ * PostgREST. Não pode virar variável de módulo: duas requisições
+ * simultâneas na mesma instância trocariam de usuário.
+ */
+const tokenDe = (req) => {
+  const h = String((req.headers && req.headers.authorization) || "");
+  return /^Bearer\s+\S+/.test(h) ? h : null;
+};
+
+const SEM_LOGIN = { erro: "Sessão expirada. Entre de novo." };
+
+// Banco: fala pelo usuário, então a RLS da 0004 vale.
+const cabecalhos = (tok, extra) => ({ apikey: ANON, Authorization: tok, ...extra });
+const json = (tok, extra) => cabecalhos(tok, { "Content-Type": "application/json", ...extra });
+
+/**
+ * Storage: continua na chave de serviço. A 0002 criou o bucket privado
+ * e não criou política em storage.objects — com o token do usuário, o
+ * upload e a leitura seriam recusados.
+ *
+ * Quem protege aqui é a ordem das operações: toda chamada ao Storage
+ * vem depois de uma consulta ao banco feita pelo usuário. Se a RLS não
+ * devolver a linha, a função para antes de tocar no arquivo.
+ */
+const hArquivo = (extra) => ({ apikey: CHAVE, Authorization: `Bearer ${CHAVE}`, ...extra });
+const jsonArquivo = (extra) => hArquivo({ "Content-Type": "application/json", ...extra });
 
 // Rede de segurança: se a chave aparecer em qualquer texto, some.
 const limpar = (s) => {
@@ -95,7 +122,7 @@ async function assinar(caminhos) {
   if (!caminhos.length) return {};
   const r = await arquivos(`${STORAGE()}/object/sign/${BUCKET}`, {
     method: "POST",
-    headers: json(),
+    headers: jsonArquivo(),
     body: JSON.stringify({ expiresIn: VALIDADE, paths: caminhos }),
   });
   const mapa = {};
@@ -111,7 +138,7 @@ async function apagarArquivo(caminho) {
   try {
     await arquivos(`${STORAGE()}/object/${BUCKET}/${paraURL(caminho)}`, {
       method: "DELETE",
-      headers: cabecalhos(),
+      headers: hArquivo(),
     });
   } catch (e) {
     // Arquivo que já não existe é sucesso: o retry precisa convergir.
@@ -121,9 +148,12 @@ async function apagarArquivo(caminho) {
 /* ------------------ handler ------------------ */
 
 module.exports = async function handler(req, res) {
-  if (!URL_BASE || !CHAVE) {
-    return res.status(500).json({ erro: "SUPABASE_URL ou SUPABASE_SERVICE_KEY não configurados." });
+  if (!URL_BASE || !CHAVE || !ANON) {
+    return res.status(500).json({ erro: "SUPABASE_URL, SUPABASE_ANON_KEY ou SUPABASE_SERVICE_KEY não configurados." });
   }
+
+  const tok = tokenDe(req);
+  if (!tok) return res.status(401).json(SEM_LOGIN);
 
   try {
     /* ---------- GET: fotos do veículo, em ordem ---------- */
@@ -133,7 +163,7 @@ module.exports = async function handler(req, res) {
 
       const linhas = await banco(
         `${REST("foto")}?select=id,caminho,ordem&veiculo_id=eq.${vid}&order=ordem.asc`,
-        { headers: cabecalhos() }
+        { headers: cabecalhos(tok) }
       ) || [];
 
       const links = await assinar(linhas.map((l) => l.caminho));
@@ -160,7 +190,7 @@ module.exports = async function handler(req, res) {
 
       // A placa vem do banco: é ela que nomeia a pasta, e a busca já
       // confirma que o veículo existe.
-      const achado = await banco(`${REST("veiculo")}?select=placa&id=eq.${vid}&limit=1`, { headers: cabecalhos() });
+      const achado = await banco(`${REST("veiculo")}?select=placa&id=eq.${vid}&limit=1`, { headers: cabecalhos(tok) });
       const placa = Array.isArray(achado) && achado[0] ? achado[0].placa : null;
       if (!placa) return res.status(404).json({ erro: "Veículo não encontrado. Salve a ficha antes das fotos." });
 
@@ -170,7 +200,7 @@ module.exports = async function handler(req, res) {
 
       await arquivos(`${STORAGE()}/object/${BUCKET}/${paraURL(caminho)}`, {
         method: "POST",
-        headers: cabecalhos({ "Content-Type": "image/jpeg", "Cache-Control": "3600", "x-upsert": "false" }),
+        headers: hArquivo({ "Content-Type": "image/jpeg", "Cache-Control": "3600", "x-upsert": "false" }),
         body: imagem,
       });
 
@@ -178,7 +208,7 @@ module.exports = async function handler(req, res) {
       try {
         const r = await banco(REST("foto"), {
           method: "POST",
-          headers: json({ Prefer: "return=representation" }),
+          headers: json(tok, { Prefer: "return=representation" }),
           body: JSON.stringify({
             veiculo_id: vid, caminho, ordem,
             largura: medida(corpo.largura), altura: medida(corpo.altura),
@@ -223,7 +253,7 @@ module.exports = async function handler(req, res) {
       // negativo, que ninguém usa, e só depois assume a posição final.
       const mover = (id, ordem) => banco(`${REST("foto")}?id=eq.${id}`, {
         method: "PATCH",
-        headers: json(),
+        headers: json(tok),
         body: JSON.stringify({ ordem }),
       });
 
@@ -238,13 +268,13 @@ module.exports = async function handler(req, res) {
       const id = String(req.query.id || "");
       if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido." });
 
-      const achado = await banco(`${REST("foto")}?select=caminho&id=eq.${id}&limit=1`, { headers: cabecalhos() });
+      const achado = await banco(`${REST("foto")}?select=caminho&id=eq.${id}&limit=1`, { headers: cabecalhos(tok) });
       const caminho = Array.isArray(achado) && achado[0] ? achado[0].caminho : null;
       if (!caminho) return res.status(404).json({ erro: "Foto não encontrada." });
 
       // Arquivo primeiro: se a linha falhar, o retry converge.
       await apagarArquivo(caminho);
-      await banco(`${REST("foto")}?id=eq.${id}`, { method: "DELETE", headers: cabecalhos() });
+      await banco(`${REST("foto")}?id=eq.${id}`, { method: "DELETE", headers: cabecalhos(tok) });
       return res.status(200).json({ ok: true, id });
     }
 
