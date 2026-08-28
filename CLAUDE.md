@@ -24,6 +24,7 @@ api/documento.js                 POST/GET — registro dos documentos gerados
 api/config.js                    GET  — URL e chave anônima para o navegador
 api/perfil.js                    GET  — quem sou eu; para gerente, a equipe
 api/atendimento.js               GET/POST/PATCH — a lista do CRM
+                                 ?recurso=indicacoes — os leads da etapa E
 api/proposta.js                  GET/POST/PATCH/DELETE — ofertas dos lojistas
 api/funil.js                     GET  — a aba PIPELINE: fluxo → venda por origem
 api/importar.js                  POST — traz a planilha do CRM para o banco
@@ -669,6 +670,110 @@ combustíveis e junta as listas, marcando cada modelo com o seu.
 começa falso e só vira verdadeiro quando o negociador usa o valor da
 tabela oficial. O aviso aparece no Lançamento e ao lado do campo FIPE.
 **É aviso, não trava** — quem decidir travar mexe em `etapaConcluida`.
+
+### 16. Simulador de propostas: a planilha do Derek, célula por célula
+
+Na Espera, um bloco reproduz o *Simulador de Proposta* que o Derek
+mantinha no Excel. Dado o valor de referência e quantas propostas se
+quer, ele devolve a nuvem de valores, a média e a melhor.
+
+**A conta é a da planilha, não uma aproximação:**
+
+```
+Vmax      = arredonda(referência × 0,90)     teto do repasse
+Vmedio    = arredonda(Vmax × 0,90)           centro da nuvem
+intervalo = arredonda((Vmax − Vmedio) ÷ 5)   largura de um degrau
+V0        = Vmedio − 10 × intervalo          piso
+proposta  = V0 + sorteio(0..16) × intervalo × |sen(π·n/45)|
+```
+
+Tudo à centena. Conferido no ar com FIPE 44.935: piso 28.400, teto da
+faixa 42.000, melhor de 57 propostas em 40.600 — os mesmos números que
+a planilha produz.
+
+**O seno é a parte que ninguém adivinha olhando o resultado.** As
+propostas de índice 1 e 45 nascem coladas no piso; as do meio abrem até
+o teto. **Quem "simplificar" para um `Math.random()` entre piso e teto
+muda o formato da nuvem e o valor médio para de bater com a planilha.**
+
+**Nada dali é gravado.** O resultado não vai para a tabela `proposta`
+nem para o funil, e a tarja laranja na tela diz "nenhum lojista
+ofereceu isto". Se um dia precisar ser gravado, tem que nascer com
+coluna marcando a simulação — proposta inventada contada como real
+estraga a conversão e pode ir para a mesa do cliente.
+
+### 17. Escuta: o consentimento é a chave, não o microfone
+
+O parecer jurídico saiu em 28/08/2026 com uma condição: o
+consentimento do cliente vem antes. Por isso o botão do microfone
+**nasce desligado** e só acende depois do toggle, e o aceite fica
+gravado com data e hora (`escutaEm`). **Quem inverter essa ordem
+derruba o parecer inteiro.**
+
+**O que isto é, exatamente** — importa não vender o que não é:
+
+- A transcrição usa o `SpeechRecognition` do próprio navegador. Sem
+  biblioteca e sem endpoint novo, o que também resolve o teto de 12
+  funções da Vercel.
+- **O áudio vai para o serviço de voz da Google ou da Apple**, conforme
+  o navegador. Não é processamento local, e está escrito na tela de
+  consentimento porque o cliente precisa saber.
+- Nós não gravamos áudio. Só o texto fica, e fica no aparelho.
+- Os "sinais" (tem pressa, tem outra proposta, decisor ausente, dívida,
+  achou pouco, está recuando, sinal de fechamento) são **busca por
+  palavra, não modelo de linguagem** — e a tela diz isso. Um resumo de
+  verdade pede um LLM, o que significa chave paga e função nova.
+
+Vale como está porque o que trava o negociador não é a falta de resumo:
+é que ele não anota.
+
+### 18. Leads de indicação: eles morriam no aparelho
+
+A etapa E colhia até dez nomes por atendimento e eles ficavam no
+`localStorage`. Ninguém nunca ligou para nenhum. Agora vão para a
+tabela `indicacao` (0011) com os cinco campos que interessam: indicado,
+telefone do indicado, negociador que conseguiu, quem indicou e o
+telefone de quem indicou.
+
+**O telefone vira link.** O valor da tela não é a tabela — é quem
+trabalha a fila ligar do próprio celular sem copiar número.
+
+**`atendimento_id` é `set null`, não `cascade`.** O lead sobrevive ao
+atendimento de origem, e é por isso que o nome do negociador e o de
+quem indicou ficam gravados **em texto** aqui, não só por referência: o
+lead precisa se explicar sozinho meses depois.
+
+**O envio marca `enviada` em cada indicação.** É o que impede a segunda
+batida no botão de duplicar a fila da pré-venda.
+
+**O endpoint mora em `/api/atendimento?recurso=indicacoes`** — mesmo
+truque dos negociadores em `/api/perfil`. É acomodação do teto de 12
+funções, não arquitetura.
+
+### 19. A conferência do administrativo tem tela própria
+
+Até a 0012 as duas mãos preenchiam o mesmo formulário, e nada impedia o
+negociador de marcar a própria conferência — "conferido" deixava de
+significar alguma coisa. Agora a fila do administrativo é uma tela, com
+o pendente em primeiro lugar, e o check list do negociador só mostra o
+estado ("ainda não passou pelo administrativo").
+
+**Quem é adm é uma coluna, não um papel.** `perfil.administrativo`
+(0012) em vez de valor novo no enum, por duas razões: `alter type ...
+add value` não pode ser usado na mesma transação em que é criado, e
+administrativo **não substitui** o papel — o gerente também confere.
+`e_adm()` cobre os dois.
+
+**O servidor confere de novo.** `api/checklist.js` recusa qualquer item
+`adm_*` de quem não é adm nem gerente; a tela esconder o botão é
+conveniência, não controle. **E vale saber o que essa proteção não é:**
+a RLS da 0008 libera a linha inteira para a equipe e não sabe separar
+coluna, então quem tiver o token e souber falar PostgREST direto passa
+por cima. Fechar de verdade pediria trigger no banco.
+
+**A lista sabe o que falta em uma consulta só.** `checklist(adm_conferido_em)`
+entrou no `EMBUTIDO` do `api/atendimento.js`; sem isso seria uma
+consulta por linha.
 
 ## Convenções do código
 

@@ -171,7 +171,24 @@ apagar sem entregar é mentir para o negociador.
 | Etapa O | biblioteca de testemunhais, filtrada pela necessidade do cliente | vocês reunirem prints, fotos e vídeos |
 | Etapa N | argumentos de IA por objeção | coletar com os negociadores o que funciona |
 | Etapa T | assinatura por ZapSign | integração |
-| Espera | escuta por microfone com IA | **jurídico primeiro** — gravar conversa é tratamento de dado pessoal e exige aviso e base legal |
+| Espera | resumo da conversa por IA de verdade | chave paga de LLM e uma função — a Vercel está em 12 de 12. A escuta e a transcrição já estão no ar (28/08/2026); o que existe hoje são sinais por palavra-chave, e a tela diz isso |
+
+---
+
+## Abertos pela escuta (28/08/2026)
+
+O parecer saiu e a escuta está no ar, com consentimento gravado antes de
+o microfone ligar. O que ficou:
+
+- **O áudio passa por Google/Apple.** É o `SpeechRecognition` do
+  navegador que transcreve, não nós. Está escrito na tela de
+  consentimento; se o jurídico quiser processamento local, o caminho é
+  outro e custa serviço próprio.
+- **A transcrição fica só no aparelho.** Trocou de celular, perdeu — o
+  mesmo limite das rodadas e das notas da espera.
+- **Retenção não foi decidida.** Ninguém definiu por quanto tempo a
+  transcrição pode ficar guardada. Enquanto ela não sai do aparelho, o
+  problema é pequeno; no dia em que for para o banco, precisa de regra.
 
 ---
 
