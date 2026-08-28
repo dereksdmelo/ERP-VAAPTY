@@ -3584,6 +3584,24 @@ const ehNumero = (v) => {
  *    "Vendeu", "Carro está no Mato Grosso"). O que não é número vira
  *    observação em vez de proposta — e nada se perde.
  */
+/**
+ * A mesma regra de `data()` do api/importar.js. Duplicada de propósito:
+ * a tela precisa contar antes de mandar, e a planilha tem "06/052022" e
+ * "18/05/0202". Se uma das duas mudar, a outra muda junto.
+ */
+function dataDaPlanilha(v) {
+  const t = String(v == null ? "" : v).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/.exec(t);
+  if (!m) return null;
+  let ano = m[3];
+  if (ano.length === 2) ano = `20${ano}`;
+  if (ano.length !== 4) return null;
+  const a = Number(ano), mes = Number(m[2]), d = Number(m[1]);
+  if (a < 2000 || a > 2100 || mes < 1 || mes > 12 || d < 1 || d > 31) return null;
+  return `${a}-${String(mes).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
 function lerPlanilha(texto) {
   const linhas = String(texto || "").split(/\r?\n/).map((l) => l.split("\t"));
   const iCab = linhas.findIndex((l) => {
@@ -3606,6 +3624,17 @@ function lerPlanilha(texto) {
    */
   const um = (...nomes) => {
     for (const nome of nomes) { const i = cab.indexOf(nome); if (i >= 0) return i; }
+    // Nenhum bateu inteiro: tenta pelo começo. "PRETENSÃO" volta do
+    // Sheets como "PRETENSAO" quando o acento sobrevive e como
+    // "PRETENS?O" quando não — e nos dois casos "PRETENS" acerta.
+    // Só com sete letras ou mais, senão "ANO" casaria com qualquer
+    // coisa que comece com A.
+    for (const nome of nomes) {
+      if (nome.length < 7) continue;
+      const raiz = nome.slice(0, 7);
+      const i = cab.findIndex((c) => c.indexOf(raiz) === 0);
+      if (i >= 0) return i;
+    }
     return -1;
   };
   const todos = (nome) => cab.map((c, i) => (c === nome ? i : -1)).filter((i) => i >= 0);
@@ -3751,7 +3780,10 @@ function Importar({ aoTerminar }) {
     setIndo(false);
   };
 
-  const comData = lido ? lido.linhas.filter((l) => l.data).length : 0;
+  // Contava célula preenchida, não data legível: "18/05/0202" entrava
+  // na conta de "com data válida" e depois virava nulo no servidor. O
+  // aviso existe justamente para dizer quantas vão entrar sem data.
+  const comData = lido ? lido.linhas.filter((l) => dataDaPlanilha(l.data)).length : 0;
   const comPlaca = lido ? lido.linhas.filter((l) => /^[A-Za-z]{3}[0-9][A-Za-z0-9][0-9]{2}$/.test(String(l.placa).replace(/[^A-Za-z0-9]/g, ""))).length : 0;
   const nProp = lido ? lido.linhas.reduce((a, l) => a + l.propostas.length, 0) : 0;
 
