@@ -934,13 +934,13 @@ const payloadShinkai = (f, n) => ({
  * daqui virou brlDoc(), porque brl já existe acima com outra regra
  * (aquele corta os centavos, este imprime linha para preencher).
  *
- * ATENÇÃO — o texto jurídico aqui é RASCUNHO, escrito só para o
- * mecanismo funcionar. Todo documento sai com uma tarja de rascunho
- * bem visível e não deve ser levado para a mesa de um cliente.
+ * ATENÇÃO — o texto jurídico aqui é o MODELO REAL DA CASA, transcrito
+ * dos papéis assinados (27/08/2026). Não invente cláusula, não mude
+ * número e não "melhore" redação: o que está aqui é o que o cliente
+ * assina, e divergir do papel cria dois contratos diferentes.
  *
- * Quando os modelos reais da Vaapty chegarem, troca-se o conteúdo das
- * funções corpo*(). O encanamento — dados da ficha, formatação,
- * impressão, registro — permanece igual.
+ * Mudança de texto passa pelo jurídico da Vaapty, não por quem edita
+ * este arquivo.
  *
  * Cada documento é montado como HTML e aberto numa janela de impressão.
  * Sem biblioteca, sem servidor: o navegador já sabe virar PDF.
@@ -974,10 +974,6 @@ function moldura({ titulo, corpo, protocolo }) {
   @page { size: A4; margin: 18mm 16mm; }
   body { font-family: Georgia, 'Times New Roman', serif; font-size: 11pt;
          line-height: 1.55; color: #15121a; }
-  .tarja { background: #EA5423; color: #fff; padding: 6px 12px;
-           font-family: system-ui, sans-serif; font-size: 9pt;
-           letter-spacing: .12em; text-transform: uppercase;
-           font-weight: 700; margin-bottom: 18px; }
   .marca { font-family: system-ui, sans-serif; font-weight: 800;
            font-size: 15pt; letter-spacing: .04em; color: #6D1B9E; }
   .sub { font-family: system-ui, sans-serif; font-size: 8.5pt;
@@ -997,9 +993,7 @@ function moldura({ titulo, corpo, protocolo }) {
   .rodape { margin-top: 28px; border-top: 1px solid #CBD0CA; padding-top: 8px;
             font-family: system-ui, sans-serif; font-size: 8pt; color: #6B6478;
             display: flex; justify-content: space-between; }
-  @media print { .tarja { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
 </style></head><body>
-<div class="tarja">Rascunho — modelo provisório, não utilizar com cliente</div>
 <div class="marca">VAAPTY</div>
 <div class="sub">Joinville · Santa Catarina</div>
 ${corpo}
@@ -1014,23 +1008,28 @@ const protocolo = (f, sufixo) =>
 
 function blocoVeiculo(f) {
   return `<table class="dados">
-  <tr><td class="r">Veículo</td><td>${ou(f.modelo, "modelo")}</td></tr>
+  <tr><td class="r">Marca / modelo</td><td>${ou(f.modelo, "marca e modelo")}</td></tr>
   <tr><td class="r">Ano / modelo</td><td>${ou(f.ano, "ano")}</td></tr>
   <tr><td class="r">Placa</td><td>${ou(f.placa, "placa")}</td></tr>
+  <tr><td class="r">Renavam</td><td>${ou(f.renavam, "renavam — do CRLV")}</td></tr>
   <tr><td class="r">Chassi</td><td>${ou(f.chassi, "chassi — do CRLV")}</td></tr>
-  <tr><td class="r">Renavam</td><td>${vazio("renavam — do CRLV")}</td></tr>
   <tr><td class="r">Cor</td><td>${ou(f.cor, "cor")}</td></tr>
   <tr><td class="r">Quilometragem</td><td>${f.km ? Number(f.km).toLocaleString("pt-BR") + " km" : vazio("km")}</td></tr>
 </table>`;
 }
 
+/**
+ * Nome vem do atendimento; CPF, RG e endereço ainda não existem em
+ * lugar nenhum do sistema e saem como lacuna para preencher à mão —
+ * que é como os modelos de papel são preenchidos hoje.
+ */
 function blocoCliente(f) {
   return `<table class="dados">
-  <tr><td class="r">Nome</td><td>${vazio("nome do cliente")}</td></tr>
+  <tr><td class="r">Nome</td><td>${ou(f.cliente_nome, "nome do cliente")}</td></tr>
   <tr><td class="r">CPF</td><td>${vazio("CPF")}</td></tr>
   <tr><td class="r">RG</td><td>${vazio("RG")}</td></tr>
   <tr><td class="r">Endereço</td><td>${vazio("endereço completo")}</td></tr>
-  <tr><td class="r">Telefone</td><td>${vazio("telefone")}</td></tr>
+  <tr><td class="r">Telefone</td><td>${ou(f.cliente_telefone, "telefone")}</td></tr>
 </table>`;
 }
 
@@ -1039,112 +1038,295 @@ const assinaturas = (a, b) => `<div class="assinatura">
   <div class="linha">${b}</div>
 </div>`;
 
-/* ---------------- 1. termo de aceite de proposta ---------------- */
+const DUAS_TESTEMUNHAS = `<p style="margin-top:22px;font-size:9.5pt">Testemunhas:</p>
+<table class="dados" style="margin-top:26px">
+  <tr><td>Nome: ${vazio("nome")}<br>CPF: ${vazio("CPF")}<br><br>Assinatura: ______________________</td>
+      <td>Nome: ${vazio("nome")}<br>CPF: ${vazio("CPF")}<br><br>Assinatura: ______________________</td></tr>
+</table>`;
 
+const VAAPTY_PJ = "Vaapty Intermediação Veicular LTDA · CNPJ 34.840.903/0001-00 · Rua Anita Garibaldi, 705 — Anita Garibaldi, Joinville/SC";
+
+/* ---------------- 1. termo de vinculação, ciência e aceite ---------------- */
+
+/**
+ * Transcrito do modelo em papel da casa. O texto jurídico é da Vaapty —
+ * não invente cláusula nem mude número aqui sem o jurídico.
+ *
+ * Uma observação sobre o original: a cláusula quinta termina em dois
+ * pontos e a enumeração não aparece na folha. Mantive como está, porque
+ * corrigir texto de contrato por conta própria é pior que reproduzir o
+ * que está assinado hoje.
+ */
 function termoAceite(f, rodada, indice) {
-  const corpo = `<h1>Termo de aceite de proposta</h1>
-<p>Pelo presente instrumento, o proprietário abaixo identificado declara ter
-recebido da <strong>Vaapty Joinville</strong> a ${indice}ª proposta de compra
-referente ao veículo descrito, e manifesta sua decisão quanto a ela.</p>
+  const valor = rodada && rodada.impresso ? rodada.impresso : f.valorFechado;
+  const corpo = `<h1>Termo de vinculação, ciência e aceite de proposta<br>de venda de veículo e multa por desistência</h1>
+
+<p>${ou(f.cliente_nome, "nome do contratante")}, RG nº ${vazio("RG")} e CPF nº ${vazio("CPF")},
+residente e domiciliado(a) à ${vazio("endereço")}.</p>
+
+<p>Por meio do presente instrumento particular, o(a) CONTRATANTE declara ter contratado a
+VAAPTY, abaixo assinada, para intermediar a venda do veículo abaixo descrito:</p>
 
 ${blocoVeiculo(f)}
-${blocoCliente(f)}
 
 <table class="dados">
-  <tr><td class="r">Proposta apresentada</td><td><strong>${brlDoc(rodada.impresso)}</strong></td></tr>
-  <tr><td class="r">Contraproposta do cliente</td><td>${rodada.contra ? brlDoc(rodada.contra) : "—"}</td></tr>
-  <tr><td class="r">Validade da proposta</td><td>${vazio("prazo de validade")}</td></tr>
+  <tr><td class="r">Valor ajustado para venda</td><td><strong>${brlDoc(valor)}</strong></td></tr>
 </table>
 
-<p>O proprietário declara que a proposta foi apresentada de forma clara, que
-teve oportunidade de esclarecer dúvidas, e que não há obrigatoriedade de
-aceitação.</p>
+<p><strong>CLÁUSULA PRIMEIRA – DECLARAÇÃO DE TITULARIDADE E AUTORIZAÇÃO</strong></p>
+<p>O(A) CONTRATANTE declara, sob sua exclusiva responsabilidade, ser o(a) legítimo(a)
+proprietário(a) do veículo acima descrito ou possuir autorização expressa e válida do
+proprietário para promover sua negociação e venda.</p>
+<p>Declara, ainda, que todas as informações fornecidas à VAAPTY são verdadeiras, completas e
+atualizadas, responsabilizando-se integralmente por sua exatidão.</p>
 
-<p style="margin-top:18px">
-  ( &nbsp; ) Aceito a proposta apresentada.<br>
-  ( &nbsp; ) Não aceito e apresento contraproposta.<br>
-  ( &nbsp; ) Não aceito e encerro a negociação.
-</p>
+<p><strong>CLÁUSULA SEGUNDA – RESPONSABILIDADE PELAS INFORMAÇÕES PRESTADAS</strong></p>
+<p>O(A) CONTRATANTE responderá integralmente por quaisquer prejuízos decorrentes de informações
+falsas, incompletas ou incorretas relacionadas à propriedade, posse, origem, estado de
+conservação, débitos, gravames, restrições administrativas ou judiciais, bem como pela
+inexistência de autorização para venda do veículo.</p>
+<p>A VAAPTY atua exclusivamente como intermediadora do negócio, não assumindo qualquer
+responsabilidade por questões relacionadas à titularidade, procedência ou regularidade das
+informações fornecidas pelo(a) CONTRATANTE.</p>
 
-${assinaturas("Proprietário do veículo", `Negociador — ${ou(f.negociador, "negociador")}`)}`;
+<p><strong>CLÁUSULA TERCEIRA – ACEITAÇÃO DA PROPOSTA E OBRIGAÇÃO DE CONCLUIR A VENDA</strong></p>
+<p>Uma vez aceita proposta de compra nos termos e condições previamente autorizados pelo(a)
+CONTRATANTE, este(a) compromete-se a comparecer e assinar todos os documentos necessários à
+efetivação da transferência do veículo ao comprador.</p>
 
-  return moldura({ titulo: `Termo de aceite ${indice}`, corpo, protocolo: protocolo(f, `ACE${indice}`) });
+<p><strong>CLÁUSULA QUARTA – MULTA POR DESISTÊNCIA</strong></p>
+<p>Caracterizar-se-á desistência quando o(a) CONTRATANTE, após a aceitação da proposta de compra
+por ele autorizada, recusar-se injustificadamente a concluir o negócio, deixar de assinar
+documentos necessários à transferência do veículo ou praticar qualquer ato que impeça a
+concretização da venda.</p>
+<p>Nessas hipóteses, o(a) CONTRATANTE ficará sujeito(a) ao pagamento de multa compensatória
+correspondente a 10% (dez por cento) sobre o valor da proposta aceita.</p>
+
+<p><strong>CLÁUSULA QUINTA – RESSARCIMENTO DE PREJUÍZOS</strong></p>
+<p>Além da multa prevista na cláusula anterior, o(a) CONTRATANTE obriga-se a ressarcir
+integralmente a VAAPTY por quaisquer prejuízos financeiros, despesas administrativas, custas
+processuais, honorários advocatícios, indenizações ou demais valores que a empresa venha a
+suportar em decorrência:</p>
+
+<p><strong>CLÁUSULA SEXTA – ENCARGOS POR INADIMPLEMENTO</strong></p>
+<p>Em caso de mora quanto ao pagamento da multa ou de qualquer valor devido em razão deste
+instrumento, incidirão:</p>
+<p>I – Correção monetária pelo INPC/IBGE;<br>
+II – Multa moratória de 2% (dois por cento);<br>
+III – Juros de mora de 1% (um por cento) ao mês, contados da data do vencimento.</p>
+
+<p><strong>CLÁUSULA SÉTIMA – TÍTULO EXECUTIVO EXTRAJUDICIAL</strong></p>
+<p>As partes reconhecem expressamente que o presente instrumento constitui título executivo
+extrajudicial, nos termos do artigo 784, inciso III, do Código de Processo Civil, estando
+assinado por duas testemunhas.</p>
+
+<p><strong>CLÁUSULA OITAVA – FORO</strong></p>
+<p>Fica eleito o foro da Comarca de Joinville, com renúncia expressa a qualquer outro, por mais
+privilegiado que seja, para dirimir eventuais controvérsias oriundas deste instrumento.</p>
+
+<p style="margin-top:16px">Por estarem justos e contratados, assinam o presente instrumento em
+2 vias de igual teor e forma.</p>
+
+<p>Joinville, ${vazio("dia")} de ${vazio("mês")} de ${new Date().getFullYear()}.</p>
+
+${assinaturas("CONTRATANTE", "VAAPTY INTERMEDIAÇÃO VEICULAR<br>CNPJ: 34.840.903/0001-00")}
+${DUAS_TESTEMUNHAS}`;
+
+  return moldura({
+    titulo: `Termo de aceite ${indice || ""}`.trim(),
+    corpo,
+    protocolo: protocolo(f, `ACE${indice || 1}`),
+  });
 }
 
-/* ---------------- 2. autorização de cautelar ---------------- */
+/* ---------------- 2. autorização de vistoria cautelar ---------------- */
 
+/**
+ * A empresa de vistoria usa bloco próprio, com recibo numerado. Esta é
+ * a via da Vaapty: mesmos campos, para ficar no envelope do negócio.
+ */
 function autorizacaoCautelar(f) {
-  const corpo = `<h1>Autorização para vistoria cautelar</h1>
-<p>O proprietário identificado abaixo autoriza a <strong>Vaapty Joinville</strong>
-a conduzir o veículo descrito até empresa credenciada para realização de
-<strong>vistoria cautelar</strong>, incluindo o deslocamento necessário e os
-procedimentos técnicos de inspeção.</p>
+  const corpo = `<h1>Autorização para realização de vistoria</h1>
+
+<p>O(A) proprietário(a) abaixo identificado(a) autoriza a <strong>Vaapty Intermediação
+Veicular</strong> a conduzir o veículo descrito até empresa credenciada para realização de
+<strong>vistoria cautelar</strong>, incluindo o deslocamento necessário e os procedimentos
+técnicos de inspeção.</p>
 
 ${blocoVeiculo(f)}
 ${blocoCliente(f)}
 
 <table class="dados">
+  <tr><td class="r">Valor da vistoria</td><td>${vazio("valor")}</td></tr>
+  <tr><td class="r">Pago por</td><td>( &nbsp; ) Loja &nbsp;&nbsp; ( &nbsp; ) Despachante &nbsp;&nbsp; ( &nbsp; ) Cliente</td></tr>
   <tr><td class="r">Empresa credenciada</td><td>${vazio("empresa de vistoria")}</td></tr>
-  <tr><td class="r">Data prevista</td><td>${dataExtenso()}</td></tr>
   <tr><td class="r">Responsável pela condução</td><td>${ou(f.negociador, "negociador")}</td></tr>
+  <tr><td class="r">Data</td><td>${dataExtenso()}</td></tr>
 </table>
 
-<p>O proprietário declara estar ciente de que o resultado da vistoria pode
-alterar as condições da negociação, e que o laudo será disponibilizado a ambas
-as partes.</p>
+<p>O(A) proprietário(a) declara estar ciente de que o resultado da vistoria pode alterar as
+condições da negociação, e que o laudo será disponibilizado a ambas as partes.</p>
 
-${assinaturas("Proprietário do veículo", "Vaapty Joinville")}`;
+${assinaturas("Proprietário(a) do veículo", "Vaapty Intermediação Veicular")}`;
 
   return moldura({ titulo: "Autorização de vistoria cautelar", corpo, protocolo: protocolo(f, "CAU") });
 }
 
-/* ---------------- 3. pré-contrato ---------------- */
+/* ---------------- 3. pré-contrato de intermediação ---------------- */
 
+/**
+ * Transcrito do modelo em papel da casa. Os valores de perícia cautelar
+ * (R$ 390,00) e consulta veicular (R$ 90,00) estão no texto assinado —
+ * mudaram? muda aqui, e no papel também.
+ */
 function preContrato(f) {
-  const corpo = `<h1>Pré-contrato de compra e venda de veículo</h1>
-<p>As partes abaixo qualificadas ajustam a compra e venda do veículo descrito,
-nas condições que seguem, ficando a formalização definitiva condicionada ao
-resultado da vistoria cautelar e à verificação da documentação.</p>
+  const corpo = `<h1>Pré-contrato de intermediação de venda de veículo</h1>
 
-<p><strong>Vendedor</strong></p>
-${blocoCliente(f)}
+<p>Pelo presente instrumento, de um lado, ${ou(f.cliente_nome, "nome do declarante")}, inscrito(a)
+no CPF sob n. ${vazio("CPF")}, residente e domiciliado(a) na ${vazio("endereço")}, doravante
+denominada simplesmente <strong>“DECLARANTE”</strong>, e de outro, <strong>Vaapty Intermediação
+Veicular LTDA</strong>, pessoa jurídica de direito privado, inscrita no CNPJ sob
+n. 34.840.903/0001-00, com sede em Rua Anita Garibaldi, 705 – Anita Garibaldi, doravante
+denominada simplesmente <strong>“VAAPTY”</strong>.</p>
 
-<p><strong>Compradora</strong> — Vaapty Joinville, ${vazio("razão social e CNPJ")}.</p>
-
-<p><strong>Objeto</strong></p>
+<p><strong>DADOS DO VEÍCULO</strong></p>
 ${blocoVeiculo(f)}
 
-<p><strong>Condições</strong></p>
-<table class="dados">
-  <tr><td class="r">Valor ajustado</td><td><strong>${brlDoc(f.valorFechado)}</strong></td></tr>
-  <tr><td class="r">Forma de pagamento</td><td>${ou(f.formaFechamento, "forma de pagamento")}</td></tr>
-  <tr><td class="r">Quitação de financiamento</td><td>${f.quitacao ? brlDoc(f.quitacao) : "não há"}</td></tr>
-  <tr><td class="r">Débitos pendentes</td><td>${f.debitos ? brlDoc(f.debitos) : vazio("débitos apurados")}</td></tr>
-  <tr><td class="r">Prazo para formalização</td><td>${vazio("prazo")}</td></tr>
-</table>
+<p><strong>DECLARAÇÕES E OBRIGAÇÕES:</strong></p>
 
-<p>O vendedor declara que o veículo se encontra livre de ônus não informados,
-que as informações prestadas sobre o estado do bem são verdadeiras, e que
-tomou conhecimento das condições acima antes de assinar.</p>
+<p><strong>1. Reconhecimento da Proposta:</strong> O(A) DECLARANTE, nos termos da legislação
+civil, declara estar plenamente ciente e de acordo com a proposta feita pela VAAPTY para o
+veículo descrito acima, de sua propriedade, dando sua total aceitação e autorização para a venda
+pelo valor ajustado de <strong>${brlDoc(f.valorFechado)}</strong>
+(${vazio("por extenso e composição")}). A VAAPTY declara que, do valor negociado, serão
+descontados todos os débitos referentes a multas, quitação de financiamento, transferências,
+comissão, vistoria cautelar e outros pendentes sobre o veículo até a data presente.</p>
 
-<p>Condições suspensivas: aprovação na vistoria cautelar e conferência da
-documentação. Não atendidas, este pré-contrato perde efeito, sem ônus para
-qualquer das partes.</p>
+<p><strong>2. Responsabilidade sobre Informações:</strong> O(A) DECLARANTE declara que as
+informações prestadas à VAAPTY são verdadeiras, assumindo integral responsabilidade por qualquer
+erro, omissão ou informação inexata, inclusive por eventuais ônus, gravames ou pendências sobre o
+veículo, que não foram previamente informados. A VAAPTY compromete-se a utilizar essas
+informações para a intermediação da venda conforme os termos deste instrumento.</p>
 
-${assinaturas("Vendedor", "Vaapty Joinville")}
+<p><strong>3. Propriedade e Autorização:</strong> O(A) DECLARANTE declara que é o(a)
+proprietário(a) legal do veículo e que detém todas as autorizações necessárias para a venda do
+bem, sendo de sua inteira responsabilidade qualquer questão judicial ou extrajudicial que possa
+surgir em relação à propriedade ou transferência do veículo. A VAAPTY compromete-se a realizar a
+intermediação da venda dentro dos parâmetros legais e acordados entre as partes.</p>
 
-<p style="margin-top:24px;font-size:9.5pt">Testemunhas:</p>
-${assinaturas("Nome e CPF", "Nome e CPF")}`;
+<p><strong>4. Pagamento de Multas e Débitos:</strong> <u>O(A) DECLARANTE se responsabiliza pelo
+pagamento da perícia cautelar no valor de R$ 390,00 e da consulta veicular no valor de R$ 90,00</u>,
+valores esses que poderão ser deduzidos do valor a ser recebido pela venda do veículo.
+<u>Concorda também que, em caso de desistência, será aplicada uma multa de 10% (dez por cento)
+sobre o valor da proposta aceita.</u> O termo terá força de título executivo extrajudicial, nos
+termos do artigo 784 do CPC. A VAAPTY, por sua vez, compromete-se a realizar a venda conforme os
+valores acordados, deduzindo os custos mencionados.</p>
+
+<p><strong>5. Posse do Veículo:</strong> O(A) DECLARANTE reconhece que o veículo está em posse da
+VAAPTY, em seu pátio interno, e concorda que o veículo não poderá ser retirado, ou ter objetos
+pessoais ou documentos removidos, até a finalização do processo de venda e assinatura do contrato
+definitivo de prestação de serviços. Caso ocorra a retirada, esta será interpretada como
+desistência, sujeitando o(a) DECLARANTE às penalidades previstas. A VAAPTY compromete-se a
+garantir a segurança do veículo durante o período de posse.</p>
+
+<p><strong>6. Execução do Pré-Contrato:</strong> Este termo, que serve como pré-contrato, precede
+a formalização do “Contrato de Aceite de Proposta de Compra de Veículo Mediante Intermediação” e
+será prevalecido por aquele.</p>
+
+<p><strong>7. Cláusula de Irrevogabilidade e Irretratabilidade:</strong> O(A) DECLARANTE e a
+VAAPTY aceitam, em caráter irrevogável e irretratável, as condições deste termo, vinculando-se ao
+cumprimento das obrigações aqui estipuladas, obrigando também seus herdeiros e sucessores, sob
+pena de responsabilização por eventuais perdas e danos.</p>
+
+<p><strong>8. Ciência sobre Due Diligence e Perícia Cautelar:</strong> O(A) DECLARANTE tem ciência
+de que o veículo ainda passará por um processo de <em>due diligence</em> e por perícia cautelar,
+os quais são necessários para avaliar a segurança do negócio e a integridade do veículo. A VAAPTY
+informa que, enquanto esses procedimentos não forem ultimados, não assume a garantia de que o
+negócio será concluído. No entanto, o caráter irrevogável e irretratável do presente termo
+permanece em relação ao(a) DECLARANTE.</p>
+
+<p style="margin-top:16px">Joinville, ${vazio("dia")} / ${vazio("mês")} / ${new Date().getFullYear()}.</p>
+
+${assinaturas("VAAPTY", "CONTRATANTE")}
+${DUAS_TESTEMUNHAS}`;
 
   return moldura({ titulo: "Pré-contrato", corpo, protocolo: protocolo(f, "PRE") });
 }
 
-/* ---------------- abertura ---------------- */
+/* ---------------- 4. check list do negócio ---------------- */
 
 /**
- * Abre o documento numa janela nova, pronto para imprimir ou salvar em PDF.
- * Devolve o protocolo, para registro de que foi gerado.
+ * O papel que fecha o atendimento e vai para o administrativo. Sai com
+ * o que o sistema já sabe — placa, valores — e com as lacunas que o
+ * cliente preenche à mão, como os dados bancários.
+ *
+ * Dado bancário NÃO fica no sistema: é escrito no papel e entregue ao
+ * financeiro. Guardar conta e chave PIX de cliente pediria conversa com
+ * o jurídico antes.
  */
+function checkList(f) {
+  const sn = (r) => `<tr><td>${r}</td><td style="width:64px;text-align:center">( &nbsp; ) SIM</td><td style="width:64px;text-align:center">( &nbsp; ) NÃO</td></tr>`;
+  const linha = (r, v) => `<tr><td class="r">${r}</td><td>${v}</td></tr>`;
+
+  const corpo = `<h1>Check list do negócio</h1>
+
+<table class="dados">
+  <tr><td class="r">Loja</td><td>Vaapty Joinville</td>
+      <td class="r">Data</td><td>${dataExtenso()}</td></tr>
+  <tr><td class="r">Negociador</td><td>${ou(f.negociador, "negociador")}</td>
+      <td class="r">Veículo / placa</td><td>${ou(f.modelo, "veículo")} — ${ou(f.placa, "placa")}</td></tr>
+</table>
+
+<p><strong>CHECK LIST — o negociador preenche</strong></p>
+<table class="dados">
+  ${sn("Recibo de compra e venda")}
+  ${sn("2ª via DUT (R$ 790,00)")}
+  ${sn("Licenciamento atual")}
+  ${sn("Transferência (R$ 590,00)")}
+  ${sn("Emplacamento Mercosul (R$ 250,00)")}
+  ${sn("Outros (chave cópia, despachante, etc.)")}
+  ${sn("Comprovante de residência")}
+  ${sn("Cópia da CNH do titular")}
+  ${sn("Manual e chave cópia")}
+</table>
+
+<p><strong>VALORES</strong></p>
+<table class="dados">
+  ${linha("Venda", brlDoc(f.valorFechado))}
+  ${linha("Cautelar", vazio("valor"))}
+  ${linha("Débitos", f.debitos ? brlDoc(f.debitos) : vazio("valor"))}
+  ${linha("Quitação", f.quitacao ? brlDoc(f.quitacao) : vazio("valor"))}
+  ${linha("Comissão Vaapty", vazio("valor"))}
+  ${linha("Líquido ao cliente", vazio("valor"))}
+</table>
+
+<p><strong>DADOS BANCÁRIOS — o cliente preenche</strong></p>
+<table class="dados">
+  ${linha("Favorecido", vazio("nome"))}
+  ${linha("CPF / CNPJ", vazio("documento"))}
+  ${linha("Banco", vazio("banco"))}
+  ${linha("Agência", vazio("agência"))}
+  ${linha("Conta", vazio("conta"))}
+  ${linha("C/C ou C/P", vazio("tipo"))}
+  ${linha("Chave PIX", vazio("chave"))}
+</table>
+
+<p><strong>COMPROVANTES / ENVELOPE — o administrativo preenche</strong></p>
+<table class="dados">
+  ${sn("Entrada")}
+  ${sn("Saída")}
+  ${sn("Débitos (estadual e federal)")}
+  ${sn("Quitação")}
+  ${sn("Outros (chave cópia, despachante, etc.)")}
+  ${sn("Laudo cautelar")}
+</table>
+
+${assinaturas("Administrativo", "Financeiro")}
+<div class="linha" style="width:62%">Gerente</div>`;
+
+  return moldura({ titulo: "Check list", corpo, protocolo: protocolo(f, "CHK") });
+}
+
 function abrirDocumento(html) {
   const j = window.open("", "_blank");
   if (!j) return { ok: false, erro: "O navegador bloqueou a janela. Libere pop-ups para este site." };
@@ -1451,6 +1633,16 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
 
   const restante = f.esperaIniciadaEm ? Math.max(0, ESPERA_SEG - Math.floor((agora - f.esperaIniciadaEm) / 1000)) : null;
   const mmss = (s) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+
+  // O contrato precisa do cliente, que mora no atendimento, não na
+  // ficha do veículo. CPF, RG e endereço ainda não existem em lugar
+  // nenhum e saem como lacuna.
+  const dadosDoc = {
+    ...f,
+    cliente_nome: (atendimento && atendimento.cliente_nome) || "",
+    cliente_telefone: (atendimento && atendimento.cliente_telefone) || "",
+    valorFechado: f.valorFechado || (atendimento && atendimento.valor_fechado) || "",
+  };
 
   const docs = f.documentos || [];
   const hhmm = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toTimeString().slice(0, 5); };
@@ -2041,7 +2233,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                         <span className="text-[11px]" style={{ color: C.mute }}>contra do cliente</span>
                       </div>
                     )}
-                    <button onClick={() => gerarDocumento("termo_aceite", `Termo de aceite ${i + 1}`, termoAceite(f, r, i + 1), i + 1)}
+                    <button onClick={() => gerarDocumento("termo_aceite", `Termo de aceite ${i + 1}`, termoAceite(dadosDoc, r, i + 1), i + 1)}
                       className="mt-2 w-full rounded-md border py-1.5 text-[11px] font-semibold"
                       style={{ borderColor: C.roxo, color: C.roxo }}>
                       Termo de aceite
@@ -2096,12 +2288,12 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 <Toggle label="Aceite final assinado" valor={f.aceiteFinal} onChange={(v) => set("aceiteFinal", v)} />
                 <Toggle label="Carro enviado para a cautelar" valor={f.cautelarEnviado} onChange={(v) => set("cautelarEnviado", v)} />
                 <div className="grid grid-cols-2 gap-2">
-                  <button onClick={() => gerarDocumento("autorizacao_cautelar", "Autorização de cautelar", autorizacaoCautelar(f), null)}
+                  <button onClick={() => gerarDocumento("autorizacao_cautelar", "Autorização de cautelar", autorizacaoCautelar(dadosDoc), null)}
                     className="rounded-md border py-2 text-[12px] font-semibold"
                     style={{ borderColor: C.roxo, color: C.roxo }}>
                     Autorização de cautelar
                   </button>
-                  <button disabled={!f.valorFechado} onClick={() => gerarDocumento("pre_contrato", "Pré-contrato", preContrato(f), null)}
+                  <button disabled={!f.valorFechado} onClick={() => gerarDocumento("pre_contrato", "Pré-contrato", preContrato(dadosDoc), null)}
                     className="rounded-md border py-2 text-[12px] font-semibold"
                     style={{ borderColor: f.valorFechado ? C.roxo : C.line, color: f.valorFechado ? C.roxo : C.mute }}>
                     Pré-contrato
@@ -2128,9 +2320,14 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                     </div>
                   </div>
                 )}
-                <Pendente>
-                  O texto jurídico destes três documentos é rascunho meu, e sai com tarja de rascunho na folha — serve para testar o mecanismo, não para assinar com cliente. Me mandem os modelos que vocês usam hoje (Word ou foto do papel) que eu troco só o texto; o resto já funciona.
-                </Pendente>
+                <button onClick={() => gerarDocumento("check_list", "Check list", checkList(dadosDoc), null)}
+                  className="w-full rounded-md border py-2 text-[12px] font-semibold"
+                  style={{ borderColor: C.line, color: C.roxo }}>
+                  Check list do negócio
+                </button>
+                <p className="text-[11px] leading-relaxed" style={{ color: C.mute }}>
+                  Os três documentos saem com o texto que a casa assina. CPF, RG, endereço e dados bancários continuam em branco para preencher à mão — o sistema não guarda conta nem chave PIX de cliente.
+                </p>
               </div>
             </Bloco>
 

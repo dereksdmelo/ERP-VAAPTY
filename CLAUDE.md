@@ -312,10 +312,24 @@ tentativa.
 `____________` quando não há valor — e duas declarações do mesmo nome no
 mesmo escopo do Babel derrubam a aplicação inteira, não só o documento.
 
-**O texto jurídico é rascunho.** Sai com tarja laranja na folha e não
-vai para a mesa de cliente. Quando os modelos reais chegarem, troca-se
-só o corpo das funções; o encanamento fica. O `<Pendente>` da etapa T
-pede esses modelos — **só sair de lá junto com o texto real**.
+**O texto jurídico é o da casa.** Em 27/08/2026 o Derek mandou os
+papéis assinados e eu transcrevi: termo de vinculação, pré-contrato e
+autorização de vistoria saíram do rascunho. **Não invente cláusula, não
+mude número, não "melhore" redação** — o que está no código é o que o
+cliente assina, e divergir do papel cria dois contratos diferentes.
+Mudança passa pelo jurídico da Vaapty.
+
+Duas coisas que ficaram fiéis ao original de propósito: a cláusula
+quinta do termo termina em dois pontos e a enumeração não aparece na
+folha; e os valores de perícia cautelar (R$ 390,00) e consulta veicular
+(R$ 90,00) estão no texto assinado. Corrigir por conta própria seria
+pior que reproduzir o que está em vigor.
+
+**O quarto documento é o check list** (0005), que fecha o atendimento e
+vai para o administrativo. Ele imprime o que o sistema sabe e deixa em
+branco o que o cliente escreve à mão — inclusive **conta e chave PIX,
+que o sistema não guarda**. Guardar dado bancário de cliente pediria
+conversa com o jurídico antes.
 
 **A janela precisa abrir no clique.** `abrirDocumento()` é chamado antes
 de qualquer `await` em `gerarDocumento()`

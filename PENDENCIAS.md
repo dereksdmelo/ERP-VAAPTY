@@ -86,7 +86,8 @@ consulta.
 
 | o que | situação |
 |-------|----------|
-| `renavam` | tem coluna no banco, não tem campo na tela |
+| `renavam` | tem coluna no banco, não tem campo na tela — e **os contratos imprimem esse campo** |
+| CPF, RG e endereço do cliente | não existem em lugar nenhum; os contratos saem com lacuna para preencher à mão |
 | conferência da FIPE | `fipeConferida` e o código de autenticação vivem só no aparelho — não têm coluna no banco |
 | `positivos`, `lataria`, `mecanica` | vão no JSON do Shinkai, sempre vazios — não têm campo |
 | `proposta.apresentada` | coluna existe, não há botão para marcar |
@@ -166,7 +167,6 @@ apagar sem entregar é mentir para o negociador.
 | Etapa O | vídeo explicando o processo | vocês gravarem |
 | Etapa O | biblioteca de testemunhais, filtrada pela necessidade do cliente | vocês reunirem prints, fotos e vídeos |
 | Etapa N | argumentos de IA por objeção | coletar com os negociadores o que funciona |
-| Etapa T | **modelos jurídicos reais** — o texto atual é rascunho e sai com tarja laranja | vocês mandarem os modelos (Word ou foto do papel) |
 | Etapa T | assinatura por ZapSign | integração |
 | Espera | escuta por microfone com IA | **jurídico primeiro** — gravar conversa é tratamento de dado pessoal e exige aviso e base legal |
 

@@ -16,7 +16,7 @@
 const URL_BASE = (process.env.SUPABASE_URL || "").replace(/\/+$/, "");
 const CHAVE = process.env.SUPABASE_SERVICE_KEY || "";
 
-const TIPOS = ["termo_aceite", "autorizacao_cautelar", "pre_contrato"];
+const TIPOS = ["termo_aceite", "autorizacao_cautelar", "pre_contrato", "check_list"];
 const MAX_CONTEUDO = 200 * 1024;   // o modelo maior hoje dá ~9 KB
 
 const REST = (tabela) => `${URL_BASE}/rest/v1/${tabela}`;
