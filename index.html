@@ -1689,6 +1689,18 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                               );
                             })}
                           </div>
+                          {/* A AutoAvaliar ignora parâmetro de URL e o resultado
+                              passa por reCAPTCHA, então não dá para chegar com o
+                              carro escolhido. O que dá é não fazer o negociador
+                              lembrar: os três valores ficam à vista. */}
+                          {fam === "tabela" && !!ma && (
+                            <p className="mt-1.5 text-[10px] leading-relaxed" style={{ color: C.mute }}>
+                              Na AutoAvaliar, selecione: <b>{ma.toUpperCase()}</b>
+                              {mo ? <> · <b>{mo.toUpperCase()}</b></> : null}
+                              {f.ano ? <> · <b>{String(f.ano).split("/").filter(Boolean).pop()}</b></> : null}
+                              . A página não aceita link com o carro já escolhido, e o resultado passa por um reCAPTCHA.
+                            </p>
+                          )}
                         </div>
                       );
                     })}

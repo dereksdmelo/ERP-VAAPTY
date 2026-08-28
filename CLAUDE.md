@@ -382,6 +382,13 @@ uma vez: `autoavaliar.com.br/tabela-auto-avaliar/` é página de produto e
 pede login; a consulta de verdade é `tabela.autoavaliar.com.br`, pública,
 com marca, modelo, ano, versão e estado. **O Derek corrigiu.**
 
+**Não dá para chegar lá com o carro já escolhido**, e não por falta de
+tentativa: a página **ignora parâmetro de URL** (testei `carBrand`,
+`carModel`, `year` — todos os campos vêm vazios) e o resultado passa por
+**reCAPTCHA**. Automatizar isso seria burlar proteção anti-robô. O que a
+tela faz é mostrar os três valores a selecionar ao lado do botão, para o
+negociador não ter que lembrar.
+
 **Chaves na Mão ficou de fora**: não responde a nenhum padrão e devolve
 "página não encontrada". Link quebrado na frente do cliente é pior que
 canal a menos — e agora seria pior ainda, porque travaria a etapa. O
