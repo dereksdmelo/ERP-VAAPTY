@@ -41,7 +41,7 @@ module.exports = async function handler(req, res) {
   const de = dia(req.query.de) || primeiro;
   const ate = dia(req.query.ate) || hoje.toISOString().slice(0, 10);
 
-  const campos = "origem,status,data,valor_fechado,veiculo(fipe_valor),proposta(id)";
+  const campos = "origem,status,data,valor_fechado,negociador_nome,veiculo(fipe_valor),proposta(id)";
   const url = `${URL_BASE}/rest/v1/atendimento?select=${campos}` +
               `&data=gte.${de}&data=lte.${ate}&limit=${TETO}`;
 
@@ -55,9 +55,10 @@ module.exports = async function handler(req, res) {
     return res.status(502).json({ erro: "Não consegui falar com o banco." });
   }
 
-  const vazio = () => ({ fluxo: 0, avaliacoes: 0, com_proposta: 0, vendas: 0, perdidos: 0 });
+  const vazio = () => ({ fluxo: 0, avaliacoes: 0, com_proposta: 0, vendas: 0, perdidos: 0, valor_vendido: 0 });
   const porOrigem = {};
   ORIGENS.forEach((o) => { porOrigem[o] = vazio(); });
+  const porNegociador = {};
   const total = vazio();
 
   const fipes = [];
@@ -72,7 +73,13 @@ module.exports = async function handler(req, res) {
     const teveProposta = ((a.proposta || []).length > 0);
     const vendeu = a.status === "fechado";
 
-    [o, total].forEach((c) => {
+    // A planilha mede por pessoa, e é aí que a conversa de meta
+    // acontece. Agrupa pelo nome porque atendimento importado não tem
+    // vínculo com login — negociador_id fica nulo.
+    const nome = String(a.negociador_nome || "").trim().toUpperCase();
+    const n = nome ? (porNegociador[nome] || (porNegociador[nome] = vazio())) : null;
+
+    [o, total].concat(n ? [n] : []).forEach((c) => {
       c.fluxo += 1;
       if (avaliou) c.avaliacoes += 1;
       if (teveProposta) c.com_proposta += 1;
@@ -81,7 +88,11 @@ module.exports = async function handler(req, res) {
     });
 
     if (v && v.fipe_valor) fipes.push(Number(v.fipe_valor));
-    if (vendeu && a.valor_fechado) vendas.push(Number(a.valor_fechado));
+    if (vendeu && a.valor_fechado) {
+      vendas.push(Number(a.valor_fechado));
+      if (n) n.valor_vendido += Number(a.valor_fechado);
+      total.valor_vendido += Number(a.valor_fechado);
+    }
   });
 
   const comMovimento = Object.keys(porOrigem)
@@ -89,8 +100,25 @@ module.exports = async function handler(req, res) {
     .sort((a, b) => porOrigem[b].fluxo - porOrigem[a].fluxo)
     .map((o) => ({ origem: o, ...porOrigem[o], conversao: pct(porOrigem[o].vendas, porOrigem[o].fluxo) }));
 
+  const equipe = Object.keys(porNegociador)
+    .sort((a, b) => porNegociador[b].vendas - porNegociador[a].vendas)
+    .map((nome) => ({
+      nome,
+      ...porNegociador[nome],
+      conversao: pct(porNegociador[nome].vendas, porNegociador[nome].fluxo),
+      ticket_medio: porNegociador[nome].vendas
+        ? Math.round(porNegociador[nome].valor_vendido / porNegociador[nome].vendas)
+        : null,
+    }));
+
+  // Quantos atendimentos ficaram sem dono: sem isso, o dashboard soma
+  // menos que o total e ninguém entende por quê.
+  const semNegociador = linhas.filter((a) => !String(a.negociador_nome || "").trim()).length;
+
   return res.status(200).json({
     de, ate,
+    por_negociador: equipe,
+    sem_negociador: semNegociador,
     total: {
       ...total,
       avaliacoes_sobre_fluxo: pct(total.avaliacoes, total.fluxo),

@@ -369,6 +369,29 @@ async function importarLinhas(linhas) {
   return d;
 }
 
+async function listarNegociadores() {
+  const r = await fetchAut("/api/perfil?recurso=negociadores");
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui carregar os negociadores.");
+  return d.negociadores || [];
+}
+async function criarNegociador(dados) {
+  const r = await fetchAut("/api/perfil?recurso=negociadores", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui cadastrar.");
+  return d.negociador;
+}
+async function atualizarNegociador(id, dados) {
+  const r = await fetchAut(`/api/perfil?recurso=negociadores&id=${encodeURIComponent(id)}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui salvar.");
+  return d.negociador;
+}
+
 async function consultarFunil(de, ate) {
   const q = comoQuery({ de, ate });
   const r = await fetchAut(`/api/funil${q ? `?${q}` : ""}`);
@@ -2123,6 +2146,8 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               <Desvalorizometro chave={f.fipeDesval} />
             </Bloco>
 
+            {blocoCliente}
+
             <Bloco titulo="O cliente" sub="Descobrir que falta o decisor depois de 40 minutos de avaliação é perda certa.">
               <div className="space-y-2.5">
                 <Campo label="Motivo da venda">
@@ -2426,8 +2451,6 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               </div>
             )}
 
-            {blocoCliente}
-
             <Bloco titulo="Extratos e contrapropostas" sub="Cada rodada vira número comparável — é assim que se acha o valor de abertura certo por faixa de FIPE.">
               <div className="space-y-2.5">
                 {f.rodadas.map((r, i) => (
@@ -2449,7 +2472,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                       onClick={() => gerarDocumento("termo_aceite", `Termo de aceite ${i + 1}`, termoAceite(dadosDoc, r, i + 1), i + 1)}
                       className="mt-2 w-full rounded-md border py-1.5 text-[11px] font-semibold"
                       style={{ borderColor: podeImprimir ? C.roxo : C.line, color: podeImprimir ? C.roxo : C.mute }}>
-                      {podeImprimir ? "Termo de aceite" : "Termo de aceite — faltam dados do cliente"}
+                      {podeImprimir ? "Termo de aceite" : "Termo de aceite — complete o cliente na Pesquisa"}
                     </button>
                     {!r.contra && (
                       <p className="mt-1 text-[10px]" style={{ color: AMARELO.texto }}>
@@ -2493,8 +2516,6 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         {/* ---------- T ---------- */}
         {etapa === "T" && (
           <>
-            {blocoCliente}
-
             <Bloco titulo="Aceite e cautelar">
               <div className="space-y-2.5">
                 <div className="grid grid-cols-2 gap-2.5">
@@ -2523,7 +2544,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 </div>
                 {!podeImprimir && (
                   <p className="text-[11px]" style={{ color: AMARELO.texto }}>
-                    Preencha os dados do cliente acima para liberar a impressão.
+                    Falta {faltamCliente.map((x) => x[1]).join(" · ")} do cliente — preencha na etapa Pesquisa para liberar a impressão.
                   </p>
                 )}
                 {podeImprimir && !f.valorFechado && (
@@ -3023,20 +3044,32 @@ function Etiqueta({ status }) {
 function NovoAtendimento({ perfil, aoCriar, aoCancelar }) {
   const [d, setD] = useState({
     cliente_nome: "", cliente_telefone: "", carro_descricao: "",
-    origem: "fluxo_loja", prospec: "", pretensao: "",
+    origem: "fluxo_loja", prospec: "", pretensao: "", negociador_nome: "",
   });
+  const [equipe, setEquipe] = useState([]);
   const [indo, setIndo] = useState(false);
   const [erro, setErro] = useState("");
   const set = (k, v) => setD({ ...d, [k]: v });
+
+  useEffect(() => {
+    listarNegociadores()
+      .then((l) => {
+        setEquipe(l);
+        // Já vem no nome de quem está logado, quando ele está na lista.
+        const meu = l.filter((x) => perfil && x.nome.toUpperCase() === String(perfil.nome || "").toUpperCase())[0];
+        if (meu) setD((a) => ({ ...a, negociador_nome: meu.nome }));
+      })
+      .catch(() => {});
+  }, []);
 
   const criar = async () => {
     setErro(""); setIndo(true);
     try {
       const novo = await criarAtendimento({
         ...d,
-        status: "aberto",
+        status: "cliente_na_loja",
         negociador_id: perfil ? perfil.id : null,
-        negociador_nome: perfil ? perfil.nome : null,
+        negociador_nome: d.negociador_nome || (perfil ? perfil.nome : null),
         data: new Date().toISOString().slice(0, 10),
       });
       await aoCriar(novo);
@@ -3057,8 +3090,24 @@ function NovoAtendimento({ perfil, aoCriar, aoCancelar }) {
               {ORIGENS.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
             </select>
           </Campo>
-          <Campo label="Quem prospectou"><input className={inputCls} style={inputSty} placeholder="ou FLUXO" value={d.prospec} onChange={(e) => set("prospec", e.target.value)} /></Campo>
+          <Campo label="Negociador" req>
+            <select className={inputCls} style={inputSty} value={d.negociador_nome}
+              onChange={(e) => set("negociador_nome", e.target.value)}>
+              <option value="">escolha</option>
+              {equipe.filter((n) => n.papel === "negociador" && n.ativo).map((n) => (
+                <option key={n.id} value={n.nome}>{n.nome}</option>
+              ))}
+            </select>
+          </Campo>
         </div>
+        <Campo label="Quem prospectou">
+          <select className={inputCls} style={inputSty} value={d.prospec} onChange={(e) => set("prospec", e.target.value)}>
+            <option value="">FLUXO — entrou sozinho</option>
+            {equipe.filter((n) => n.ativo).map((n) => (
+              <option key={n.id} value={n.nome}>{n.nome}</option>
+            ))}
+          </select>
+        </Campo>
         <Campo label="Pretensão do cliente"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={d.pretensao} onChange={(e) => set("pretensao", e.target.value)} /></Campo>
         {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
         <div className="flex gap-2">
@@ -3279,14 +3328,17 @@ function Importar({ aoTerminar }) {
   );
 }
 
-function Funil() {
+function Funil({ perfil }) {
   const [d, setD] = useState(null);
+  const [equipe, setEquipe] = useState([]);
   const [erro, setErro] = useState("");
   const [aberto, setAberto] = useState(false);
+  const [cadastro, setCadastro] = useState(false);
 
   useEffect(() => {
     if (!aberto || d) return;
     consultarFunil().then(setD).catch((e) => setErro(e.message));
+    listarNegociadores().then(setEquipe).catch(() => {});
   }, [aberto]);
 
   const Num = ({ rot, v, sub, cor }) => (
@@ -3301,7 +3353,7 @@ function Funil() {
     return (
       <button onClick={() => setAberto(true)} className="w-full rounded-md border py-2.5 text-[13px] font-semibold"
         style={{ borderColor: C.line, color: C.roxo }}>
-        Ver o funil do mês
+        Ver o dashboard do mês
       </button>
     );
   }
@@ -3309,14 +3361,21 @@ function Funil() {
   return (
     <div className="rounded-lg p-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
       <div className="flex items-baseline justify-between">
-        <span className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.roxo, fontFamily: F.disp, fontWeight: 700 }}>Funil do mês</span>
-        <button onClick={() => setAberto(false)} className="text-[11px]" style={{ color: C.mute }}>fechar</button>
+        <span className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.roxo, fontFamily: F.disp, fontWeight: 700 }}>Dashboard do mês</span>
+        <span className="flex items-center gap-3">
+          <button onClick={() => setCadastro(!cadastro)} className="text-[11px]" style={{ color: C.roxo }}>
+            {cadastro ? "ver números" : "negociadores"}
+          </button>
+          <button onClick={() => setAberto(false)} className="text-[11px]" style={{ color: C.mute }}>fechar</button>
+        </span>
       </div>
 
-      {erro && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
-      {!d && !erro && <p className="mt-2 text-[12px]" style={{ color: C.mute }}>Calculando…</p>}
+      {cadastro && <CadastroNegociadores perfil={perfil} />}
 
-      {d && (
+      {erro && !cadastro && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+      {!d && !erro && !cadastro && <p className="mt-2 text-[12px]" style={{ color: C.mute }}>Calculando…</p>}
+
+      {d && !cadastro && (
         <>
           <div className="mt-3 grid grid-cols-4 gap-2">
             <Num rot="Fluxo" v={d.total.fluxo} />
@@ -3359,11 +3418,162 @@ function Funil() {
             </div>
           )}
 
+          {!!(d.por_negociador || []).length && (
+            <div className="rolar mt-4 overflow-x-auto">
+              <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>Por negociador</div>
+              <table className="mt-1.5 w-full" style={{ borderCollapse: "collapse", minWidth: 560 }}>
+                <thead>
+                  <tr>
+                    {["Negociador", "Fluxo", "Vendas", "Conv.", "Meta", "% meta", "Ticket"].map((h, i) => (
+                      <th key={h} className="whitespace-nowrap px-2 py-1.5 text-[9px] uppercase tracking-[0.1em]"
+                        style={{ color: C.mute, borderBottom: `1px solid ${C.line}`, textAlign: i ? "right" : "left" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {d.por_negociador.map((n) => {
+                    const cad = (equipe || []).filter((x) => x.nome.toUpperCase() === n.nome)[0];
+                    const meta = cad ? cad.meta_volume : null;
+                    const pctMeta = meta ? Math.round((n.vendas / meta) * 100) : null;
+                    return (
+                      <tr key={n.nome} style={{ borderBottom: `1px solid ${C.line}` }}>
+                        <td className="whitespace-nowrap px-2 py-1.5 text-[12px] font-medium">{n.nome}</td>
+                        {[n.fluxo, n.vendas].map((v, i) => (
+                          <td key={i} className="px-2 py-1.5 text-[12px]" style={{ fontFamily: F.mono, textAlign: "right" }}>{v}</td>
+                        ))}
+                        <td className="px-2 py-1.5 text-[12px]" style={{ fontFamily: F.mono, textAlign: "right", color: n.conversao ? C.verde : C.mute }}>
+                          {n.conversao != null ? `${n.conversao}%` : "—"}
+                        </td>
+                        <td className="px-2 py-1.5 text-[12px]" style={{ fontFamily: F.mono, textAlign: "right", color: C.mute }}>
+                          {meta != null ? meta : "—"}
+                        </td>
+                        <td className="px-2 py-1.5 text-[12px]"
+                          style={{ fontFamily: F.mono, textAlign: "right", fontWeight: 700,
+                                   color: pctMeta == null ? C.mute : pctMeta >= 100 ? C.verde : pctMeta >= 60 ? C.ink : C.laranja }}>
+                          {pctMeta != null ? `${pctMeta}%` : "—"}
+                        </td>
+                        <td className="px-2 py-1.5 text-[12px]" style={{ fontFamily: F.mono, textAlign: "right", color: C.mute }}>
+                          {n.ticket_medio ? brl(n.ticket_medio) : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {!!d.sem_negociador && (
+            <p className="mt-2 rounded px-2 py-1.5 text-[11px]" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
+              {d.sem_negociador} atendimento{d.sem_negociador > 1 ? "s" : ""} sem negociador — não entra{d.sem_negociador > 1 ? "m" : ""} na tabela acima. Os importados vieram sem esse campo.
+            </p>
+          )}
+
           <p className="mt-2 text-[10px] leading-relaxed" style={{ color: C.mute }}>
             De {d.de} a {d.ate}. Avaliação conta ficha com valor FIPE, não só cliente que entrou.
             {d.truncado ? " Atenção: bateu no teto de 2000 e o número está incompleto." : ""}
           </p>
         </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * O cadastro de gente: quem atende e quem prospecta. É o que faz o
+ * dashboard existir — sem nome no atendimento, não há por quem medir.
+ *
+ * Só gerente edita (a RLS da 0010 recusa o resto), e a tela reflete
+ * isso em vez de deixar o negociador clicar e tomar erro.
+ */
+function CadastroNegociadores({ perfil }) {
+  const [lista, setLista] = useState([]);
+  const [novo, setNovo] = useState({ nome: "", papel: "negociador" });
+  const [erro, setErro] = useState("");
+  const [indo, setIndo] = useState(false);
+  const eGerente = perfil && perfil.papel === "gerente";
+
+  const carregar = () => listarNegociadores().then(setLista).catch((e) => setErro(e.message));
+  useEffect(() => { carregar(); }, []);
+
+  const cadastrar = async () => {
+    if (!novo.nome.trim()) return;
+    setErro(""); setIndo(true);
+    try { await criarNegociador(novo); setNovo({ nome: "", papel: novo.papel }); await carregar(); }
+    catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+
+  const mexer = async (id, mud) => {
+    setErro("");
+    try { await atualizarNegociador(id, mud); await carregar(); }
+    catch (e) { setErro(e.message); }
+  };
+
+  const grupo = (papel, titulo) => {
+    const gente = lista.filter((n) => n.papel === papel);
+    if (!gente.length) return null;
+    return (
+      <div className="mt-3">
+        <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>{titulo}</div>
+        <div className="mt-1.5 space-y-1.5">
+          {gente.map((n) => (
+            <div key={n.id} className="flex items-center gap-2 rounded-md px-3 py-2"
+              style={{ background: n.ativo ? "#fff" : "#FBFAFC", border: `1px solid ${C.line}`, opacity: n.ativo ? 1 : 0.55 }}>
+              <span className="flex-1 text-[13px] font-medium">{n.nome}</span>
+              {eGerente ? (
+                <>
+                  <input className="w-24 rounded-md border px-2 py-1 text-right text-[12px] outline-none"
+                    style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" title="Meta do mês em R$"
+                    defaultValue={n.meta_valor == null ? "" : Math.round(n.meta_valor)}
+                    onBlur={(e) => e.target.value != Math.round(n.meta_valor) && mexer(n.id, { meta_valor: e.target.value })} />
+                  <input className="w-14 rounded-md border px-2 py-1 text-right text-[12px] outline-none"
+                    style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" title="Meta de carros no mês"
+                    defaultValue={n.meta_volume == null ? "" : n.meta_volume}
+                    onBlur={(e) => e.target.value != n.meta_volume && mexer(n.id, { meta_volume: e.target.value })} />
+                  <button onClick={() => mexer(n.id, { ativo: !n.ativo })} className="text-[11px]"
+                    style={{ color: n.ativo ? C.laranja : C.verde }}>
+                    {n.ativo ? "desativar" : "ativar"}
+                  </button>
+                </>
+              ) : (
+                <span className="text-[11px]" style={{ color: C.mute, fontFamily: F.mono }}>
+                  {brl(n.meta_valor)} · {n.meta_volume} carros
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+      {grupo("negociador", "Negociadores")}
+      {grupo("prospeccao", "Prospecção")}
+
+      {eGerente && (
+        <div className="mt-3 space-y-2">
+          <div className="grid grid-cols-3 gap-2">
+            <input className={`${inputCls} col-span-2`} style={inputSty} placeholder="Nome"
+              value={novo.nome} onChange={(e) => setNovo({ ...novo, nome: e.target.value })} />
+            <select className={inputCls} style={inputSty} value={novo.papel}
+              onChange={(e) => setNovo({ ...novo, papel: e.target.value })}>
+              <option value="negociador">Negociador</option>
+              <option value="prospeccao">Prospecção</option>
+            </select>
+          </div>
+          <button onClick={cadastrar} disabled={indo || !novo.nome.trim()}
+            className="w-full rounded-md py-2.5 text-[13px] font-semibold"
+            style={{ background: indo || !novo.nome.trim() ? C.line : C.roxo, color: "#fff" }}>
+            {indo ? "Cadastrando…" : "Cadastrar"}
+          </button>
+          <p className="text-[10px] leading-relaxed" style={{ color: C.mute }}>
+            Os dois números são a meta do mês: valor e quantidade de carros. Saem do campo e já salvam.
+          </p>
+        </div>
       )}
     </div>
   );
@@ -3438,7 +3648,7 @@ function CRM({ perfil, aoAbrir }) {
           </button>
         )}
 
-        <Funil />
+        <Funil perfil={perfil} />
 
         {perfil && perfil.papel === "gerente" && (
           mostrarImportar

@@ -9,6 +9,17 @@
  * a mesma consulta traz uma linha para negociador e todas para gerente.
  * Não há checagem de papel aqui — se houvesse, seriam duas regras para
  * manter em sincronia.
+ *
+ * ---------------------------------------------------------------------
+ * /api/perfil?recurso=negociadores
+ *
+ *   GET            lista o cadastro de negociadores e prospecção
+ *   POST           cadastra { nome, papel, meta_valor, meta_volume }
+ *   PATCH ?id=     edita
+ *
+ * Mora aqui, e não em arquivo próprio, porque o plano Hobby da Vercel
+ * aceita no máximo 12 funções e já estamos nas 12. Cadastro de gente é
+ * o assunto deste arquivo, então a costura não é arbitrária.
  */
 
 const URL_BASE = (process.env.SUPABASE_URL || "").replace(/\/+$/, "");
@@ -37,17 +48,109 @@ function donoDoToken(tok) {
   }
 }
 
+const RX_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const PAPEIS = ["negociador", "prospeccao"];
+
+const texto = (v) => {
+  const t = String(v == null ? "" : v).trim();
+  return t === "" ? null : t;
+};
+const numero = (v) => {
+  const n = Number(String(v == null ? "" : v).replace(/[^\d.,-]/g, "").replace(/\./g, "").replace(",", "."));
+  return Number.isFinite(n) ? n : null;
+};
+
+async function lerCorpo(req) {
+  let c = req.body;
+  if (c && typeof Buffer !== "undefined" && Buffer.isBuffer(c)) c = c.toString("utf8");
+  if (typeof c === "string") { try { c = JSON.parse(c); } catch (e) { c = null; } }
+  return c && typeof c === "object" ? c : null;
+}
+
+async function negociadores(req, res, tok) {
+  const base = `${URL_BASE}/rest/v1/negociador`;
+  const cab = { apikey: ANON, Authorization: tok };
+  const cabJson = { ...cab, "Content-Type": "application/json" };
+
+  const responder = async (r) => {
+    const corpo = await r.text();
+    let d = null;
+    try { d = corpo ? JSON.parse(corpo) : null; } catch (e) {}
+    if (!r.ok) {
+      const msg = (d && (d.message || d.hint || d.details)) || "O banco recusou a operação.";
+      // 23505 é nome repetido: mensagem própria, porque a do Postgres
+      // não diz nada a quem está cadastrando.
+      const dup = d && d.code === "23505";
+      return res.status(dup ? 409 : (r.status === 401 ? 401 : 502))
+        .json({ erro: dup ? "Já existe alguém com esse nome nesse papel." : String(msg) });
+    }
+    return d;
+  };
+
+  if (req.method === "GET") {
+    const r = await fetch(`${base}?select=id,nome,papel,ativo,meta_valor,meta_volume&order=papel.asc,nome.asc`, { headers: cab });
+    const d = await responder(r);
+    if (d === undefined || res.writableEnded) return;
+    return res.status(200).json({ negociadores: d || [] });
+  }
+
+  if (req.method === "POST") {
+    const c = await lerCorpo(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    const nome = texto(c.nome);
+    if (!nome) return res.status(400).json({ erro: "Informe o nome." });
+    const papel = PAPEIS.indexOf(String(c.papel || "")) >= 0 ? c.papel : "negociador";
+    const linha = { nome, papel };
+    if (c.meta_valor !== undefined) linha.meta_valor = numero(c.meta_valor);
+    if (c.meta_volume !== undefined) linha.meta_volume = Math.trunc(numero(c.meta_volume) || 0);
+    const r = await fetch(base, { method: "POST", headers: { ...cabJson, Prefer: "return=representation" }, body: JSON.stringify(linha) });
+    const d = await responder(r);
+    if (d === undefined || res.writableEnded) return;
+    return res.status(201).json({ ok: true, negociador: Array.isArray(d) ? d[0] : d });
+  }
+
+  if (req.method === "PATCH") {
+    const id = String(req.query.id || "");
+    if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido." });
+    const c = await lerCorpo(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    const mud = {};
+    if (c.nome !== undefined) mud.nome = texto(c.nome);
+    if (c.papel !== undefined && PAPEIS.indexOf(String(c.papel)) >= 0) mud.papel = c.papel;
+    if (c.ativo !== undefined) mud.ativo = !!c.ativo;
+    if (c.meta_valor !== undefined) mud.meta_valor = numero(c.meta_valor);
+    if (c.meta_volume !== undefined) mud.meta_volume = Math.trunc(numero(c.meta_volume) || 0);
+    if (!Object.keys(mud).length) return res.status(400).json({ erro: "Nada para atualizar." });
+    const r = await fetch(`${base}?id=eq.${id}`, { method: "PATCH", headers: { ...cabJson, Prefer: "return=representation" }, body: JSON.stringify(mud) });
+    const d = await responder(r);
+    if (d === undefined || res.writableEnded) return;
+    const salvo = Array.isArray(d) ? d[0] : d;
+    // PATCH vazio é a RLS recusando: só gerente edita.
+    if (!salvo) return res.status(403).json({ erro: "Só o gerente edita o cadastro." });
+    return res.status(200).json({ ok: true, negociador: salvo });
+  }
+
+  res.setHeader("Allow", "GET, POST, PATCH");
+  return res.status(405).json({ erro: "Use GET, POST ou PATCH." });
+}
+
 module.exports = async function handler(req, res) {
   if (!URL_BASE || !ANON) {
     return res.status(500).json({ erro: "SUPABASE_URL ou SUPABASE_ANON_KEY não configurados." });
   }
+
+  const tok = tokenDe(req);
+  if (!tok) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
+
+  if (String(req.query.recurso || "") === "negociadores") {
+    try { return await negociadores(req, res, tok); }
+    catch (e) { return res.status(502).json({ erro: "Não consegui falar com o banco." }); }
+  }
+
   if (req.method !== "GET") {
     res.setHeader("Allow", "GET");
     return res.status(405).json({ erro: "Use GET." });
   }
-
-  const tok = tokenDe(req);
-  if (!tok) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
 
   let r, corpo;
   try {
