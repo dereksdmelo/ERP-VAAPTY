@@ -1940,7 +1940,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   };
 
   const blocoCliente = (
-    <Bloco titulo="Dados do cliente" sub="O documento só imprime com os quatro preenchidos. Papel com lacuna volta para ser completado depois — e é assim que contrato acaba assinado pela metade.">
+    <Bloco titulo="Dados do cliente" sub="Nome, CPF e RG travam a impressão — papel com lacuna volta para ser completado depois, e é assim que contrato acaba assinado pela metade. O resto é opcional: anexe o CRLV e a CNH em vez de perguntar.">
       <div className="space-y-2.5">
         <Campo label="Nome completo" req>
           <input className={inputCls} style={inputSty} value={cliente.cliente_nome}
@@ -1956,13 +1956,17 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               value={cliente.cliente_rg} onChange={(e) => setCliente({ ...cliente, cliente_rg: e.target.value })} />
           </Campo>
         </div>
-        <Campo label="Endereço completo" req>
-          <input className={inputCls} style={inputSty} placeholder="Rua, número, bairro, cidade"
-            value={cliente.cliente_endereco} onChange={(e) => setCliente({ ...cliente, cliente_endereco: e.target.value })} />
-        </Campo>
         <Campo label="Telefone">
           <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="tel"
             value={cliente.cliente_telefone} onChange={(e) => setCliente({ ...cliente, cliente_telefone: e.target.value })} />
+        </Campo>
+        {/* Sem `req`: não trava mais a impressão. A cláusula continua no
+            termo e no pré-contrato — é texto assinado — e sai com a
+            linha em branco quando este campo estiver vazio. O endereço
+            do proprietário está no CRLV, que agora é anexado. */}
+        <Campo label="Endereço — opcional, está no CRLV">
+          <input className={inputCls} style={inputSty} placeholder="Só se o papel exigir preenchido"
+            value={cliente.cliente_endereco} onChange={(e) => setCliente({ ...cliente, cliente_endereco: e.target.value })} />
         </Campo>
 
         <button onClick={salvarCliente} disabled={salvandoCliente}
