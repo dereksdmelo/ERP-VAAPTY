@@ -671,10 +671,19 @@ começa falso e só vira verdadeiro quando o negociador usa o valor da
 tabela oficial. O aviso aparece no Lançamento e ao lado do campo FIPE.
 **É aviso, não trava** — quem decidir travar mexe em `etapaConcluida`.
 
-### 16. Simulador de propostas: a planilha do Derek, célula por célula
+### 16. Extrato de ofertas: a planilha do Derek, célula por célula
 
-Na Espera, um bloco reproduz o *Simulador de Proposta* que o Derek
-mantinha no Excel. Dado o valor de referência e quantas propostas se
+Na **Negociação**, um bloco reproduz o *Simulador de Proposta* que o
+Derek mantinha no Excel. Nasceu na Espera e foi movido a pedido dele:
+é a folha que vai para a mesa, então mora onde a mesa acontece.
+
+**O papel sai exatamente igual à tela.** Se imprimisse outros números,
+a folha do cliente não bateria com o que o negociador está vendo — e é
+ele quem tem que sustentar o número na conversa.
+
+**Cada impressão cria uma rodada**, com a Melhor Proposta como valor
+impresso; a contraproposta do cliente responde a ela. São três, com
+teto, e o botão diz qual é o próximo. Dado o valor de referência e quantas propostas se
 quer, ele devolve a nuvem de valores, a média e a melhor.
 
 **A conta é a da planilha, não uma aproximação:**
@@ -696,7 +705,7 @@ propostas de índice 1 e 45 nascem coladas no piso; as do meio abrem até
 o teto. **Quem "simplificar" para um `Math.random()` entre piso e teto
 muda o formato da nuvem e o valor médio para de bater com a planilha.**
 
-**A tela imita a planilha**, a pedido do Derek: o mesmo cabeçalho de
+**A tela imita a planilha**, a pedido do Derek: o logo, o cabeçalho de
 quatro linhas (Veículo, Quant. de propostas, Valor médio das propostas,
 Melhor Proposta) e a lista de propostas em três colunas de Num | Valor,
 como nas faixas H/I, K/L e N/O do arquivo. Ele lê esse formato há
@@ -704,9 +713,10 @@ tempo. **A planilha não tem gráfico** — o único desenho embutido nela é
 o logo da Vaapty; o histograma que existiu aqui por um dia era invenção
 minha e saiu junto com a tarja laranja.
 
-**Nada dali é gravado.** O resultado não vai para a tabela `proposta`
-nem para o funil. O que separa simulação de proposta real é o título do
-bloco e o subtítulo ("não vale como proposta"), já que a tarja saiu. Se
+**Nada dali é gravado como proposta.** O resultado não vai para a
+tabela `proposta` nem para o funil — só a Melhor Proposta vira o valor
+impresso da rodada. A tarja "nenhum lojista ofereceu isto" saiu a
+pedido do Derek; o que identifica a folha é o título do bloco. Se
 um dia precisar ser gravado, tem que nascer com coluna marcando a
 simulação — proposta inventada contada como real estraga a conversão e
 pode ir para a mesa do cliente.
