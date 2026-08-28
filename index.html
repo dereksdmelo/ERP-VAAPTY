@@ -3532,16 +3532,39 @@ const semAcentoMaiusc = (t) =>
 
 const DE_ORIGEM = {
   "FLUXO LOJA": "fluxo_loja", "FLUXO DE LOJA": "fluxo_loja", "FLUXO": "fluxo_loja",
-  "PROSPECCAO": "prospeccao", "INDICACAO": "indicacao", "TV": "tv",
-  "GOOGLE": "google", "GOOGLE/SITE": "google", "SITE": "google",
+  "PROSPECCAO": "prospeccao", "PROSPECCAO ATIVA": "prospeccao",
+  "INDICACAO": "indicacao", "TV": "tv",
+  "GOOGLE": "google", "GOOGLE/SITE": "google", "GOOGLE / SITE": "google", "SITE": "google",
   "FACEBOOK": "facebook", "FACELEADS": "faceleads", "INSTAGRAM": "facebook",
+  "FACEBOOK/INSTAGRAM": "facebook", "FACEBOOK / INSTAGRAM": "facebook", "FACE": "facebook",
   "OUTDOOR": "outdoor", "RECUPERACAO": "recuperacao",
-  "TELEFONE RECEPTIVO": "outro", "RADIO": "outro",
+  "TELEFONE RECEPTIVO": "outro", "RADIO": "outro", "OUTRO": "outro", "OUTROS": "outro",
+  "WHATSAPP": "outro", "MARKETPLACE": "outro", "OLX": "outro",
 };
+
+/**
+ * Os quinze status reais da planilha (0009). Sem eles, tudo o que não
+ * fosse "FECHADO" caía em "aberto" — foi o que aconteceu na primeira
+ * importação, e é por isso que o funil não separava nada.
+ */
 const DE_STATUS = {
+  "FECHADO": "fechado",
+  "CLIENTE NA LOJA": "cliente_na_loja",
+  "AGUARDANDO": "aguardando",
   "AGUARDANDO PROPOSTAS": "aguardando_propostas",
-  "EM NEGOCIACAO": "em_negociacao",
-  "FECHADO": "fechado", "PERDIDO": "perdido",
+  "BAIXAR EXPECTATIVA": "baixar_expectativa", "BAIXAR A EXPECTATIVA": "baixar_expectativa",
+  "VAI VOLTAR": "vai_voltar",
+  "CONSIGNADO": "consignado", "CONSIGNACAO": "consignado",
+  "VENDEU FORA": "vendeu_fora",
+  "PERSEGUIR": "perseguir",
+  "EM NEGOCIACAO": "em_negociacao", "NEGOCIACAO": "em_negociacao",
+  "NAO AVALIOU": "nao_avaliou",
+  "NAO LANCADO": "nao_lancado", "NAO LANCOU": "nao_lancado",
+  "FALTA PROPOSTA": "falta_proposta", "FALTOU PROPOSTA": "falta_proposta",
+  "QUITACAO FUTURA": "quitacao_futura",
+  "RESCISAO": "rescisao",
+  "RESTRICAO": "restricao",
+  "PERDIDO": "perdido",
 };
 
 const ehNumero = (v) => {
@@ -3570,19 +3593,67 @@ function lerPlanilha(texto) {
   if (iCab < 0) return { erro: "Não achei o cabeçalho. Copie incluindo a linha com DATA, NEGOCIADOR, CARRO, PLACA…" };
 
   const cab = linhas[iCab].map(semAcentoMaiusc);
-  const um = (nome) => cab.indexOf(nome);
+
+  /**
+   * O cabeçalho real não é o que eu tinha suposto: a planilha diz
+   * NEGOCIADORES (plural), PROSPECTO e ANO — e o parser procurava
+   * NEGOCIADOR, PROSPEC e ANO/MOD. Nome que não bate vira coluna
+   * ignorada em silêncio, e foi assim que 199 de 200 linhas entraram
+   * sem negociador.
+   *
+   * Daí a busca por lista de nomes possíveis, e o relatório de colunas
+   * na tela: importação que erra calada é pior que importação que falha.
+   */
+  const um = (...nomes) => {
+    for (const nome of nomes) { const i = cab.indexOf(nome); if (i >= 0) return i; }
+    return -1;
+  };
   const todos = (nome) => cab.map((c, i) => (c === nome ? i : -1)).filter((i) => i >= 0);
 
   const iProp = todos("PROPOSTAS");
   const iLoj = todos("LOJISTA");
 
+  /**
+   * LOJISTA vale para a coluna de PROPOSTAS mais próxima à esquerda
+   * dele. No cabeçalho de hoje — PROPOSTAS | cx | PROPOSTAS | LOJISTA —
+   * o lojista é do segundo, não do primeiro. Parear por ordem, como
+   * antes, colava o lojista na coluna errada.
+   */
+  const lojistaDe = (ip) => {
+    const depois = iLoj.filter((j) => j > ip);
+    if (!depois.length) return -1;
+    const j = depois[0];
+    return iProp.some((outro) => outro > ip && outro < j) ? -1 : j;
+  };
+
   const col = {
-    data: um("DATA"), negociador: um("NEGOCIADOR"), prospec: um("PROSPEC"),
-    carro: um("CARRO"), placa: um("PLACA"), ano: um("ANO/MOD"), km: um("KM"),
-    cliente: um("CLIENTE"), telefone: um("TELEFONE"), origem: um("ORIGEM"),
-    status: um("STATUS"), fipe: um("FIPE"), pretensao: um("PRETENSAO"),
+    data: um("DATA"),
+    negociador: um("NEGOCIADORES", "NEGOCIADOR", "VENDEDOR", "VENDEDORES"),
+    prospec: um("PROSPECTO", "PROSPEC", "PROSPECCAO"),
+    carro: um("CARRO", "VEICULO", "MODELO"),
+    placa: um("PLACA"),
+    ano: um("ANO/MOD", "ANO/MODELO", "ANO"),
+    km: um("KM"),
+    cliente: um("CLIENTE"),
+    telefone: um("TELEFONE", "FONE", "CONTATO"),
+    origem: um("ORIGEM"),
+    status: um("STATUS"),
+    fipe: um("FIPE"),
+    pretensao: um("PRETENSAO"),
+    motivo: um("MOTIVO DA VENDA", "MOTIVO"),
+    obs: um("OBS SOBRE NEGOCIACAO", "OBS SOBRE NEGOCIACOES", "OBS", "OBSERVACOES", "OBSERVACAO"),
+    conseguiu: um("QUEM CONSEGUIU"),
+    acao: um("ACAO", "ACOES"),
   };
   const pega = (l, i) => (i >= 0 && l[i] != null ? String(l[i]).trim() : "");
+
+  // O que casou e o que sobrou, para a tela mostrar antes de gravar.
+  const usadas = new Set();
+  Object.keys(col).forEach((k) => { if (col[k] >= 0) usadas.add(col[k]); });
+  iProp.concat(iLoj).forEach((i) => usadas.add(i));
+  const achadas = Object.keys(col).filter((k) => col[k] >= 0);
+  const faltando = Object.keys(col).filter((k) => col[k] < 0);
+  const ignoradas = cab.map((c, i) => (!usadas.has(i) && c ? c : "")).filter(Boolean);
 
   const fora = [];
   const prontas = [];
@@ -3595,15 +3666,27 @@ function lerPlanilha(texto) {
 
     const propostas = [];
     const recados = [];
-    iProp.forEach((ip, k) => {
+    iProp.forEach((ip) => {
       const valor = pega(l, ip);
-      const lojista = pega(l, iLoj[k] >= 0 ? iLoj[k] : -1);
+      const lojista = pega(l, lojistaDe(ip));
       if (valor && ehNumero(valor)) propostas.push({ valor, lojista });
       else if (valor) recados.push(valor);
       if (lojista && !ehNumero(valor) && !propostas.some((p) => p.lojista === lojista)) {
         if (lojista.length > 3) recados.push(lojista);
       }
     });
+
+    // Motivo da venda, observação e quem conseguiu não têm coluna
+    // própria no banco, e jogar fora seria perder o que a planilha tem
+    // de mais útil. Vão para `observacoes` com o rótulo na frente.
+    const motivo = pega(l, col.motivo);
+    const obsPlanilha = pega(l, col.obs);
+    const conseguiu = pega(l, col.conseguiu);
+    const acao = pega(l, col.acao);
+    if (motivo) recados.unshift(`Motivo: ${motivo}`);
+    if (obsPlanilha) recados.push(obsPlanilha);
+    if (conseguiu) recados.push(`Quem conseguiu: ${conseguiu}`);
+    if (acao) recados.push(`Ação: ${acao}`);
 
     const origemBruta = semAcentoMaiusc(pega(l, col.origem));
     const statusBruto = semAcentoMaiusc(pega(l, col.status));
@@ -3629,7 +3712,11 @@ function lerPlanilha(texto) {
     });
   });
 
-  return { linhas: prontas, desconhecidos: [...new Set(fora)] };
+  return {
+    linhas: prontas,
+    desconhecidos: [...new Set(fora)],
+    colunas: { achadas, faltando, ignoradas, propostas: iProp.length, lojistas: iLoj.length },
+  };
 }
 
 function Importar({ aoTerminar }) {
@@ -3695,6 +3782,30 @@ function Importar({ aoTerminar }) {
           <div className="rounded-md p-3 text-[11px] leading-relaxed" style={{ background: "#FBFAFC", border: `1px solid ${C.line}`, color: C.mute }}>
             <b style={{ color: C.ink }}>{lido.linhas.length} linhas</b> · {comData} com data válida ·
             {" "}{comPlaca} com placa válida · {nProp} propostas com valor.
+
+            {/* O relatório de colunas existe porque a primeira
+                importação errou calada: o cabeçalho dizia NEGOCIADORES
+                e o parser procurava NEGOCIADOR. Agora dá para ver
+                antes de gravar. */}
+            {lido.colunas && (
+              <div className="mt-2 border-t pt-2" style={{ borderColor: C.line }}>
+                <div style={{ color: C.verde }}>
+                  Reconheci: {lido.colunas.achadas.join(", ")}
+                  {lido.colunas.propostas ? ` · ${lido.colunas.propostas} coluna(s) de proposta` : ""}
+                  {lido.colunas.lojistas ? ` · ${lido.colunas.lojistas} de lojista` : ""}
+                </div>
+                {lido.colunas.faltando.length > 0 && (
+                  <div className="mt-1" style={{ color: C.laranja }}>
+                    Não achei: {lido.colunas.faltando.join(", ")} — essas linhas entram sem esse dado.
+                  </div>
+                )}
+                {lido.colunas.ignoradas.length > 0 && (
+                  <div className="mt-1">
+                    Colunas que não uso: {lido.colunas.ignoradas.join(", ")}.
+                  </div>
+                )}
+              </div>
+            )}
             {comData < lido.linhas.length && (
               <div className="mt-1" style={{ color: C.laranja }}>
                 {lido.linhas.length - comData} sem data legível entram sem data — a planilha tem "06/052022" e "18/05/0202". Inventar dia seria pior.

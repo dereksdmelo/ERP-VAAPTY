@@ -23,7 +23,16 @@ const TETO = 500;
 
 const ORIGENS = ["fluxo_loja", "prospeccao", "indicacao", "tv", "google",
                  "facebook", "outdoor", "recuperacao", "faceleads", "outro"];
-const STATUS = ["aberto", "aguardando_propostas", "em_negociacao", "fechado", "perdido"];
+// Os quinze da 0009 mais os três antigos, que continuam no enum. Sem
+// esta lista completa tudo o que não fosse "fechado" virava "aberto" no
+// servidor, mesmo com a tela mandando o status certo — foi o que
+// apagou o status de 200 linhas na primeira importação.
+const STATUS = [
+  "fechado", "cliente_na_loja", "aguardando", "baixar_expectativa", "vai_voltar",
+  "consignado", "vendeu_fora", "perseguir", "em_negociacao", "nao_avaliou",
+  "nao_lancado", "falta_proposta", "quitacao_futura", "rescisao", "restricao",
+  "aberto", "aguardando_propostas", "perdido",
+];
 
 const tokenDe = (req) => {
   const h = String((req.headers && req.headers.authorization) || "");
