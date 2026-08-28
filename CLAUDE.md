@@ -28,6 +28,7 @@ api/proposta.js                  GET/POST/PATCH/DELETE — ofertas dos lojistas
 api/funil.js                     GET  — a aba PIPELINE: fluxo → venda por origem
 api/importar.js                  POST — traz a planilha do CRM para o banco
 api/fipe.js                      GET  — tabela FIPE oficial, para conferência
+api/checklist.js                 GET/PUT — o check list digital do negócio
 documentos.js                    CÓPIA MORTA: o que roda é o bloco colado no index.html
 supabase/migrations/*.sql        esquema do banco, versionado
 PENDENCIAS.md                    o que está em aberto e o que destrava cada coisa
@@ -346,11 +347,29 @@ declarado dentro de outro vira tipo novo a cada render: o React remonta
 o formulário e **o campo perde o foco a cada tecla digitada**. Quem
 transformar `blocoCliente` em `<BlocoCliente/>` reintroduz isso.
 
-**O quarto documento é o check list** (0005), que fecha o atendimento e
-vai para o administrativo. Ele imprime o que o sistema sabe e deixa em
-branco o que o cliente escreve à mão — inclusive **conta e chave PIX,
-que o sistema não guarda**. Guardar dado bancário de cliente pediria
-conversa com o jurídico antes.
+### 15. O check list virou registro, não papel
+
+O check list era uma folha que o negociador preenchia, o cliente
+completava com os dados bancários e o administrativo conferia depois.
+Agora é linha no banco (0008), **uma por atendimento** — daí o `unique`
+em `atendimento_id` e o upsert em cima dele. Ele é o resumo do negócio,
+não um evento que se repete como o documento impresso.
+
+**Duas mãos preenchem, e o carimbo é do servidor.** Quando qualquer
+item do administrativo é marcado, `api/checklist.js` grava
+`adm_conferido_por` e `adm_conferido_em` a partir do token — o cliente
+não escolhe esses valores. Sem isso, "conferido" não responde a
+pergunta que importa quando algo dá errado: conferido por quem.
+
+**A via impressa espelha o digital.** `checkList(f, cl)` marca no papel
+o que está marcado no sistema; sem check list salvo, sai com as caixas
+vazias e continua servindo como formulário.
+
+**Dado bancário agora fica guardado.** Conta e chave PIX são dado
+sensível ao ponto de fraude: quem tiver acesso desvia pagamento. A RLS
+da 0008 é o que separa isso de um vazamento, e a tela avisa para
+conferir o favorecido antes de salvar. **A conversa com o jurídico
+sobre retenção continua pendente** — ver PENDENCIAS.md.
 
 **A janela precisa abrir no clique.** `abrirDocumento()` é chamado antes
 de qualquer `await` em `gerarDocumento()`
