@@ -1,29 +1,30 @@
 /**
- * /api/fipe — a tabela FIPE, para conferência.
+ * /api/fipe — a tabela FIPE oficial, para conferência.
  *
  *   GET ?acao=marcas
- *   GET ?acao=modelos&marca=26
- *   GET ?acao=anos&marca=26&modelo=4925
- *   GET ?acao=valor&marca=26&modelo=4925&ano=2010-1
+ *   GET ?acao=modelos&marca=26&ano=2010
+ *   GET ?acao=valor&marca=26&modelo=4925&ano=2010&combustivel=1
  *
  * Por que existe, se /api/placa já traz o valor FIPE: são fontes
  * diferentes. A Placa Fipe *adivinha* a versão a partir da placa e
- * devolve candidatas com percentual de similaridade. Versão errada
- * contamina o FIPE, que contamina o POR, que contamina a negociação.
- * Aqui o negociador confirma escolhendo à mão.
+ * devolve as candidatas com um percentual de similaridade. Versão
+ * errada contamina o FIPE, que contamina o POR, que contamina a
+ * negociação inteira. Aqui o negociador confirma na fonte.
  *
- * POR QUE NÃO A FIPE OFICIAL: veiculos.fipe.org.br está atrás do
- * Cloudflare e devolve 403 para requisição de servidor; do navegador,
- * o CORS barra. Contornar proteção anti-robô está fora de questão.
- * A Parallelum espelha a mesma tabela e é aberta a uso programático.
+ * A ordem é MARCA → ANO → MODELO, e não a da FIPE (marca → modelo →
+ * ano): escolhendo o modelo primeiro, a lista mistura o mesmo carro de
+ * muitos anos. O endpoint `ConsultarModelosAtravesDoAno` da FIPE faz
+ * exatamente esse caminho.
  *
- * O QUE SE PERDE: a Parallelum não tem caminho ano → modelos, então a
- * ordem é marca → modelo → ano, e não marca → ano → modelo como o
- * Derek pediu. A lista de modelos de uma marca é longa (261 na
- * Hyundai), e por isso a tela tem busca por texto. Ver PENDENCIAS.md.
+ * O ano da FIPE carrega o combustível junto ("2010-1"). Como o
+ * negociador escolhe só o ano, consulto os três combustíveis e junto as
+ * listas, marcando cada modelo com o seu — assim a consulta de valor
+ * depois sai com o parâmetro certo.
  */
 
-const BASE = "https://parallelum.com.br/fipe/api/v1/carros/marcas";
+const FIPE = "https://veiculos.fipe.org.br/api/veiculos";
+const CARRO = 1;                       // codigoTipoVeiculo
+const COMBUSTIVEIS = [1, 2, 3];        // gasolina, álcool, diesel
 const ANON = process.env.SUPABASE_ANON_KEY || "";
 
 const tokenDe = (req) => {
@@ -31,31 +32,71 @@ const tokenDe = (req) => {
   return /^Bearer\s+\S+/.test(h) ? h : null;
 };
 
-const codigo = (v) => {
-  const s = String(v == null ? "" : v).trim();
-  return /^[\w-]{1,20}$/.test(s) ? s : null;
-};
+// A tabela de referência muda uma vez por mês. Guardar por uma hora
+// evita uma ida extra à FIPE em cada clique do negociador.
+let refCache = { codigo: null, mes: null, em: 0 };
 
-async function buscar(caminho) {
+/**
+ * A FIPE recusa requisição que não pareça vir do site dela. Estes
+ * cabeçalhos são os que o navegador manda — sem eles a resposta volta
+ * bloqueada, e do servidor da Vercel isso é ainda mais sensível do que
+ * de um navegador comum.
+ */
+async function chamar(rota, corpo) {
   let r, texto;
   try {
-    r = await fetch(`${BASE}${caminho}`, { headers: { Accept: "application/json" } });
+    r = await fetch(`${FIPE}/${rota}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/javascript, */*; q=0.01",
+        "Accept-Language": "pt-BR,pt;q=0.9",
+        Origin: "https://veiculos.fipe.org.br",
+        Referer: "https://veiculos.fipe.org.br/",
+        "X-Requested-With": "XMLHttpRequest",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+      },
+      body: JSON.stringify(corpo),
+    });
     texto = await r.text();
   } catch (e) {
-    const x = new Error("Não consegui alcançar a tabela FIPE.");
+    const x = new Error("Não consegui alcançar a FIPE.");
     x.status = 502;
     throw x;
   }
+
   let dado = null;
   try { dado = texto ? JSON.parse(texto) : null; } catch (e) {}
+
   if (!r.ok || dado == null) {
+    // A mensagem carrega o status e um pedaço da resposta: sem isso,
+    // "não respondeu como esperado" não diz se é bloqueio, mudança de
+    // rota ou parâmetro errado.
     const pedaco = String(texto || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 120);
-    const x = new Error(`A tabela FIPE respondeu ${r.status}${pedaco ? `: ${pedaco}` : " sem corpo"}.`);
+    const x = new Error(`A FIPE respondeu ${r.status}${pedaco ? `: ${pedaco}` : " sem corpo"}.`);
     x.status = 502;
     throw x;
   }
   return dado;
 }
+
+async function referencia() {
+  const agora = Date.now();
+  if (refCache.codigo && agora - refCache.em < 3600000) return refCache;
+  const tabelas = await chamar("ConsultarTabelaDeReferencia", {});
+  if (!Array.isArray(tabelas) || !tabelas.length) {
+    const e = new Error("A FIPE não devolveu a tabela de referência.");
+    e.status = 502;
+    throw e;
+  }
+  refCache = { codigo: tabelas[0].Codigo, mes: String(tabelas[0].Mes || "").trim(), em: agora };
+  return refCache;
+}
+
+const inteiro = (v) => {
+  const n = Number(String(v == null ? "" : v).replace(/[^\d]/g, ""));
+  return Number.isFinite(n) && n > 0 ? n : null;
+};
 
 // "R$ 44.935,00" → 44935
 const valorNumerico = (s) => {
@@ -68,45 +109,75 @@ module.exports = async function handler(req, res) {
     res.setHeader("Allow", "GET");
     return res.status(405).json({ erro: "Use GET." });
   }
+  // Não gasta cota da Placa Fipe, mas é rota interna: exige login como
+  // o resto de api/. ANON só entra aqui para a checagem de configuração.
   if (!ANON) return res.status(500).json({ erro: "SUPABASE_ANON_KEY não configurada." });
   if (!tokenDe(req)) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
 
   const acao = String(req.query.acao || "");
-  const marca = codigo(req.query.marca);
-  const modelo = codigo(req.query.modelo);
-  const ano = codigo(req.query.ano);
-
-  // A tabela muda uma vez por mês: um dia na borda é conservador.
-  const guardar = () => res.setHeader("Cache-Control", "public, max-age=0, s-maxage=86400");
 
   try {
-    if (acao === "marcas") {
-      const d = await buscar("");
-      guardar();
-      return res.status(200).json({ marcas: (d || []).map((m) => ({ codigo: m.codigo, nome: m.nome })) });
-    }
+    const ref = await referencia();
 
-    if (acao === "modelos") {
-      if (!marca) return res.status(400).json({ erro: "Informe a marca." });
-      const d = await buscar(`/${marca}/modelos`);
-      guardar();
+    if (acao === "marcas") {
+      const marcas = await chamar("ConsultarMarcas", {
+        codigoTabelaReferencia: ref.codigo, codigoTipoVeiculo: CARRO,
+      });
+      res.setHeader("Cache-Control", "public, max-age=0, s-maxage=86400");
       return res.status(200).json({
-        modelos: (d.modelos || []).map((m) => ({ codigo: m.codigo, nome: m.nome })),
+        mes: ref.mes,
+        marcas: (marcas || []).map((m) => ({ codigo: m.Value, nome: m.Label })),
       });
     }
 
-    if (acao === "anos") {
-      if (!marca || !modelo) return res.status(400).json({ erro: "Informe marca e modelo." });
-      const d = await buscar(`/${marca}/modelos/${modelo}/anos`);
-      guardar();
-      return res.status(200).json({ anos: (d || []).map((a) => ({ codigo: a.codigo, nome: a.nome })) });
+    if (acao === "modelos") {
+      const marca = inteiro(req.query.marca);
+      const ano = inteiro(req.query.ano);
+      if (!marca || !ano) return res.status(400).json({ erro: "Informe marca e ano." });
+
+      // Os três combustíveis, juntados. "nadaencontrado" é como a FIPE
+      // diz que não há nada — não é erro.
+      const vistos = {};
+      const modelos = [];
+      for (const comb of COMBUSTIVEIS) {
+        let lista;
+        try {
+          lista = await chamar("ConsultarModelosAtravesDoAno", {
+            codigoTabelaReferencia: ref.codigo, codigoTipoVeiculo: CARRO,
+            codigoMarca: marca, ano: `${ano}-${comb}`,
+            codigoTipoCombustivel: comb, anoModelo: ano,
+          });
+        } catch (e) { continue; }
+        if (!Array.isArray(lista)) continue;
+        lista.forEach((m) => {
+          const chave = `${m.Value}-${comb}`;
+          if (vistos[chave]) return;
+          vistos[chave] = true;
+          modelos.push({ codigo: m.Value, nome: m.Label, combustivel: comb });
+        });
+      }
+
+      res.setHeader("Cache-Control", "public, max-age=0, s-maxage=86400");
+      return res.status(200).json({ mes: ref.mes, modelos });
     }
 
     if (acao === "valor") {
+      const marca = inteiro(req.query.marca);
+      const modelo = inteiro(req.query.modelo);
+      const ano = inteiro(req.query.ano);
+      const comb = inteiro(req.query.combustivel) || 1;
       if (!marca || !modelo || !ano) return res.status(400).json({ erro: "Informe marca, modelo e ano." });
-      const d = await buscar(`/${marca}/modelos/${modelo}/anos/${ano}`);
+
+      const d = await chamar("ConsultarValorComTodosParametros", {
+        codigoTabelaReferencia: ref.codigo, codigoTipoVeiculo: CARRO,
+        codigoMarca: marca, codigoModelo: modelo,
+        ano: `${ano}-${comb}`, anoModelo: ano, codigoTipoCombustivel: comb,
+        tipoVeiculo: "carro", tipoConsulta: "tradicional",
+      });
+
       if (!d || !d.Valor) return res.status(422).json({ erro: "A FIPE não tem valor para essa combinação." });
-      guardar();
+
+      res.setHeader("Cache-Control", "public, max-age=0, s-maxage=86400");
       return res.status(200).json({
         valor: valorNumerico(d.Valor),
         valor_texto: d.Valor,
@@ -116,10 +187,13 @@ module.exports = async function handler(req, res) {
         combustivel: d.Combustivel,
         codigo_fipe: d.CodigoFipe,
         mes_referencia: String(d.MesReferencia || "").trim(),
+        // Código que a própria FIPE emite para a consulta. É a prova de
+        // que o número veio da fonte, e não de estimativa.
+        autenticacao: d.Autenticacao,
       });
     }
 
-    return res.status(400).json({ erro: "Ação desconhecida. Use marcas, modelos, anos ou valor." });
+    return res.status(400).json({ erro: "Ação desconhecida. Use marcas, modelos ou valor." });
   } catch (e) {
     return res.status(e.status || 502).json({ erro: String(e.message) || "Falha ao consultar a FIPE." });
   }
