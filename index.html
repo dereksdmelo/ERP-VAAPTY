@@ -439,16 +439,15 @@ function alertaDispersao(vs) {
 /* ===================== avaliação no Google ===================== */
 
 /**
- * Perfil da Vaapty Joinville SC no Google — 4,8 de quase 2 mil
- * avaliações. O número é o CID do perfil, tirado da URL do Maps em
- * 28/08/2026; conferi que abre o lugar certo.
+ * O link curto do Perfil da Empresa, que o Derek tirou do painel em
+ * 28/08/2026. Ele abre a caixa de estrelas já aberta — o cliente
+ * escreve e envia sem procurar nada.
  *
- * Este link abre o perfil, onde "Escrever avaliação" está a um toque.
- * O link que cai direto na caixa de avaliação é o `g.page/r/…/review`,
- * que só o dono pega no painel do Perfil da Empresa — quando o Derek
- * mandar, troca-se só esta linha.
+ * O link do Maps que estava aqui antes abria o perfil da loja e
+ * obrigava a achar "Escrever avaliação". Um toque a mais na frente do
+ * cliente é uma avaliação a menos.
  */
-const AVALIACAO_LINK = "https://www.google.com/maps?cid=3248104940544214546";
+const AVALIACAO_LINK = "https://g.page/r/CRJGVPY7lhMtEAE/review";
 
 // QR gerado por serviço externo. Se ele cair, o link ao lado continua
 // funcionando — por isso o texto nunca depende da imagem.
@@ -870,6 +869,8 @@ const VAZIO = {
   publicado: false,
   // espera
   esperaIniciadaEm: null, notasEspera: "",
+  // escuta: só liga depois do consentimento, e guarda quando ele foi dado
+  escutaOk: false, escutaEm: null, transcricao: "",
   // N
   rodadas: [], objecao: "",
   // T
@@ -2426,14 +2427,17 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 iniciais={propostas} aoMudar={setPropostas} />
             </Bloco>
 
+            <Bloco titulo="Simulador de propostas" sub="A planilha do Derek, dentro do sistema. Serve para treinar e para mostrar ao cliente como a rodada se comporta — não vale como proposta.">
+              <SimuladorPropostas fipePadrao={f.fipe} />
+            </Bloco>
+
             <Bloco titulo="Anote o que ouvir" sub="O que ele falar aqui é o argumento que você usa na hora do extrato.">
               <textarea rows={5} className={inputCls} style={inputSty} value={f.notasEspera} onChange={(e) => set("notasEspera", e.target.value)}
                 placeholder="Precisa do dinheiro até sexta. Mulher não sabe da dívida. Já tentou vender há 2 meses…" />
-              <div className="mt-3">
-                <Pendente>
-                  A escuta por microfone com IA que você pediu entra aqui. Antes de construir, precisa passar pelo jurídico: gravar e processar conversa é tratamento de dado pessoal e exige aviso ao cliente e base legal definida.
-                </Pendente>
-              </div>
+            </Bloco>
+
+            <Bloco titulo="Escutar a conversa" sub="Transcreve o que for dito e destaca os ganchos. O cliente precisa autorizar antes — é a condição do parecer.">
+              <Escuta f={f} set={set} />
             </Bloco>
           </>
         )}
@@ -2833,6 +2837,342 @@ const numeroBR = (v) => {
   const n = Number(t);
   return Number.isFinite(n) ? n : 0;
 };
+
+/**
+ * ===== escuta da conversa =====
+ *
+ * O parecer jurídico saiu em 28/08/2026 e a condição é uma só: o
+ * consentimento do cliente vem antes. Por isso o botão do microfone
+ * nasce desligado e só acende depois do toggle — não é enfeite, é a
+ * base legal. Quem trocar a ordem, ou ligar a escuta sem o toggle,
+ * derruba o parecer inteiro.
+ *
+ * O consentimento fica registrado com data e hora (`escutaEm`), que é
+ * o que se mostra se alguém perguntar quando o cliente autorizou.
+ *
+ * O QUE ISTO É, EXATAMENTE:
+ *   · a transcrição usa o reconhecimento de voz do próprio navegador
+ *     (`SpeechRecognition`). Sem biblioteca, sem endpoint novo — e a
+ *     Vercel já está em 12 de 12 funções.
+ *   · **o áudio vai para o serviço de voz da Google ou da Apple**,
+ *     conforme o navegador. Não é processamento local, e está escrito
+ *     na tela de consentimento porque o cliente precisa saber disso.
+ *   · nós não gravamos áudio em lugar nenhum. Só o texto fica, e fica
+ *     no aparelho, junto com o resto do atendimento.
+ *   · os "sinais" abaixo são busca por palavra, não modelo de
+ *     linguagem. Chamar isso de IA na frente de quem decide seria
+ *     mentira. Um resumo de verdade precisa de um LLM, o que pede uma
+ *     chave paga e uma função — hoje não cabe.
+ *
+ * Vale como está porque o que trava o negociador não é a falta de
+ * resumo: é que ele não anota. O texto corrido mais o destaque de
+ * "tem pressa" e "tem outra proposta" já é mais do que ele levaria
+ * para a mesa de memória.
+ */
+
+const SINAIS = [
+  { id: "pressa", rotulo: "Tem pressa", cor: "#C2410C",
+    termos: ["preciso do dinheiro", "urgente", "com pressa", "essa semana", "ate sexta", "o quanto antes", "rapido", "hoje mesmo"] },
+  { id: "concorrencia", rotulo: "Tem outra proposta", cor: "#B91C1C",
+    termos: ["outra proposta", "me ofereceram", "outro lugar", "outra loja", "ja fui em", "olx", "webmotors", "na concorrencia"] },
+  { id: "decisor", rotulo: "Decisor não está na mesa", cor: "#A16207",
+    termos: ["minha esposa", "meu marido", "meu socio", "vou falar com", "preciso conversar com", "nao decido sozinho"] },
+  { id: "divida", rotulo: "Tem dívida no carro", cor: "#7C3AED",
+    termos: ["financiado", "financiamento", "parcelas", "devo", "quitar", "banco", "alienado", "em nome do banco"] },
+  { id: "objecao", rotulo: "Achou pouco", cor: "#BE123C",
+    termos: ["muito pouco", "ta baixo", "esta baixo", "esperava mais", "nao da", "vale mais", "e pouco"] },
+  { id: "recuo", rotulo: "Está recuando", cor: "#4B5563",
+    termos: ["vou pensar", "depois eu volto", "dar uma olhada", "outro dia", "te aviso"] },
+  { id: "fechamento", rotulo: "Sinal de fechamento", cor: "#15803D",
+    termos: ["se der", "eu fecho", "aceito", "pode ser", "fechado", "vamos fazer", "topo"] },
+];
+
+// O reconhecimento devolve "até" ou "ate" conforme o serviço, e a
+// busca não pode depender disso. `semAcento` já existe lá em cima —
+// declarar de novo aqui derrubaria a aplicação inteira, como quase
+// aconteceu com o `brl` dos documentos.
+const sinaisDe = (texto) => {
+  const t = semAcento(texto).toLowerCase();
+  return SINAIS.filter((s) => s.termos.some((termo) => t.indexOf(termo) >= 0));
+};
+
+function Escuta({ f, set }) {
+  const Rec = (typeof window !== "undefined") &&
+    (window.SpeechRecognition || window.webkitSpeechRecognition);
+
+  const [ouvindo, setOuvindo] = useState(false);
+  const [parcial, setParcial] = useState("");
+  const [erro, setErro] = useState("");
+  const recRef = useRef(null);
+  const ligadoRef = useRef(false);
+  const textoRef = useRef(f.transcricao || "");
+
+  // O navegador encerra a sessão sozinho depois de um silêncio. Se
+  // ainda estamos ligados, religa — senão a escuta morre no meio da
+  // conversa sem ninguém perceber.
+  const criar = () => {
+    const r = new Rec();
+    r.lang = "pt-BR";
+    r.continuous = true;
+    r.interimResults = true;
+    r.onresult = (ev) => {
+      let novoFinal = "", emAndamento = "";
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const trecho = ev.results[i][0].transcript;
+        if (ev.results[i].isFinal) novoFinal += trecho + " ";
+        else emAndamento += trecho;
+      }
+      setParcial(emAndamento);
+      if (novoFinal) {
+        // Só o trecho fechado vai para a ficha: gravar a cada palavra
+        // provisória escreveria no localStorage dezenas de vezes por
+        // minuto.
+        textoRef.current = (textoRef.current + novoFinal).slice(-8000);
+        set("transcricao", textoRef.current);
+      }
+    };
+    r.onerror = (ev) => {
+      const c = ev && ev.error;
+      if (c === "not-allowed" || c === "service-not-allowed") {
+        setErro("O navegador negou o microfone. Libere nas permissões do site.");
+        ligadoRef.current = false;
+        setOuvindo(false);
+      } else if (c !== "no-speech" && c !== "aborted") {
+        setErro("A escuta falhou: " + c);
+      }
+    };
+    r.onend = () => {
+      if (ligadoRef.current) { try { r.start(); } catch (e) { /* já rodando */ } }
+      else setOuvindo(false);
+    };
+    return r;
+  };
+
+  const ligar = () => {
+    if (!Rec || !f.escutaOk) return;
+    setErro("");
+    ligadoRef.current = true;
+    recRef.current = criar();
+    try { recRef.current.start(); setOuvindo(true); }
+    catch (e) { setErro("Não consegui abrir o microfone."); ligadoRef.current = false; }
+  };
+
+  const desligar = () => {
+    ligadoRef.current = false;
+    setParcial("");
+    if (recRef.current) { try { recRef.current.stop(); } catch (e) {} }
+    setOuvindo(false);
+  };
+
+  // Sair da etapa com o microfone aberto seria escuta sem ninguém
+  // olhando. Desliga junto.
+  useEffect(() => () => { ligadoRef.current = false; if (recRef.current) { try { recRef.current.stop(); } catch (e) {} } }, []);
+
+  const achados = sinaisDe((f.transcricao || "") + " " + parcial);
+
+  return (
+    <div>
+      <div className="rounded-md p-3" style={{ background: "#FBF7FD", border: `1px solid ${C.line}` }}>
+        <Toggle
+          label="O cliente foi avisado e autorizou a escuta"
+          nota="Leia em voz alta: a conversa vai ser transcrita para texto, o áudio não fica gravado, e a transcrição passa pelo serviço de voz do celular (Google ou Apple). Sem esse aceite o microfone não liga."
+          valor={f.escutaOk}
+          onChange={(v) => { if (!v) desligar(); set("escutaOk", v); set("escutaEm", v ? new Date().toISOString() : null); }} />
+        {f.escutaOk && f.escutaEm && (
+          <p className="mt-2 text-[11px]" style={{ color: C.mute, fontFamily: F.mono }}>
+            autorizado em {new Date(f.escutaEm).toLocaleString("pt-BR")}
+          </p>
+        )}
+      </div>
+
+      {!Rec && (
+        <p className="mt-3 text-[12px]" style={{ color: C.laranja }}>
+          Este navegador não tem reconhecimento de voz. No celular, use o Chrome (Android) ou o Safari (iPhone).
+        </p>
+      )}
+
+      {Rec && (
+        <button onClick={ouvindo ? desligar : ligar} disabled={!f.escutaOk}
+          className="mt-3 w-full rounded-md py-3 text-[14px] font-semibold"
+          style={{
+            background: ouvindo ? C.laranja : (f.escutaOk ? C.roxo : "#E7E3EC"),
+            color: f.escutaOk ? "#fff" : C.mute,
+            cursor: f.escutaOk ? "pointer" : "not-allowed",
+          }}>
+          {ouvindo ? "● Ouvindo — tocar para parar" : "Começar a escutar"}
+        </button>
+      )}
+
+      {erro && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+
+      {achados.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {achados.map((s) => (
+            <span key={s.id} className="rounded-full px-2.5 py-1 text-[11px] font-semibold"
+              style={{ background: s.cor + "1A", color: s.cor }}>{s.rotulo}</span>
+          ))}
+        </div>
+      )}
+
+      {(f.transcricao || parcial) && (
+        <div className="mt-3">
+          <div className="rounded-md px-3 py-2 text-[12px] leading-relaxed"
+            style={{ background: "#FAFAFB", border: `1px solid ${C.line}`, maxHeight: 160, overflowY: "auto" }}>
+            <span>{f.transcricao}</span>
+            <span style={{ color: C.mute }}>{parcial}</span>
+          </div>
+          <div className="mt-2 flex gap-2">
+            <button onClick={() => { textoRef.current = ""; set("transcricao", ""); setParcial(""); }}
+              className="text-[11px] underline" style={{ color: C.mute }}>limpar a transcrição</button>
+            <button onClick={() => set("notasEspera", (f.notasEspera ? f.notasEspera + "\n\n" : "") + f.transcricao)}
+              className="text-[11px] underline" style={{ color: C.roxo }}>copiar para as anotações</button>
+          </div>
+        </div>
+      )}
+
+      <p className="mt-3 text-[11px]" style={{ color: C.mute }}>
+        Os destaques acima são busca por palavra, não resumo por IA. Servem para você não perder o gancho — ler a conversa continua sendo seu trabalho.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * ===== simulador de propostas =====
+ *
+ * Reproduz, célula por célula, a planilha "Simulador de Proposta" do
+ * Derek. Dado o valor de referência do carro e quantas propostas se
+ * quer ver, devolve a nuvem de valores no desenho que a rede costuma
+ * responder — para treinar negociador novo e para demonstrar o
+ * processo ao cliente sem esperar a rede real.
+ *
+ * A conta da planilha:
+ *   Vmax      = arredonda(referência × 0,90)      teto do repasse
+ *   Vmedio    = arredonda(Vmax × 0,90)            centro da nuvem
+ *   intervalo = arredonda((Vmax − Vmedio) ÷ 5)    largura de um degrau
+ *   V0        = Vmedio − 10 × intervalo           piso
+ *   proposta  = V0 + sorteio(0..16) × intervalo × |sen(π·n/45)|
+ * Tudo arredondado à centena, como lá.
+ *
+ * O seno é o que dá forma à nuvem, e é a parte que ninguém adivinha
+ * olhando o resultado: a proposta nº 1 e a nº 45 nascem coladas no
+ * piso, as do meio abrem até o teto. Não é sorteio uniforme — é a
+ * curva que a planilha desenha. Quem "simplificar" para um
+ * Math.random() entre piso e teto muda o formato da nuvem, e o valor
+ * médio para de bater com o da planilha.
+ *
+ * NADA daqui vira proposta de verdade. O resultado não é gravado na
+ * tabela `proposta` e não entra no funil do mês. Se um dia precisar
+ * ser gravado, tem que nascer com coluna marcando que é simulação —
+ * proposta inventada contada como real estraga a conversão e, pior,
+ * pode ir para a mesa do cliente como se um lojista tivesse oferecido.
+ */
+
+const cem = (n) => Math.round(n / 100) * 100;
+
+function simularPropostas(referencia, quantidade) {
+  const ref = Number(referencia) || 0;
+  const qtd = Math.max(1, Math.min(90, Math.round(Number(quantidade) || 0)));
+  if (ref <= 0) return null;
+
+  const vmax = cem(ref * 0.9);
+  const vmedio = cem(vmax * 0.9);
+  const intervalo = cem((vmax - vmedio) / 5);
+  const v0 = vmedio - 10 * intervalo;
+
+  const valores = [];
+  for (let n = 1; n <= qtd; n++) {
+    const sorteio = Math.round(Math.random() * 16);
+    const onda = Math.abs(Math.sin((Math.PI * n) / 45));
+    valores.push(cem(v0 + sorteio * intervalo * onda));
+  }
+
+  const soma = valores.reduce((a, b) => a + b, 0);
+  const melhor = valores.reduce((a, b) => (b > a ? b : a), 0);
+
+  // As 17 faixas da planilha (v1..v17), uma barra por degrau.
+  const faixas = [];
+  for (let i = 0; i < 17; i++) {
+    const de = v0 + i * intervalo;
+    const ate = de + intervalo;
+    faixas.push({ de, ate, quantas: valores.filter((v) => v > de && v <= ate).length });
+  }
+
+  return {
+    valores, quantidade: qtd, media: soma / qtd, melhor,
+    vmax, vmedio, intervalo, v0, faixas,
+  };
+}
+
+function SimuladorPropostas({ fipePadrao }) {
+  const [ref, setRef] = useState(fipePadrao || "");
+  const [qtd, setQtd] = useState("57");
+  const [r, setR] = useState(null);
+
+  const rodar = () => setR(simularPropostas(numeroBR(ref), Number(qtd) || 0));
+  const pico = r ? Math.max(1, ...r.faixas.map((f) => f.quantas)) : 1;
+
+  return (
+    <div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-[11px]" style={{ color: C.mute }}>Valor de referência</label>
+          <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal"
+            value={ref} onChange={(e) => setRef(e.target.value)} placeholder="51.371" />
+        </div>
+        <div>
+          <label className="text-[11px]" style={{ color: C.mute }}>Quantas propostas</label>
+          <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric"
+            value={qtd} onChange={(e) => setQtd(e.target.value)} placeholder="57" />
+        </div>
+      </div>
+
+      <button onClick={rodar} className="mt-3 w-full rounded-md py-2.5 text-[13px] font-semibold"
+        style={{ background: C.roxo, color: "#fff" }}>
+        {r ? "Sortear de novo" : "Simular a rodada"}
+      </button>
+
+      {r && (
+        <div className="mt-3 rounded-md p-3" style={{ background: "#FBF7FD", border: `1px solid ${C.line}` }}>
+          <div className="text-[10px] font-semibold tracking-wider" style={{ color: C.laranja }}>
+            SIMULAÇÃO — NENHUM LOJISTA OFERECEU ISTO
+          </div>
+          <div className="mt-2 grid grid-cols-3 gap-2 text-center">
+            <div>
+              <div className="text-[10px]" style={{ color: C.mute }}>PROPOSTAS</div>
+              <div className="text-[20px]" style={{ fontFamily: F.mono, fontWeight: 700 }}>{r.quantidade}</div>
+            </div>
+            <div>
+              <div className="text-[10px]" style={{ color: C.mute }}>MÉDIA</div>
+              <div className="text-[20px]" style={{ fontFamily: F.mono, fontWeight: 700 }}>{brl(r.media)}</div>
+            </div>
+            <div>
+              <div className="text-[10px]" style={{ color: C.mute }}>MELHOR</div>
+              <div className="text-[20px]" style={{ fontFamily: F.mono, fontWeight: 700, color: C.verde }}>{brl(r.melhor)}</div>
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-end gap-[3px]" style={{ height: 56 }}>
+            {r.faixas.map((f, i) => (
+              <div key={i} className="flex-1 rounded-t-sm" title={`${brl(f.de)} a ${brl(f.ate)} — ${f.quantas}`}
+                style={{ height: `${(f.quantas / pico) * 100}%`, minHeight: f.quantas ? 3 : 0, background: C.roxo, opacity: 0.75 }} />
+            ))}
+          </div>
+          <div className="flex justify-between text-[10px]" style={{ color: C.mute, fontFamily: F.mono }}>
+            <span>{brl(r.v0)}</span><span>{brl(r.v0 + 17 * r.intervalo)}</span>
+          </div>
+
+          <div className="mt-3 text-[11px]" style={{ color: C.mute }}>
+            As cinco maiores:{" "}
+            <span style={{ fontFamily: F.mono, color: C.ink }}>
+              {r.valores.slice().sort((a, b) => b - a).slice(0, 5).map((v) => brl(v)).join(" · ")}
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /**
  * O check list deixou de ser papel. Duas mãos preenchem: o negociador
