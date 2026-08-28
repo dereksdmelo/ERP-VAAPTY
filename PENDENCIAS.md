@@ -112,6 +112,23 @@ mesmo tempo criam duas linhas.
 
 *Conserto:* índice único parcial em `veiculo (atendimento_id)`.
 
+### As 251 linhas já importadas estão com o mapeamento antigo
+
+A primeira importação rodou com o parser procurando NEGOCIADOR,
+PROSPEC e ANO/MOD, e o cabeçalho real diz NEGOCIADORES, PROSPECTO e
+ANO. O parser foi corrigido em 28/08/2026, **mas as linhas que já estão
+no banco não se corrigem sozinhas**: seguem sem negociador, sem
+prospecto, sem ano, sem motivo da venda e com o status achatado em
+"aberto".
+
+O efeito visível é o dashboard por negociador vazio — a tabela avisa
+"251 atendimentos sem negociador".
+
+**O que destrava:** apagar as linhas importadas e importar de novo com
+o parser novo. É destrutivo e leva junto veículos e propostas dessas
+linhas, então **depende do Derek mandar** — e de conferir antes se
+alguém já editou algum desses atendimentos à mão.
+
 ### Importador não é transação
 Se o lote de veículos falhar, os atendimentos do lote anterior ficam.
 Aceitável para algo que se faz uma vez; se virar rotina, vira função no
