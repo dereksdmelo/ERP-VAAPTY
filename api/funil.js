@@ -55,7 +55,13 @@ module.exports = async function handler(req, res) {
     return res.status(502).json({ erro: "Não consegui falar com o banco." });
   }
 
-  const vazio = () => ({ fluxo: 0, avaliacoes: 0, com_proposta: 0, vendas: 0, perdidos: 0, valor_vendido: 0 });
+  // `semanas` são os quatro blocos da META SEMANAL da planilha: dias
+  // 1–7, 8–14, 15–21 e 22 em diante. Não é semana de calendário, é a
+  // divisão do mês em quatro — que é como a meta é cobrada.
+  const vazio = () => ({
+    fluxo: 0, avaliacoes: 0, com_proposta: 0, vendas: 0, perdidos: 0,
+    valor_vendido: 0, semanas: [0, 0, 0, 0],
+  });
   const porOrigem = {};
   ORIGENS.forEach((o) => { porOrigem[o] = vazio(); });
   const porNegociador = {};
@@ -89,9 +95,20 @@ module.exports = async function handler(req, res) {
 
     if (v && v.fipe_valor) fipes.push(Number(v.fipe_valor));
     if (vendeu && a.valor_fechado) {
-      vendas.push(Number(a.valor_fechado));
-      if (n) n.valor_vendido += Number(a.valor_fechado);
-      total.valor_vendido += Number(a.valor_fechado);
+      const valor = Number(a.valor_fechado);
+      vendas.push(valor);
+      if (n) n.valor_vendido += valor;
+      total.valor_vendido += valor;
+
+      // Venda sem data não entra em semana nenhuma. A planilha do CRM
+      // tem data quebrada em várias linhas, e somar tudo na semana 1
+      // daria uma meta semanal mentirosa.
+      const dia = Number(String(a.data || "").slice(8, 10));
+      if (dia >= 1 && dia <= 31) {
+        const semana = Math.min(3, Math.floor((dia - 1) / 7));
+        if (n) n.semanas[semana] += valor;
+        total.semanas[semana] += valor;
+      }
     }
   });
 

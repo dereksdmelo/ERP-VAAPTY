@@ -134,6 +134,71 @@ async function negociadores(req, res, tok) {
   return res.status(405).json({ erro: "Use GET, POST ou PATCH." });
 }
 
+const CAMPOS_DESEMPENHO = [
+  "faltas", "atrasos", "perdeu_atendimento", "prospectou", "avaliacao_google",
+  "ficou_mais", "gravou_video", "avaliacao_errada", "postura", "indice_at",
+];
+
+/**
+ * A faixa CONFIABILIDADE do dashboard (0013).
+ *
+ * São observações de gestor — falta, atraso, perdeu atendimento — que
+ * não existem em lugar nenhum do banco de atendimento. O servidor não
+ * tem como calcular, então é digitado, uma linha por negociador por mês.
+ *
+ * Mora aqui e não em api/desempenho.js porque a Vercel do plano Hobby
+ * para em 12 funções e nós estamos nas 12. Mesmo truque dos
+ * negociadores logo abaixo — acomodação de teto, não arquitetura.
+ *
+ * Quem escreve é só o gerente, e quem garante isso é a RLS da 0013: a
+ * política de escrita exige e_gerente(). O PUT que volta vazio é ela
+ * recusando, e vira 403 com mensagem legível.
+ */
+async function desempenho(req, res, tok) {
+  const base = `${URL_BASE}/rest/v1/desempenho`;
+  const cab = { apikey: ANON, Authorization: tok };
+  const cabJson = { ...cab, "Content-Type": "application/json" };
+
+  // Sempre o primeiro dia do mês: é a chave do unique da 0013.
+  const competencia = (() => {
+    const c = String(req.query.competencia || "");
+    if (/^\d{4}-\d{2}-\d{2}$/.test(c)) return `${c.slice(0, 8)}01`;
+    const hoje = new Date();
+    return `${hoje.getUTCFullYear()}-${String(hoje.getUTCMonth() + 1).padStart(2, "0")}-01`;
+  })();
+
+  if (req.method === "GET") {
+    const r = await fetch(`${base}?select=*&competencia=eq.${competencia}`, { headers: cab });
+    if (!r.ok) return res.status(r.status === 401 ? 401 : 502).json({ erro: "Não consegui ler o desempenho." });
+    const d = await r.json().catch(() => []);
+    return res.status(200).json({ competencia, desempenho: Array.isArray(d) ? d : [] });
+  }
+
+  if (req.method === "PUT") {
+    const c = await lerCorpo(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    const id = String(c.negociador_id || "");
+    if (!RX_UUID.test(id)) return res.status(400).json({ erro: "negociador_id inválido." });
+
+    const linha = { negociador_id: id, competencia, atualizado_em: new Date().toISOString() };
+    CAMPOS_DESEMPENHO.forEach((k) => { if (c[k] !== undefined) linha[k] = numero(c[k]) || 0; });
+
+    const r = await fetch(`${base}?on_conflict=negociador_id,competencia`, {
+      method: "POST",
+      headers: { ...cabJson, Prefer: "resolution=merge-duplicates,return=representation" },
+      body: JSON.stringify(linha),
+    });
+    if (!r.ok) return res.status(r.status === 401 ? 401 : 502).json({ erro: "O banco recusou a gravação." });
+    const d = await r.json().catch(() => []);
+    const salvo = Array.isArray(d) ? d[0] : d;
+    if (!salvo) return res.status(403).json({ erro: "Só o gerente edita a confiabilidade." });
+    return res.status(200).json({ ok: true, desempenho: salvo });
+  }
+
+  res.setHeader("Allow", "GET, PUT");
+  return res.status(405).json({ erro: "Use GET ou PUT." });
+}
+
 module.exports = async function handler(req, res) {
   if (!URL_BASE || !ANON) {
     return res.status(500).json({ erro: "SUPABASE_URL ou SUPABASE_ANON_KEY não configurados." });
@@ -141,6 +206,11 @@ module.exports = async function handler(req, res) {
 
   const tok = tokenDe(req);
   if (!tok) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
+
+  if (String(req.query.recurso || "") === "desempenho") {
+    try { return await desempenho(req, res, tok); }
+    catch (e) { return res.status(502).json({ erro: "Não consegui falar com o banco." }); }
+  }
 
   if (String(req.query.recurso || "") === "negociadores") {
     try { return await negociadores(req, res, tok); }
