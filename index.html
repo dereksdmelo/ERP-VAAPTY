@@ -1613,6 +1613,16 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     guardarFicha({ ...fRef.current, documentos: [...(fRef.current.documentos || []), reg] });
   };
 
+  // Sem estes quatro, o documento sai com lacuna. E papel com lacuna
+  // volta para ser preenchido depois — que é como contrato acaba
+  // assinado pela metade.
+  const OBRIG_CLIENTE = [
+    ["cliente_nome", "Nome"], ["cliente_cpf", "CPF"],
+    ["cliente_rg", "RG"], ["cliente_endereco", "Endereço"],
+  ];
+  const faltamCliente = OBRIG_CLIENTE.filter(([k]) => !String(cliente[k] || "").trim());
+  const podeImprimir = faltamCliente.length === 0;
+
   const salvarCliente = async () => {
     if (!atendimento) { setErroCliente("Abra o atendimento pela lista para salvar."); return; }
     setErroCliente(""); setSalvandoCliente(true);
@@ -1733,15 +1743,6 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     valorFechado: f.valorFechado || (atendimento && atendimento.valor_fechado) || "",
   };
 
-  // Sem estes quatro, o documento sai com lacuna. E papel com lacuna
-  // volta para ser preenchido depois — que é como contrato acaba
-  // assinado pela metade.
-  const OBRIG_CLIENTE = [
-    ["cliente_nome", "Nome"], ["cliente_cpf", "CPF"],
-    ["cliente_rg", "RG"], ["cliente_endereco", "Endereço"],
-  ];
-  const faltamCliente = OBRIG_CLIENTE.filter(([k]) => !String(cliente[k] || "").trim());
-  const podeImprimir = faltamCliente.length === 0;
 
   const docs = f.documentos || [];
   const hhmm = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toTimeString().slice(0, 5); };

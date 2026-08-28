@@ -347,6 +347,12 @@ declarado dentro de outro vira tipo novo a cada render: o React remonta
 o formulário e **o campo perde o foco a cada tecla digitada**. Quem
 transformar `blocoCliente` em `<BlocoCliente/>` reintroduz isso.
 
+**E por ser expressão, ele é avaliado na hora da declaração** — não sob
+demanda como um componente. Tudo que ele lê (`podeImprimir`,
+`faltamCliente`) precisa estar declarado **acima** dele. Declarar
+depois dá `ReferenceError` a cada render e **a tela do atendimento para
+de abrir**, sem erro visível na lista. Já aconteceu uma vez.
+
 ### 15. O check list virou registro, não papel
 
 O check list era uma folha que o negociador preenchia, o cliente
