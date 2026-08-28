@@ -681,9 +681,28 @@ Derek mantinha no Excel. Nasceu na Espera e foi movido a pedido dele:
 a folha do cliente não bateria com o que o negociador está vendo — e é
 ele quem tem que sustentar o número na conversa.
 
-**Cada impressão cria uma rodada**, com a Melhor Proposta como valor
-impresso; a contraproposta do cliente responde a ela. São três, com
-teto, e o botão diz qual é o próximo. Dado o valor de referência e quantas propostas se
+**A Negociação é uma fila, não um formulário.** A tela mostra um passo
+de cada vez, com a trilha sempre à vista:
+
+```
+extrato 1 → contra 1 → 5 min → extrato 2 → contra 2 → 5 min → extrato 3 → pré-contrato
+```
+
+Antes disso tudo aparecia junto e a ordem ficava na cabeça do
+negociador. Cada impressão cria a rodada, com a Melhor Proposta como
+valor impresso; a contraproposta do cliente responde a ela.
+
+**Os cinco minutos entre uma rodada e a seguinte não são enfeite**
+(`RODADA_SEG`): é o tempo em que o negociador some para consultar a
+mesa. Sem ele o próximo extrato sai na hora e o cliente entende que o
+número já estava pronto. Dá para pular, e o botão diz isso.
+
+**O papel usa o molde do extrato, não o do contrato.** A primeira
+versão saía com o serif e o título centrado do `moldura` de contrato —
+o Derek viu na hora que estava "totalmente diferente". Agora o CSS do
+extrato desenha o mesmo que a tela: resumo à esquerda com as caixas
+cinzas e os valores em vermelho sublinhados, três colunas de
+Num | Valor à direita, a melhor pintada de verde. Dado o valor de referência e quantas propostas se
 quer, ele devolve a nuvem de valores, a média e a melhor.
 
 **A conta é a da planilha, não uma aproximação:**
@@ -745,6 +764,12 @@ derruba o parecer inteiro.**
 
 Vale como está porque o que trava o negociador não é a falta de resumo:
 é que ele não anota.
+
+**A escuta aparece em três etapas**, a pedido do Derek: na Pesquisa
+(onde o cliente conta o motivo da venda), na Espera e na Negociação
+(onde os ganchos viram argumento da rodada seguinte). O consentimento é
+um só, guardado na ficha — quem aceitou na Pesquisa não é perguntado de
+novo.
 
 ### 18. Leads de indicação: eles morriam no aparelho
 
