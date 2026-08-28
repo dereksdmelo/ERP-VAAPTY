@@ -97,6 +97,14 @@ function paraColunas(c) {
     cliente_cpf: texto(c.cliente_cpf),
     cliente_rg: texto(c.cliente_rg),
     cliente_endereco: texto(c.cliente_endereco),
+    // O comprador é o lojista que leva o carro (0014): a outra parte do
+    // contrato final, e não o cliente que vende.
+    comprador_nome: texto(c.comprador_nome),
+    comprador_cpf: texto(c.comprador_cpf),
+    comprador_nacionalidade: texto(c.comprador_nacionalidade),
+    comprador_estado_civil: texto(c.comprador_estado_civil),
+    comprador_profissao: texto(c.comprador_profissao),
+    comprador_endereco: texto(c.comprador_endereco),
     origem: daLista(c.origem, ORIGENS),
     status: daLista(c.status, STATUS),
     carro_descricao: texto(c.carro_descricao),

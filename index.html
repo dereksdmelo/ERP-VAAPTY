@@ -947,7 +947,7 @@ const VAZIO = {
   // conferência na FIPE oficial
   fipeConferida: false, fipeOficialCodigo: "", fipeOficialMes: "", fipeAutenticacao: "",
   marca: "", modeloCurto: "",
-  chassi: "", cor: "", combustivel: "",
+  chassi: "", cor: "", combustivel: "", renavam: "",
   pneus: ["", "", "", ""], leilao: false, gnv: false, opcionais: [],
   lataria: "", mecanica: "", positivos: "", ressalvas: "", internas: "",
   negociador: "",
@@ -1096,7 +1096,7 @@ function gerarDescritivo(f, n) {
 // mapeamento nome → coluna mora no servidor, em api/veiculo.js.
 const fichaParaBanco = (f) => ({
   placa: f.placa, chassi: f.chassi, modelo: f.modelo, ano: f.ano,
-  cor: f.cor, combustivel: f.combustivel, cambio: f.cambio,
+  cor: f.cor, combustivel: f.combustivel, cambio: f.cambio, renavam: f.renavam,
   km: f.km, kmEntrada: f.kmEntrada,
   fipe: f.fipe, fipeCodigo: f.fipeCodigo, por: f.por, gastos: f.gastos,
   pneus: f.pneus, leilao: f.leilao, gnv: f.gnv, opcionais: f.opcionais,
@@ -1312,6 +1312,234 @@ const VAAPTY_PJ = "Vaapty Intermediação Veicular LTDA · CNPJ 34.840.903/0001-
  * São três extratos, um por rodada. O que muda entre eles é a rodada
  * do sorteio — a nuvem inteira, não só a Melhor Proposta.
  */
+/**
+ * ---------------- 4. contrato final de compra e venda ----------------
+ *
+ * O contrato que fecha o negócio, depois da cautelar aprovada. É entre
+ * a Vaapty e o **COMPRADOR** — o lojista que leva o carro —, e não com
+ * o cliente que vende. Foi a primeira vez que esse terceiro apareceu no
+ * sistema; os seis dados dele vieram na 0014.
+ *
+ * **Texto transcrito do .docx que o Derek mandou em 28/08/2026.** Vale
+ * aqui a mesma regra dos outros papéis: não inventar cláusula, não
+ * mudar número, não "melhorar" redação. O que está no código é o que as
+ * partes assinam.
+ *
+ * Duas coisas do original reproduzidas de propósito, e que o Derek
+ * precisa levar ao jurídico:
+ *
+ *   1. A cláusula primeira numera I, II, **IV**, V — falta a definição
+ *      III, que seria a do VENDEDOR.
+ *   2. VENDEDOR aparece nas cláusulas quarta, sétima e décima primeira,
+ *      mas o preâmbulo não o qualifica nem o traz como parte, e ele não
+ *      assina no fim.
+ *
+ * Corrigir por conta própria seria pior que reproduzir o que está em
+ * vigor — mas contrato que cita uma parte que não define é o tipo de
+ * coisa que aparece quando dá briga.
+ */
+function contratoFinal(f) {
+  const anos = String(f.ano || "").split("/");
+  const corpo = `<h1>Contrato particular de compra e venda de veículo<br>automotor mediante intermediação</h1>
+
+<p><strong>PREÂMBULO</strong></p>
+
+<p>Pelo presente instrumento particular, de um lado:</p>
+
+<p><strong>INTERMEDIADORA:</strong> Vaapty Intermediação Veicular LTDA, pessoa jurídica de
+direito privado, inscrita no CNPJ nº 34.840.903/0001-00, com sede à Rua Anita Garibaldi,
+705 – Anita Garibaldi, Joinville/SC, neste ato representada na forma de seu Contrato Social,
+doravante denominada simplesmente INTERMEDIADORA.</p>
+
+<p><strong>COMPRADOR:</strong> ${ou(f.comprador_nome, "nome do comprador")}, nacionalidade
+${ou(f.comprador_nacionalidade, "nacionalidade")}, estado civil ${ou(f.comprador_estado_civil, "estado civil")},
+profissão ${ou(f.comprador_profissao, "profissão")}, portador do CPF nº ${ou(f.comprador_cpf, "CPF")},
+residente à ${ou(f.comprador_endereco, "endereço")}.</p>
+
+<p>As partes resolvem celebrar o presente CONTRATO PARTICULAR DE COMPRA E VENDA DE VEÍCULO
+AUTOMOTOR MEDIANTE INTERMEDIAÇÃO, que será regido pelos artigos 104, 113, 421, 421-A, 422,
+425, 427, 481 e seguintes do Código Civil, Código de Trânsito Brasileiro, Lei Geral de
+Proteção de Dados (Lei nº 13.709/2018), Medida Provisória nº 2.200-2/2001, Lei nº 14.063/2020
+e demais normas aplicáveis, mediante as cláusulas seguintes.</p>
+
+<p><strong>CLÁUSULA PRIMEIRA – DAS DEFINIÇÕES</strong></p>
+<p>Para os fins deste contrato:</p>
+<p>I – INTERMEDIADORA: empresa que aproxima comprador e vendedor, sem adquirir a propriedade do veículo.<br>
+II – COMPRADOR: pessoa que adquire o veículo.<br>
+IV – VEÍCULO DE REPASSE: veículo comercializado no estado em que se encontra, destinado
+normalmente a lojistas, comerciantes ou compradores que assumem integralmente os riscos da
+aquisição, sem garantia contratual.<br>
+V – NEGÓCIO: operação de compra e venda intermediada pela INTERMEDIADORA.</p>
+
+<p><strong>CLÁUSULA SEGUNDA – DO OBJETO</strong></p>
+<p>O presente contrato tem por objeto a formalização da compra e venda do veículo abaixo
+descrito, cuja negociação foi aproximada pela INTERMEDIADORA.</p>
+
+<p><strong>DADOS DO VEÍCULO</strong></p>
+<table class="dados">
+  <tr><td class="r">Marca</td><td>${ou(f.marca, "marca")}</td></tr>
+  <tr><td class="r">Modelo</td><td>${ou(f.modeloCurto || f.modelo, "modelo")}</td></tr>
+  <tr><td class="r">Versão</td><td>${ou(f.modelo, "versão")}</td></tr>
+  <tr><td class="r">Ano fabricação</td><td>${ou(anos[0], "ano de fabricação")}</td></tr>
+  <tr><td class="r">Ano modelo</td><td>${ou(anos[1] || anos[0], "ano do modelo")}</td></tr>
+  <tr><td class="r">Placa</td><td>${ou(f.placa, "placa")}</td></tr>
+  <tr><td class="r">Renavam</td><td>${ou(f.renavam, "renavam — do CRLV")}</td></tr>
+  <tr><td class="r">Chassi</td><td>${ou(f.chassi, "chassi — do CRLV")}</td></tr>
+  <tr><td class="r">Combustível</td><td>${ou(f.combustivel, "combustível")}</td></tr>
+  <tr><td class="r">Cor</td><td>${ou(f.cor, "cor")}</td></tr>
+  <tr><td class="r">Quilometragem</td><td>${f.km ? `${f.km} km` : vazio("km")}</td></tr>
+  <tr><td class="r">Valor FIPE</td><td>${brlDoc(f.fipe)}</td></tr>
+  <tr><td class="r">Valor da venda</td><td>${brlDoc(f.valorFechado)}</td></tr>
+</table>
+
+<p><strong>CLÁUSULA TERCEIRA – DA NATUREZA JURÍDICA DA INTERMEDIAÇÃO</strong></p>
+<p>A INTERMEDIADORA atua exclusivamente como mandatária e aproximadora das partes, prestando
+serviços de intermediação comercial.</p>
+<p>Não integra a cadeia de fornecimento do veículo.<br>
+Não exerce atividade de revenda.<br>
+Não figura como alienante.<br>
+Não adquire a propriedade do veículo.<br>
+Não responde pelos riscos inerentes ao bem.<br>
+Sua remuneração decorre exclusivamente da prestação do serviço de intermediação.</p>
+<p><em>Parágrafo único.</em> A celebração deste contrato não gera responsabilidade solidária
+ou subsidiária da INTERMEDIADORA pelas obrigações do VENDEDOR.</p>
+
+<p><strong>CLÁUSULA QUARTA – DAS DECLARAÇÕES DO VENDEDOR</strong></p>
+<p>O VENDEDOR declara que:</p>
+<p>I – é legítimo proprietário do veículo;<br>
+II – possui capacidade para aliená-lo;<br>
+III – entregou todos os documentos necessários;<br>
+IV – informou, de boa-fé, todas as informações relevantes de seu conhecimento;<br>
+V – responsabiliza-se civil e criminalmente pelas declarações prestadas.</p>
+
+<p><strong>CLÁUSULA QUINTA – DAS DECLARAÇÕES DO COMPRADOR</strong></p>
+<p>O COMPRADOR declara que:</p>
+<p>• vistoriou o veículo;<br>
+• realizou test-drive, quando desejado;<br>
+• examinou documentação;<br>
+• recebeu oportunidade de contratar vistoria cautelar;<br>
+• recebeu oportunidade de contratar avaliação mecânica;<br>
+• recebeu oportunidade de utilizar scanner eletrônico;<br>
+• inspecionou pintura, funilaria, estrutura, suspensão, freios, motor, transmissão,
+acabamento, acessórios e equipamentos;<br>
+• não possui dúvidas quanto ao estado geral do veículo.</p>
+<p>Declara ainda que sua manifestação de vontade é livre, consciente e desprovida de qualquer vício.</p>
+
+<p><strong>CLÁUSULA SEXTA – DA CIÊNCIA DA MODALIDADE “VEÍCULO DE REPASSE”</strong></p>
+<p>O COMPRADOR reconhece, de forma expressa, que o veículo objeto deste contrato é
+comercializado na modalidade VEÍCULO DE REPASSE, circunstância previamente informada pela
+INTERMEDIADORA e integralmente compreendida pelo adquirente.</p>
+<p>O COMPRADOR declara ciência de que:</p>
+<p>I – o preço contratado é inferior ao valor médio divulgado pela Tabela FIPE, justamente em
+razão da modalidade de comercialização;<br>
+II – a redução do preço decorre da inexistência de preparação comercial, revisão geral,
+garantia contratual e demais custos normalmente suportados por concessionárias e revendedoras
+tradicionais;<br>
+III – o veículo é adquirido no estado de conservação em que se encontra (“ad corpus” e “as
+is”), assumindo integralmente os riscos inerentes à aquisição;<br>
+IV – teve ampla oportunidade de inspecionar o bem, realizar vistoria cautelar, perícia
+mecânica, avaliação estrutural, scanner eletrônico, verificação de pintura, chassi, motor,
+transmissão, suspensão, sistema elétrico e quaisquer outras verificações que entendesse
+pertinentes;<br>
+V – caso tenha optado por não realizar tais inspeções, o fez por sua exclusiva conveniência,
+assumindo integralmente os riscos decorrentes dessa escolha.</p>
+<p><em>Parágrafo Primeiro.</em> O COMPRADOR declara que o desconto concedido em relação à
+Tabela FIPE constitui contraprestação econômica pela modalidade de repasse e pela inexistência
+de garantia.</p>
+<p><em>Parágrafo Segundo.</em> O COMPRADOR reconhece que essa condição foi determinante para a
+formação do preço e para sua decisão de contratar.</p>
+
+<p><strong>CLÁUSULA SÉTIMA – DA INEXISTÊNCIA DE GARANTIA</strong></p>
+<p>A INTERMEDIADORA não concede qualquer garantia legal ou contratual sobre o veículo objeto
+da negociação.</p>
+<p>Em razão da natureza jurídica da atividade exercida, a INTERMEDIADORA não responde por:</p>
+<p>I – vícios aparentes; II – vícios ocultos; III – defeitos mecânicos; IV – defeitos
+elétricos; V – defeitos eletrônicos; VI – falhas estruturais; VII – desgaste natural;
+VIII – quilometragem; IX – histórico de manutenção; X – histórico de sinistros;
+XI – enchentes; XII – leilão; XIII – recuperação; XIV – necessidade futura de manutenção;
+XV – consumo de óleo; XVI – câmbio; XVII – motor; XVIII – suspensão; XIX – direção;
+XX – freios; XXI – módulos eletrônicos; XXII – sistema multimídia; XXIII – pintura;
+XXIV – funilaria; XXV – ar-condicionado; XXVI – acessórios; XXVII – qualquer componente ou
+sistema do veículo.</p>
+<p><em>Parágrafo Primeiro.</em> Eventual responsabilidade por vícios do veículo será exclusiva
+do VENDEDOR, observadas as disposições legais aplicáveis.</p>
+<p><em>Parágrafo Segundo.</em> O COMPRADOR renuncia à formulação de reclamações contra a
+INTERMEDIADORA relacionadas ao estado de conservação do veículo, ressalvadas exclusivamente as
+hipóteses de dolo ou fraude comprovadamente praticados pela própria INTERMEDIADORA.</p>
+
+<p><strong>CLÁUSULA OITAVA – DA ENTREGA DO VEÍCULO</strong></p>
+<p>A tradição do veículo importa em aceitação irretratável de seu estado de conservação.</p>
+<p>Após a entrega, todos os riscos da coisa passam ao COMPRADOR, nos termos do Código Civil.</p>
+
+<p><strong>CLÁUSULA NONA – DA TRANSFERÊNCIA</strong></p>
+<p>O COMPRADOR obriga-se a promover a transferência da propriedade no prazo legal previsto no
+Código de Trânsito Brasileiro.</p>
+<p>Todos os custos correrão exclusivamente por sua conta.</p>
+
+<p><strong>CLÁUSULA DÉCIMA – DAS RESPONSABILIDADES APÓS A ENTREGA</strong></p>
+<p>Após a tradição, responderá exclusivamente o COMPRADOR por: multas; IPVA; licenciamento;
+seguro obrigatório; tributos; danos ambientais; acidentes; danos materiais; danos morais;
+danos a terceiros; remoções; apreensões; guinchos; custas judiciais; honorários advocatícios.</p>
+
+<p><strong>CLÁUSULA DÉCIMA PRIMEIRA – DA OBRIGAÇÃO DE INDENIZAR (HOLD HARMLESS)</strong></p>
+<p>O COMPRADOR obriga-se a manter a INTERMEDIADORA integralmente livre e indene de toda e
+qualquer reclamação, demanda judicial, procedimento administrativo, execução, cobrança ou
+indenização decorrente da utilização, posse, propriedade, circulação ou transferência do
+veículo após sua entrega.</p>
+<p>Caso a INTERMEDIADORA seja demandada judicial ou administrativamente por fato imputável ao
+COMPRADOR ou ao VENDEDOR, estes obrigam-se a:</p>
+<p>I – assumir imediatamente a defesa;<br>
+II – requerer sua exclusão do processo;<br>
+III – reembolsar integralmente todas as despesas suportadas, incluindo custas, honorários
+advocatícios contratuais e sucumbenciais, perícias, deslocamentos, condenações e demais
+prejuízos.</p>
+
+<p><strong>CLÁUSULA DÉCIMA SEGUNDA – DA MULTA CONTRATUAL</strong></p>
+<p>O descumprimento de qualquer obrigação contratual sujeitará a parte inadimplente ao
+pagamento de multa equivalente a 10% (dez por cento) do valor da negociação, sem prejuízo de
+perdas e danos.</p>
+
+<p><strong>CLÁUSULA DÉCIMA TERCEIRA – DA BOA-FÉ OBJETIVA</strong></p>
+<p>As partes comprometem-se a observar os deveres anexos de boa-fé, cooperação, lealdade,
+transparência e informação durante toda a execução contratual.</p>
+
+<p><strong>CLÁUSULA DÉCIMA QUARTA – DA LGPD</strong></p>
+<p>As partes comprometem-se a tratar os dados pessoais em conformidade com a Lei nº 13.709/2018.</p>
+
+<p><strong>CLÁUSULA DÉCIMA QUINTA – DA ASSINATURA ELETRÔNICA</strong></p>
+<p>As partes reconhecem como válidas as assinaturas eletrônicas realizadas por plataformas
+digitais, produzindo todos os efeitos jurídicos da assinatura manuscrita.</p>
+
+<p><strong>CLÁUSULA DÉCIMA SEXTA – DAS DISPOSIÇÕES FINAIS</strong></p>
+<p>Este contrato possui natureza irrevogável e irretratável, obrigando as partes, seus
+herdeiros e sucessores.</p>
+<p>A eventual nulidade de qualquer cláusula não prejudicará a validade das demais disposições.</p>
+<p>Qualquer tolerância será considerada mera liberalidade, não importando novação ou renúncia
+de direitos.</p>
+
+<p><strong>CLÁUSULA DÉCIMA SÉTIMA – DO FORO</strong></p>
+<p>Fica eleito o foro da Comarca da sede da INTERMEDIADORA para dirimir quaisquer controvérsias
+oriundas deste contrato, com renúncia expressa a qualquer outro, por mais privilegiado que seja.</p>
+
+<p>E, por estarem justas e contratadas, as partes assinam o presente instrumento em 2 vias de
+igual teor e forma, juntamente com duas testemunhas.</p>
+
+<p style="margin-top:18px">Joinville, ${dataExtenso()}.</p>
+
+<div class="assinatura">
+  <div class="linha">INTERMEDIADORA — Vaapty Intermediação Veicular LTDA</div>
+  <div class="linha">COMPRADOR — ${ou(f.comprador_nome, "nome do comprador")}</div>
+  <div class="linha">TESTEMUNHA 1 — Nome: ${vazio("nome")} · CPF: ${vazio("CPF")}</div>
+  <div class="linha">TESTEMUNHA 2 — Nome: ${vazio("nome")} · CPF: ${vazio("CPF")}</div>
+</div>`;
+
+  return moldura({
+    titulo: "Contrato de compra e venda",
+    corpo,
+    protocolo: protocolo(f, "CONTRATO"),
+  });
+}
+
 function extratoOfertas(f, r, indice, titulo) {
   const valores = (r && r.valores) || [];
   const cem = (v) => Number(v || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -1695,6 +1923,14 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     cliente_cpf: (atendimento && atendimento.cliente_cpf) || "",
     cliente_rg: (atendimento && atendimento.cliente_rg) || "",
     cliente_endereco: (atendimento && atendimento.cliente_endereco) || "",
+    // O comprador é o lojista que leva o carro — a outra parte do
+    // contrato final, e não o cliente que vende (0014).
+    comprador_nome: (atendimento && atendimento.comprador_nome) || "",
+    comprador_cpf: (atendimento && atendimento.comprador_cpf) || "",
+    comprador_nacionalidade: (atendimento && atendimento.comprador_nacionalidade) || "Brasileiro(a)",
+    comprador_estado_civil: (atendimento && atendimento.comprador_estado_civil) || "",
+    comprador_profissao: (atendimento && atendimento.comprador_profissao) || "",
+    comprador_endereco: (atendimento && atendimento.comprador_endereco) || "",
   });
   const [checklist, setChecklist] = useState(null);
   const [statusAtual, setStatusAtual] = useState((atendimento && atendimento.status) || "aberto");
@@ -2532,6 +2768,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                   <Campo label="KM quando o cliente pegou"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.kmEntrada} onChange={(e) => set("kmEntrada", e.target.value)} /></Campo>
                   <Campo label="Placa" req><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} value={f.placa} onChange={(e) => set("placa", e.target.value.toUpperCase())} /></Campo>
                   <Campo label="Cor"><input className={inputCls} style={inputSty} value={f.cor} onChange={(e) => set("cor", e.target.value)} /></Campo>
+                  <Campo label="Renavam"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.renavam} onChange={(e) => set("renavam", e.target.value)} placeholder="do CRLV" /></Campo>
                   <Campo label="FIPE" req><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.fipe} onChange={(e) => set("fipe", e.target.value)} /></Campo>
                   <Campo label="POR" req><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.por} onChange={(e) => set("por", e.target.value)} /></Campo>
                 </div>
@@ -2928,6 +3165,79 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 </p>
               </div>
             </Bloco>
+
+            {/* O contrato final só faz sentido depois do laudo. Antes
+                disso o negócio ainda pode voltar à mesa, e contrato
+                assinado que precisa ser refeito é pior que contrato
+                nenhum. */}
+            {f.cautelarResultado === "aprovada" && (
+              <Bloco titulo="Contrato final" sub="O comprador é o lojista que leva o carro — a outra parte do contrato, não o cliente que vende.">
+                <div className="space-y-2.5">
+                  <Campo label="Nome do comprador" req>
+                    <input className={inputCls} style={inputSty} value={cliente.comprador_nome}
+                      onChange={(e) => setCliente({ ...cliente, comprador_nome: e.target.value })} />
+                  </Campo>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <Campo label="CPF" req>
+                      <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric"
+                        value={cliente.comprador_cpf} onChange={(e) => setCliente({ ...cliente, comprador_cpf: e.target.value })} />
+                    </Campo>
+                    <Campo label="Nacionalidade">
+                      <input className={inputCls} style={inputSty} value={cliente.comprador_nacionalidade}
+                        onChange={(e) => setCliente({ ...cliente, comprador_nacionalidade: e.target.value })} />
+                    </Campo>
+                    <Campo label="Estado civil">
+                      <input className={inputCls} style={inputSty} value={cliente.comprador_estado_civil}
+                        onChange={(e) => setCliente({ ...cliente, comprador_estado_civil: e.target.value })} />
+                    </Campo>
+                    <Campo label="Profissão">
+                      <input className={inputCls} style={inputSty} value={cliente.comprador_profissao}
+                        onChange={(e) => setCliente({ ...cliente, comprador_profissao: e.target.value })} />
+                    </Campo>
+                  </div>
+                  <Campo label="Endereço">
+                    <input className={inputCls} style={inputSty} value={cliente.comprador_endereco}
+                      onChange={(e) => setCliente({ ...cliente, comprador_endereco: e.target.value })} />
+                  </Campo>
+                  <button onClick={salvarCliente} disabled={salvandoCliente}
+                    className="w-full rounded-md border py-2 text-[12px] font-semibold"
+                    style={{ borderColor: C.line, color: C.roxo }}>
+                    {salvandoCliente ? "Salvando…" : "Salvar dados do comprador"}
+                  </button>
+
+                  {(() => {
+                    const faltaCarro = [["marca", "marca"], ["modelo", "modelo"], ["placa", "placa"],
+                                        ["chassi", "chassi"], ["renavam", "renavam"], ["cor", "cor"],
+                                        ["km", "KM"], ["fipe", "FIPE"]]
+                      .filter(([k]) => !String(f[k] || "").trim()).map((x) => x[1]);
+                    const faltaComp = !String(cliente.comprador_nome || "").trim() || !String(cliente.comprador_cpf || "").trim();
+                    const pronto = !faltaCarro.length && !faltaComp && !!f.valorFechado;
+                    return (
+                      <>
+                        <button disabled={!pronto}
+                          onClick={() => gerarDocumento("contrato_final", "Contrato de compra e venda",
+                            contratoFinal({ ...dadosDoc, ...cliente }), null)}
+                          className="w-full rounded-md py-3 text-[14px] font-semibold"
+                          style={{ background: pronto ? C.roxo : "#E7E3EC", color: pronto ? "#fff" : C.mute }}>
+                          Imprimir o contrato de compra e venda
+                        </button>
+                        {!pronto && (
+                          <p className="text-[11px]" style={{ color: AMARELO.texto }}>
+                            Falta{" "}
+                            {[!!faltaCarro.length && `do carro: ${faltaCarro.join(", ")}`,
+                              faltaComp && "nome e CPF do comprador",
+                              !f.valorFechado && "o valor fechado"].filter(Boolean).join(" · ")}.
+                          </p>
+                        )}
+                        <Pendente>
+                          A assinatura pelo ZapSign entra aqui. Falta a chave da conta chegar às variáveis de ambiente da Vercel — ela não pode passar por mim nem ficar no repositório.
+                        </Pendente>
+                      </>
+                    );
+                  })()}
+                </div>
+              </Bloco>
+            )}
 
             <Bloco titulo="Anexos do fechamento"
               sub="Comprovante de residência, laudo da cautelar e comprovante de pagamento.">
