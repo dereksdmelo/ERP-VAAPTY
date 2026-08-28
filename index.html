@@ -486,6 +486,19 @@ async function apagarAnexo(id) {
   return true;
 }
 
+/* ----------- assinatura eletrônica ----------- */
+// A chave da conta fica no servidor. Daqui vai só o conteúdo e quem
+// assina — nunca o token.
+async function enviarParaAssinatura(atendimentoId, dados) {
+  const r = await fetchAut("/api/documento?recurso=zapsign", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ atendimento_id: atendimentoId, ...dados }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui enviar para assinatura.");
+  return d;
+}
+
 async function consultarFunil(de, ate) {
   const q = comoQuery({ de, ate });
   const r = await fetchAut(`/api/funil${q ? `?${q}` : ""}`);
@@ -1931,11 +1944,16 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     comprador_estado_civil: (atendimento && atendimento.comprador_estado_civil) || "",
     comprador_profissao: (atendimento && atendimento.comprador_profissao) || "",
     comprador_endereco: (atendimento && atendimento.comprador_endereco) || "",
+    // Não entram no texto do contrato: são para o ZapSign chamar (0016).
+    comprador_email: (atendimento && atendimento.comprador_email) || "",
+    comprador_telefone: (atendimento && atendimento.comprador_telefone) || "",
   });
   const [checklist, setChecklist] = useState(null);
   const [statusAtual, setStatusAtual] = useState((atendimento && atendimento.status) || "aberto");
   const [erroStatus, setErroStatus] = useState("");
   const [salvandoCliente, setSalvandoCliente] = useState(false);
+  const [enviandoZap, setEnviandoZap] = useState(false);
+  const [envioZap, setEnvioZap] = useState("");
   const [erroCliente, setErroCliente] = useState("");
   const [erroCanais, setErroCanais] = useState("");
   const [novaRodada, setNovaRodada] = useState({ impresso: "", contra: "" });
@@ -3199,6 +3217,16 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                     <input className={inputCls} style={inputSty} value={cliente.comprador_endereco}
                       onChange={(e) => setCliente({ ...cliente, comprador_endereco: e.target.value })} />
                   </Campo>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <Campo label="E-mail — para assinar">
+                      <input className={inputCls} style={inputSty} inputMode="email"
+                        value={cliente.comprador_email} onChange={(e) => setCliente({ ...cliente, comprador_email: e.target.value })} />
+                    </Campo>
+                    <Campo label="Telefone — para assinar">
+                      <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="tel"
+                        value={cliente.comprador_telefone} onChange={(e) => setCliente({ ...cliente, comprador_telefone: e.target.value })} />
+                    </Campo>
+                  </div>
                   <button onClick={salvarCliente} disabled={salvandoCliente}
                     className="w-full rounded-md border py-2 text-[12px] font-semibold"
                     style={{ borderColor: C.line, color: C.roxo }}>
@@ -3229,9 +3257,49 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                               !f.valorFechado && "o valor fechado"].filter(Boolean).join(" · ")}.
                           </p>
                         )}
-                        <Pendente>
-                          A assinatura pelo ZapSign entra aqui. Falta a chave da conta chegar às variáveis de ambiente da Vercel — ela não pode passar por mim nem ficar no repositório.
-                        </Pendente>
+                        <button
+                          disabled={!pronto || !!enviandoZap || (!cliente.comprador_email && !cliente.comprador_telefone)}
+                          onClick={async () => {
+                            setEnvioZap(""); setEnviandoZap(true);
+                            try {
+                              const r = await enviarParaAssinatura(atendimento.id, {
+                                nome: `Contrato de compra e venda — ${f.placa || "sem placa"}`,
+                                conteudo: contratoFinal({ ...dadosDoc, ...cliente }),
+                                signatarios: [{
+                                  nome: cliente.comprador_nome,
+                                  email: cliente.comprador_email,
+                                  telefone: cliente.comprador_telefone,
+                                }],
+                              });
+                              setEnvioZap(r.assinantes && r.assinantes.length
+                                ? `Enviado. Link para ${r.assinantes[0].nome}: ${r.assinantes[0].link}`
+                                : "Enviado ao ZapSign.");
+                            } catch (e) { setEnvioZap(e.message); }
+                            setEnviandoZap(false);
+                          }}
+                          className="w-full rounded-md border py-2.5 text-[13px] font-semibold"
+                          style={{
+                            borderColor: pronto ? C.roxo : C.line,
+                            color: pronto ? C.roxo : C.mute,
+                          }}>
+                          {enviandoZap ? "Enviando…" : "Enviar para assinatura no ZapSign"}
+                        </button>
+                        {!cliente.comprador_email && !cliente.comprador_telefone && (
+                          <p className="text-[11px]" style={{ color: C.mute }}>
+                            O ZapSign precisa de e-mail ou telefone do comprador para mandar o convite.
+                          </p>
+                        )}
+                        {envioZap && (
+                          <p className="text-[11px] leading-relaxed"
+                            style={{ color: envioZap.indexOf("Enviado") === 0 ? C.verde : C.laranja, wordBreak: "break-all" }}>
+                            {envioZap}
+                          </p>
+                        )}
+                        {atendimento && atendimento.contrato_assinado_em && (
+                          <p className="text-[12px] font-semibold" style={{ color: C.verde }}>
+                            Contrato assinado em {new Date(atendimento.contrato_assinado_em).toLocaleString("pt-BR")}.
+                          </p>
+                        )}
                       </>
                     );
                   })()}

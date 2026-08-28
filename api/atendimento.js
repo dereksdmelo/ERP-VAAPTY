@@ -105,6 +105,8 @@ function paraColunas(c) {
     comprador_estado_civil: texto(c.comprador_estado_civil),
     comprador_profissao: texto(c.comprador_profissao),
     comprador_endereco: texto(c.comprador_endereco),
+    comprador_email: texto(c.comprador_email),
+    comprador_telefone: texto(c.comprador_telefone),
     origem: daLista(c.origem, ORIGENS),
     status: daLista(c.status, STATUS),
     carro_descricao: texto(c.carro_descricao),
