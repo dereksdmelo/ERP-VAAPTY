@@ -356,12 +356,23 @@ busca do Google.
 | Mercado Livre | `carros.mercadolivre.com.br/{marca}/{modelo}/` |
 | Marketplace | `/marketplace/search/?query=` (localiza sozinho) |
 | KBB | `/sp/marcas/{marca}/` — só a marca |
-| AutoAvaliar | home |
+| AutoAvaliar | `/tabela-auto-avaliar/` — exige conta |
+
+**Os canais são de duas famílias, e a tela separa as duas** porque
+medem coisas diferentes:
+
+- **anúncio** (OLX, Webmotors, iCarros, Mercado Livre, Marketplace) é o
+  que o dono **pede**. Teto, não referência.
+- **tabela** (KBB, AutoAvaliar) é o que o mercado **pratica**. A FIPE é
+  média de varejo; o KBB é o varejo praticado; a **tabela AutoAvaliar é
+  o repasse entre lojistas** — a ponta que a Vaapty vende, e por isso a
+  que mais se aproxima do POR.
 
 **KBB para na marca** porque o modelo lá fica sob a carroceria
 (`/hatchback/i30/`), que a FIPE não devolve. **AutoAvaliar para na
-home** porque é B2B, exige login e não tem endereço por modelo. Os dois
-estão assim de propósito, não por descuido.
+página do produto** porque a tabela exige conta: conferi em 27/08/2026
+e os únicos campos de `/tabela-auto-avaliar/` são e-mail e senha, sem
+consulta pública por modelo. Os dois estão assim de propósito.
 
 **Chaves na Mão ficou de fora**: não responde a nenhum padrão e devolve
 "página não encontrada". Link quebrado na frente do cliente é pior que

@@ -377,23 +377,28 @@ const semAcento = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036
 const fatia = (t) => semAcento(t).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 const CANAIS = [
-  { chave: "olx", nome: "OLX", cor: "#6D1B9E", tipo: "texto",
+  // Anúncio: o que o dono PEDE. Serve de teto.
+  { chave: "olx", nome: "OLX", familia: "anuncio", cor: "#6D1B9E", tipo: "texto",
     url: (t) => `https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios?q=${encodeURIComponent(t)}` },
-  { chave: "webmotors", nome: "Webmotors", tipo: "caminho",
+  { chave: "webmotors", nome: "Webmotors", familia: "anuncio", tipo: "caminho",
     url: (ma, mo) => `https://www.webmotors.com.br/carros/estoque/${fatia(ma)}/${fatia(mo)}` },
-  { chave: "icarros", nome: "iCarros", tipo: "caminho",
+  { chave: "icarros", nome: "iCarros", familia: "anuncio", tipo: "caminho",
     url: (ma, mo) => `https://www.icarros.com.br/comprar/usados/${fatia(ma)}/${fatia(mo)}` },
-  { chave: "mercadolivre", nome: "Mercado Livre", tipo: "caminho",
+  { chave: "mercadolivre", nome: "Mercado Livre", familia: "anuncio", tipo: "caminho",
     url: (ma, mo) => `https://carros.mercadolivre.com.br/${fatia(ma)}/${fatia(mo)}/` },
-  { chave: "facebook", nome: "Marketplace", tipo: "texto",
+  { chave: "facebook", nome: "Marketplace", familia: "anuncio", tipo: "texto",
     url: (t) => `https://www.facebook.com/marketplace/search/?query=${encodeURIComponent(t)}` },
+
+  // Tabela: o que o mercado PRATICA. Cada uma mede uma ponta.
+  // KBB é varejo; AutoAvaliar é repasse — a ponta que a Vaapty vende.
   // O modelo no KBB fica sob a carroceria (/hatchback/i30/), que a FIPE
-  // não devolve. A página da marca sempre existe e está a um clique.
-  { chave: "kbb", nome: "KBB", tipo: "marca",
+  // não devolve, então o link para na marca.
+  { chave: "kbb", nome: "KBB — varejo", familia: "tabela", tipo: "marca",
     url: (ma) => `https://www.kbb.com.br/sp/marcas/${fatia(ma)}/` },
-  // B2B, exige login e não tem endereço por modelo.
-  { chave: "autoavaliar", nome: "AutoAvaliar", tipo: "fixo",
-    url: () => "https://www.autoavaliar.com.br/" },
+  // Tabela transacional de repasse. Exige conta: a página é a do
+  // produto, com o login. Não há consulta pública por modelo.
+  { chave: "autoavaliar", nome: "AutoAvaliar — repasse", familia: "tabela", tipo: "fixo",
+    url: () => "https://www.autoavaliar.com.br/tabela-auto-avaliar/" },
 ];
 
 const enderecoCanal = (c, termo, marca, modelo) => {
@@ -1465,23 +1470,32 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                       Abrir todos
                     </button>
 
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {CANAIS.map((c) => {
-                        const href = enderecoCanal(c, termo, ma, mo);
-                        if (!href) return null;
-                        const visto = vistos.indexOf(c.chave) >= 0;
-                        return (
-                          <a key={c.chave} href={href} target="_blank" rel="noopener noreferrer"
-                            onClick={() => marcarVisto(c.chave)}
-                            className="rounded-full px-3 py-1.5 text-[12px] font-medium"
-                            style={{ background: visto ? "#F0F8F4" : "#fff",
-                                     color: visto ? C.verde : C.roxo,
-                                     border: `1px solid ${visto ? C.verde : C.line}` }}>
-                            {visto ? "✓ " : ""}{c.nome}
-                          </a>
-                        );
-                      })}
-                    </div>
+                    {[["anuncio", "Anúncio — o que o dono pede"],
+                      ["tabela", "Tabela — o que o mercado pratica"]].map(([fam, titulo]) => {
+                      const doGrupo = CANAIS.filter((c) => c.familia === fam && enderecoCanal(c, termo, ma, mo));
+                      if (!doGrupo.length) return null;
+                      return (
+                        <div key={fam} className="mt-3">
+                          <div className="text-[9px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>{titulo}</div>
+                          <div className="mt-1.5 flex flex-wrap gap-1.5">
+                            {doGrupo.map((c) => {
+                              const href = enderecoCanal(c, termo, ma, mo);
+                              const visto = vistos.indexOf(c.chave) >= 0;
+                              return (
+                                <a key={c.chave} href={href} target="_blank" rel="noopener noreferrer"
+                                  onClick={() => marcarVisto(c.chave)}
+                                  className="rounded-full px-3 py-1.5 text-[12px] font-medium"
+                                  style={{ background: visto ? "#F0F8F4" : "#fff",
+                                           color: visto ? C.verde : C.roxo,
+                                           border: `1px solid ${visto ? C.verde : C.line}` }}>
+                                  {visto ? "✓ " : ""}{c.nome}
+                                </a>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
 
                     {erroCanais && <p className="mt-2 text-[11px]" style={{ color: C.laranja }}>{erroCanais}</p>}
 
@@ -1491,10 +1505,15 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                       </p>
                     )}
 
-                    <p className="mt-2 text-[10px] leading-relaxed" style={{ color: C.mute }}>
-                      Anúncio é preço pedido, não preço de venda. Serve de teto, não de referência.
-                      {" "}KBB abre na marca — o modelo lá fica sob a carroceria, que a FIPE não informa.
-                      {" "}AutoAvaliar abre na home, porque é B2B e exige login.
+                    <p className="mt-3 text-[10px] leading-relaxed" style={{ color: C.mute }}>
+                      <b>Anúncio é preço pedido, não preço de venda</b> — serve de teto.
+                      {" "}A <b>FIPE</b> é média de varejo; o <b>KBB</b> é o varejo praticado;
+                      {" "}a <b>tabela AutoAvaliar</b> é o repasse entre lojistas — a ponta que a Vaapty vende,
+                      e por isso a que mais se aproxima do POR.
+                    </p>
+                    <p className="mt-1 text-[10px] leading-relaxed" style={{ color: C.mute }}>
+                      KBB abre na marca: o modelo lá fica sob a carroceria, que a FIPE não informa.
+                      {" "}A tabela AutoAvaliar exige conta — não há consulta pública por modelo.
                     </p>
                   </div>
                 );
