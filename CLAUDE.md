@@ -31,6 +31,7 @@ api/funil.js                     GET  — a aba PIPELINE: fluxo → venda por or
 api/importar.js                  POST — traz a planilha do CRM para o banco
 documentos.js                    CÓPIA MORTA: o que roda é o bloco colado no index.html
 supabase/migrations/*.sql        esquema do banco, versionado
+PENDENCIAS.md                    o que está em aberto e o que destrava cada coisa
 ```
 
 Sem `package.json`, de propósito: nenhuma função usa biblioteca. O
@@ -595,6 +596,10 @@ O importador só aparece para gerente.
   com a entrega da funcionalidade.
 
 ## Limites conhecidos
+
+A lista completa, com o que destrava cada item, está em
+[PENDENCIAS.md](PENDENCIAS.md). **Quem resolver um item apaga de lá** —
+lista que acumula item resolvido para de ser lida. Os principais:
 
 - **O login existe, o CRM ainda não.** Nome e telefone de cliente já
   têm coluna (0004) mas ainda não têm tela. Enquanto a etapa 3 não
