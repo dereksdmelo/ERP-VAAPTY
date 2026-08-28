@@ -1165,11 +1165,15 @@ const ou = (valor, rotulo) => (valor ? String(valor) : vazio(rotulo));
 
 /* ---------------- moldura ---------------- */
 
-function moldura({ titulo, corpo, protocolo, logo }) {
+function moldura({ titulo, corpo, protocolo, logo, paisagem }) {
   return `<!DOCTYPE html>
 <html lang="pt-BR"><head><meta charset="utf-8"><title>${titulo}</title>
 <style>
-  @page { size: A4; margin: 18mm 16mm; }
+  /* O extrato é largo — resumo à esquerda e três colunas de trinta à
+     direita — e em pé sobra meia folha em branco com tudo espremido no
+     alto. Ele sai deitado; os contratos, que são texto corrido,
+     continuam em pé. */
+  @page { size: ${paisagem ? "A4 landscape" : "A4"}; margin: ${paisagem ? "12mm 14mm" : "18mm 16mm"}; }
   body { font-family: Georgia, 'Times New Roman', serif; font-size: 11pt;
          line-height: 1.55; color: #15121a; }
   .marca { font-family: system-ui, sans-serif; font-weight: 800;
@@ -1196,11 +1200,12 @@ function moldura({ titulo, corpo, protocolo, logo }) {
      Tudo em sans e monoespaçada: o serif do contrato não tem nada a ver
      com uma folha de números. */
   img.logo { height: 11mm; display: block; }
-  .extrato { display: flex; gap: 10mm; align-items: flex-start;
-             font-family: system-ui, sans-serif; margin-top: 14px; }
-  .extrato .lado { width: 58mm; flex: 0 0 58mm; }
-  .extrato .tit { font-size: 8.5pt; font-weight: 700; letter-spacing: .14em;
-                  text-transform: uppercase; color: #6D1B9E; margin-bottom: 14px; }
+  .extrato { display: flex; gap: 14mm; align-items: flex-start;
+             font-family: system-ui, sans-serif; margin-top: 12px; }
+  .extrato .lado { width: 72mm; flex: 0 0 72mm; }
+  .extrato .tit { font-size: 8.5pt; font-weight: 700; letter-spacing: .1em;
+                  text-transform: uppercase; color: #6D1B9E; margin-bottom: 16px;
+                  white-space: nowrap; }
   .extrato .linhaV { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
   .extrato .rot { font-size: 9pt; font-weight: 700; font-style: italic; width: 16mm; }
   .extrato .caixa { background: #BFBFBF; padding: 3px 6px; font-size: 9pt;
@@ -1221,11 +1226,11 @@ function moldura({ titulo, corpo, protocolo, logo }) {
   .extrato .cols { display: grid; grid-template-columns: repeat(3, 1fr);
                    gap: 6mm; flex: 1; min-width: 0; }
   table.col { border-collapse: collapse; font-family: 'Courier New', monospace;
-              font-size: 7.4pt; width: 100%; table-layout: fixed; }
+              font-size: 8.6pt; width: 100%; table-layout: fixed; }
   table.col th { font-family: system-ui, sans-serif; font-size: 7pt; font-weight: 700;
                  border-bottom: 1px solid #15121a; padding: 2px 4px; text-align: left; }
   table.col th.d { text-align: right; }
-  table.col td { padding: 0.9px 4px; }
+  table.col td { padding: 1.4px 5px; }
   table.col th:first-child, table.col td.n { width: 8mm; color: #6B6478; }
   table.col td.v { text-align: right; white-space: nowrap; }
   table.col td.destaque { background: #DCEFDC; font-weight: 700; }
@@ -1355,6 +1360,7 @@ function extratoOfertas(f, r, indice, titulo) {
     corpo,
     protocolo: protocolo(f, `EXT${indice}`),
     logo: true,
+    paisagem: true,
   });
 }
 
