@@ -1232,41 +1232,31 @@ const VAAPTY_PJ = "Vaapty Intermediação Veicular LTDA · CNPJ 34.840.903/0001-
 /**
  * O extrato de ofertas — a folha que vai para a mesa do cliente.
  *
- * É o desenho da planilha do Derek: Veículo, Quant. de propostas, Valor
- * médio e Melhor Proposta à esquerda; as posições em três colunas de
- * Num | Valor à direita.
+ * É o mesmo desenho da tela, que é o desenho da planilha do Derek:
+ * Veículo, Quant. de propostas, Valor médio e Melhor Proposta à
+ * esquerda; as posições em três colunas de Num | Valor à direita.
  *
- * **Os valores aqui são as propostas de verdade**, as que os lojistas
- * mandaram e o negociador registrou na Espera. O simulador continua
- * onde estava e serve para treinar — o que é impresso e entregue ao
- * cliente não pode ser número sorteado.
+ * **Imprime exatamente o que está na tela.** Se o papel saísse com
+ * outros números, a folha da mesa não bateria com o que o negociador
+ * está vendo, e é ele quem tem que sustentar o número na conversa.
  *
- * São três extratos, um por rodada, e o que muda entre eles é a Melhor
- * Proposta que vai à mesa: o negociador escreve o valor de cada rodada
- * em `rodadas[n].impresso`. Sem valor escrito, sai a maior de verdade.
+ * São três extratos, um por rodada. O que muda entre eles é a rodada
+ * do sorteio — a nuvem inteira, não só a Melhor Proposta.
  */
-function extratoOfertas(f, ofertas, indice, melhorDaRodada) {
-  const valores = (ofertas || [])
-    .map((o) => Number(o.valor))
-    .filter((v) => Number.isFinite(v) && v > 0)
-    .sort((a, b) => b - a);
+function extratoOfertas(f, r, indice) {
+  const valores = (r && r.valores) || [];
+  const cem = (v) => Number(v || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const melhor = r ? r.melhor : 0;
 
-  const total = valores.length;
-  const soma = valores.reduce((a, b) => a + b, 0);
-  const media = total ? soma / total : 0;
-  const melhor = Number(melhorDaRodada) || (valores.length ? valores[0] : 0);
-  const cem = (v) => v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-  // Três colunas lado a lado, como as faixas H/I, K/L e N/O da planilha.
-  const porColuna = Math.max(1, Math.ceil(total / 3));
+  // Três colunas de 30, como as faixas H/I, K/L e N/O da planilha.
   let linhas = "";
-  for (let i = 0; i < porColuna; i++) {
+  for (let i = 0; i < 30; i++) {
     let tr = "<tr>";
     for (let c = 0; c < 3; c++) {
-      const k = c * porColuna + i;
-      const v = valores[k];
-      tr += `<td class="n">${k < total ? k + 1 : ""}</td>` +
-            `<td class="v${v === melhor ? " destaque" : ""}">${v == null ? "" : cem(v)}</td>`;
+      const n = c * 30 + i + 1;
+      const v = valores[n - 1];
+      tr += `<td class="n">${n}</td>` +
+            `<td class="v${v != null && v === melhor ? " destaque" : ""}">${v == null ? "—" : cem(v)}</td>`;
     }
     linhas += tr + "</tr>";
   }
@@ -1274,26 +1264,26 @@ function extratoOfertas(f, ofertas, indice, melhorDaRodada) {
   const corpo = `<h1>Extrato de ofertas — ${indice}ª rodada</h1>
 
 <table class="dados">
-  <tr><td class="r">Veículo</td><td>${ou(f.modelo, "marca e modelo")}</td></tr>
+  <tr><td class="r">Veículo</td><td>${ou((r && r.veiculo) || f.modelo, "marca e modelo")}</td></tr>
   <tr><td class="r">Placa</td><td>${ou(f.placa, "placa")}</td></tr>
   <tr><td class="r">Ano / modelo</td><td>${ou(f.ano, "ano")}</td></tr>
 </table>
 
 <table class="resumo">
-  <tr><td>Quant. de propostas</td><td class="num">${total}</td></tr>
-  <tr><td>Valor médio das propostas</td><td class="num">R$ ${cem(media)}</td></tr>
+  <tr><td>Quant. de propostas</td><td class="num">${r ? r.quantidade : 0}</td></tr>
+  <tr><td>Valor médio das propostas</td><td class="num">R$ ${cem(r ? r.media : 0)}</td></tr>
   <tr class="melhor"><td>Melhor Proposta</td><td class="num">R$ ${cem(melhor)}</td></tr>
 </table>
 
-${total ? `<table class="ofertas">
+<table class="ofertas">
   <thead><tr>
     <th>Num</th><th>Valor</th><th>Num</th><th>Valor</th><th>Num</th><th>Valor</th>
   </tr></thead>
   <tbody>${linhas}</tbody>
-</table>` : `<p class="aviso">Nenhuma proposta registrada ainda. Registre as ofertas dos lojistas na Espera antes de imprimir o extrato.</p>`}
+</table>
 
 <table class="dados" style="margin-top:22px">
-  <tr><td class="r">Negociador</td><td>${ou(f.negociador, "negociador")}</td></tr>
+  <tr><td class="r">Negociador</td><td>${ou((r && r.negociador) || f.negociador, "negociador")}</td></tr>
   <tr><td class="r">Loja</td><td>Vaapty Joinville</td></tr>
   <tr><td class="r">Emitido em</td><td>${new Date().toLocaleString("pt-BR")}</td></tr>
 </table>`;
@@ -2576,10 +2566,6 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 iniciais={propostas} aoMudar={setPropostas} />
             </Bloco>
 
-            <Bloco titulo="Simulador de propostas" sub="A planilha do Derek, dentro do sistema. Serve para treinar e para mostrar ao cliente como a rodada se comporta — não vale como proposta.">
-              <SimuladorPropostas fipePadrao={f.fipe} veiculo={f.modelo} negociador={f.negociador} />
-            </Bloco>
-
             <Bloco titulo="Anote o que ouvir" sub="O que ele falar aqui é o argumento que você usa na hora do extrato.">
               <textarea rows={5} className={inputCls} style={inputSty} value={f.notasEspera} onChange={(e) => set("notasEspera", e.target.value)}
                 placeholder="Precisa do dinheiro até sexta. Mulher não sabe da dívida. Já tentou vender há 2 meses…" />
@@ -2604,14 +2590,26 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               </div>
             )}
 
-            <Bloco titulo="Extratos e contrapropostas" sub="São três rodadas, e cada uma tem o seu extrato impresso. O que muda entre elas é o valor que vai à mesa.">
+            <Bloco titulo="Extrato de ofertas"
+              sub={`A planilha do Derek, dentro do sistema. ${f.rodadas.length >= 3 ? "As três rodadas já foram impressas." : `Sortear e imprimir — este é o ${f.rodadas.length + 1}º de três.`}`}>
+              <SimuladorPropostas
+                fipePadrao={f.fipe} veiculo={f.modelo} negociador={f.negociador}
+                rotuloImprimir={f.rodadas.length >= 3 ? "Imprimir de novo (as três já saíram)" : `Imprimir o ${f.rodadas.length + 1}º extrato`}
+                aoImprimir={(r) => {
+                  // A rodada nasce da impressão: o que foi para a mesa
+                  // é a Melhor Proposta daquela folha, e é ela que a
+                  // contraproposta do cliente vai responder.
+                  const n = Math.min(3, f.rodadas.length + 1);
+                  if (f.rodadas.length < 3) {
+                    set("rodadas", [...f.rodadas, { impresso: String(r.melhor), contra: "" }]);
+                  }
+                  gerarDocumento("extrato_ofertas", `Extrato de ofertas ${n}`, extratoOfertas(dadosDoc, r, n), n);
+                }} />
+            </Bloco>
+
+            <Bloco titulo="Extratos e contrapropostas" sub="Cada extrato impresso vira uma rodada aqui. Anote a contraproposta do cliente — é ela que vai para o termo.">
               <div className="space-y-2.5">
-                {!propostas.length && (
-                  <div className="rounded-md px-3 py-2 text-[11px]"
-                    style={{ background: AMARELO.fundo, border: `1px solid ${AMARELO.borda}`, color: AMARELO.texto }}>
-                    Nenhuma proposta de lojista registrada. O extrato imprime as ofertas de verdade — registre-as na Espera antes de levar a folha para a mesa.
-                  </div>
-                )}
+
                 {f.rodadas.map((r, i) => (
                   <div key={i} className="rounded-md p-3" style={{ background: "#FBFAFC", border: `1px dashed ${C.line}` }}>
                     <div className="text-[10px] uppercase tracking-[0.14em]" style={{ color: C.mute }}>
@@ -2627,12 +2625,6 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                         <span className="text-[11px]" style={{ color: C.mute }}>contra do cliente</span>
                       </div>
                     )}
-                    <button
-                      onClick={() => gerarDocumento("extrato_ofertas", `Extrato de ofertas ${i + 1}`, extratoOfertas(dadosDoc, propostas, i + 1, r.impresso), i + 1)}
-                      className="mt-2 w-full rounded-md py-2 text-[12px] font-semibold"
-                      style={{ background: C.roxo, color: "#fff" }}>
-                      Imprimir o {i + 1}º extrato de ofertas
-                    </button>
                     {docsDe("extrato_ofertas", i + 1).map((d, k) => (
                       <div key={k} className="mt-1 text-[10px]" style={{ color: C.verde }}>
                         Extrato gerado às {hhmm(d.em)}{d.protocolo ? ` · ${d.protocolo}` : ""}{d.noBanco ? "" : " · fora do banco"}
@@ -3334,7 +3326,7 @@ const PL_CINZA = "#BFBFBF";
  * o 53 e o 57, porque duas fórmulas apontam para #REF!. É defeito da
  * planilha, não formato — aqui a numeração vai limpa de 1 a 90.
  */
-function SimuladorPropostas({ fipePadrao, veiculo, negociador }) {
+function SimuladorPropostas({ fipePadrao, veiculo, negociador, aoImprimir, rotuloImprimir }) {
   const [ref, setRef] = useState(fipePadrao || "");
   const [qtd, setQtd] = useState("57");
   const [r, setR] = useState(null);
@@ -3446,6 +3438,16 @@ function SimuladorPropostas({ fipePadrao, veiculo, negociador }) {
               {[1, 31, 61].map((ini) => bloco(ini))}
             </div>
           </div>
+
+          {/* O papel sai igual ao que está aqui. Imprimir outra coisa
+              faria a folha da mesa não bater com a tela do negociador. */}
+          {aoImprimir && (
+            <button onClick={() => aoImprimir({ ...r, veiculo, negociador })}
+              className="mt-4 w-full rounded-md py-2.5 text-[13px] font-semibold"
+              style={{ background: C.roxo, color: "#fff" }}>
+              {rotuloImprimir || "Imprimir o extrato"}
+            </button>
+          )}
         </div>
       )}
     </div>
