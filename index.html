@@ -4829,11 +4829,20 @@ const TEMAS_TESTEMUNHAL = [
  * dos sinais da escuta, e pelo mesmo motivo.
  */
 const NECESSIDADE_TEMA = [
-  [["pressa", "rapid", "urgent", "hoje", "amanha", "semana", "quitar", "divida", "dinheiro"], ["Agilidade/Rapidez", "Pagamento/Pix rápido", "Venda rápida do veículo"]],
-  [["desconfia", "medo", "golpe", "segur", "confia"], ["Confiança/Segurança", "Transparência"]],
-  [["burocra", "document", "papel", "transfer"], ["Sem burocracia", "Documentação"]],
-  [["preco", "valor", "pouco", "baixo", "caro"], ["Preço/Valor justo", "Negociação"]],
-  [["combinad", "prometeu", "cumpr"], ["Cumpriu o combinado", "Transparência"]],
+  // `nega: true` só onde a negação inverte o sentido. "Sem pressa" é o
+  // contrário de pressa, mas "sem burocracia" é exatamente o desejo que
+  // o tema "Sem burocracia" atende — tratar os dois igual erraria um
+  // dos dois sempre.
+  { p: ["pressa", "rapid", "urgent", "hoje", "amanha", "semana", "quitar", "divida", "dinheiro"],
+    t: ["Agilidade/Rapidez", "Pagamento/Pix rápido", "Venda rápida do veículo"], nega: true },
+  { p: ["desconfia", "medo", "golpe", "segur", "confia"],
+    t: ["Confiança/Segurança", "Transparência"] },
+  { p: ["burocra", "document", "papel", "transfer"],
+    t: ["Sem burocracia", "Documentação"] },
+  { p: ["preco", "valor", "pouco", "baixo", "caro"],
+    t: ["Preço/Valor justo", "Negociação"] },
+  { p: ["combinad", "prometeu", "cumpr"],
+    t: ["Cumpriu o combinado", "Transparência"] },
 ];
 
 /**
@@ -4873,9 +4882,29 @@ function Testemunhais({ necessidade, negociador, aoMostrar }) {
   const sugeridos = useMemo(() => {
     const t = semAcento(necessidade || "").toLowerCase();
     if (!t.trim()) return [];
+
+    /* "sem pressa" estava acendendo Agilidade, que é o contrário do que
+       o cliente disse. Achar a palavra não basta: se logo antes dela
+       vier uma negação, ela vale ao contrário e o tema não entra. */
+    const NEGA = ["sem ", "nao ", "nenhuma ", "nenhum "];
+    const citado = (p, nega) => {
+      let i = t.indexOf(p);
+      while (i >= 0) {
+        if (!nega) return true;
+        // Quinze caracteres antes cobrem "não tem pressa" sem alcançar
+        // a frase anterior.
+        const antes = t.slice(Math.max(0, i - 15), i);
+        if (!NEGA.some((neg) => antes.indexOf(neg) >= 0)) return true;
+        i = t.indexOf(p, i + 1);
+      }
+      return false;
+    };
+
     const achados = [];
-    NECESSIDADE_TEMA.forEach(([palavras, temas]) => {
-      if (palavras.some((p) => t.indexOf(p) >= 0)) temas.forEach((x) => { if (achados.indexOf(x) < 0) achados.push(x); });
+    NECESSIDADE_TEMA.forEach((g) => {
+      if (g.p.some((palavra) => citado(palavra, g.nega))) {
+        g.t.forEach((x) => { if (achados.indexOf(x) < 0) achados.push(x); });
+      }
     });
     return achados;
   }, [necessidade]);
@@ -4928,7 +4957,7 @@ function Testemunhais({ necessidade, negociador, aoMostrar }) {
       )}
 
       <p className="mt-2 text-[11px]" style={{ color: C.mute }}>
-        {lista.length} avaliação{lista.length === 1 ? "" : "ões"} de 5 estrelas no Google.
+        {lista.length} avaliaç{lista.length === 1 ? "ão" : "ões"} de 5 estrelas no Google.
       </p>
 
       <div className="mt-2 space-y-2">
