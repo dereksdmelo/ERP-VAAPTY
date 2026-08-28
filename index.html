@@ -127,6 +127,11 @@ const corStatus = (v) => (STATUS_AT.filter((x) => x[0] === v)[0] || [0, 0, "#6B6
 
 const MAX_FOTOS = 12;
 const ESPERA_SEG = 15 * 60;
+// O intervalo entre uma contraproposta e o extrato seguinte. Não é
+// enfeite: é o tempo em que o negociador "vai falar com a mesa" — sem
+// ele o segundo extrato sai na hora e o cliente percebe que o número
+// estava pronto.
+const RODADA_SEG = 5 * 60;
 
 /* ===================== sessão ===================== */
 
@@ -1147,25 +1152,38 @@ function moldura({ titulo, corpo, protocolo }) {
             font-family: system-ui, sans-serif; font-size: 8pt; color: #6B6478;
             display: flex; justify-content: space-between; }
 
-  /* extrato de ofertas — o desenho da planilha, em papel */
-  table.resumo { width: 100%; border-collapse: collapse; margin: 16px 0 20px;
-                 font-family: system-ui, sans-serif; }
-  table.resumo td { padding: 7px 9px; font-size: 11pt; border-bottom: 1px solid #CBD0CA; }
-  table.resumo td.num { text-align: right; font-family: 'Courier New', monospace;
-                        font-weight: 700; color: #C00000; white-space: nowrap; }
-  table.resumo tr.melhor td { font-size: 14pt; font-weight: 700; border-bottom: 2px solid #15121a; }
+  /* extrato de ofertas — o mesmo desenho da tela, que é o da planilha.
+     Tudo em sans e monoespaçada: o serif do contrato não tem nada a ver
+     com uma folha de números. */
+  .extrato { display: flex; gap: 14mm; align-items: flex-start;
+             font-family: system-ui, sans-serif; margin-top: 10px; }
+  .extrato .lado { width: 62mm; flex: 0 0 62mm; }
+  .extrato .tit { font-size: 11pt; font-weight: 700; margin-bottom: 12px; }
+  .extrato .linhaV { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+  .extrato .rot { font-size: 9pt; font-weight: 700; font-style: italic; width: 16mm; }
+  .extrato .caixa { background: #BFBFBF; padding: 3px 6px; font-size: 9pt;
+                    font-weight: 600; flex: 1; text-align: center; }
+  .extrato .caixa.cheia { display: block; margin-top: 7px; }
+  .extrato .par { display: flex; justify-content: space-between; align-items: baseline;
+                  margin: 14px 0 10px; font-size: 10pt; font-weight: 700; }
+  .extrato .bloco { margin-bottom: 14px; }
+  .extrato .rotG { font-size: 10pt; font-weight: 700; }
+  .extrato .rotG.grande { font-size: 12pt; margin-top: 6px; }
+  .extrato .sub { display: flex; justify-content: space-between;
+                  border-bottom: 1px solid #15121a; padding-bottom: 2px; margin-top: 3px; }
+  .extrato .vm { font-family: 'Courier New', monospace; font-weight: 700; color: #C00000; font-size: 10pt; }
+  .extrato .vm.grande { font-size: 13pt; }
 
-  table.ofertas { width: 100%; border-collapse: collapse; margin-top: 6px;
-                  font-family: 'Courier New', monospace; font-size: 9pt; }
-  table.ofertas th { font-family: system-ui, sans-serif; font-size: 8pt;
-                     letter-spacing: .08em; text-transform: uppercase; color: #6B6478;
-                     border-bottom: 1px solid #15121a; padding: 4px 6px; }
-  table.ofertas th:nth-child(even) { text-align: right; }
-  table.ofertas td { padding: 2px 6px; }
-  table.ofertas td.n { color: #6B6478; width: 6%; }
-  table.ofertas td.v { text-align: right; width: 27%; }
-  table.ofertas td.destaque { background: #DCEFDC; font-weight: 700; }
-  .aviso { color: #EA5423; font-family: system-ui, sans-serif; font-size: 10pt; }
+  .extrato .cols { display: flex; gap: 7mm; flex: 1; }
+  table.col { border-collapse: collapse; font-family: 'Courier New', monospace;
+              font-size: 7.6pt; flex: 1; }
+  table.col th { font-family: system-ui, sans-serif; font-size: 7pt; font-weight: 700;
+                 border-bottom: 1px solid #15121a; padding: 2px 4px; text-align: left; }
+  table.col th.d { text-align: right; }
+  table.col td { padding: 0.9px 4px; }
+  table.col td.n { color: #6B6478; }
+  table.col td.v { text-align: right; white-space: nowrap; }
+  table.col td.destaque { background: #DCEFDC; font-weight: 700; }
 </style></head><body>
 <div class="marca">VAAPTY</div>
 <div class="sub">Joinville · Santa Catarina</div>
@@ -1248,45 +1266,44 @@ function extratoOfertas(f, r, indice) {
   const cem = (v) => Number(v || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const melhor = r ? r.melhor : 0;
 
-  // Três colunas de 30, como as faixas H/I, K/L e N/O da planilha.
-  let linhas = "";
-  for (let i = 0; i < 30; i++) {
-    let tr = "<tr>";
-    for (let c = 0; c < 3; c++) {
-      const n = c * 30 + i + 1;
+  // Três blocos de 30, como as faixas H/I, K/L e N/O da planilha. Vão
+  // lado a lado no papel, do mesmo jeito que estão na tela.
+  const coluna = (inicio) => {
+    let linhas = "";
+    for (let k = 0; k < 30; k++) {
+      const n = inicio + k;
       const v = valores[n - 1];
-      tr += `<td class="n">${n}</td>` +
-            `<td class="v${v != null && v === melhor ? " destaque" : ""}">${v == null ? "—" : cem(v)}</td>`;
+      linhas += `<tr><td class="n">${n}</td>` +
+        `<td class="v${v != null && v === melhor ? " destaque" : ""}">${v == null ? "—" : cem(v)}</td></tr>`;
     }
-    linhas += tr + "</tr>";
-  }
+    return `<table class="col"><thead><tr><th>Num</th><th class="d">Valor</th></tr></thead><tbody>${linhas}</tbody></table>`;
+  };
 
-  const corpo = `<h1>Extrato de ofertas — ${indice}ª rodada</h1>
+  const corpo = `<div class="extrato">
+  <div class="lado">
+    <div class="tit">Extrato de ofertas — ${indice}ª rodada</div>
 
-<table class="dados">
-  <tr><td class="r">Veículo</td><td>${ou((r && r.veiculo) || f.modelo, "marca e modelo")}</td></tr>
-  <tr><td class="r">Placa</td><td>${ou(f.placa, "placa")}</td></tr>
-  <tr><td class="r">Ano / modelo</td><td>${ou(f.ano, "ano")}</td></tr>
-</table>
+    <div class="linhaV"><span class="rot">Veículo</span><span class="caixa">${ou((r && r.veiculo) || f.modelo, "marca e modelo")}</span></div>
+    <div class="linhaV"><span class="rot">Placa</span><span class="caixa">${ou(f.placa, "placa")}</span></div>
 
-<table class="resumo">
-  <tr><td>Quant. de propostas</td><td class="num">${r ? r.quantidade : 0}</td></tr>
-  <tr><td>Valor médio das propostas</td><td class="num">R$ ${cem(r ? r.media : 0)}</td></tr>
-  <tr class="melhor"><td>Melhor Proposta</td><td class="num">R$ ${cem(melhor)}</td></tr>
-</table>
+    <div class="par"><span>Quant. de propostas</span><span class="vm">${r ? r.quantidade : 0}</span></div>
 
-<table class="ofertas">
-  <thead><tr>
-    <th>Num</th><th>Valor</th><th>Num</th><th>Valor</th><th>Num</th><th>Valor</th>
-  </tr></thead>
-  <tbody>${linhas}</tbody>
-</table>
+    <div class="bloco">
+      <div class="rotG">Valor médio das propostas</div>
+      <div class="sub"><span class="vm">R$</span><span class="vm">${cem(r ? r.media : 0)}</span></div>
+    </div>
 
-<table class="dados" style="margin-top:22px">
-  <tr><td class="r">Negociador</td><td>${ou((r && r.negociador) || f.negociador, "negociador")}</td></tr>
-  <tr><td class="r">Loja</td><td>Vaapty Joinville</td></tr>
-  <tr><td class="r">Emitido em</td><td>${new Date().toLocaleString("pt-BR")}</td></tr>
-</table>`;
+    <div class="bloco">
+      <div class="rotG grande">Melhor Proposta</div>
+      <div class="sub"><span class="vm grande">R$</span><span class="vm grande">${cem(melhor)}</span></div>
+    </div>
+
+    <div class="caixa cheia">${ou((r && r.negociador) || f.negociador, "negociador")}</div>
+    <div class="caixa cheia">JOINVILLE</div>
+  </div>
+
+  <div class="cols">${coluna(1)}${coluna(31)}${coluna(61)}</div>
+</div>`;
 
   return moldura({
     titulo: `Extrato de ofertas ${indice}`,
@@ -2321,6 +2338,10 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 )}
               </div>
             </Bloco>
+
+            <Bloco titulo="Escutar a conversa" sub="É aqui que ele conta por que está vendendo. O cliente precisa autorizar antes — é a condição do parecer.">
+              <Escuta f={f} set={set} />
+            </Bloco>
           </>
         )}
 
@@ -2578,7 +2599,35 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         )}
 
         {/* ---------- N ---------- */}
-        {etapa === "N" && (
+        {etapa === "N" && (() => {
+          /* O caminho é uma fila só, e a tela mostra um passo de cada
+             vez: extrato 1 → contra 1 → 5 min → extrato 2 → contra 2 →
+             5 min → extrato 3 → pré-contrato. Antes disso tudo
+             aparecia junto e o negociador tinha que lembrar da ordem. */
+          const R = f.rodadas;
+          const n = R.length;
+          const atual = n ? R[n - 1] : null;
+          const faltaContra = !!atual && !atual.contra;
+          const podeContar = !!atual && !!atual.contra && !atual.esperaEm && n < 3;
+          const sobra = atual && atual.esperaEm
+            ? Math.max(0, RODADA_SEG - Math.floor((agora - atual.esperaEm) / 1000))
+            : null;
+          const noRelogio = sobra != null && sobra > 0;
+          const liberado = n === 0 || (n < 3 && !!atual.contra && sobra === 0);
+          const fim = n === 3;
+
+          const passo = (num, rot, estado) => (
+            <div className="flex items-center gap-2">
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
+                style={{ background: estado === "feito" ? C.verde : estado === "agora" ? C.roxo : "#E7E3EC",
+                         color: estado === "espera" ? C.mute : "#fff" }}>
+                {estado === "feito" ? "✓" : num}
+              </span>
+              <span className="text-[11px]" style={{ color: estado === "espera" ? C.mute : C.ink, fontWeight: estado === "agora" ? 700 : 400 }}>{rot}</span>
+            </div>
+          );
+
+          return (
           <>
             {gap != null && (
               <div className="rounded-lg p-3" style={{ background: C.roxoFraco, border: `1px solid ${C.line}` }}>
@@ -2590,102 +2639,159 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               </div>
             )}
 
-            <Bloco titulo="Extrato de ofertas"
-              sub={`A planilha do Derek, dentro do sistema. ${f.rodadas.length >= 3 ? "As três rodadas já foram impressas." : `Sortear e imprimir — este é o ${f.rodadas.length + 1}º de três.`}`}>
-              <SimuladorPropostas
-                fipePadrao={f.fipe} veiculo={f.modelo} negociador={f.negociador}
-                rotuloImprimir={f.rodadas.length >= 3 ? "Imprimir de novo (as três já saíram)" : `Imprimir o ${f.rodadas.length + 1}º extrato`}
-                aoImprimir={(r) => {
-                  // A rodada nasce da impressão: o que foi para a mesa
-                  // é a Melhor Proposta daquela folha, e é ela que a
-                  // contraproposta do cliente vai responder.
-                  const n = Math.min(3, f.rodadas.length + 1);
-                  if (f.rodadas.length < 3) {
-                    set("rodadas", [...f.rodadas, { impresso: String(r.melhor), contra: "" }]);
-                  }
-                  gerarDocumento("extrato_ofertas", `Extrato de ofertas ${n}`, extratoOfertas(dadosDoc, r, n), n);
-                }} />
+            {/* o caminho, sempre à vista */}
+            <div className="rounded-lg p-3" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
+              <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                {[1, 2, 3].map((k) => (
+                  <React.Fragment key={k}>
+                    {passo(k, `Extrato ${k}`, n >= k ? "feito" : (liberado && n === k - 1 ? "agora" : "espera"))}
+                    {k < 3 && passo("↓", `Contra ${k}`, (R[k - 1] && R[k - 1].contra) ? "feito" : (faltaContra && n === k ? "agora" : "espera"))}
+                    {k < 3 && passo("⏱", "5 min", (R[k - 1] && R[k - 1].esperaEm && (n > k || sobra === 0)) ? "feito" : ((podeContar || noRelogio) && n === k ? "agora" : "espera"))}
+                  </React.Fragment>
+                ))}
+                {passo("✎", "Pré-contrato", fim ? "agora" : "espera")}
+              </div>
+            </div>
+
+            {/* 1. o extrato da vez */}
+            {liberado && (
+              <Bloco titulo={`Extrato de ofertas — ${n + 1}º de três`}
+                sub="Sorteie a rodada e imprima. A folha sai igual ao que está aqui.">
+                <SimuladorPropostas
+                  fipePadrao={f.fipe} veiculo={f.modelo} negociador={f.negociador}
+                  rotuloImprimir={`Imprimir o ${n + 1}º extrato e seguir`}
+                  aoImprimir={(r) => {
+                    set("rodadas", [...f.rodadas, { impresso: String(r.melhor), contra: "", esperaEm: null }]);
+                    gerarDocumento("extrato_ofertas", `Extrato de ofertas ${n + 1}`, extratoOfertas(dadosDoc, r, n + 1), n + 1);
+                  }} />
+              </Bloco>
+            )}
+
+            {/* 2. a contraproposta do cliente */}
+            {faltaContra && (
+              <Bloco titulo={`Contraproposta ${n}`}
+                sub={`Você levou ${brl(atual.impresso)} para a mesa. Quanto ele pediu?`}>
+                <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono, fontSize: 18 }}
+                  inputMode="numeric" placeholder="Quanto o cliente pediu"
+                  value={novaRodada.contra}
+                  onChange={(e) => setNovaRodada({ ...novaRodada, contra: e.target.value })} />
+                <button
+                  onClick={() => {
+                    if (!novaRodada.contra.trim()) return;
+                    const copia = f.rodadas.slice();
+                    copia[n - 1] = { ...atual, contra: novaRodada.contra.trim() };
+                    set("rodadas", copia);
+                    setNovaRodada({ impresso: "", contra: "" });
+                  }}
+                  className="mt-2 w-full rounded-md py-3 text-[14px] font-semibold"
+                  style={{ background: C.roxo, color: "#fff" }}>
+                  Registrar a contraproposta
+                </button>
+                <p className="mt-2 text-[11px]" style={{ color: C.mute }}>
+                  É este número que vai para o termo de aceite — não o que a loja imprimiu.
+                </p>
+              </Bloco>
+            )}
+
+            {/* 3. os cinco minutos */}
+            {(podeContar || noRelogio) && (
+              <Bloco titulo="Cinco minutos com a mesa"
+                sub="O tempo em que você some para consultar. Sem ele, o próximo extrato sai na hora e o cliente entende que o número já estava pronto.">
+                {podeContar ? (
+                  <button onClick={() => {
+                      const copia = f.rodadas.slice();
+                      copia[n - 1] = { ...atual, esperaEm: Date.now() };
+                      set("rodadas", copia);
+                    }}
+                    className="w-full rounded-md py-3 text-[14px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>
+                    Iniciar os 5 minutos
+                  </button>
+                ) : (
+                  <div className="text-center">
+                    <div className="text-[46px] leading-none" style={{ fontFamily: F.mono, fontWeight: 700, color: C.roxo }}>
+                      {mmss(sobra)}
+                    </div>
+                    <p className="mt-2 text-[12px]" style={{ color: C.mute }}>Fique com o cliente. Volte com o próximo extrato.</p>
+                    <button onClick={() => {
+                        const copia = f.rodadas.slice();
+                        copia[n - 1] = { ...atual, esperaEm: Date.now() - RODADA_SEG * 1000 };
+                        set("rodadas", copia);
+                      }}
+                      className="mt-3 text-[12px] underline" style={{ color: C.mute }}>pular o tempo</button>
+                  </div>
+                )}
+              </Bloco>
+            )}
+
+            {/* 4. acabaram as três: vai para o fechamento */}
+            {fim && (
+              <Bloco titulo="Três rodadas feitas" sub="Daqui o caminho é o pré-contrato, no Tome a iniciativa.">
+                <button disabled={!podeImprimir}
+                  onClick={() => gerarDocumento("pre_contrato", "Pré-contrato", preContrato(dadosDoc))}
+                  className="w-full rounded-md py-3 text-[14px] font-semibold"
+                  style={{ background: podeImprimir ? C.roxo : "#E7E3EC", color: podeImprimir ? "#fff" : C.mute }}>
+                  {podeImprimir ? "Imprimir o pré-contrato" : "Pré-contrato — complete o cliente na Pesquisa"}
+                </button>
+                <button onClick={() => setEtapa("T")}
+                  className="mt-2 w-full rounded-md border py-2.5 text-[13px] font-semibold"
+                  style={{ borderColor: C.roxo, color: C.roxo }}>
+                  Ir para o Tome a iniciativa
+                </button>
+              </Bloco>
+            )}
+
+            {/* o histórico das rodadas, compacto */}
+            {n > 0 && (
+              <Bloco titulo="As rodadas até aqui" sub="Cada extrato impresso e o que o cliente respondeu.">
+                <div className="space-y-2">
+                  {R.map((r, i) => (
+                    <div key={i} className="rounded-md p-3" style={{ background: "#FBFAFC", border: `1px dashed ${C.line}` }}>
+                      <div className="text-[10px] uppercase tracking-[0.14em]" style={{ color: C.mute }}>{i + 1}º extrato</div>
+                      <div className="mt-1 flex items-baseline justify-between">
+                        <span className="text-[17px]" style={{ fontFamily: F.mono, fontWeight: 700 }}>{brl(r.impresso)}</span>
+                        <span className="text-[11px]" style={{ color: C.mute }}>impresso</span>
+                      </div>
+                      {r.contra && (
+                        <div className="mt-1 flex items-baseline justify-between">
+                          <span className="text-[17px]" style={{ fontFamily: F.mono, fontWeight: 700, color: C.laranja }}>{brl(r.contra)}</span>
+                          <span className="text-[11px]" style={{ color: C.mute }}>contra do cliente</span>
+                        </div>
+                      )}
+                      <button disabled={!podeImprimir}
+                        onClick={() => gerarDocumento("termo_aceite", `Termo de aceite ${i + 1}`, termoAceite(dadosDoc, r, i + 1), i + 1)}
+                        className="mt-2 w-full rounded-md border py-1.5 text-[11px] font-semibold"
+                        style={{ borderColor: podeImprimir ? C.roxo : C.line, color: podeImprimir ? C.roxo : C.mute }}>
+                        {podeImprimir ? "Termo de aceite" : "Termo de aceite — complete o cliente na Pesquisa"}
+                      </button>
+                      {docsDe("extrato_ofertas", i + 1).concat(docsDe("termo_aceite", i + 1)).map((d, k) => (
+                        <div key={k} className="mt-1 text-[10px]" style={{ color: C.verde }}>
+                          {d.rotulo} às {hhmm(d.em)}{d.protocolo ? ` · ${d.protocolo}` : ""}{d.noBanco ? "" : " · fora do banco"}
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                  {erroDoc && <p className="text-[12px]" style={{ color: C.laranja }}>{erroDoc}</p>}
+                </div>
+              </Bloco>
+            )}
+
+            <Bloco titulo="Escutar a conversa" sub="Os ganchos do que ele falar aqui são o argumento da próxima rodada.">
+              <Escuta f={f} set={set} />
             </Bloco>
 
-            <Bloco titulo="Extratos e contrapropostas" sub="Cada extrato impresso vira uma rodada aqui. Anote a contraproposta do cliente — é ela que vai para o termo.">
-              <div className="space-y-2.5">
-
-                {f.rodadas.map((r, i) => (
-                  <div key={i} className="rounded-md p-3" style={{ background: "#FBFAFC", border: `1px dashed ${C.line}` }}>
-                    <div className="text-[10px] uppercase tracking-[0.14em]" style={{ color: C.mute }}>
-                      {i + 1}º extrato{i > 0 ? " · menos compradores" : ""}
-                    </div>
-                    <div className="mt-1 flex items-baseline justify-between">
-                      <span className="text-[17px]" style={{ fontFamily: F.mono, fontWeight: 700 }}>{brl(r.impresso)}</span>
-                      <span className="text-[11px]" style={{ color: C.mute }}>impresso</span>
-                    </div>
-                    {r.contra && (
-                      <div className="mt-1 flex items-baseline justify-between">
-                        <span className="text-[17px]" style={{ fontFamily: F.mono, fontWeight: 700, color: C.laranja }}>{brl(r.contra)}</span>
-                        <span className="text-[11px]" style={{ color: C.mute }}>contra do cliente</span>
-                      </div>
-                    )}
-                    {docsDe("extrato_ofertas", i + 1).map((d, k) => (
-                      <div key={k} className="mt-1 text-[10px]" style={{ color: C.verde }}>
-                        Extrato gerado às {hhmm(d.em)}{d.protocolo ? ` · ${d.protocolo}` : ""}{d.noBanco ? "" : " · fora do banco"}
-                      </div>
-                    ))}
-                    <button disabled={!podeImprimir}
-                      onClick={() => gerarDocumento("termo_aceite", `Termo de aceite ${i + 1}`, termoAceite(dadosDoc, r, i + 1), i + 1)}
-                      className="mt-2 w-full rounded-md border py-1.5 text-[11px] font-semibold"
-                      style={{ borderColor: podeImprimir ? C.roxo : C.line, color: podeImprimir ? C.roxo : C.mute }}>
-                      {podeImprimir ? "Termo de aceite" : "Termo de aceite — complete o cliente na Pesquisa"}
-                    </button>
-                    {!r.contra && (
-                      <p className="mt-1 text-[10px]" style={{ color: AMARELO.texto }}>
-                        Sem contraproposta registrada, o termo sai com o valor impresso. O campo "valor ajustado" é o que o cliente aceita.
-                      </p>
-                    )}
-                    {docsDe("termo_aceite", i + 1).map((d, k) => (
-                      <div key={k} className="mt-1 text-[10px]" style={{ color: C.verde }}>
-                        Gerado às {hhmm(d.em)}{d.protocolo ? ` · ${d.protocolo}` : ""}{d.noBanco ? "" : " · fora do banco"}
-                      </div>
-                    ))}
-                  </div>
-                ))}
-                {erroDoc && <p className="text-[12px]" style={{ color: C.laranja }}>{erroDoc}</p>}
-                {!!melhorProposta && (
-                  <button onClick={() => setNovaRodada({ ...novaRodada, impresso: String(melhorProposta) })}
-                    className="w-full rounded-md border py-2 text-[12px] font-semibold"
-                    style={{ borderColor: C.verde, color: C.verde, background: "#F0F8F4" }}>
-                    Usar a maior proposta — {brl(melhorProposta)}
-                  </button>
-                )}
-                {/* Três rodadas, como a casa faz. Passar disso não é
-                    negociação, é desgaste — e o cliente já foi embora. */}
-                {f.rodadas.length < 3 ? (
-                  <>
-                    <div className="grid grid-cols-2 gap-2">
-                      <input placeholder="Impresso" className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={novaRodada.impresso} onChange={(e) => setNovaRodada({ ...novaRodada, impresso: e.target.value })} />
-                      <input placeholder="Contra" className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={novaRodada.contra} onChange={(e) => setNovaRodada({ ...novaRodada, contra: e.target.value })} />
-                    </div>
-                    <button onClick={() => { if (!novaRodada.impresso) return; set("rodadas", [...f.rodadas, novaRodada]); setNovaRodada({ impresso: "", contra: "" }); }}
-                      className="w-full rounded-md py-2.5 text-[13px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>
-                      Registrar o {f.rodadas.length + 1}º extrato
-                    </button>
-                  </>
-                ) : (
-                  <p className="text-[11px]" style={{ color: C.mute }}>
-                    As três rodadas estão registradas. Daqui vai para o fechamento.
-                  </p>
-                )}
-                <Campo label="Objeção principal">
-                  <select className={inputCls} style={inputSty} value={f.objecao} onChange={(e) => set("objecao", e.target.value)}>
-                    {OBJECOES.map((o) => <option key={o}>{o}</option>)}
-                  </select>
-                </Campo>
+            <Bloco titulo="Objeção principal" sub="O que travou a conversa.">
+              <select className={inputCls} style={inputSty} value={f.objecao} onChange={(e) => set("objecao", e.target.value)}>
+                {OBJECOES.map((o) => <option key={o}>{o}</option>)}
+              </select>
+              <div className="mt-3">
                 <Pendente>
                   Os argumentos sugeridos por IA para cada objeção entram aqui. Precisam da matéria-prima: quais objeções aparecem e o que funciona contra cada uma, coletado com os negociadores.
                 </Pendente>
               </div>
             </Bloco>
           </>
-        )}
+          );
+        })()}
 
         {/* ---------- T ---------- */}
         {etapa === "T" && (
