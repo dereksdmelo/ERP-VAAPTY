@@ -114,11 +114,14 @@ const rotuloStatus = (v) => (STATUS_AT.filter((x) => x[0] === v)[0] || [0, LEGAD
 const AUTOMATICOS = ["aberto", "cliente_na_loja", "falta_proposta", "aguardando_propostas", "aguardando", "em_negociacao", "fechado"];
 const avancoDe = (v) => AUTOMATICOS.indexOf(v);
 
-function statusDerivado(f, propostas) {
+function statusDerivado(f) {
   if (f.aceiteFinal && f.valorFechado) return "fechado";
   if ((f.rodadas || []).length) return "em_negociacao";
-  if ((propostas || []).length) return "aguardando";
-  if (f.publicado) return "falta_proposta";
+  // Lançado é aguardando a rede. "Falta proposta" deixou de ser
+  // derivado: ninguém registra proposta durante a espera, então o
+  // sistema não tem como saber que a rede não respondeu — quem marca
+  // isso é o negociador, na faixa de status.
+  if (f.publicado) return "aguardando";
   if (f.carroSubiu) return "cliente_na_loja";
   return null;
 }
@@ -1650,11 +1653,6 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   const [salvandoCliente, setSalvandoCliente] = useState(false);
   const [erroCliente, setErroCliente] = useState("");
   const [erroCanais, setErroCanais] = useState("");
-  const [propostas, setPropostas] = useState((atendimento && atendimento.proposta) || []);
-  const melhorProposta = useMemo(() => {
-    const v = propostas.map((p) => Number(p.valor) || 0);
-    return v.length ? Math.max(...v) : 0;
-  }, [propostas]);
   const [novaRodada, setNovaRodada] = useState({ impresso: "", contra: "" });
   const [novaInd, setNovaInd] = useState({ nome: "", fone: "" });
   const [envioLeads, setEnvioLeads] = useState("");
@@ -1889,9 +1887,9 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   // Segue o preenchimento: carro no pátio, lançamento, propostas,
   // rodadas, fechamento.
   useEffect(() => {
-    const derivado = statusDerivado(f, propostas);
+    const derivado = statusDerivado(f);
     if (derivado) mudarStatus(derivado, false);
-  }, [f.carroSubiu, f.publicado, f.aceiteFinal, f.valorFechado, f.rodadas.length, propostas.length]);
+  }, [f.carroSubiu, f.publicado, f.aceiteFinal, f.valorFechado, f.rodadas.length]);
 
   const salvarCliente = async () => {
     if (!atendimento) { setErroCliente("Abra o atendimento pela lista para salvar."); return; }
@@ -2580,7 +2578,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         {/* ---------- ESPERA ---------- */}
         {etapa === "ESP" && (
           <>
-            <Bloco titulo="Enquanto as propostas chegam" sub="O carro está lançado. Este é o tempo de conversa que decide o fechamento.">
+            <Bloco titulo="Enquanto as propostas chegam" sub="O carro está lançado e a rede está respondendo. Aqui não se registra nada — a primeira proposta que entra no sistema é o 1º extrato, na Negociação. Este é o tempo de conversa que decide o fechamento.">
               {restante == null ? (
                 <button onClick={() => set("esperaIniciadaEm", Date.now())} className="w-full rounded-md py-3 text-[14px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>
                   Iniciar os 15 minutos
@@ -2596,11 +2594,6 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                   <button onClick={() => set("esperaIniciadaEm", null)} className="mt-3 text-[12px] underline" style={{ color: C.mute }}>Reiniciar</button>
                 </div>
               )}
-            </Bloco>
-
-            <Bloco titulo="Propostas dos lojistas" sub="Registre conforme chegam. A maior é a que vai impressa para a mesa.">
-              <Propostas atendimentoId={atendimento ? atendimento.id : null}
-                iniciais={propostas} aoMudar={setPropostas} />
             </Bloco>
 
             <Bloco titulo="Anote o que ouvir" sub="O que ele falar aqui é o argumento que você usa na hora do extrato.">
@@ -2674,7 +2667,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               <Bloco titulo={`Extrato de ofertas — ${n + 1}º de três`}
                 sub="Sorteie a rodada e imprima. A folha sai igual ao que está aqui.">
                 <SimuladorPropostas
-                  fipePadrao={f.fipe} veiculo={f.modelo} negociador={f.negociador}
+                  alvoPadrao={f.por || f.fipe} veiculo={f.modelo} negociador={f.negociador}
                   rotuloImprimir={`Imprimir o ${n + 1}º extrato e seguir`}
                   aoImprimir={(r) => {
                     set("rodadas", [...f.rodadas, { impresso: String(r.melhor), contra: "", esperaEm: null }]);
@@ -3002,91 +2995,6 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   );
 }
 
-
-/* ===================== propostas ===================== */
-
-/**
- * As ofertas dos lojistas, registradas conforme chegam durante a
- * espera. Na planilha isso eram quatro pares de colunas; aqui não tem
- * teto.
- *
- * A melhor proposta é o número que vai impresso para a mesa, então ela
- * fica destacada — é o que o negociador procura com o cliente olhando.
- */
-function Propostas({ atendimentoId, iniciais, aoMudar }) {
-  const [lista, setLista] = useState(iniciais || []);
-  const [nova, setNova] = useState({ lojista: "", valor: "" });
-  const [indo, setIndo] = useState(false);
-  const [erro, setErro] = useState("");
-
-  const ordenada = [...lista].sort((a, b) => (Number(b.valor) || 0) - (Number(a.valor) || 0));
-  const melhor = ordenada.length ? Number(ordenada[0].valor) || 0 : 0;
-
-  const avisar = (n) => { setLista(n); if (aoMudar) aoMudar(n); };
-
-  const adicionar = async () => {
-    if (!nova.lojista.trim()) { setErro("Diga de qual lojista é."); return; }
-    setErro(""); setIndo(true);
-    try {
-      const p = await criarProposta({ atendimento_id: atendimentoId, lojista: nova.lojista, valor: nova.valor });
-      avisar([...lista, p]);
-      setNova({ lojista: "", valor: "" });
-    } catch (e) { setErro(e.message); }
-    setIndo(false);
-  };
-
-  const remover = async (id) => {
-    setErro("");
-    try { await apagarProposta(id); avisar(lista.filter((x) => x.id !== id)); }
-    catch (e) { setErro(e.message); }
-  };
-
-  if (!atendimentoId) {
-    return (
-      <p className="text-[11px] leading-relaxed" style={{ color: C.mute }}>
-        As propostas ficam presas ao atendimento. Abra este carro pela lista de atendimentos para registrá-las.
-      </p>
-    );
-  }
-
-  return (
-    <div className="space-y-2.5">
-      {ordenada.map((p, i) => (
-        <div key={p.id} className="flex items-center justify-between gap-2 rounded-md px-3 py-2.5"
-          style={{ background: i === 0 ? "#F0F8F4" : "#FBFAFC", border: `1px solid ${i === 0 ? C.verde : C.line}` }}>
-          <span>
-            <span className="block text-[13px] font-medium">{p.lojista}</span>
-            {i === 0 && <span className="text-[9px] uppercase tracking-[0.1em]" style={{ color: C.verde }}>maior oferta</span>}
-          </span>
-          <span className="flex items-center gap-3">
-            <span className="text-[15px]" style={{ fontFamily: F.mono, fontWeight: 700, color: i === 0 ? C.verde : C.ink }}>
-              {brl(p.valor)}
-            </span>
-            <button onClick={() => remover(p.id)} className="text-[11px]" style={{ color: C.laranja }}>remover</button>
-          </span>
-        </div>
-      ))}
-
-      <div className="grid grid-cols-2 gap-2">
-        <input placeholder="Lojista" className={inputCls} style={inputSty}
-          value={nova.lojista} onChange={(e) => setNova({ ...nova, lojista: e.target.value })} />
-        <input placeholder="Valor" className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric"
-          value={nova.valor} onChange={(e) => setNova({ ...nova, valor: e.target.value })} />
-      </div>
-      <button onClick={adicionar} disabled={indo}
-        className="w-full rounded-md py-2.5 text-[13px] font-semibold"
-        style={{ background: indo ? C.line : C.roxo, color: "#fff" }}>
-        {indo ? "Registrando…" : "Registrar proposta"}
-      </button>
-      {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
-      {!!melhor && (
-        <p className="text-[11px]" style={{ color: C.mute }}>
-          {ordenada.length} proposta{ordenada.length > 1 ? "s" : ""} · maior {brl(melhor)}. É este o número que vai impresso.
-        </p>
-      )}
-    </div>
-  );
-}
 
 /**
  * O status é o que faz a lista do CRM valer. Sem isto tudo fica
@@ -3529,12 +3437,56 @@ const PL_CINZA = "#BFBFBF";
  * o 53 e o 57, porque duas fórmulas apontam para #REF!. É defeito da
  * planilha, não formato — aqui a numeração vai limpa de 1 a 90.
  */
-function SimuladorPropostas({ fipePadrao, veiculo, negociador, aoImprimir, rotuloImprimir }) {
-  const [ref, setRef] = useState(fipePadrao || "");
+/**
+ * O caminho inverso: o negociador diz quanto quer que saia como Melhor
+ * Proposta, e o sistema acha o valor de referência que produz isso.
+ *
+ * Pela conta da planilha, ignorando os arredondamentos, o teto de uma
+ * rodada é 0,918 × referência:
+ *
+ *   V0 = 0,63 × ref   e   teto = V0 + 16 × intervalo = 0,918 × ref
+ *
+ * Esse é o chute inicial. Como o valor de cada proposta tem sorteio
+ * dentro, o melhor de uma rodada varia — então tenta algumas vezes,
+ * corrigindo a referência pela razão entre o que saiu e o alvo, e fica
+ * com a rodada que chegou mais perto. Quase sempre acerta na centena.
+ *
+ * O que NÃO é feito: forçar a Melhor Proposta no fim. Isso daria o
+ * número exato sempre, mas a nuvem deixaria de ser a da planilha — e a
+ * folha impressa mostraria uma proposta que a conta não produz.
+ */
+function simularPorMelhor(alvo, quantidade) {
+  const meta = Number(alvo) || 0;
+  if (meta <= 0) return null;
+
+  let ref = meta / 0.918;
+  let escolhida = null;
+
+  for (let tentativa = 0; tentativa < 60; tentativa++) {
+    const r = simularPropostas(ref, quantidade);
+    if (!r) break;
+
+    const perto = (x) => Math.abs(x.melhor - meta);
+    if (!escolhida || perto(r) < perto(escolhida)) escolhida = { ...r, referencia: ref };
+    if (r.melhor === meta) break;
+
+    // Corrige pela razão, com um empurrão pequeno para não ficar preso
+    // repetindo a mesma referência quando o sorteio é teimoso.
+    const razao = meta / (r.melhor || meta);
+    ref = ref * (tentativa % 3 === 2 ? razao * (1 + (tentativa % 2 ? 0.004 : -0.004)) : razao);
+  }
+
+  return escolhida;
+}
+
+function SimuladorPropostas({ alvoPadrao, veiculo, negociador, aoImprimir, rotuloImprimir }) {
+  const [alvo, setAlvo] = useState(alvoPadrao || "");
   const [qtd, setQtd] = useState("57");
   const [r, setR] = useState(null);
 
-  const rodar = () => setR(simularPropostas(numeroBR(ref), Number(qtd) || 0));
+  // Ele digita a Melhor Proposta que quer levar à mesa; a referência é
+  // consequência, e aparece embaixo para ele conferir.
+  const rodar = () => setR(simularPorMelhor(numeroBR(alvo), Number(qtd) || 0));
 
   // Duas casas e separador brasileiro: a planilha imprime 18,500.00 no
   // formato americano dela, e aqui quem lê é o negociador.
@@ -3586,9 +3538,9 @@ function SimuladorPropostas({ fipePadrao, veiculo, negociador, aoImprimir, rotul
     <div>
       <div className="grid grid-cols-2 gap-2">
         <div>
-          <label className="text-[11px]" style={{ color: C.mute }}>Valor de referência</label>
+          <label className="text-[11px]" style={{ color: C.mute }}>Melhor Proposta que vai à mesa</label>
           <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal"
-            value={ref} onChange={(e) => setRef(e.target.value)} placeholder="51.371" />
+            value={alvo} onChange={(e) => setAlvo(e.target.value)} placeholder="40.600" />
         </div>
         <div>
           <label className="text-[11px]" style={{ color: C.mute }}>Quant. de propostas</label>
@@ -3633,6 +3585,16 @@ function SimuladorPropostas({ fipePadrao, veiculo, negociador, aoImprimir, rotul
               <div className="mt-6 space-y-2" style={{ maxWidth: 240 }}>
                 {caixa(negociador || "NEGOCIADOR")}
                 {caixa("JOINVILLE")}
+              </div>
+
+              <div className="mt-4 text-[10px] leading-relaxed" style={{ color: C.mute, maxWidth: 240 }}>
+                Valor de referência usado:{" "}
+                <span style={{ fontFamily: F.mono, color: C.ink }}>{brl(Math.round(r.referencia))}</span>
+                {r.melhor !== numeroBR(alvo) && (
+                  <span style={{ color: C.laranja }}>
+                    {" "}· o sorteio parou em {brl(r.melhor)}; sorteie de novo para tentar cravar.
+                  </span>
+                )}
               </div>
             </div>
 
