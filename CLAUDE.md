@@ -819,6 +819,24 @@ batida no botão de duplicar a fila da pré-venda.
 truque dos negociadores em `/api/perfil`. É acomodação do teto de 12
 funções, não arquitetura.
 
+### 20. A cautelar reprova, e aí o negócio volta para a mesa
+
+Faltava o passo entre o pré-contrato e o contrato: o laudo. Aprovou,
+segue; reprovou, a negociação reabre.
+
+**Na reprovação o extrato é refeito**, agora com o laudo na mão, e o
+valor impresso vira o novo `valorFechado`. Cada volta fica em
+`revisoes`, com valor e hora — quantas vezes um carro voltou depois da
+cautelar é informação que o gerente vai querer, e ela some se só o
+último valor for guardado.
+
+**O pré-contrato sai de novo, com o valor novo.** O anterior morreu com
+o laudo, e a tela diz isso: o contrato só vem depois deste assinado.
+
+**O extrato da revisão tem título próprio.** Imprimir como "4ª rodada"
+confundiria a folha da mesa com as três da negociação, que são outra
+coisa — por isso `extratoOfertas()` aceita um título.
+
 ### 19. A conferência do administrativo tem tela própria
 
 Até a 0012 as duas mãos preenchiam o mesmo formulário, e nada impedia o

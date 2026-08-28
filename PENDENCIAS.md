@@ -112,6 +112,26 @@ mesmo tempo criam duas linhas.
 
 *Conserto:* índice único parcial em `veiculo (atendimento_id)`.
 
+### Preencher o cliente pela CNH
+
+O Derek perguntou se dá para fotografar a CNH e o sistema preencher
+nome, CPF, RG e endereço sozinho. Dá, mas não com o que existe hoje:
+
+- **Precisa de OCR pago.** Google Vision, AWS Textract ou um serviço
+  brasileiro de leitura de documento. Não há como fazer isso no
+  navegador com qualidade suficiente para um documento que vai para
+  contrato.
+- **O QR da CNH digital não serve.** Ele aponta para a validação do
+  Denatran, não devolve os dados.
+- **Precisa de função no servidor**, porque a chave do OCR não pode
+  chegar ao navegador. Como a Vercel está em 12 de 12, o caminho é
+  `api/placa.js?acao=documento` — o mesmo truque do `?acao=cota`.
+- **É dado sensível.** Foto de documento de identidade tem regra de
+  retenção própria; o parecer que liberou a escuta não cobre isso.
+
+**O que destrava:** o Derek escolher o serviço (e o custo por leitura) e
+o jurídico dizer por quanto tempo a imagem pode ficar guardada.
+
 ### A fórmula do SCORE de confiabilidade
 
 O dashboard reproduz a aba FLUXO X CONVERSÃO, inclusive a faixa
