@@ -936,6 +936,9 @@ const VAZIO = {
   // T
   aceiteFinal: false, valorFechado: "", formaFechamento: "",
   cautelarEnviado: false, contratoAssinado: false,
+  // A cautelar pode reprovar, e aí a negociação reabre: novo extrato,
+  // novo valor, novo pré-contrato. `revisoes` guarda essas voltas.
+  cautelarResultado: "", cautelarLaudo: "", revisoes: [],
   // E
   avaliacaoGoogle: false, indicacoes: [],
   // documentos gerados: { tipo, rotulo, rodada, protocolo, em, noBanco }
@@ -1264,7 +1267,7 @@ const VAAPTY_PJ = "Vaapty Intermediação Veicular LTDA · CNPJ 34.840.903/0001-
  * São três extratos, um por rodada. O que muda entre eles é a rodada
  * do sorteio — a nuvem inteira, não só a Melhor Proposta.
  */
-function extratoOfertas(f, r, indice) {
+function extratoOfertas(f, r, indice, titulo) {
   const valores = (r && r.valores) || [];
   const cem = (v) => Number(v || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const melhor = r ? r.melhor : 0;
@@ -1284,7 +1287,7 @@ function extratoOfertas(f, r, indice) {
 
   const corpo = `<div class="extrato">
   <div class="lado">
-    <div class="tit">Extrato de ofertas — ${indice}ª rodada</div>
+    <div class="tit">${titulo || `Extrato de ofertas — ${indice}ª rodada`}</div>
 
     <div class="linhaV"><span class="rot">Veículo</span><span class="caixa">${ou((r && r.veiculo) || f.modelo, "marca e modelo")}</span></div>
     <div class="linhaV"><span class="rot">Placa</span><span class="caixa">${ou(f.placa, "placa")}</span></div>
@@ -2868,6 +2871,98 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 </p>
               </div>
             </Bloco>
+
+            {/* A cautelar pode reprovar, e aí a negociação reabre.
+                Este passo fica entre o pré-contrato e o contrato: é
+                onde o negócio combinado ou confirma ou volta à mesa. */}
+            {f.cautelarEnviado && (
+              <Bloco titulo="Resultado da cautelar"
+                sub="O laudo chegou? É aqui que o negócio confirma ou volta para a mesa.">
+                {!f.cautelarResultado ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    <button onClick={() => set("cautelarResultado", "aprovada")}
+                      className="rounded-md py-3 text-[13px] font-semibold" style={{ background: C.verde, color: "#fff" }}>
+                      Aprovada
+                    </button>
+                    <button onClick={() => set("cautelarResultado", "reprovada")}
+                      className="rounded-md py-3 text-[13px] font-semibold" style={{ background: C.laranja, color: "#fff" }}>
+                      Reprovada
+                    </button>
+                  </div>
+                ) : (
+                  <div>
+                    <div className="flex items-center justify-between gap-2 rounded-md px-3 py-2"
+                      style={{ background: f.cautelarResultado === "aprovada" ? "#F0F8F4" : AMARELO.fundo,
+                               border: `1px solid ${f.cautelarResultado === "aprovada" ? C.verde : AMARELO.borda}` }}>
+                      <span className="text-[13px] font-semibold"
+                        style={{ color: f.cautelarResultado === "aprovada" ? C.verde : AMARELO.texto }}>
+                        {f.cautelarResultado === "aprovada"
+                          ? "Cautelar aprovada — segue para o contrato."
+                          : "Cautelar reprovada — o valor precisa ser refeito."}
+                      </span>
+                      <button onClick={() => setVarios({ cautelarResultado: "", cautelarLaudo: "" })}
+                        className="shrink-0 text-[11px] underline" style={{ color: C.mute }}>trocar</button>
+                    </div>
+
+                    {f.cautelarResultado === "reprovada" && (
+                      <div className="mt-3 space-y-3">
+                        <Campo label="O que apareceu no laudo">
+                          <textarea rows={2} className={inputCls} style={inputSty}
+                            placeholder="Estrutural na longarina direita, troca de teto…"
+                            value={f.cautelarLaudo} onChange={(e) => set("cautelarLaudo", e.target.value)} />
+                        </Campo>
+
+                        <div className="rounded-md p-3" style={{ background: "#FBF7FD", border: `1px solid ${C.line}` }}>
+                          <div className="text-[10px] uppercase tracking-[0.13em]" style={{ color: C.roxo }}>
+                            Novo extrato para o cliente
+                          </div>
+                          <p className="mt-1 text-[11px]" style={{ color: C.mute }}>
+                            A rede refaz a oferta com o laudo na mão. Coloque quanto passa a valer e imprima.
+                          </p>
+                          <div className="mt-2">
+                            <SimuladorPropostas
+                              alvoPadrao={f.valorFechado} veiculo={f.modelo} negociador={f.negociador}
+                              rotuloImprimir={`Imprimir o extrato da revisão ${(f.revisoes || []).length + 1}`}
+                              aoImprimir={(r) => {
+                                const n = (f.revisoes || []).length + 1;
+                                setVarios({
+                                  revisoes: [...(f.revisoes || []), { valor: String(r.melhor), em: new Date().toISOString() }],
+                                  valorFechado: String(r.melhor),
+                                });
+                                gerarDocumento("extrato_revisao", `Extrato da revisão ${n}`,
+                                  extratoOfertas(dadosDoc, r, n, "Extrato de ofertas — revisão após a cautelar"), null);
+                              }} />
+                          </div>
+                        </div>
+
+                        {!!(f.revisoes || []).length && (
+                          <div className="rounded-md p-3" style={{ background: "#FBFAFC", border: `1px solid ${C.line}` }}>
+                            <div className="text-[10px] uppercase tracking-[0.14em]" style={{ color: C.mute }}>Revisões</div>
+                            {f.revisoes.map((rv, k) => (
+                              <div key={k} className="mt-1 flex items-baseline justify-between">
+                                <span className="text-[13px]" style={{ fontFamily: F.mono, fontWeight: 700 }}>{brl(rv.valor)}</span>
+                                <span className="text-[10px]" style={{ color: C.mute }}>{hhmm(rv.em)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <button disabled={!podeImprimir || !f.valorFechado}
+                          onClick={() => gerarDocumento("pre_contrato", "Pré-contrato (revisão)", preContrato(dadosDoc), null)}
+                          className="w-full rounded-md py-3 text-[13px] font-semibold"
+                          style={{ background: podeImprimir && f.valorFechado ? C.roxo : "#E7E3EC",
+                                   color: podeImprimir && f.valorFechado ? "#fff" : C.mute }}>
+                          Imprimir o novo pré-contrato
+                        </button>
+                        <p className="text-[11px]" style={{ color: C.mute }}>
+                          O pré-contrato anterior morreu com o laudo. Este é o que vale, e sai com o valor novo — o contrato só vem depois dele assinado.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Bloco>
+            )}
 
             <Bloco titulo="Check list do negócio" sub="Preenchido aqui, não no papel. O administrativo confere na mesma tela depois, e o sistema carimba quem conferiu.">
               <ChecklistDigital atendimentoId={atendimento ? atendimento.id : null}
