@@ -362,7 +362,7 @@ busca do Google.
 | Mercado Livre | `carros.mercadolivre.com.br/{marca}/{modelo}/` |
 | Marketplace | `/marketplace/search/?query=` (localiza sozinho) |
 | KBB | `/sp/marcas/{marca}/` — só a marca |
-| AutoAvaliar | `/tabela-auto-avaliar/` — exige conta |
+| AutoAvaliar | `tabela.autoavaliar.com.br` — consulta pública |
 
 **Os canais são de duas famílias, e a tela separa as duas** porque
 medem coisas diferentes:
@@ -375,10 +375,12 @@ medem coisas diferentes:
   que mais se aproxima do POR.
 
 **KBB para na marca** porque o modelo lá fica sob a carroceria
-(`/hatchback/i30/`), que a FIPE não devolve. **AutoAvaliar para na
-página do produto** porque a tabela exige conta: conferi em 27/08/2026
-e os únicos campos de `/tabela-auto-avaliar/` são e-mail e senha, sem
-consulta pública por modelo. Os dois estão assim de propósito.
+(`/hatchback/i30/`), que a FIPE não devolve.
+
+**A tabela AutoAvaliar fica em subdomínio próprio**, e isso me enganou
+uma vez: `autoavaliar.com.br/tabela-auto-avaliar/` é página de produto e
+pede login; a consulta de verdade é `tabela.autoavaliar.com.br`, pública,
+com marca, modelo, ano, versão e estado. **O Derek corrigiu.**
 
 **Chaves na Mão ficou de fora**: não responde a nenhum padrão e devolve
 "página não encontrada". Link quebrado na frente do cliente é pior que
@@ -570,35 +572,36 @@ O importador só aparece para gerente.
 ### 14. Duas FIPEs: uma adivinha, a outra confirma
 
 `/api/placa` devolve o valor FIPE a partir da placa — mas a Placa Fipe
-**adivinha a versão**, e por isso manda várias candidatas com
-percentual de similaridade. Versão errada contamina o FIPE, que
-contamina o POR, que contamina a negociação inteira.
+**adivinha a versão**, e por isso manda candidatas com percentual de
+similaridade. Versão errada contamina o FIPE, que contamina o POR, que
+contamina a negociação inteira.
 
-`/api/fipe` deixa o negociador **escolher à mão** e confirmar.
+`/api/fipe` fala com a **tabela oficial** (`veiculos.fipe.org.br`), onde
+o negociador escolhe à mão. Ela devolve, além do valor, um **código de
+autenticação emitido pela própria FIPE** — a prova de que o número veio
+da fonte. Fica gravado na ficha.
 
-**Não é a FIPE oficial, e não dá para ser.** `veiculos.fipe.org.br`
-está atrás do Cloudflare: responde **403 "Attention Required"** para
-requisição de servidor, e do navegador o **CORS** barra. Testei os dois
-caminhos. Contornar proteção anti-robô está fora de questão, então a
-fonte é a **Parallelum**, que espelha a mesma tabela e é aberta a uso
-programático.
+**A ordem é MARCA → ANO → MODELO**, e não a da FIPE (marca → modelo →
+ano). Com o modelo primeiro, a lista de uma marca traz 261 itens
+misturando todos os anos; com o ano primeiro, Hyundai/2010 traz 11. O
+endpoint `ConsultarModelosAtravesDoAno` faz exatamente esse caminho.
 
-**O custo dessa troca: a ordem.** O pedido era marca → **ano** →
-modelo, porque com o modelo primeiro a lista mistura o mesmo carro de
-muitos anos. A FIPE oficial tem `ConsultarModelosAtravesDoAno`, que faz
-exatamente isso — Hyundai/2010 devolve 11 modelos em vez de 261. **A
-Parallelum não tem esse caminho** (`/anos/{a}/modelos` responde 404),
-então a ordem voltou a ser marca → modelo → ano.
+**A FIPE bloqueia por país, e é por isso que existe `vercel.json`.**
+Do datacenter padrão da Vercel (Estados Unidos) a resposta é
+`403 Attention Required | Cloudflare`. Rodando em `gru1` (São Paulo)
+responde normal. **Se alguém remover `regions` do `vercel.json`, a
+conferência da FIPE para de funcionar** — e o erro vai parecer bloqueio
+de robô, que foi o diagnóstico errado que me custou uma volta inteira.
 
-**O paliativo é a busca por texto** no campo de modelo, já preenchida
-com o modelo curto da ficha. Numa marca de 261 modelos é a diferença
-entre achar e desistir. Quando o ano da ficha bate com um da lista, a
-consulta dispara sozinha.
+**O ano da FIPE carrega o combustível junto** (`"2010-1"`). Como o
+negociador escolhe só o ano, `api/fipe.js` consulta os três
+combustíveis e junta as listas, marcando cada modelo com o seu.
+`"nadaencontrado"` é como a FIPE diz que não há nada; não é erro.
 
 **Enquanto não conferir, aparece o aviso amarelo.** `fipeConferida`
 começa falso e só vira verdadeiro quando o negociador usa o valor da
-tabela. O aviso aparece no Lançamento e ao lado do campo FIPE. **É
-aviso, não trava** — quem decidir travar mexe em `etapaConcluida`.
+tabela oficial. O aviso aparece no Lançamento e ao lado do campo FIPE.
+**É aviso, não trava** — quem decidir travar mexe em `etapaConcluida`.
 
 ## Convenções do código
 
