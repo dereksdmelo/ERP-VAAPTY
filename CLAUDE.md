@@ -574,34 +574,31 @@ O importador só aparece para gerente.
 percentual de similaridade. Versão errada contamina o FIPE, que
 contamina o POR, que contamina a negociação inteira.
 
-`/api/fipe` fala com a **tabela oficial** (`veiculos.fipe.org.br`), onde
-o negociador escolhe à mão e confirma. Ela devolve, além do valor, um
-**código de autenticação emitido pela própria FIPE** — a prova de que o
-número veio da fonte. Ele fica gravado na ficha.
+`/api/fipe` deixa o negociador **escolher à mão** e confirmar.
 
-**A ordem é MARCA → ANO → MODELO**, e não a da FIPE (marca → modelo →
-ano). Escolhendo o modelo primeiro, a lista mistura o mesmo carro de
-vinte anos diferentes; escolhendo o ano antes, ela já vem curta e só com
-o que existiu naquele ano. O endpoint `ConsultarModelosAtravesDoAno`
-faz exatamente esse caminho — foi por isso que deu para inverter.
+**Não é a FIPE oficial, e não dá para ser.** `veiculos.fipe.org.br`
+está atrás do Cloudflare: responde **403 "Attention Required"** para
+requisição de servidor, e do navegador o **CORS** barra. Testei os dois
+caminhos. Contornar proteção anti-robô está fora de questão, então a
+fonte é a **Parallelum**, que espelha a mesma tabela e é aberta a uso
+programático.
 
-**O ano da FIPE carrega o combustível junto** (`"2010-1"`). Como o
-negociador escolhe só o ano, `api/fipe.js` consulta os três
-combustíveis e junta as listas, marcando cada modelo com o seu — assim a
-consulta de valor sai com o parâmetro certo. `"nadaencontrado"` é como a
-FIPE diz que não há nada; não é erro.
+**O custo dessa troca: a ordem.** O pedido era marca → **ano** →
+modelo, porque com o modelo primeiro a lista mistura o mesmo carro de
+muitos anos. A FIPE oficial tem `ConsultarModelosAtravesDoAno`, que faz
+exatamente isso — Hyundai/2010 devolve 11 modelos em vez de 261. **A
+Parallelum não tem esse caminho** (`/anos/{a}/modelos` responde 404),
+então a ordem voltou a ser marca → modelo → ano.
+
+**O paliativo é a busca por texto** no campo de modelo, já preenchida
+com o modelo curto da ficha. Numa marca de 261 modelos é a diferença
+entre achar e desistir. Quando o ano da ficha bate com um da lista, a
+consulta dispara sozinha.
 
 **Enquanto não conferir, aparece o aviso amarelo.** `fipeConferida`
 começa falso e só vira verdadeiro quando o negociador usa o valor da
-tabela oficial. O aviso aparece no Lançamento, ao lado do campo FIPE, e
-some quando confere. **É aviso, não trava** — quem decidir travar mexe
-em `etapaConcluida`.
-
-**A tabela de referência fica em cache de uma hora** no módulo. Ela muda
-uma vez por mês, e sem cache seria uma ida extra à FIPE em cada clique.
-Cache de módulo aqui é seguro: é dado público, igual para todo mundo —
-diferente do token de usuário, que nunca pode viver em escopo
-compartilhado.
+tabela. O aviso aparece no Lançamento e ao lado do campo FIPE. **É
+aviso, não trava** — quem decidir travar mexe em `etapaConcluida`.
 
 ## Convenções do código
 

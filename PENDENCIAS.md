@@ -31,6 +31,25 @@ nos últimos 90 dias" — dado nosso, não de terceiro.
 
 ---
 
+### Ordem marca → ano → modelo na conferência da FIPE
+**Pedido do Derek, entregue pela metade.** Com o modelo primeiro, a
+lista de uma marca traz 261 itens misturando todos os anos; com o ano
+primeiro, Hyundai/2010 traz 11.
+
+A FIPE oficial tem o endpoint exato (`ConsultarModelosAtravesDoAno`) e
+**testei que funciona** — mas `veiculos.fipe.org.br` está atrás do
+Cloudflare: 403 para servidor, CORS para navegador. Contornar proteção
+anti-robô está fora de questão. A Parallelum, que é a fonte usada, não
+tem caminho ano → modelos (404).
+
+*Paliativo em produção:* busca por texto no campo de modelo, já
+preenchida com o modelo da ficha.
+
+*Destrava com:* uma fonte que ofereça modelos por ano e aceite
+requisição de servidor. Vale investigar a API paga da Parallelum (v2),
+ou se a própria Placa Fipe — que já é paga e já responde ao servidor —
+expõe algo parecido.
+
 ## Segurança e acesso
 
 ### `/api/placa`, `/api/cota` e `/api/desvalorizacao` estão abertos

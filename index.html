@@ -468,55 +468,62 @@ const AvisoFipe = ({ compacto }) => (
 function ConferirFipe({ f, set }) {
   const [marcas, setMarcas] = useState([]);
   const [marca, setMarca] = useState("");
-  const [ano, setAno] = useState("");
   const [modelos, setModelos] = useState([]);
-  const [escolha, setEscolha] = useState("");      // "codigo|combustivel"
+  const [filtro, setFiltro] = useState("");
+  const [modelo, setModelo] = useState("");
+  const [anos, setAnos] = useState([]);
+  const [ano, setAno] = useState("");
   const [res, setRes] = useState(null);
   const [erro, setErro] = useState("");
-  const [indo, setIndo] = useState("");            // marcas | modelos | valor
-
-  const anos = useMemo(() => {
-    const atual = new Date().getFullYear();
-    const l = [];
-    for (let a = atual + 1; a >= 1985; a--) l.push(a);
-    return l;
-  }, []);
+  const [indo, setIndo] = useState("");
 
   useEffect(() => {
     setIndo("marcas");
     fipeOficial({ acao: "marcas" })
       .then((d) => {
         setMarcas(d.marcas || []);
-        // Adianta o que já se sabe da ficha.
         const alvo = (d.marcas || []).filter((m) =>
           m.nome.toLowerCase() === String(f.marca || "").toLowerCase())[0];
         if (alvo) setMarca(String(alvo.codigo));
-        const a = String(f.ano || "").split("/")[1] || String(f.ano || "").split("/")[0];
-        if (a && /^\d{4}$/.test(a)) setAno(a);
+        // Adianta a busca com o modelo curto da ficha: numa marca de 261
+        // modelos, é a diferença entre achar e desistir.
+        if (f.modeloCurto) setFiltro(f.modeloCurto);
       })
       .catch((e) => setErro(e.message))
       .then(() => setIndo(""));
   }, []);
 
   useEffect(() => {
-    setModelos([]); setEscolha(""); setRes(null);
-    if (!marca || !ano) return;
+    setModelos([]); setModelo(""); setAnos([]); setAno(""); setRes(null);
+    if (!marca) return;
     setIndo("modelos"); setErro("");
-    fipeOficial({ acao: "modelos", marca, ano })
+    fipeOficial({ acao: "modelos", marca })
+      .then((d) => setModelos(d.modelos || []))
+      .catch((e) => setErro(e.message))
+      .then(() => setIndo(""));
+  }, [marca]);
+
+  const escolherModelo = (cod) => {
+    setModelo(cod); setAnos([]); setAno(""); setRes(null);
+    if (!cod) return;
+    setIndo("anos"); setErro("");
+    fipeOficial({ acao: "anos", marca, modelo: cod })
       .then((d) => {
-        setModelos(d.modelos || []);
-        if (!(d.modelos || []).length) setErro("A FIPE não tem modelos dessa marca nesse ano.");
+        setAnos(d.anos || []);
+        // Se o ano da ficha estiver na lista, já seleciona e consulta.
+        const daFicha = String(f.ano || "").split("/").filter(Boolean).pop();
+        const bate = (d.anos || []).filter((a) => a.nome.indexOf(daFicha) === 0)[0];
+        if (bate) escolherAno(bate.codigo, cod);
       })
       .catch((e) => setErro(e.message))
       .then(() => setIndo(""));
-  }, [marca, ano]);
+  };
 
-  const buscarValor = (valorEscolha) => {
-    setEscolha(valorEscolha); setRes(null);
-    if (!valorEscolha) return;
-    const [codigo, comb] = valorEscolha.split("|");
+  const escolherAno = (cod, modeloForcado) => {
+    setAno(cod); setRes(null);
+    if (!cod) return;
     setIndo("valor"); setErro("");
-    fipeOficial({ acao: "valor", marca, modelo: codigo, ano, combustivel: comb })
+    fipeOficial({ acao: "valor", marca, modelo: modeloForcado || modelo, ano: cod })
       .then(setRes)
       .catch((e) => setErro(e.message))
       .then(() => setIndo(""));
@@ -529,9 +536,14 @@ function ConferirFipe({ f, set }) {
       fipeConferida: true,
       fipeOficialCodigo: res.codigo_fipe || "",
       fipeOficialMes: res.mes_referencia || "",
-      fipeAutenticacao: res.autenticacao || "",
     });
   };
+
+  const visiveis = useMemo(() => {
+    const t = filtro.trim().toLowerCase();
+    if (!t) return modelos;
+    return modelos.filter((m) => m.nome.toLowerCase().indexOf(t) >= 0);
+  }, [modelos, filtro]);
 
   const daPlaca = Number(f.fipe) || 0;
   const diferenca = res && daPlaca ? res.valor - daPlaca : 0;
@@ -540,48 +552,48 @@ function ConferirFipe({ f, set }) {
     <div className="mt-3 rounded-md p-3"
       style={{ background: f.fipeConferida ? "#F0F8F4" : AMARELO.fundo,
                border: `1px solid ${f.fipeConferida ? C.verde : AMARELO.borda}` }}>
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="text-[10px] uppercase tracking-[0.13em]" style={{ color: f.fipeConferida ? C.verde : AMARELO.texto }}>
-          {f.fipeConferida ? "✓ FIPE conferida na fonte" : "Conferir na tabela FIPE oficial"}
-        </span>
-      </div>
+      <span className="text-[10px] uppercase tracking-[0.13em]" style={{ color: f.fipeConferida ? C.verde : AMARELO.texto }}>
+        {f.fipeConferida ? "✓ FIPE conferida na tabela" : "Conferir na tabela FIPE"}
+      </span>
 
       {f.fipeConferida ? (
         <p className="mt-1 text-[11px] leading-relaxed" style={{ color: C.mute }}>
-          {f.fipeOficialCodigo} · {f.fipeOficialMes}
-          {f.fipeAutenticacao ? ` · autenticação ${f.fipeAutenticacao}` : ""}
+          {f.fipeOficialCodigo}{f.fipeOficialMes ? ` · ${f.fipeOficialMes}` : ""}
         </p>
       ) : (
         <p className="mt-1 text-[11px] leading-relaxed" style={{ color: AMARELO.texto }}>
-          A consulta de placa adivinha a versão. Aqui você confirma na fonte — marca, depois ano, depois modelo.
+          A consulta de placa adivinha a versão. Aqui você confirma escolhendo à mão.
         </p>
       )}
 
       <div className="mt-2 space-y-2">
-        <div className="grid grid-cols-2 gap-2">
-          <Campo label="Marca">
-            <select className={inputCls} style={inputSty} value={marca} onChange={(e) => setMarca(e.target.value)}>
-              <option value="">{indo === "marcas" ? "carregando…" : "escolha"}</option>
-              {marcas.map((m) => <option key={m.codigo} value={m.codigo}>{m.nome}</option>)}
-            </select>
-          </Campo>
-          <Campo label="Ano do modelo">
-            <select className={inputCls} style={inputSty} value={ano} onChange={(e) => setAno(e.target.value)}>
-              <option value="">escolha</option>
-              {anos.map((a) => <option key={a} value={a}>{a}</option>)}
-            </select>
-          </Campo>
-        </div>
+        <Campo label="Marca">
+          <select className={inputCls} style={inputSty} value={marca} onChange={(e) => setMarca(e.target.value)}>
+            <option value="">{indo === "marcas" ? "carregando…" : "escolha"}</option>
+            {marcas.map((m) => <option key={m.codigo} value={m.codigo}>{m.nome}</option>)}
+          </select>
+        </Campo>
 
-        <Campo label={`Modelo${modelos.length ? ` — ${modelos.length} naquele ano` : ""}`}>
-          <select className={inputCls} style={inputSty} value={escolha}
-            disabled={!modelos.length} onChange={(e) => buscarValor(e.target.value)}>
+        <Campo label={`Modelo${modelos.length ? ` — ${visiveis.length} de ${modelos.length}` : ""}`}>
+          <input className={inputCls} style={inputSty} placeholder="Filtre por parte do nome: i30, onix, hb20…"
+            value={filtro} disabled={!modelos.length} onChange={(e) => setFiltro(e.target.value)} />
+          <select className={`${inputCls} mt-1.5`} style={inputSty} value={modelo}
+            disabled={!modelos.length} size={visiveis.length > 8 ? 6 : undefined}
+            onChange={(e) => escolherModelo(e.target.value)}>
             <option value="">
-              {indo === "modelos" ? "carregando…" : !marca || !ano ? "escolha marca e ano antes" : "escolha"}
+              {indo === "modelos" ? "carregando…" : !marca ? "escolha a marca antes" : "escolha"}
             </option>
-            {modelos.map((m) => (
-              <option key={`${m.codigo}-${m.combustivel}`} value={`${m.codigo}|${m.combustivel}`}>{m.nome}</option>
-            ))}
+            {visiveis.map((m) => <option key={m.codigo} value={m.codigo}>{m.nome}</option>)}
+          </select>
+        </Campo>
+
+        <Campo label="Ano do modelo">
+          <select className={inputCls} style={inputSty} value={ano}
+            disabled={!anos.length} onChange={(e) => escolherAno(e.target.value)}>
+            <option value="">
+              {indo === "anos" ? "carregando…" : !modelo ? "escolha o modelo antes" : "escolha"}
+            </option>
+            {anos.map((a) => <option key={a.codigo} value={a.codigo}>{a.nome}</option>)}
           </select>
         </Campo>
       </div>
@@ -598,7 +610,7 @@ function ConferirFipe({ f, set }) {
             {res.modelo} · {res.combustivel} · {res.ano_modelo}
           </div>
           <div className="mt-0.5 text-[10px]" style={{ color: C.mute, fontFamily: F.mono }}>
-            {res.codigo_fipe} · {res.mes_referencia} · autenticação {res.autenticacao}
+            {res.codigo_fipe} · {res.mes_referencia}
           </div>
 
           {!!daPlaca && diferenca !== 0 && (
@@ -751,7 +763,7 @@ const VAZIO = {
   modelo: "", ano: "", cambio: "", km: "", kmEntrada: "", placa: "",
   fipe: "", fipeCodigo: "", fipeDesval: "", pedida: "", por: "", gastos: "",
   // conferência na FIPE oficial
-  fipeConferida: false, fipeOficialCodigo: "", fipeOficialMes: "", fipeAutenticacao: "",
+  fipeConferida: false, fipeOficialCodigo: "", fipeOficialMes: "",
   marca: "", modeloCurto: "",
   chassi: "", cor: "", combustivel: "",
   pneus: ["", "", "", ""], leilao: false, gnv: false, opcionais: [],
