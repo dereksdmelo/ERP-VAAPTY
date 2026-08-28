@@ -1165,7 +1165,7 @@ const ou = (valor, rotulo) => (valor ? String(valor) : vazio(rotulo));
 
 /* ---------------- moldura ---------------- */
 
-function moldura({ titulo, corpo, protocolo }) {
+function moldura({ titulo, corpo, protocolo, logo }) {
   return `<!DOCTYPE html>
 <html lang="pt-BR"><head><meta charset="utf-8"><title>${titulo}</title>
 <style>
@@ -1195,10 +1195,12 @@ function moldura({ titulo, corpo, protocolo }) {
   /* extrato de ofertas — o mesmo desenho da tela, que é o da planilha.
      Tudo em sans e monoespaçada: o serif do contrato não tem nada a ver
      com uma folha de números. */
-  .extrato { display: flex; gap: 14mm; align-items: flex-start;
-             font-family: system-ui, sans-serif; margin-top: 10px; }
-  .extrato .lado { width: 62mm; flex: 0 0 62mm; }
-  .extrato .tit { font-size: 11pt; font-weight: 700; margin-bottom: 12px; }
+  img.logo { height: 11mm; display: block; }
+  .extrato { display: flex; gap: 10mm; align-items: flex-start;
+             font-family: system-ui, sans-serif; margin-top: 14px; }
+  .extrato .lado { width: 58mm; flex: 0 0 58mm; }
+  .extrato .tit { font-size: 8.5pt; font-weight: 700; letter-spacing: .14em;
+                  text-transform: uppercase; color: #6D1B9E; margin-bottom: 14px; }
   .extrato .linhaV { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
   .extrato .rot { font-size: 9pt; font-weight: 700; font-style: italic; width: 16mm; }
   .extrato .caixa { background: #BFBFBF; padding: 3px 6px; font-size: 9pt;
@@ -1214,19 +1216,23 @@ function moldura({ titulo, corpo, protocolo }) {
   .extrato .vm { font-family: 'Courier New', monospace; font-weight: 700; color: #C00000; font-size: 10pt; }
   .extrato .vm.grande { font-size: 13pt; }
 
-  .extrato .cols { display: flex; gap: 7mm; flex: 1; }
+  /* Grid e não flex: table como item de flex não divide o espaço em
+     partes iguais, e as três colunas saíam de larguras diferentes. */
+  .extrato .cols { display: grid; grid-template-columns: repeat(3, 1fr);
+                   gap: 6mm; flex: 1; min-width: 0; }
   table.col { border-collapse: collapse; font-family: 'Courier New', monospace;
-              font-size: 7.6pt; flex: 1; }
+              font-size: 7.4pt; width: 100%; table-layout: fixed; }
   table.col th { font-family: system-ui, sans-serif; font-size: 7pt; font-weight: 700;
                  border-bottom: 1px solid #15121a; padding: 2px 4px; text-align: left; }
   table.col th.d { text-align: right; }
   table.col td { padding: 0.9px 4px; }
-  table.col td.n { color: #6B6478; }
+  table.col th:first-child, table.col td.n { width: 8mm; color: #6B6478; }
   table.col td.v { text-align: right; white-space: nowrap; }
   table.col td.destaque { background: #DCEFDC; font-weight: 700; }
 </style></head><body>
-<div class="marca">VAAPTY</div>
-<div class="sub">Joinville · Santa Catarina</div>
+${logo
+  ? `<img class="logo" src="${LOGO_VAAPTY}" alt="Vaapty">`
+  : `<div class="marca">VAAPTY</div><div class="sub">Joinville · Santa Catarina</div>`}
 ${corpo}
 <div class="rodape"><span>Protocolo ${protocolo}</span><span>Gerado em ${dataExtenso()} às ${hora()}</span></div>
 </body></html>`;
@@ -1324,7 +1330,6 @@ function extratoOfertas(f, r, indice, titulo) {
     <div class="tit">${titulo || `Extrato de ofertas — ${indice}ª rodada`}</div>
 
     <div class="linhaV"><span class="rot">Veículo</span><span class="caixa">${ou((r && r.veiculo) || f.modelo, "marca e modelo")}</span></div>
-    <div class="linhaV"><span class="rot">Placa</span><span class="caixa">${ou(f.placa, "placa")}</span></div>
 
     <div class="par"><span>Quant. de propostas</span><span class="vm">${r ? r.quantidade : 0}</span></div>
 
@@ -1349,6 +1354,7 @@ function extratoOfertas(f, r, indice, titulo) {
     titulo: `Extrato de ofertas ${indice}`,
     corpo,
     protocolo: protocolo(f, `EXT${indice}`),
+    logo: true,
   });
 }
 
