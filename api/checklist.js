@@ -8,11 +8,19 @@
  * gravação usa upsert em cima dele. Check list é o resumo do negócio,
  * não um evento que se repete como o documento impresso.
  *
- * Duas mãos preenchem: o negociador na entrega e o administrativo na
- * conferência. Quando qualquer item do administrativo é marcado, o
- * servidor carimba quem conferiu e quando — o cliente não escolhe esse
- * valor, senão "conferido" não responde a pergunta que importa quando
- * algo dá errado.
+ * Duas mãos preenchem, e desde a 0012 em telas separadas: o negociador
+ * na entrega, o administrativo na sua própria tela. Quando qualquer
+ * item do administrativo é marcado, o servidor carimba quem conferiu e
+ * quando — o cliente não escolhe esse valor, senão "conferido" não
+ * responde a pergunta que importa quando algo dá errado.
+ *
+ * E quem não é administrativo não marca esses itens: o PUT recusa. A
+ * RLS da 0008 libera a linha inteira para a equipe e não sabe separar
+ * coluna, então a separação é aqui. Vale dizer o que isso não é: quem
+ * tiver o token e souber falar PostgREST direto passa por cima. Para
+ * fechar de verdade seria preciso trigger no banco ou coluna em outra
+ * tabela — não foi feito, e é honesto saber disso antes de chamar de
+ * controle de acesso.
  *
  * ATENÇÃO: aqui trafega dado bancário de cliente. Nada é escrito em
  * log, e a RLS da 0008 é quem decide o acesso.
@@ -66,6 +74,26 @@ const BANCO = ["banco_favorecido", "banco_documento", "banco_nome", "banco_agenc
 const CAMPOS = ["id", "atendimento_id"].concat(ITENS, ADM, VALORES, BANCO,
   ["adm_conferido_por", "adm_conferido_em", "observacoes", "atualizado_em"]).join(",");
 
+/**
+ * Uma ida a mais ao banco por gravação com item do administrativo. Vale
+ * o custo: sem ela, "conferido pelo administrativo" seria só um rótulo
+ * que qualquer um marca.
+ */
+async function eAdministrativo(tok) {
+  const id = donoDoToken(tok);
+  if (!id) return false;
+  try {
+    const r = await fetch(
+      `${URL_BASE}/rest/v1/perfil?select=administrativo,papel&id=eq.${id}&limit=1`,
+      { headers: cabecalhos(tok) }
+    );
+    if (!r.ok) return false;
+    const linhas = await r.json().catch(() => []);
+    const eu = Array.isArray(linhas) ? linhas[0] : null;
+    return !!(eu && (eu.administrativo || eu.papel === "gerente"));
+  } catch (e) { return false; }
+}
+
 async function banco(url, opcoes) {
   let r;
   try { r = await fetch(url, opcoes); }
@@ -115,6 +143,11 @@ module.exports = async function handler(req, res) {
       if (c.observacoes !== undefined) linha.observacoes = texto(c.observacoes);
 
       // O carimbo da conferência é do servidor, não do cliente.
+      if (ADM.some((k) => linha[k] !== undefined)) {
+        if (!(await eAdministrativo(tok))) {
+          return res.status(403).json({ erro: "A conferência é da tela do administrativo." });
+        }
+      }
       if (ADM.some((k) => linha[k])) {
         linha.adm_conferido_por = donoDoToken(tok);
         linha.adm_conferido_em = new Date().toISOString();

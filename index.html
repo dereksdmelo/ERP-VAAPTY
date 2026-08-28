@@ -3295,8 +3295,6 @@ function ChecklistDigital({ atendimentoId, ficha, perfil, aoCarregar }) {
     setIndo(false);
   };
 
-  const eGerente = perfil && (perfil.papel === "gerente" || perfil.papel === "prep");
-
   return (
     <div className="space-y-3">
       <div>
@@ -3391,21 +3389,14 @@ function ChecklistDigital({ atendimentoId, ficha, perfil, aoCarregar }) {
         </p>
       </div>
 
-      <div>
-        <div className="text-[10px] uppercase tracking-[0.13em]" style={{ color: C.mute }}>
-          Conferência do administrativo
-        </div>
-        <div className="mt-1.5 space-y-1.5">
-          {CL_ADM.map(([k, r]) => (
-            <Toggle key={k} label={r} valor={!!cl[k]} onChange={(v) => set(k, v)} />
-          ))}
-        </div>
-        {cl.adm_conferido_em && (
-          <p className="mt-1.5 text-[11px]" style={{ color: C.verde }}>
-            Conferido em {new Date(cl.adm_conferido_em).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
-            {eGerente && cl.adm_conferido_por ? "" : ""}.
-          </p>
-        )}
+      {/* A conferência saiu daqui na 0012: ela mora na tela do
+          administrativo. O que fica é o aviso de estado — o negociador
+          precisa saber se já passou, mas não é ele quem marca. */}
+      <div className="rounded-md px-3 py-2 text-[11px]"
+        style={{ background: cl.adm_conferido_em ? "#F1FAF3" : "#FBFAFC", border: `1px solid ${C.line}`, color: cl.adm_conferido_em ? C.verde : C.mute }}>
+        {cl.adm_conferido_em
+          ? `Conferido pelo administrativo em ${new Date(cl.adm_conferido_em).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}.`
+          : "Ainda não passou pelo administrativo. A conferência é feita na tela deles."}
       </div>
 
       <Campo label="Observações">
@@ -4115,7 +4106,7 @@ function CadastroNegociadores({ perfil }) {
   );
 }
 
-function CRM({ perfil, aoAbrir }) {
+function CRM({ perfil, aoAbrir, aoAbrirAdm }) {
   const [lista, setLista] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
@@ -4187,6 +4178,13 @@ function CRM({ perfil, aoAbrir }) {
         <Funil perfil={perfil} />
 
         <LeadsIndicacao />
+
+        {perfil && (perfil.administrativo || perfil.papel === "gerente") && (
+          <button onClick={aoAbrirAdm} className="w-full rounded-md border py-2.5 text-[13px] font-semibold"
+            style={{ borderColor: C.line, color: C.roxo }}>
+            Conferência do administrativo
+          </button>
+        )}
 
         {perfil && perfil.papel === "gerente" && (
           mostrarImportar
@@ -4325,11 +4323,200 @@ const Aviso = ({ titulo, children, acao }) => (
   </div>
 );
 
+/**
+ * ===== a tela do administrativo =====
+ *
+ * O Derek pediu que a conferência saísse da tela do negociador: "vai
+ * ficar em outra tela, só na tela do adm mesmo". A razão é de processo,
+ * não de layout — enquanto as duas mãos preenchiam o mesmo formulário,
+ * nada impedia o negociador de marcar a própria conferência, e
+ * "conferido" deixava de significar alguma coisa.
+ *
+ * Quem entra aqui é `administrativo` ou gerente (0012). O servidor
+ * confere de novo no PUT: a tela esconder o botão não é controle de
+ * acesso, é conveniência.
+ *
+ * A lista traz os fechados, porque conferência é do negócio fechado. O
+ * pendente vem primeiro — é a fila de trabalho de quem senta aqui, e
+ * ordenar por data deixaria o atrasado no fim.
+ */
+function TelaADM({ perfil, aoVoltar }) {
+  const [lista, setLista] = useState(null);
+  const [erro, setErro] = useState("");
+  const [foco, setFoco] = useState(null);      // atendimento aberto
+  const [cl, setCl] = useState(null);
+  const [indo, setIndo] = useState(false);
+  const [salvo, setSalvo] = useState(false);
+
+  const conferidoEm = (a) => {
+    const c = a.checklist;
+    const linha = Array.isArray(c) ? c[0] : c;
+    return linha ? linha.adm_conferido_em : null;
+  };
+
+  const carregar = () =>
+    listarAtendimentos({ status: "fechado", limite: 200 })
+      .then((ls) => setLista(ls.slice().sort((a, b) => {
+        const ca = conferidoEm(a) ? 1 : 0, cb = conferidoEm(b) ? 1 : 0;
+        if (ca !== cb) return ca - cb;                    // pendente primeiro
+        return String(b.data || "").localeCompare(String(a.data || ""));
+      })))
+      .catch((e) => setErro(e.message));
+
+  useEffect(() => { carregar(); }, []);
+
+  const abrir = async (a) => {
+    setFoco(a); setCl(null); setErro(""); setSalvo(false);
+    try { setCl((await lerChecklist(a.id)) || {}); }
+    catch (e) { setErro(e.message); setCl({}); }
+  };
+
+  const gravar = async () => {
+    setIndo(true); setErro(""); setSalvo(false);
+    try {
+      // Só os campos do administrativo sobem. Mandar o check list
+      // inteiro daqui sobrescreveria o que o negociador digitou com o
+      // que esta tela leu minutos atrás.
+      const so = {};
+      CL_ADM.forEach(([k]) => { so[k] = !!cl[k]; });
+      const d = await salvarChecklist(foco.id, so);
+      setCl(d); setSalvo(true);
+      await carregar();
+    } catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+
+  const pendentes = lista ? lista.filter((a) => !conferidoEm(a)).length : 0;
+
+  if (foco) {
+    return (
+      <div className="min-h-screen" style={{ background: C.paper }}>
+        <div className="px-4 py-3" style={{ background: C.roxo, color: "#fff" }}>
+          <button onClick={() => { setFoco(null); setCl(null); }} className="text-[12px]" style={{ opacity: 0.85 }}>← voltar à fila</button>
+          <h1 className="mt-1 text-[18px]" style={{ fontFamily: F.disp, fontWeight: 700 }}>
+            {foco.cliente_nome || "Sem nome"}
+          </h1>
+          <p className="text-[12px]" style={{ opacity: 0.8 }}>
+            {foco.carro_descricao || (foco.veiculo && foco.veiculo.marca_modelo) || "—"}
+          </p>
+        </div>
+
+        <div className="space-y-3 p-4">
+          {!cl && !erro && <p className="text-[12px]" style={{ color: C.mute }}>Carregando o check list…</p>}
+
+          {cl && (
+            <>
+              <div className="rounded-lg p-4" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
+                <div className="text-[10px] uppercase tracking-[0.13em]" style={{ color: C.mute }}>
+                  O que o negociador entregou
+                </div>
+                <div className="mt-2 space-y-1">
+                  {CL_ITENS.map(([k, r]) => (
+                    <div key={k} className="flex items-center justify-between text-[12px]">
+                      <span style={{ color: cl[k] ? C.ink : C.mute }}>{r}</span>
+                      <span style={{ color: cl[k] ? C.verde : C.laranja, fontWeight: 600 }}>{cl[k] ? "sim" : "não"}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 border-t pt-2 text-[12px]" style={{ borderColor: C.line }}>
+                  <div className="flex justify-between"><span style={{ color: C.mute }}>Valor de venda</span><span style={{ fontFamily: F.mono }}>{brl(numeroBR(cl.valor_venda))}</span></div>
+                  <div className="flex justify-between"><span style={{ color: C.mute }}>Líquido ao cliente</span><span style={{ fontFamily: F.mono, fontWeight: 700 }}>{brl(numeroBR(cl.valor_cliente))}</span></div>
+                </div>
+                {cl.banco_favorecido && (
+                  <div className="mt-2 rounded-md px-3 py-2 text-[11px]" style={{ background: "#FBFAFC", border: `1px solid ${C.line}` }}>
+                    <div style={{ color: C.mute }}>Favorecido</div>
+                    <div style={{ fontWeight: 600 }}>{cl.banco_favorecido}</div>
+                    <div style={{ fontFamily: F.mono, color: C.mute }}>
+                      {[cl.banco_nome, cl.banco_agencia, cl.banco_conta].filter(Boolean).join(" · ")}
+                    </div>
+                    {cl.banco_pix && <div style={{ fontFamily: F.mono, color: C.mute }}>PIX {cl.banco_pix}</div>}
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-lg p-4" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
+                <div className="text-[10px] uppercase tracking-[0.13em]" style={{ color: C.roxo }}>
+                  Conferência do administrativo
+                </div>
+                <div className="mt-2 space-y-1.5">
+                  {CL_ADM.map(([k, r]) => (
+                    <Toggle key={k} label={r} valor={!!cl[k]} onChange={(v) => setCl({ ...cl, [k]: v })} />
+                  ))}
+                </div>
+                {cl.adm_conferido_em && (
+                  <p className="mt-2 text-[11px]" style={{ color: C.verde }}>
+                    Última conferência em {new Date(cl.adm_conferido_em).toLocaleString("pt-BR")}.
+                  </p>
+                )}
+                <button onClick={gravar} disabled={indo}
+                  className="mt-3 w-full rounded-md py-2.5 text-[13px] font-semibold"
+                  style={{ background: indo ? C.line : C.roxo, color: "#fff" }}>
+                  {indo ? "Salvando…" : "Salvar a conferência"}
+                </button>
+                {salvo && !erro && <p className="mt-2 text-[12px]" style={{ color: C.verde }}>Conferência registrada no seu nome.</p>}
+              </div>
+            </>
+          )}
+
+          {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen" style={{ background: C.paper }}>
+      <div className="px-4 py-3" style={{ background: C.roxo, color: "#fff" }}>
+        <button onClick={aoVoltar} className="text-[12px]" style={{ opacity: 0.85 }}>← atendimentos</button>
+        <h1 className="mt-1 text-[20px]" style={{ fontFamily: F.disp, fontWeight: 700 }}>Administrativo</h1>
+        <p className="text-[12px]" style={{ opacity: 0.8 }}>
+          {lista ? `${lista.length} fechados · ${pendentes} esperando conferência` : "Carregando…"}
+        </p>
+      </div>
+
+      <div className="space-y-2 p-4">
+        {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+
+        {lista && !lista.length && (
+          <p className="text-[12px] leading-relaxed" style={{ color: C.mute }}>
+            Nenhum negócio fechado ainda. A fila enche quando o negociador marca o atendimento como fechado.
+          </p>
+        )}
+
+        {lista && lista.map((a) => {
+          const ok = conferidoEm(a);
+          return (
+            <button key={a.id} onClick={() => abrir(a)}
+              className="w-full rounded-lg p-3 text-left"
+              style={{ background: "#fff", border: `1px solid ${ok ? C.line : C.laranja}` }}>
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-[14px]" style={{ fontWeight: 600 }}>{a.cliente_nome || "Sem nome"}</span>
+                <span className="shrink-0 text-[10px] font-semibold" style={{ color: ok ? C.verde : C.laranja }}>
+                  {ok ? "conferido" : "pendente"}
+                </span>
+              </div>
+              <div className="text-[12px]" style={{ color: C.mute }}>
+                {a.carro_descricao || (a.veiculo && a.veiculo.marca_modelo) || "—"}
+                {a.veiculo && a.veiculo.placa ? ` · ${a.veiculo.placa}` : ""}
+              </div>
+              <div className="text-[11px]" style={{ color: C.mute, fontFamily: F.mono }}>
+                {a.data ? String(a.data).split("-").reverse().join("/") : "sem data"}
+                {a.valor_fechado ? ` · ${brl(Number(a.valor_fechado))}` : ""}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [estado, setEstado] = useState("carregando");   // carregando | fora | esperando | dentro | erro
   const [perfil, setPerfil] = useState(null);
   const [erro, setErro] = useState("");
   const [aberto, setAberto] = useState(null);           // atendimento em foco, ou a lista
+  const [adm, setAdm] = useState(false);                // a tela do administrativo
 
   const verQuemSou = async () => {
     try {
@@ -4375,7 +4562,9 @@ function App() {
              aoVoltar={() => setAberto(null)}
              aoRecarregar={async () => { try { setAberto(await lerAtendimento(aberto.id)); } catch (e) {} }} />;
   }
-  return <CRM perfil={perfil} aoAbrir={async (id) => {
+  if (adm) return <TelaADM perfil={perfil} aoVoltar={() => setAdm(false)} />;
+
+  return <CRM perfil={perfil} aoAbrirAdm={() => setAdm(true)} aoAbrir={async (id) => {
     try { setAberto(await lerAtendimento(id)); } catch (e) { alert(e.message); }
   }} />;
 }

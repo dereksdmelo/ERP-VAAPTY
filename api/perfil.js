@@ -154,7 +154,7 @@ module.exports = async function handler(req, res) {
 
   let r, corpo;
   try {
-    r = await fetch(`${URL_BASE}/rest/v1/perfil?select=id,nome,papel,ativo&order=nome.asc`, {
+    r = await fetch(`${URL_BASE}/rest/v1/perfil?select=id,nome,papel,ativo,administrativo&order=nome.asc`, {
       headers: { apikey: ANON, Authorization: tok },
     });
     corpo = await r.text();
