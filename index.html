@@ -392,6 +392,35 @@ async function atualizarNegociador(id, dados) {
   return d.negociador;
 }
 
+/* ----------- leads de indicação (0011) ----------- */
+// Moram sob /api/atendimento porque a Vercel do Hobby para em 12
+// funções e nós estamos nas 12. O `?recurso=` é o mesmo truque dos
+// negociadores em /api/perfil.
+async function listarIndicacoes(status) {
+  const q = comoQuery({ status });
+  const r = await fetchAut(`/api/atendimento?recurso=indicacoes${q ? `&${q}` : ""}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui carregar os leads.");
+  return d.indicacoes || [];
+}
+async function enviarIndicacoes(lista) {
+  const r = await fetchAut("/api/atendimento?recurso=indicacoes", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ indicacoes: lista }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui enviar as indicações.");
+  return d.indicacoes || [];
+}
+async function atualizarIndicacao(id, dados) {
+  const r = await fetchAut(`/api/atendimento?recurso=indicacoes&id=${encodeURIComponent(id)}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui salvar o lead.");
+  return d.indicacao;
+}
+
 async function consultarFunil(de, ate) {
   const q = comoQuery({ de, ate });
   const r = await fetchAut(`/api/funil${q ? `?${q}` : ""}`);
@@ -1502,6 +1531,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   }, [propostas]);
   const [novaRodada, setNovaRodada] = useState({ impresso: "", contra: "" });
   const [novaInd, setNovaInd] = useState({ nome: "", fone: "" });
+  const [envioLeads, setEnvioLeads] = useState("");
   const [erroFoto, setErroFoto] = useState("");
   const [veiculoId, setVeiculoId] = useState(null);
   const [pronto, setPronto] = useState(false);
@@ -2638,7 +2668,8 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               <div className="space-y-2">
                 {f.indicacoes.map((p, i) => (
                   <div key={i} className="flex items-center justify-between rounded-md px-3 py-2" style={{ background: "#FBFAFC", border: `1px solid ${C.line}` }}>
-                    <span className="text-[13px]">{p.nome}<span className="ml-2 text-[11px]" style={{ color: C.mute, fontFamily: F.mono }}>{p.fone}</span></span>
+                    <span className="text-[13px]">{p.nome}<span className="ml-2 text-[11px]" style={{ color: C.mute, fontFamily: F.mono }}>{p.fone}</span>
+                      {p.enviada && <span className="ml-2 text-[10px]" style={{ color: C.verde }}>enviada</span>}</span>
                     <button onClick={() => set("indicacoes", f.indicacoes.filter((_, x) => x !== i))} className="text-[11px]" style={{ color: C.laranja }}>remover</button>
                   </div>
                 ))}
@@ -2652,9 +2683,41 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                       className="w-full rounded-md py-2.5 text-[13px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>Adicionar indicação</button>
                   </>
                 )}
-                <Pendente>
-                  O envio automático para a fila da pré-venda depende do backend. Por enquanto a lista fica aqui e precisa ser repassada à mão.
-                </Pendente>
+                {f.indicacoes.some((p) => !p.enviada) && (
+                  <button
+                    onClick={async () => {
+                      const pendentes = f.indicacoes.filter((p) => !p.enviada && p.nome && p.nome.trim());
+                      if (!pendentes.length) return;
+                      setEnvioLeads("indo");
+                      try {
+                        await enviarIndicacoes(pendentes.map((p) => ({
+                          atendimento_id: atendimento ? atendimento.id : null,
+                          nome: p.nome,
+                          telefone: p.fone,
+                          negociador_nome: (atendimento && atendimento.negociador_nome) || (perfil && perfil.nome) || null,
+                          cliente_nome: (atendimento && atendimento.cliente_nome) || null,
+                          cliente_telefone: (atendimento && atendimento.cliente_telefone) || null,
+                        })));
+                        // Marcar as enviadas é o que impede a segunda
+                        // batida no botão de duplicar a fila da pré-venda.
+                        set("indicacoes", f.indicacoes.map((p) => (p.enviada ? p : { ...p, enviada: true })));
+                        setEnvioLeads("ok");
+                      } catch (e) { setEnvioLeads(e.message); }
+                    }}
+                    className="w-full rounded-md border py-2.5 text-[13px] font-semibold"
+                    style={{ borderColor: C.roxo, color: C.roxo }}>
+                    {envioLeads === "indo" ? "Enviando…"
+                      : `Enviar ${f.indicacoes.filter((p) => !p.enviada).length} para a pré-venda`}
+                  </button>
+                )}
+                {envioLeads && envioLeads !== "indo" && (
+                  <p className="text-[11px]" style={{ color: envioLeads === "ok" ? C.verde : C.laranja }}>
+                    {envioLeads === "ok" ? "Na fila da pré-venda." : envioLeads}
+                  </p>
+                )}
+                {f.indicacoes.length > 0 && f.indicacoes.every((p) => p.enviada) && (
+                  <p className="text-[11px]" style={{ color: C.verde }}>Todas já foram para a fila da pré-venda.</p>
+                )}
               </div>
             </Bloco>
           </>
@@ -3826,6 +3889,139 @@ function Funil({ perfil }) {
  * Só gerente edita (a RLS da 0010 recusa o resto), e a tela reflete
  * isso em vez de deixar o negociador clicar e tomar erro.
  */
+const STATUS_LEAD = [
+  ["novo", "Novo"], ["em_contato", "Em contato"], ["agendado", "Agendado"],
+  ["virou_atendimento", "Virou atendimento"], ["sem_interesse", "Sem interesse"],
+];
+
+/**
+ * A fila de leads de indicação.
+ *
+ * Antes disto a etapa E colhia cinco nomes por atendimento e eles
+ * morriam no localStorage do aparelho — ninguém nunca ligou para
+ * nenhum. O valor da tela não é a tabela, é o telefone virar link:
+ * quem trabalha a fila liga do próprio celular, sem copiar número.
+ *
+ * A tabela rola na horizontal dentro da própria caixa. O corpo da
+ * página não pode rolar de lado no celular.
+ */
+function LeadsIndicacao() {
+  const [aberto, setAberto] = useState(false);
+  const [lista, setLista] = useState(null);
+  const [erro, setErro] = useState("");
+  const [filtro, setFiltro] = useState("");
+
+  const carregar = (st) =>
+    listarIndicacoes(st || undefined).then(setLista).catch((e) => setErro(e.message));
+
+  useEffect(() => { if (aberto) { setErro(""); carregar(filtro); } }, [aberto, filtro]);
+
+  const mudar = async (l, status) => {
+    // Otimista: a fila é trabalhada com o telefone na orelha, e esperar
+    // o servidor a cada troca de status trava a mão de quem liga.
+    setLista((ls) => ls.map((x) => (x.id === l.id ? { ...x, status } : x)));
+    try { await atualizarIndicacao(l.id, { status }); }
+    catch (e) {
+      setErro(e.message);
+      setLista((ls) => ls.map((x) => (x.id === l.id ? { ...x, status: l.status } : x)));
+    }
+  };
+
+  if (!aberto) {
+    return (
+      <button onClick={() => setAberto(true)} className="w-full rounded-md border py-2.5 text-[13px] font-semibold"
+        style={{ borderColor: C.line, color: C.roxo }}>
+        Leads de indicação
+      </button>
+    );
+  }
+
+  const abertos = lista ? lista.filter((l) => l.status === "novo").length : 0;
+
+  return (
+    <div className="rounded-lg p-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+      <div className="flex items-baseline justify-between">
+        <span className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.roxo, fontFamily: F.disp, fontWeight: 700 }}>
+          Leads de indicação
+        </span>
+        <button onClick={() => setAberto(false)} className="text-[11px]" style={{ color: C.mute }}>fechar</button>
+      </div>
+
+      {lista && (
+        <p className="mt-1 text-[12px]" style={{ color: C.mute }}>
+          {lista.length} na fila · <span style={{ color: abertos ? C.laranja : C.mute }}>{abertos} sem ninguém ter ligado</span>
+        </p>
+      )}
+
+      <div className="mt-3 flex gap-1.5 overflow-x-auto pb-1">
+        <button onClick={() => setFiltro("")}
+          className="shrink-0 rounded-full px-3 py-1 text-[11px]"
+          style={{ background: filtro === "" ? C.roxo : "#fff", color: filtro === "" ? "#fff" : C.mute, border: `1px solid ${C.line}` }}>
+          Todos
+        </button>
+        {STATUS_LEAD.map(([k, r]) => (
+          <button key={k} onClick={() => setFiltro(k)}
+            className="shrink-0 rounded-full px-3 py-1 text-[11px]"
+            style={{ background: filtro === k ? C.roxo : "#fff", color: filtro === k ? "#fff" : C.mute, border: `1px solid ${C.line}` }}>
+            {r}
+          </button>
+        ))}
+      </div>
+
+      {erro && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+      {!lista && !erro && <p className="mt-2 text-[12px]" style={{ color: C.mute }}>Carregando…</p>}
+
+      {lista && !lista.length && (
+        <p className="mt-3 text-[12px] leading-relaxed" style={{ color: C.mute }}>
+          Nenhum lead ainda. Eles entram quando o negociador manda as indicações da etapa E.
+        </p>
+      )}
+
+      {lista && lista.length > 0 && (
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full text-[12px]" style={{ borderCollapse: "collapse", minWidth: 620 }}>
+            <thead>
+              <tr style={{ color: C.mute }}>
+                <th className="py-1 pr-3 text-left font-medium">Indicado</th>
+                <th className="py-1 pr-3 text-left font-medium">Telefone</th>
+                <th className="py-1 pr-3 text-left font-medium">Negociador</th>
+                <th className="py-1 pr-3 text-left font-medium">Quem indicou</th>
+                <th className="py-1 pr-3 text-left font-medium">Telefone de quem indicou</th>
+                <th className="py-1 text-left font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lista.map((l) => (
+                <tr key={l.id} style={{ borderTop: `1px solid ${C.line}` }}>
+                  <td className="py-2 pr-3">{l.nome}</td>
+                  <td className="py-2 pr-3" style={{ fontFamily: F.mono }}>
+                    {l.telefone
+                      ? <a href={`tel:${String(l.telefone).replace(/\D/g, "")}`} style={{ color: C.roxo }}>{l.telefone}</a>
+                      : <span style={{ color: C.mute }}>—</span>}
+                  </td>
+                  <td className="py-2 pr-3">{l.negociador_nome || <span style={{ color: C.mute }}>—</span>}</td>
+                  <td className="py-2 pr-3">{l.cliente_nome || <span style={{ color: C.mute }}>—</span>}</td>
+                  <td className="py-2 pr-3" style={{ fontFamily: F.mono }}>
+                    {l.cliente_telefone
+                      ? <a href={`tel:${String(l.cliente_telefone).replace(/\D/g, "")}`} style={{ color: C.roxo }}>{l.cliente_telefone}</a>
+                      : <span style={{ color: C.mute }}>—</span>}
+                  </td>
+                  <td className="py-2">
+                    <select value={l.status} onChange={(e) => mudar(l, e.target.value)}
+                      className="rounded border px-2 py-1 text-[11px]" style={{ borderColor: C.line, background: "#fff", color: C.ink }}>
+                      {STATUS_LEAD.map(([k, r]) => <option key={k} value={k}>{r}</option>)}
+                    </select>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CadastroNegociadores({ perfil }) {
   const [lista, setLista] = useState([]);
   const [novo, setNovo] = useState({ nome: "", papel: "negociador" });
@@ -3989,6 +4185,8 @@ function CRM({ perfil, aoAbrir }) {
         )}
 
         <Funil perfil={perfil} />
+
+        <LeadsIndicacao />
 
         {perfil && perfil.papel === "gerente" && (
           mostrarImportar

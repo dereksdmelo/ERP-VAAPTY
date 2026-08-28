@@ -9,6 +9,13 @@
  * Filtros do GET de lista: status, origem, negociador_id, de, ate, q
  * (q busca em cliente, carro e placa), limite.
  *
+ * ?recurso=indicacoes      GET lista · POST cria · PATCH ?id= atualiza
+ *
+ * As indicações moram aqui, e não em api/indicacao.js, porque a Vercel
+ * do plano Hobby para em 12 funções e nós estamos nas 12. Um lead de
+ * indicação nasce dentro de um atendimento, então é o vizinho menos
+ * estranho — mas é acomodação de teto, não arquitetura.
+ *
  * Como todo o resto de api/, fala com o banco pelo token do usuário —
  * quem decide o que ele enxerga é a RLS da 0004, não código daqui.
  */
@@ -145,6 +152,91 @@ async function lerCorpo(req) {
 // banco em vez de três, e a lista já mostra placa e melhor proposta.
 const EMBUTIDO = "*,veiculo(id,placa,marca_modelo,ano_fabricacao,ano_modelo,km_atual,fipe_valor,valor_por,status),proposta(id,lojista,valor,apresentada)";
 
+const STATUS_INDICACAO = ["novo", "em_contato", "agendado", "virou_atendimento", "sem_interesse"];
+
+/**
+ * Leads de indicação (0011).
+ *
+ * O nome do negociador e o do cliente vêm em texto e ficam gravados em
+ * texto: o lead precisa se explicar sozinho meses depois, quando
+ * ninguém lembrar de qual atendimento ele saiu.
+ *
+ * Status fora da lista vira `novo` em vez de 400 — a tela manda o que
+ * o botão oferece, e recusar o atendimento inteiro por causa de um
+ * rótulo de lead seria desproporcional.
+ */
+async function indicacoes(req, res, tok) {
+  if (req.method === "GET") {
+    const st = String(req.query.status || "");
+    const filtro = STATUS_INDICACAO.indexOf(st) >= 0 ? `&status=eq.${st}` : "";
+    const lim = Math.min(500, Math.max(1, Number(req.query.limite) || 200));
+    const lista = await banco(
+      `${REST("indicacao")}?select=*&order=criado_em.desc&limit=${lim}${filtro}`,
+      { headers: cabecalhos(tok) }
+    );
+    return res.status(200).json({ indicacoes: Array.isArray(lista) ? lista : [] });
+  }
+
+  if (req.method === "POST") {
+    const corpo = await lerCorpo(req);
+    if (!corpo) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+
+    const nomes = Array.isArray(corpo.indicacoes) ? corpo.indicacoes : [corpo];
+    const linhas = nomes
+      .map((c) => ({
+        atendimento_id: RX_UUID.test(String(c.atendimento_id || "")) ? c.atendimento_id : null,
+        nome: texto(c.nome),
+        telefone: texto(c.telefone),
+        negociador_nome: texto(c.negociador_nome),
+        cliente_nome: texto(c.cliente_nome),
+        cliente_telefone: texto(c.cliente_telefone),
+        status: STATUS_INDICACAO.indexOf(String(c.status || "")) >= 0 ? c.status : "novo",
+        observacoes: texto(c.observacoes),
+      }))
+      .filter((l) => l.nome);
+
+    if (!linhas.length) return res.status(400).json({ erro: "Indicação sem nome." });
+
+    // Lote só de ida: mandar cinco indicações é uma requisição, não cinco.
+    const salvo = await banco(REST("indicacao"), {
+      method: "POST",
+      headers: json(tok, { Prefer: "return=representation" }),
+      body: JSON.stringify(linhas),
+    });
+    return res.status(201).json({ ok: true, indicacoes: Array.isArray(salvo) ? salvo : [] });
+  }
+
+  if (req.method === "PATCH") {
+    const id = String(req.query.id || "");
+    if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido." });
+
+    const corpo = await lerCorpo(req);
+    if (!corpo) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+
+    const linha = { atualizado_em: new Date().toISOString() };
+    if (corpo.status != null) {
+      if (STATUS_INDICACAO.indexOf(String(corpo.status)) < 0) {
+        return res.status(400).json({ erro: "Status de indicação desconhecido." });
+      }
+      linha.status = corpo.status;
+    }
+    ["nome", "telefone", "negociador_nome", "cliente_nome", "cliente_telefone", "observacoes"]
+      .forEach((k) => { if (corpo[k] != null) linha[k] = texto(corpo[k]); });
+
+    const r = await banco(`${REST("indicacao")}?id=eq.${id}`, {
+      method: "PATCH",
+      headers: json(tok, { Prefer: "return=representation" }),
+      body: JSON.stringify(linha),
+    });
+    const salvo = Array.isArray(r) ? r[0] : r;
+    if (!salvo) return res.status(403).json({ erro: "Indicação fora do seu alcance." });
+    return res.status(200).json({ ok: true, indicacao: salvo });
+  }
+
+  res.setHeader("Allow", "GET, POST, PATCH");
+  return res.status(405).json({ erro: "Use GET, POST ou PATCH." });
+}
+
 module.exports = async function handler(req, res) {
   if (!URL_BASE || !ANON) {
     return res.status(500).json({ erro: "SUPABASE_URL ou SUPABASE_ANON_KEY não configurados." });
@@ -154,6 +246,10 @@ module.exports = async function handler(req, res) {
   if (!tok) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
 
   try {
+    if (String(req.query.recurso || "") === "indicacoes") {
+      return await indicacoes(req, res, tok);
+    }
+
     if (req.method === "GET") {
       const id = String(req.query.id || "");
       if (id) {
