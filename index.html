@@ -201,13 +201,13 @@ async function fipeOficial(params) {
 }
 
 async function consultarDesvalorizacao(chave) {
-  const r = await fetch(`/api/desvalorizacao?chave=${encodeURIComponent(chave)}`);
+  const r = await fetch(`/api/placa?acao=desvalorizacao&chave=${encodeURIComponent(chave)}`);
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.erro || "Histórico indisponível.");
   return d;
 }
 async function consultarCota() {
-  try { const r = await fetch("/api/cota"); return r.ok ? await r.json() : null; } catch (e) { return null; }
+  try { const r = await fetch("/api/placa?acao=cota"); return r.ok ? await r.json() : null; } catch (e) { return null; }
 }
 async function salvarFicha(ficha) {
   const r = await fetchAut("/api/veiculo", {

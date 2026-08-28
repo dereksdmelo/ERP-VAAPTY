@@ -141,6 +141,14 @@ lugares — mas é uma armadilha.
 Cita `vaapty_schema.sql` e `.env.example`, que não existem. O esquema
 vive em `supabase/migrations/`.
 
+### Teto de 12 funções no plano Hobby da Vercel
+São 11 hoje. O décimo terceiro arquivo em `api/` **derrubou o build
+inteiro** — não é aviso, é erro de deploy. O contorno foi juntar por
+fonte: tudo da Placa Fipe em `api/placa.js`, atrás de `?acao=`.
+
+*Quando o espaço acabar de novo:* ou junta mais por fonte, ou o plano
+Pro. Vale contar antes de criar arquivo novo.
+
 ### Nada tem teste automatizado
 Não há Node na máquina do Derek, então nem `node --check` roda. A
 verificação é leitura, checagem de balanceamento por script, e teste

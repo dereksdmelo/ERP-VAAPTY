@@ -17,8 +17,7 @@ verdade, gravada no Supabase pela etapa de Lançamento.
 
 ```
 index.html                       aplicação inteira (React 18 + Babel via CDN, sem build)
-api/placa.js                     GET  /api/placa?placa= — consulta a Placa Fipe
-api/cota.js                      GET  /api/cota — consumo diário (não gasta consulta)
+api/placa.js                     GET  — Placa Fipe: ?placa=, ?acao=cota, ?acao=desvalorizacao
 api/veiculo.js                   POST /api/veiculo — grava a ficha · GET — as 20 últimas
 api/foto.js                      POST/GET/PATCH/DELETE — imagens no Storage
 api/documento.js                 POST/GET — registro dos documentos gerados
@@ -26,7 +25,6 @@ api/config.js                    GET  — URL e chave anônima para o navegador
 api/perfil.js                    GET  — quem sou eu; para gerente, a equipe
 api/atendimento.js               GET/POST/PATCH — a lista do CRM
 api/proposta.js                  GET/POST/PATCH/DELETE — ofertas dos lojistas
-api/desvalorizacao.js            GET  — histórico FIPE mês a mês do veículo
 api/funil.js                     GET  — a aba PIPELINE: fluxo → venda por origem
 api/importar.js                  POST — traz a planilha do CRM para o banco
 api/fipe.js                      GET  — tabela FIPE oficial, para conferência
@@ -38,6 +36,12 @@ PENDENCIAS.md                    o que está em aberto e o que destrava cada coi
 Sem `package.json`, de propósito: nenhuma função usa biblioteca. O
 Supabase é chamado pela API REST (PostgREST) com `fetch`. Manter assim
 — dependência nova precisa de uma boa razão.
+
+**Teto de 12 funções.** O plano Hobby da Vercel não aceita mais que isso
+por deploy, e o build **falha inteiro** quando passa — foi o que
+aconteceu com o arquivo 13. Hoje são 11. **Antes de criar arquivo novo
+em `api/`, conte.** O corte que funcionou foi juntar por fonte: tudo que
+fala com a Placa Fipe mora em `api/placa.js`, atrás de `?acao=`.
 
 ## Rodar e publicar
 
