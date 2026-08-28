@@ -452,6 +452,40 @@ async function gravarDesempenho(negociadorId, dados) {
   return d.desempenho;
 }
 
+/* ----------- anexos do negócio (0008) ----------- */
+// Sob /api/foto porque é o arquivo que já fala com o Storage — e
+// porque a Vercel está em 12 de 12 funções.
+async function listarAnexos(atendimentoId) {
+  const r = await fetchAut(`/api/foto?recurso=anexo&atendimento_id=${encodeURIComponent(atendimentoId)}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui carregar os anexos.");
+  return d.anexos || [];
+}
+async function enviarAnexo(atendimentoId, arquivo, rotulo) {
+  const dados = await new Promise((ok, falha) => {
+    const fr = new FileReader();
+    fr.onload = () => ok(fr.result);
+    fr.onerror = () => falha(new Error("Não consegui ler o arquivo."));
+    fr.readAsDataURL(arquivo);
+  });
+  const r = await fetchAut("/api/foto?recurso=anexo", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      atendimento_id: atendimentoId, rotulo,
+      nome: arquivo.name, tipo: arquivo.type, dados,
+    }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui anexar.");
+  return d.anexo;
+}
+async function apagarAnexo(id) {
+  const r = await fetchAut(`/api/foto?recurso=anexo&id=${encodeURIComponent(id)}`, { method: "DELETE" });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui apagar.");
+  return true;
+}
+
 async function consultarFunil(de, ate) {
   const q = comoQuery({ de, ate });
   const r = await fetchAut(`/api/funil${q ? `?${q}` : ""}`);
@@ -1863,9 +1897,12 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   // Sem estes quatro, o documento sai com lacuna. E papel com lacuna
   // volta para ser preenchido depois — que é como contrato acaba
   // assinado pela metade.
+  // O endereço saiu da trava a pedido do Derek: ele não quer perguntar
+  // ao cliente o que já está na CNH e no CRLV. A cláusula continua nos
+  // documentos — é texto assinado, não se apaga — e sai com a linha em
+  // branco para preencher à mão quando o papel exigir.
   const OBRIG_CLIENTE = [
-    ["cliente_nome", "Nome"], ["cliente_cpf", "CPF"],
-    ["cliente_rg", "RG"], ["cliente_endereco", "Endereço"],
+    ["cliente_nome", "Nome"], ["cliente_cpf", "CPF"], ["cliente_rg", "RG"],
   ];
   const faltamCliente = OBRIG_CLIENTE.filter(([k]) => !String(cliente[k] || "").trim());
   const podeImprimir = faltamCliente.length === 0;
@@ -2354,6 +2391,12 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                   </div>
                 )}
               </div>
+            </Bloco>
+
+            <Bloco titulo="Documentos do carro e do cliente"
+              sub="O CRLV e a CNH em foto ou PDF. É de onde saem os dados — anexando, você para de perguntar.">
+              <Anexos atendimentoId={atendimento ? atendimento.id : null}
+                rotulos={["CRLV", "CNH", "Identidade"]} />
             </Bloco>
 
             <Bloco titulo="Escutar a conversa" sub="É aqui que ele conta por que está vendendo. O cliente precisa autorizar antes — é a condição do parecer.">
@@ -2870,6 +2913,12 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                   Os documentos saem com o texto que a casa assina e com os dados do cliente preenchidos. Só os dados bancários ficam em branco: o sistema não guarda conta nem chave PIX.
                 </p>
               </div>
+            </Bloco>
+
+            <Bloco titulo="Anexos do fechamento"
+              sub="Comprovante de residência, laudo da cautelar e comprovante de pagamento.">
+              <Anexos atendimentoId={atendimento ? atendimento.id : null}
+                rotulos={["Comprovante de residência", "Laudo cautelar", "Comprovante de pagamento", "Outro"]} />
             </Bloco>
 
             {/* A cautelar pode reprovar, e aí a negociação reabre.
@@ -4647,6 +4696,108 @@ const PL = {
   cinza: "#D9D9D9", verde: "#D6EADF", vermelho: "#E8402A",
   laranja: "#FFA000", creme: "#FFF2CC", magenta: "#FF00FF", roxo: "#4A1173",
 };
+
+/**
+ * Os anexos do negócio: CRLV em PDF, CNH ou identidade do cliente,
+ * comprovante de residência, laudo, comprovante de pagamento.
+ *
+ * Cada tela mostra só os rótulos que interessam ali — o CRLV e a CNH na
+ * Pesquisa, porque é de onde saem os dados do cliente e do carro; o
+ * comprovante de residência no Fechamento, que é quando ele importa.
+ *
+ * **Aqui entra documento de identidade.** O bucket é privado e o link
+ * vence em uma hora; a regra de retenção ainda é conversa com o
+ * jurídico, e está anotada em PENDENCIAS.md.
+ */
+function Anexos({ atendimentoId, rotulos, aoMudar }) {
+  const [lista, setLista] = useState(null);
+  const [erro, setErro] = useState("");
+  const [indo, setIndo] = useState("");
+  const entrada = useRef(null);
+  const [rotulo, setRotulo] = useState(rotulos[0]);
+
+  useEffect(() => {
+    if (!atendimentoId) { setLista([]); return; }
+    listarAnexos(atendimentoId).then(setLista).catch((e) => { setErro(e.message); setLista([]); });
+  }, [atendimentoId]);
+
+  const daTela = (lista || []).filter((a) => rotulos.indexOf(a.rotulo) >= 0);
+
+  const escolher = async (ev) => {
+    const arq = ev.target.files && ev.target.files[0];
+    ev.target.value = "";
+    if (!arq) return;
+    setErro(""); setIndo(arq.name);
+    try {
+      const novo = await enviarAnexo(atendimentoId, arq, rotulo);
+      setLista((ls) => [novo, ...(ls || [])]);
+      if (aoMudar) aoMudar();
+    } catch (e) { setErro(e.message); }
+    setIndo("");
+  };
+
+  if (!atendimentoId) {
+    return (
+      <p className="text-[12px] leading-relaxed" style={{ color: C.mute }}>
+        Os anexos ficam presos ao atendimento. Abra este carro pela lista de atendimentos para anexar.
+      </p>
+    );
+  }
+
+  const kb = (b) => (b > 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.round((b || 0) / 1024)} KB`);
+
+  return (
+    <div>
+      <div className="flex gap-2">
+        <select className={inputCls} style={inputSty} value={rotulo} onChange={(e) => setRotulo(e.target.value)}>
+          {rotulos.map((r) => <option key={r}>{r}</option>)}
+        </select>
+        <button onClick={() => entrada.current && entrada.current.click()} disabled={!!indo}
+          className="shrink-0 rounded-md px-4 text-[13px] font-semibold"
+          style={{ background: indo ? C.line : C.roxo, color: "#fff" }}>
+          {indo ? "Enviando…" : "Anexar"}
+        </button>
+      </div>
+      <input ref={entrada} type="file" accept="application/pdf,image/jpeg,image/png,image/webp"
+        onChange={escolher} style={{ display: "none" }} />
+
+      <p className="mt-1.5 text-[10px]" style={{ color: C.mute }}>
+        PDF ou foto, até 10 MB. Fica guardado no atendimento, fora do aparelho.
+      </p>
+
+      {erro && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+      {lista === null && <p className="mt-2 text-[12px]" style={{ color: C.mute }}>Carregando…</p>}
+
+      {!!daTela.length && (
+        <div className="mt-3 space-y-1.5">
+          {daTela.map((a) => (
+            <div key={a.id} className="flex items-center justify-between gap-2 rounded-md px-3 py-2"
+              style={{ background: "#FBFAFC", border: `1px solid ${C.line}` }}>
+              <div style={{ minWidth: 0 }}>
+                <div className="text-[12px] font-semibold">{a.rotulo}</div>
+                <div className="truncate text-[10px]" style={{ color: C.mute }}>
+                  {a.nome || "arquivo"} · {kb(a.bytes)}
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-3">
+                {a.url && (
+                  <a href={a.url} target="_blank" rel="noopener noreferrer"
+                    className="text-[11px] font-semibold" style={{ color: C.roxo }}>abrir</a>
+                )}
+                <button onClick={async () => {
+                    if (!window.confirm(`Apagar o anexo "${a.rotulo}"?`)) return;
+                    try { await apagarAnexo(a.id); setLista((ls) => ls.filter((x) => x.id !== a.id)); }
+                    catch (e) { setErro(e.message); }
+                  }}
+                  className="text-[11px]" style={{ color: C.laranja }}>apagar</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function CartaoNegociador({ n, equipe, loja, desempenho, podeEditar, aoSalvar }) {
   const cad = loja ? null : (equipe || []).filter((x) => String(x.nome).toUpperCase() === n.nome)[0];

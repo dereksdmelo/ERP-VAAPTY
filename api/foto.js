@@ -147,6 +147,153 @@ async function apagarArquivo(caminho) {
 
 /* ------------------ handler ------------------ */
 
+const BUCKET_DOC = "documentos-veiculo";
+const MAX_DOC = 10 * 1024 * 1024;      // o mesmo file_size_limit da 0008
+
+// O que o bucket aceita (0008). PDF entra aqui e não no de fotos.
+const TIPOS_DOC = {
+  "application/pdf": "pdf",
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+};
+
+const ROTULOS = [
+  "CRLV", "CNH", "Identidade", "Comprovante de residência",
+  "Laudo cautelar", "Comprovante de pagamento", "Outro",
+];
+
+/**
+ * Anexos do negócio (0008): CRLV em PDF, CNH ou identidade do cliente,
+ * comprovante de residência, laudo, comprovante de pagamento.
+ *
+ * Mora sob /api/foto porque é o arquivo que já fala com o Storage — e
+ * porque a Vercel do plano Hobby para em 12 funções e nós estamos nas
+ * 12. Acomodação de teto, não arquitetura.
+ *
+ * A chave de serviço continua sendo só para o Storage. O que protege é
+ * a ordem: toda ida ao arquivo acontece depois de uma consulta ao banco
+ * feita com o token do usuário — se a RLS não devolver o atendimento, a
+ * função para antes de tocar no arquivo.
+ *
+ * **Aqui trafega documento de identidade.** Nada é escrito em log, o
+ * bucket é privado e o link é assinado por uma hora. A conversa sobre
+ * por quanto tempo isso pode ficar guardado é do jurídico — está em
+ * PENDENCIAS.md.
+ */
+async function anexos(req, res, tok) {
+  const assinarDoc = async (caminhos) => {
+    if (!caminhos.length) return {};
+    const r = await arquivos(`${STORAGE()}/object/sign/${BUCKET_DOC}`, {
+      method: "POST", headers: jsonArquivo(),
+      body: JSON.stringify({ expiresIn: VALIDADE, paths: caminhos }),
+    });
+    const mapa = {};
+    (Array.isArray(r) ? r : []).forEach((x) => {
+      const a = x && (x.signedURL || x.signedUrl);
+      if (a) mapa[x.path] = a.charAt(0) === "/" ? `${STORAGE()}${a}` : a;
+    });
+    return mapa;
+  };
+
+  if (req.method === "GET") {
+    const aid = String(req.query.atendimento_id || "");
+    if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
+    const linhas = await banco(
+      `${REST("anexo")}?select=*&atendimento_id=eq.${aid}&order=criado_em.desc`,
+      { headers: cabecalhos(tok) }
+    );
+    const lista = Array.isArray(linhas) ? linhas : [];
+    const urls = await assinarDoc(lista.map((x) => x.caminho));
+    return res.status(200).json({
+      anexos: lista.map((x) => ({ ...x, url: urls[x.caminho] || null })),
+      rotulos: ROTULOS,
+    });
+  }
+
+  if (req.method === "POST") {
+    let corpo = req.body;
+    if (corpo && typeof Buffer !== "undefined" && Buffer.isBuffer(corpo)) corpo = corpo.toString("utf8");
+    if (typeof corpo === "string") { try { corpo = JSON.parse(corpo); } catch (e) { corpo = null; } }
+    if (!corpo || typeof corpo !== "object") return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+
+    const aid = String(corpo.atendimento_id || "");
+    if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
+
+    const tipo = String(corpo.tipo || "");
+    const ext = TIPOS_DOC[tipo];
+    if (!ext) return res.status(415).json({ erro: "Só PDF, JPEG, PNG ou WEBP." });
+
+    // Aqui não dá para conferir magic bytes como nas fotos: são quatro
+    // formatos. O bucket da 0008 recusa o que não estiver na lista, e é
+    // ele a última palavra.
+    let bruto = String(corpo.dados || "").trim();
+    const virgula = bruto.indexOf(",");
+    if (bruto.slice(0, 5) === "data:" && virgula > 0) bruto = bruto.slice(virgula + 1);
+    bruto = bruto.replace(/\s/g, "");
+    if (!bruto || !/^[A-Za-z0-9+/]+={0,2}$/.test(bruto)) return res.status(400).json({ erro: "Arquivo vazio ou fora do formato." });
+    const buf = Buffer.from(bruto, "base64");
+    if (!buf.length) return res.status(400).json({ erro: "Arquivo vazio." });
+    if (buf.length > MAX_DOC) return res.status(413).json({ erro: "Arquivo maior que 10 MB." });
+
+    // A consulta pelo token confirma que o atendimento existe e que a
+    // RLS deixa este usuário vê-lo. Só depois o arquivo sobe.
+    const achado = await banco(`${REST("atendimento")}?select=id&id=eq.${aid}&limit=1`, { headers: cabecalhos(tok) });
+    if (!Array.isArray(achado) || !achado[0]) return res.status(404).json({ erro: "Atendimento não encontrado." });
+
+    const caminho = `${aid}/${Date.now()}-${sufixo()}.${ext}`;
+    await arquivos(`${STORAGE()}/object/${BUCKET_DOC}/${paraURL(caminho)}`, {
+      method: "POST",
+      headers: hArquivo({ "Content-Type": tipo, "Cache-Control": "3600", "x-upsert": "false" }),
+      body: buf,
+    });
+
+    let linha;
+    try {
+      const r = await banco(REST("anexo"), {
+        method: "POST",
+        headers: json(tok, { Prefer: "return=representation" }),
+        body: JSON.stringify({
+          atendimento_id: aid, caminho, tipo, bytes: buf.length,
+          nome: String(corpo.nome || "").slice(0, 200) || null,
+          rotulo: ROTULOS.indexOf(String(corpo.rotulo || "")) >= 0 ? corpo.rotulo : "Outro",
+        }),
+      });
+      linha = Array.isArray(r) ? r[0] : r;
+    } catch (e) {
+      // Linha falhou depois do upload: o arquivo não pode ficar órfão.
+      await apagarDoc(caminho);
+      throw e;
+    }
+
+    const urls = await assinarDoc([caminho]);
+    return res.status(201).json({ ok: true, anexo: { ...linha, url: urls[caminho] || null } });
+  }
+
+  if (req.method === "DELETE") {
+    const id = String(req.query.id || "");
+    if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido." });
+    const achado = await banco(`${REST("anexo")}?select=caminho&id=eq.${id}&limit=1`, { headers: cabecalhos(tok) });
+    const alvo = Array.isArray(achado) && achado[0] ? achado[0].caminho : null;
+    if (!alvo) return res.status(404).json({ erro: "Anexo não encontrado." });
+    // Arquivo primeiro, linha depois: assim repetir a chamada converge.
+    await apagarDoc(alvo);
+    await banco(`${REST("anexo")}?id=eq.${id}`, { method: "DELETE", headers: cabecalhos(tok) });
+    return res.status(200).json({ ok: true });
+  }
+
+  res.setHeader("Allow", "GET, POST, DELETE");
+  return res.status(405).json({ erro: "Use GET, POST ou DELETE." });
+}
+
+async function apagarDoc(caminho) {
+  try {
+    await arquivos(`${STORAGE()}/object/${BUCKET_DOC}/${paraURL(caminho)}`, {
+      method: "DELETE", headers: hArquivo(),
+    });
+  } catch (e) { /* já não existe é sucesso */ }
+}
+
 module.exports = async function handler(req, res) {
   if (!URL_BASE || !CHAVE || !ANON) {
     return res.status(500).json({ erro: "SUPABASE_URL, SUPABASE_ANON_KEY ou SUPABASE_SERVICE_KEY não configurados." });
@@ -154,6 +301,11 @@ module.exports = async function handler(req, res) {
 
   const tok = tokenDe(req);
   if (!tok) return res.status(401).json(SEM_LOGIN);
+
+  if (String(req.query.recurso || "") === "anexo") {
+    try { return await anexos(req, res, tok); }
+    catch (e) { return res.status(e.status || 500).json({ erro: limpar(e.message) || "Falha no anexo." }); }
+  }
 
   try {
     /* ---------- GET: fotos do veículo, em ordem ---------- */
