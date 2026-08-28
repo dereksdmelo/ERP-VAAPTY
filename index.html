@@ -1123,6 +1123,26 @@ function moldura({ titulo, corpo, protocolo }) {
   .rodape { margin-top: 28px; border-top: 1px solid #CBD0CA; padding-top: 8px;
             font-family: system-ui, sans-serif; font-size: 8pt; color: #6B6478;
             display: flex; justify-content: space-between; }
+
+  /* extrato de ofertas — o desenho da planilha, em papel */
+  table.resumo { width: 100%; border-collapse: collapse; margin: 16px 0 20px;
+                 font-family: system-ui, sans-serif; }
+  table.resumo td { padding: 7px 9px; font-size: 11pt; border-bottom: 1px solid #CBD0CA; }
+  table.resumo td.num { text-align: right; font-family: 'Courier New', monospace;
+                        font-weight: 700; color: #C00000; white-space: nowrap; }
+  table.resumo tr.melhor td { font-size: 14pt; font-weight: 700; border-bottom: 2px solid #15121a; }
+
+  table.ofertas { width: 100%; border-collapse: collapse; margin-top: 6px;
+                  font-family: 'Courier New', monospace; font-size: 9pt; }
+  table.ofertas th { font-family: system-ui, sans-serif; font-size: 8pt;
+                     letter-spacing: .08em; text-transform: uppercase; color: #6B6478;
+                     border-bottom: 1px solid #15121a; padding: 4px 6px; }
+  table.ofertas th:nth-child(even) { text-align: right; }
+  table.ofertas td { padding: 2px 6px; }
+  table.ofertas td.n { color: #6B6478; width: 6%; }
+  table.ofertas td.v { text-align: right; width: 27%; }
+  table.ofertas td.destaque { background: #DCEFDC; font-weight: 700; }
+  .aviso { color: #EA5423; font-family: system-ui, sans-serif; font-size: 10pt; }
 </style></head><body>
 <div class="marca">VAAPTY</div>
 <div class="sub">Joinville · Santa Catarina</div>
@@ -1186,6 +1206,82 @@ const VAAPTY_PJ = "Vaapty Intermediação Veicular LTDA · CNPJ 34.840.903/0001-
  * corrigir texto de contrato por conta própria é pior que reproduzir o
  * que está assinado hoje.
  */
+/**
+ * O extrato de ofertas — a folha que vai para a mesa do cliente.
+ *
+ * É o desenho da planilha do Derek: Veículo, Quant. de propostas, Valor
+ * médio e Melhor Proposta à esquerda; as posições em três colunas de
+ * Num | Valor à direita.
+ *
+ * **Os valores aqui são as propostas de verdade**, as que os lojistas
+ * mandaram e o negociador registrou na Espera. O simulador continua
+ * onde estava e serve para treinar — o que é impresso e entregue ao
+ * cliente não pode ser número sorteado.
+ *
+ * São três extratos, um por rodada, e o que muda entre eles é a Melhor
+ * Proposta que vai à mesa: o negociador escreve o valor de cada rodada
+ * em `rodadas[n].impresso`. Sem valor escrito, sai a maior de verdade.
+ */
+function extratoOfertas(f, ofertas, indice, melhorDaRodada) {
+  const valores = (ofertas || [])
+    .map((o) => Number(o.valor))
+    .filter((v) => Number.isFinite(v) && v > 0)
+    .sort((a, b) => b - a);
+
+  const total = valores.length;
+  const soma = valores.reduce((a, b) => a + b, 0);
+  const media = total ? soma / total : 0;
+  const melhor = Number(melhorDaRodada) || (valores.length ? valores[0] : 0);
+  const cem = (v) => v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  // Três colunas lado a lado, como as faixas H/I, K/L e N/O da planilha.
+  const porColuna = Math.max(1, Math.ceil(total / 3));
+  let linhas = "";
+  for (let i = 0; i < porColuna; i++) {
+    let tr = "<tr>";
+    for (let c = 0; c < 3; c++) {
+      const k = c * porColuna + i;
+      const v = valores[k];
+      tr += `<td class="n">${k < total ? k + 1 : ""}</td>` +
+            `<td class="v${v === melhor ? " destaque" : ""}">${v == null ? "" : cem(v)}</td>`;
+    }
+    linhas += tr + "</tr>";
+  }
+
+  const corpo = `<h1>Extrato de ofertas — ${indice}ª rodada</h1>
+
+<table class="dados">
+  <tr><td class="r">Veículo</td><td>${ou(f.modelo, "marca e modelo")}</td></tr>
+  <tr><td class="r">Placa</td><td>${ou(f.placa, "placa")}</td></tr>
+  <tr><td class="r">Ano / modelo</td><td>${ou(f.ano, "ano")}</td></tr>
+</table>
+
+<table class="resumo">
+  <tr><td>Quant. de propostas</td><td class="num">${total}</td></tr>
+  <tr><td>Valor médio das propostas</td><td class="num">R$ ${cem(media)}</td></tr>
+  <tr class="melhor"><td>Melhor Proposta</td><td class="num">R$ ${cem(melhor)}</td></tr>
+</table>
+
+${total ? `<table class="ofertas">
+  <thead><tr>
+    <th>Num</th><th>Valor</th><th>Num</th><th>Valor</th><th>Num</th><th>Valor</th>
+  </tr></thead>
+  <tbody>${linhas}</tbody>
+</table>` : `<p class="aviso">Nenhuma proposta registrada ainda. Registre as ofertas dos lojistas na Espera antes de imprimir o extrato.</p>`}
+
+<table class="dados" style="margin-top:22px">
+  <tr><td class="r">Negociador</td><td>${ou(f.negociador, "negociador")}</td></tr>
+  <tr><td class="r">Loja</td><td>Vaapty Joinville</td></tr>
+  <tr><td class="r">Emitido em</td><td>${new Date().toLocaleString("pt-BR")}</td></tr>
+</table>`;
+
+  return moldura({
+    titulo: `Extrato de ofertas ${indice}`,
+    corpo,
+    protocolo: protocolo(f, `EXT${indice}`),
+  });
+}
+
 function termoAceite(f, rodada, indice) {
   /**
    * "Valor ajustado para venda" é o que o CLIENTE aceita receber — a
@@ -2485,8 +2581,14 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               </div>
             )}
 
-            <Bloco titulo="Extratos e contrapropostas" sub="Cada rodada vira número comparável — é assim que se acha o valor de abertura certo por faixa de FIPE.">
+            <Bloco titulo="Extratos e contrapropostas" sub="São três rodadas, e cada uma tem o seu extrato impresso. O que muda entre elas é o valor que vai à mesa.">
               <div className="space-y-2.5">
+                {!propostas.length && (
+                  <div className="rounded-md px-3 py-2 text-[11px]"
+                    style={{ background: AMARELO.fundo, border: `1px solid ${AMARELO.borda}`, color: AMARELO.texto }}>
+                    Nenhuma proposta de lojista registrada. O extrato imprime as ofertas de verdade — registre-as na Espera antes de levar a folha para a mesa.
+                  </div>
+                )}
                 {f.rodadas.map((r, i) => (
                   <div key={i} className="rounded-md p-3" style={{ background: "#FBFAFC", border: `1px dashed ${C.line}` }}>
                     <div className="text-[10px] uppercase tracking-[0.14em]" style={{ color: C.mute }}>
@@ -2502,6 +2604,17 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                         <span className="text-[11px]" style={{ color: C.mute }}>contra do cliente</span>
                       </div>
                     )}
+                    <button
+                      onClick={() => gerarDocumento("extrato_ofertas", `Extrato de ofertas ${i + 1}`, extratoOfertas(dadosDoc, propostas, i + 1, r.impresso), i + 1)}
+                      className="mt-2 w-full rounded-md py-2 text-[12px] font-semibold"
+                      style={{ background: C.roxo, color: "#fff" }}>
+                      Imprimir o {i + 1}º extrato de ofertas
+                    </button>
+                    {docsDe("extrato_ofertas", i + 1).map((d, k) => (
+                      <div key={k} className="mt-1 text-[10px]" style={{ color: C.verde }}>
+                        Extrato gerado às {hhmm(d.em)}{d.protocolo ? ` · ${d.protocolo}` : ""}{d.noBanco ? "" : " · fora do banco"}
+                      </div>
+                    ))}
                     <button disabled={!podeImprimir}
                       onClick={() => gerarDocumento("termo_aceite", `Termo de aceite ${i + 1}`, termoAceite(dadosDoc, r, i + 1), i + 1)}
                       className="mt-2 w-full rounded-md border py-1.5 text-[11px] font-semibold"
@@ -2528,12 +2641,24 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                     Usar a maior proposta — {brl(melhorProposta)}
                   </button>
                 )}
-                <div className="grid grid-cols-2 gap-2">
-                  <input placeholder="Impresso" className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={novaRodada.impresso} onChange={(e) => setNovaRodada({ ...novaRodada, impresso: e.target.value })} />
-                  <input placeholder="Contra" className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={novaRodada.contra} onChange={(e) => setNovaRodada({ ...novaRodada, contra: e.target.value })} />
-                </div>
-                <button onClick={() => { if (!novaRodada.impresso) return; set("rodadas", [...f.rodadas, novaRodada]); setNovaRodada({ impresso: "", contra: "" }); }}
-                  className="w-full rounded-md py-2.5 text-[13px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>Registrar extrato</button>
+                {/* Três rodadas, como a casa faz. Passar disso não é
+                    negociação, é desgaste — e o cliente já foi embora. */}
+                {f.rodadas.length < 3 ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input placeholder="Impresso" className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={novaRodada.impresso} onChange={(e) => setNovaRodada({ ...novaRodada, impresso: e.target.value })} />
+                      <input placeholder="Contra" className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={novaRodada.contra} onChange={(e) => setNovaRodada({ ...novaRodada, contra: e.target.value })} />
+                    </div>
+                    <button onClick={() => { if (!novaRodada.impresso) return; set("rodadas", [...f.rodadas, novaRodada]); setNovaRodada({ impresso: "", contra: "" }); }}
+                      className="w-full rounded-md py-2.5 text-[13px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>
+                      Registrar o {f.rodadas.length + 1}º extrato
+                    </button>
+                  </>
+                ) : (
+                  <p className="text-[11px]" style={{ color: C.mute }}>
+                    As três rodadas estão registradas. Daqui vai para o fechamento.
+                  </p>
+                )}
                 <Campo label="Objeção principal">
                   <select className={inputCls} style={inputSty} value={f.objecao} onChange={(e) => set("objecao", e.target.value)}>
                     {OBJECOES.map((o) => <option key={o}>{o}</option>)}
