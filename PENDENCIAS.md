@@ -57,7 +57,9 @@ Storage vem depois de uma consulta ao banco feita pelo usuário.
 o token do usuário.
 
 ### LGPD
-O banco guarda nome e telefone de cliente desde a 0004. Não há política
+O banco guarda nome e telefone desde a 0004, **CPF, RG e endereço desde
+a 0007, e conta bancária e chave PIX desde a 0008**. Dado bancário é
+sensível ao ponto de fraude: quem tiver acesso desvia pagamento. Não há política
 de retenção, nem registro de consentimento, nem rotina de exclusão a
 pedido do titular. **Vale conversar com o jurídico antes de escalar o
 uso.**
@@ -142,7 +144,9 @@ Cita `vaapty_schema.sql` e `.env.example`, que não existem. O esquema
 vive em `supabase/migrations/`.
 
 ### Teto de 12 funções no plano Hobby da Vercel
-São 11 hoje. O décimo terceiro arquivo em `api/` **derrubou o build
+**São 12 hoje — o teto.** Não cabe mais nenhuma; os anexos do
+fechamento vão ter que entrar dentro do `api/foto.js`, que já cuida do
+Storage. O décimo terceiro arquivo em `api/` **derrubou o build
 inteiro** — não é aviso, é erro de deploy. O contorno foi juntar por
 fonte: tudo da Placa Fipe em `api/placa.js`, atrás de `?acao=`.
 

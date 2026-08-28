@@ -300,6 +300,23 @@ async function apagarProposta(id) {
   return d;
 }
 
+async function lerChecklist(atendimentoId) {
+  const r = await fetchAut(`/api/checklist?atendimento_id=${encodeURIComponent(atendimentoId)}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui ler o check list.");
+  return d.checklist;
+}
+async function salvarChecklist(atendimentoId, dados) {
+  const r = await fetchAut(`/api/checklist?atendimento_id=${encodeURIComponent(atendimentoId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(dados),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui salvar o check list.");
+  return d.checklist;
+}
+
 async function importarLinhas(linhas) {
   const r = await fetchAut("/api/importar", {
     method: "POST",
@@ -1270,9 +1287,18 @@ ${DUAS_TESTEMUNHAS}`;
  * financeiro. Guardar conta e chave PIX de cliente pediria conversa com
  * o jurídico antes.
  */
-function checkList(f) {
-  const sn = (r) => `<tr><td>${r}</td><td style="width:64px;text-align:center">( &nbsp; ) SIM</td><td style="width:64px;text-align:center">( &nbsp; ) NÃO</td></tr>`;
+function checkList(f, cl) {
+  const c = cl || {};
+  // Marcado no sistema sai marcado no papel. Sem check list salvo, sai
+  // com as caixas vazias — a via impressa continua servindo.
+  const sn = (r, k) => {
+    const v = c[k];
+    const marca = (certo) => (v === undefined || v === null ? "( &nbsp; )" : (!!v === certo ? "( <b>X</b> )" : "( &nbsp; )"));
+    return `<tr><td>${r}</td><td style="width:64px;text-align:center">${marca(true)} SIM</td><td style="width:64px;text-align:center">${marca(false)} NÃO</td></tr>`;
+  };
   const linha = (r, v) => `<tr><td class="r">${r}</td><td>${v}</td></tr>`;
+  const val = (k, alt) => (c[k] != null && c[k] !== "" ? brlDoc(c[k]) : (alt != null && alt !== "" ? brlDoc(alt) : vazio("valor")));
+  const txt = (k, rotulo) => (c[k] ? String(c[k]) : vazio(rotulo));
 
   const corpo = `<h1>Check list do negócio</h1>
 
@@ -1285,46 +1311,46 @@ function checkList(f) {
 
 <p><strong>CHECK LIST — o negociador preenche</strong></p>
 <table class="dados">
-  ${sn("Recibo de compra e venda")}
-  ${sn("2ª via DUT (R$ 790,00)")}
-  ${sn("Licenciamento atual")}
-  ${sn("Transferência (R$ 590,00)")}
-  ${sn("Emplacamento Mercosul (R$ 250,00)")}
-  ${sn("Outros (chave cópia, despachante, etc.)")}
-  ${sn("Comprovante de residência")}
-  ${sn("Cópia da CNH do titular")}
-  ${sn("Manual e chave cópia")}
+  ${sn("Recibo de compra e venda", "recibo_compra_venda")}
+  ${sn("2ª via DUT (R$ 790,00)", "segunda_via_dut")}
+  ${sn("Licenciamento atual", "licenciamento_atual")}
+  ${sn("Transferência (R$ 590,00)", "transferencia")}
+  ${sn("Emplacamento Mercosul (R$ 250,00)", "emplacamento_mercosul")}
+  ${sn("Outros (chave cópia, despachante, etc.)", "outros_itens")}
+  ${sn("Comprovante de residência", "comprovante_residencia")}
+  ${sn("Cópia da CNH do titular", "copia_cnh_titular")}
+  ${sn("Manual e chave cópia", "manual_chave_copia")}
 </table>
 
 <p><strong>VALORES</strong></p>
 <table class="dados">
-  ${linha("Venda", brlDoc(f.valorFechado))}
-  ${linha("Cautelar", vazio("valor"))}
-  ${linha("Débitos", f.debitos ? brlDoc(f.debitos) : vazio("valor"))}
-  ${linha("Quitação", f.quitacao ? brlDoc(f.quitacao) : vazio("valor"))}
-  ${linha("Comissão Vaapty", vazio("valor"))}
-  ${linha("Líquido ao cliente", vazio("valor"))}
+  ${linha("Venda", val("valor_venda", f.valorFechado))}
+  ${linha("Cautelar", val("valor_cautelar"))}
+  ${linha("Débitos", val("valor_debitos", f.debitos))}
+  ${linha("Quitação", val("valor_quitacao", f.quitacao))}
+  ${linha("Comissão Vaapty", val("comissao_vaapty"))}
+  ${linha("Líquido ao cliente", val("valor_cliente"))}
 </table>
 
 <p><strong>DADOS BANCÁRIOS — o cliente preenche</strong></p>
 <table class="dados">
-  ${linha("Favorecido", vazio("nome"))}
-  ${linha("CPF / CNPJ", vazio("documento"))}
-  ${linha("Banco", vazio("banco"))}
-  ${linha("Agência", vazio("agência"))}
-  ${linha("Conta", vazio("conta"))}
-  ${linha("C/C ou C/P", vazio("tipo"))}
-  ${linha("Chave PIX", vazio("chave"))}
+  ${linha("Favorecido", txt("banco_favorecido", "nome"))}
+  ${linha("CPF / CNPJ", txt("banco_documento", "documento"))}
+  ${linha("Banco", txt("banco_nome", "banco"))}
+  ${linha("Agência", txt("banco_agencia", "agência"))}
+  ${linha("Conta", txt("banco_conta", "conta"))}
+  ${linha("C/C ou C/P", txt("banco_tipo", "tipo"))}
+  ${linha("Chave PIX", txt("banco_pix", "chave"))}
 </table>
 
 <p><strong>COMPROVANTES / ENVELOPE — o administrativo preenche</strong></p>
 <table class="dados">
-  ${sn("Entrada")}
-  ${sn("Saída")}
-  ${sn("Débitos (estadual e federal)")}
-  ${sn("Quitação")}
-  ${sn("Outros (chave cópia, despachante, etc.)")}
-  ${sn("Laudo cautelar")}
+  ${sn("Entrada", "adm_entrada")}
+  ${sn("Saída", "adm_saida")}
+  ${sn("Débitos (estadual e federal)", "adm_debitos")}
+  ${sn("Quitação", "adm_quitacao")}
+  ${sn("Outros (chave cópia, despachante, etc.)", "adm_outros")}
+  ${sn("Laudo cautelar", "adm_laudo_cautelar")}
 </table>
 
 ${assinaturas("Administrativo", "Financeiro")}
@@ -1379,6 +1405,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     cliente_rg: (atendimento && atendimento.cliente_rg) || "",
     cliente_endereco: (atendimento && atendimento.cliente_endereco) || "",
   });
+  const [checklist, setChecklist] = useState(null);
   const [salvandoCliente, setSalvandoCliente] = useState(false);
   const [erroCliente, setErroCliente] = useState("");
   const [erroCanais, setErroCanais] = useState("");
@@ -2410,7 +2437,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                   </div>
                 )}
                 <button disabled={!podeImprimir}
-                  onClick={() => gerarDocumento("check_list", "Check list", checkList(dadosDoc), null)}
+                  onClick={() => gerarDocumento("check_list", "Check list", checkList(dadosDoc, checklist), null)}
                   className="w-full rounded-md border py-2 text-[12px] font-semibold"
                   style={{ borderColor: C.line, color: podeImprimir ? C.roxo : C.mute }}>
                   Check list do negócio
@@ -2419,6 +2446,11 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                   Os documentos saem com o texto que a casa assina e com os dados do cliente preenchidos. Só os dados bancários ficam em branco: o sistema não guarda conta nem chave PIX.
                 </p>
               </div>
+            </Bloco>
+
+            <Bloco titulo="Check list do negócio" sub="Preenchido aqui, não no papel. O administrativo confere na mesma tela depois, e o sistema carimba quem conferiu.">
+              <ChecklistDigital atendimentoId={atendimento ? atendimento.id : null}
+                ficha={f} perfil={perfil} aoCarregar={setChecklist} />
             </Bloco>
 
             <Bloco titulo="Depois da cautelar">
@@ -2596,6 +2628,167 @@ function StatusAtendimento({ atendimento, aoMudar }) {
         ))}
       </div>
       {erro && <p className="mt-1 text-[11px]" style={{ color: C.laranja }}>{erro}</p>}
+    </div>
+  );
+}
+
+/* ===================== check list digital ===================== */
+
+const CL_ITENS = [
+  ["recibo_compra_venda", "Recibo de compra e venda"],
+  ["segunda_via_dut", "2ª via DUT (R$ 790,00)"],
+  ["licenciamento_atual", "Licenciamento atual"],
+  ["transferencia", "Transferência (R$ 590,00)"],
+  ["emplacamento_mercosul", "Emplacamento Mercosul (R$ 250,00)"],
+  ["outros_itens", "Outros (chave cópia, despachante…)"],
+  ["comprovante_residencia", "Comprovante de residência"],
+  ["copia_cnh_titular", "Cópia da CNH do titular"],
+  ["manual_chave_copia", "Manual e chave cópia"],
+];
+const CL_ADM = [
+  ["adm_entrada", "Entrada"], ["adm_saida", "Saída"],
+  ["adm_debitos", "Débitos (estadual e federal)"], ["adm_quitacao", "Quitação"],
+  ["adm_outros", "Outros"], ["adm_laudo_cautelar", "Laudo cautelar"],
+];
+const CL_VALORES = [
+  ["valor_venda", "Venda"], ["valor_cautelar", "Cautelar"], ["valor_debitos", "Débitos"],
+  ["valor_quitacao", "Quitação"], ["comissao_vaapty", "Comissão Vaapty"], ["valor_cliente", "Líquido ao cliente"],
+];
+const CL_BANCO = [
+  ["banco_favorecido", "Favorecido"], ["banco_documento", "CPF / CNPJ"], ["banco_nome", "Banco"],
+  ["banco_agencia", "Agência"], ["banco_conta", "Conta"], ["banco_tipo", "C/C ou C/P"], ["banco_pix", "Chave PIX"],
+];
+
+/**
+ * O check list deixou de ser papel. Duas mãos preenchem: o negociador
+ * na entrega e o administrativo na conferência — e o carimbo de quem
+ * conferiu vem do servidor, não daqui.
+ *
+ * Fica no escopo do módulo de propósito. Declarado dentro do componente
+ * pai, viraria tipo novo a cada render e o campo perderia o foco a cada
+ * tecla digitada.
+ */
+function ChecklistDigital({ atendimentoId, ficha, perfil, aoCarregar }) {
+  const [cl, setCl] = useState(null);
+  const [indo, setIndo] = useState(false);
+  const [erro, setErro] = useState("");
+  const [salvoEm, setSalvoEm] = useState(null);
+
+  useEffect(() => {
+    if (!atendimentoId) return;
+    lerChecklist(atendimentoId)
+      .then((d) => {
+        // Primeira abertura: puxa o que a ficha já sabe, para o
+        // negociador não redigitar número que o sistema tem.
+        const base = d || {
+          valor_venda: ficha.valorFechado || "",
+          valor_debitos: ficha.debitos || "",
+          valor_quitacao: ficha.quitacao || "",
+        };
+        setCl(base);
+        if (aoCarregar) aoCarregar(base);
+      })
+      .catch((e) => setErro(e.message));
+  }, [atendimentoId]);
+
+  if (!atendimentoId) {
+    return (
+      <p className="text-[11px] leading-relaxed" style={{ color: C.mute }}>
+        O check list fica preso ao atendimento. Abra este carro pela lista para preencher.
+      </p>
+    );
+  }
+  if (!cl) return <p className="text-[12px]" style={{ color: C.mute }}>{erro || "Carregando…"}</p>;
+
+  const set = (k, v) => setCl({ ...cl, [k]: v });
+
+  const gravar = async () => {
+    setErro(""); setIndo(true);
+    try {
+      const d = await salvarChecklist(atendimentoId, cl);
+      setCl(d); setSalvoEm(new Date());
+      if (aoCarregar) aoCarregar(d);
+    } catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+
+  const eGerente = perfil && (perfil.papel === "gerente" || perfil.papel === "prep");
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <div className="text-[10px] uppercase tracking-[0.13em]" style={{ color: C.mute }}>
+          Entrega — o negociador confere
+        </div>
+        <div className="mt-1.5 space-y-1.5">
+          {CL_ITENS.map(([k, r]) => (
+            <Toggle key={k} label={r} valor={!!cl[k]} onChange={(v) => set(k, v)} />
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div className="text-[10px] uppercase tracking-[0.13em]" style={{ color: C.mute }}>A conta do negócio</div>
+        <div className="mt-1.5 grid grid-cols-2 gap-2">
+          {CL_VALORES.map(([k, r]) => (
+            <Campo key={k} label={r}>
+              <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric"
+                value={cl[k] == null ? "" : cl[k]} onChange={(e) => set(k, e.target.value)} />
+            </Campo>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div className="text-[10px] uppercase tracking-[0.13em]" style={{ color: C.mute }}>
+          Para onde o dinheiro vai — o cliente informa
+        </div>
+        <div className="mt-1.5 space-y-2">
+          {CL_BANCO.map(([k, r]) => (
+            <Campo key={k} label={r}>
+              <input className={inputCls} style={{ ...inputSty, fontFamily: k === "banco_favorecido" ? F.body : F.mono }}
+                value={cl[k] || ""} onChange={(e) => set(k, e.target.value)} />
+            </Campo>
+          ))}
+        </div>
+        <p className="mt-1 text-[10px] leading-relaxed" style={{ color: C.mute }}>
+          Conta e chave PIX ficam guardadas no banco de dados, protegidas por login. Confira o favorecido com o cliente antes de salvar — pagamento sai por esses números.
+        </p>
+      </div>
+
+      <div>
+        <div className="text-[10px] uppercase tracking-[0.13em]" style={{ color: C.mute }}>
+          Conferência do administrativo
+        </div>
+        <div className="mt-1.5 space-y-1.5">
+          {CL_ADM.map(([k, r]) => (
+            <Toggle key={k} label={r} valor={!!cl[k]} onChange={(v) => set(k, v)} />
+          ))}
+        </div>
+        {cl.adm_conferido_em && (
+          <p className="mt-1.5 text-[11px]" style={{ color: C.verde }}>
+            Conferido em {new Date(cl.adm_conferido_em).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+            {eGerente && cl.adm_conferido_por ? "" : ""}.
+          </p>
+        )}
+      </div>
+
+      <Campo label="Observações">
+        <textarea rows={2} className={inputCls} style={inputSty} value={cl.observacoes || ""}
+          onChange={(e) => set("observacoes", e.target.value)} />
+      </Campo>
+
+      <button onClick={gravar} disabled={indo}
+        className="w-full rounded-md py-2.5 text-[13px] font-semibold"
+        style={{ background: indo ? C.line : C.roxo, color: "#fff" }}>
+        {indo ? "Salvando…" : "Salvar check list"}
+      </button>
+      {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+      {salvoEm && !erro && (
+        <p className="text-[12px]" style={{ color: C.verde }}>
+          Salvo às {salvoEm.toTimeString().slice(0, 5)}.
+        </p>
+      )}
     </div>
   );
 }
