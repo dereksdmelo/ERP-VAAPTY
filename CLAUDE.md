@@ -599,6 +599,13 @@ aviso é pior que número nenhum.
 tradução mais fiel de "Nº de avaliações" da planilha: o que ela contava
 era carro avaliado, não porta que abriu.
 
+**Não se registra proposta na Espera.** A primeira proposta que entra no
+sistema é o 1º extrato, na Negociação — foi correção do Derek em
+28/08/2026. Por isso `statusDerivado()` parou de olhar a tabela
+`proposta`: lançado é "aguardando", e **"falta proposta" virou marcação
+do negociador**, porque o sistema não tem como saber que a rede não
+respondeu. A tabela continua existindo para o que veio da importação.
+
 **Status é manual, e precisa ser.** Sem alguém marcar fechado ou
 perdido, tudo fica "aberto" e o funil não conta nada. A faixa de status
 fica no topo do atendimento, sempre visível, por isso. Automatizar a
@@ -724,6 +731,18 @@ propostas de índice 1 e 45 nascem coladas no piso; as do meio abrem até
 o teto. **Quem "simplificar" para um `Math.random()` entre piso e teto
 muda o formato da nuvem e o valor médio para de bater com a planilha.**
 
+**O que se digita é a Melhor Proposta, não a referência.** O negociador
+diz quanto quer levar à mesa e o valor de referência é consequência,
+mostrado embaixo. Pela conta da planilha o teto de uma rodada é
+`0,918 × referência` — esse é o chute inicial; como cada proposta tem
+sorteio dentro, `simularPorMelhor()` tenta algumas vezes corrigindo pela
+razão e fica com a rodada mais perto. Conferido: alvo 40.600 crava em
+40.600 com referência 45.009.
+
+**Não se força a melhor no fim.** Daria o número exato sempre, mas a
+nuvem deixaria de ser a da planilha e a folha mostraria uma proposta que
+a conta não produz. Quando não crava, a tela diz onde o sorteio parou.
+
 **A tela imita a planilha**, a pedido do Derek: o logo, o cabeçalho de
 quatro linhas (Veículo, Quant. de propostas, Valor médio das propostas,
 Melhor Proposta) e a lista de propostas em três colunas de Num | Valor,
@@ -765,11 +784,17 @@ derruba o parecer inteiro.**
 Vale como está porque o que trava o negociador não é a falta de resumo:
 é que ele não anota.
 
-**A escuta aparece em três etapas**, a pedido do Derek: na Pesquisa
-(onde o cliente conta o motivo da venda), na Espera e na Negociação
-(onde os ganchos viram argumento da rodada seguinte). O consentimento é
-um só, guardado na ficha — quem aceitou na Pesquisa não é perguntado de
-novo.
+**A escuta é do atendimento, não da etapa.** `useEscuta` é chamado uma
+vez no `VaaptyAponte`, que fica montado do começo ao fim. Enquanto isto
+era um componente dentro da etapa, trocar de etapa desmontava o
+componente e **matava o reconhecimento no meio da conversa, sem aviso**.
+Quem voltar a declarar isso dentro de uma etapa reintroduz o corte.
+
+O aceite e o botão do microfone ficam na **Abordagem** — é onde se
+pede, e pedir no meio da negociação seria pedir na pior hora. Uma tarja
+laranja no alto, fora das etapas, mostra que está escutando e há quanto
+tempo: é o que impede a escuta de rodar esquecida. Os sinais e a
+transcrição aparecem na Pesquisa, na Espera e na Negociação.
 
 ### 18. Leads de indicação: eles morriam no aparelho
 
