@@ -2458,7 +2458,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
             </Bloco>
 
             <Bloco titulo="Simulador de propostas" sub="A planilha do Derek, dentro do sistema. Serve para treinar e para mostrar ao cliente como a rodada se comporta — não vale como proposta.">
-              <SimuladorPropostas fipePadrao={f.fipe} />
+              <SimuladorPropostas fipePadrao={f.fipe} veiculo={f.modelo} />
             </Bloco>
 
             <Bloco titulo="Anote o que ouvir" sub="O que ele falar aqui é o argumento que você usa na hora do extrato.">
@@ -3153,27 +3153,40 @@ function simularPropostas(referencia, quantidade) {
   const soma = valores.reduce((a, b) => a + b, 0);
   const melhor = valores.reduce((a, b) => (b > a ? b : a), 0);
 
-  // As 17 faixas da planilha (v1..v17), uma barra por degrau.
-  const faixas = [];
-  for (let i = 0; i < 17; i++) {
-    const de = v0 + i * intervalo;
-    const ate = de + intervalo;
-    faixas.push({ de, ate, quantas: valores.filter((v) => v > de && v <= ate).length });
-  }
-
-  return {
-    valores, quantidade: qtd, media: soma / qtd, melhor,
-    vmax, vmedio, intervalo, v0, faixas,
-  };
+  return { valores, quantidade: qtd, media: soma / qtd, melhor, vmax, vmedio, intervalo, v0 };
 }
 
-function SimuladorPropostas({ fipePadrao }) {
+/**
+ * A tela imita a planilha: o mesmo cabeçalho de quatro linhas
+ * (Veículo, Quant. de propostas, Valor médio das propostas, Melhor
+ * Proposta) e a lista de propostas em três colunas de Num | Valor,
+ * como nas faixas H/I, K/L e N/O do arquivo. O Derek já lê esse
+ * formato há tempo — trocar o desenho custaria mais do que ganharia.
+ *
+ * A planilha não tem gráfico: o único desenho embutido nela é o logo.
+ * O histograma que eu tinha posto aqui era invenção minha e saiu.
+ */
+function SimuladorPropostas({ fipePadrao, veiculo }) {
   const [ref, setRef] = useState(fipePadrao || "");
   const [qtd, setQtd] = useState("57");
   const [r, setR] = useState(null);
 
   const rodar = () => setR(simularPropostas(numeroBR(ref), Number(qtd) || 0));
-  const pico = r ? Math.max(1, ...r.faixas.map((f) => f.quantas)) : 1;
+
+  // Três colunas, como na planilha. No celular o grid quebra para duas
+  // e depois para uma, senão o valor não cabe na linha.
+  // Função de render, não componente: componente declarado dentro de
+  // outro vira tipo novo a cada render e remonta. É a mesma armadilha
+  // do blocoCliente, e não custa nada evitar aqui também.
+  const linha = (rot, valor, forte) => (
+    <div key={rot} className="flex items-baseline justify-between gap-3 py-1"
+      style={{ borderBottom: `1px solid ${C.line}` }}>
+      <span className="text-[12px]" style={{ color: C.mute }}>{rot}</span>
+      <span className="text-[14px]" style={{ fontFamily: F.mono, fontWeight: forte ? 700 : 500, color: forte ? C.verde : C.ink }}>
+        {valor}
+      </span>
+    </div>
+  );
 
   return (
     <div>
@@ -3184,7 +3197,7 @@ function SimuladorPropostas({ fipePadrao }) {
             value={ref} onChange={(e) => setRef(e.target.value)} placeholder="51.371" />
         </div>
         <div>
-          <label className="text-[11px]" style={{ color: C.mute }}>Quantas propostas</label>
+          <label className="text-[11px]" style={{ color: C.mute }}>Quant. de propostas</label>
           <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric"
             value={qtd} onChange={(e) => setQtd(e.target.value)} placeholder="57" />
         </div>
@@ -3196,40 +3209,23 @@ function SimuladorPropostas({ fipePadrao }) {
       </button>
 
       {r && (
-        <div className="mt-3 rounded-md p-3" style={{ background: "#FBF7FD", border: `1px solid ${C.line}` }}>
-          <div className="text-[10px] font-semibold tracking-wider" style={{ color: C.laranja }}>
-            SIMULAÇÃO — NENHUM LOJISTA OFERECEU ISTO
-          </div>
-          <div className="mt-2 grid grid-cols-3 gap-2 text-center">
-            <div>
-              <div className="text-[10px]" style={{ color: C.mute }}>PROPOSTAS</div>
-              <div className="text-[20px]" style={{ fontFamily: F.mono, fontWeight: 700 }}>{r.quantidade}</div>
-            </div>
-            <div>
-              <div className="text-[10px]" style={{ color: C.mute }}>MÉDIA</div>
-              <div className="text-[20px]" style={{ fontFamily: F.mono, fontWeight: 700 }}>{brl(r.media)}</div>
-            </div>
-            <div>
-              <div className="text-[10px]" style={{ color: C.mute }}>MELHOR</div>
-              <div className="text-[20px]" style={{ fontFamily: F.mono, fontWeight: 700, color: C.verde }}>{brl(r.melhor)}</div>
-            </div>
-          </div>
+        <div className="mt-3 rounded-md p-3" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
+          {linha("Veículo", veiculo || "—")}
+          {linha("Quant. de propostas", r.quantidade)}
+          {linha("Valor médio das propostas", brl(r.media))}
+          {linha("Melhor Proposta", brl(r.melhor), true)}
 
-          <div className="mt-3 flex items-end gap-[3px]" style={{ height: 56 }}>
-            {r.faixas.map((f, i) => (
-              <div key={i} className="flex-1 rounded-t-sm" title={`${brl(f.de)} a ${brl(f.ate)} — ${f.quantas}`}
-                style={{ height: `${(f.quantas / pico) * 100}%`, minHeight: f.quantas ? 3 : 0, background: C.roxo, opacity: 0.75 }} />
+          <div className="mt-3 grid gap-x-4 gap-y-0"
+            style={{ gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))" }}>
+            {r.valores.map((v, i) => (
+              <div key={i} className="flex items-baseline justify-between py-[3px]"
+                style={{ borderBottom: `1px solid ${C.line}` }}>
+                <span className="text-[11px]" style={{ color: C.mute, fontFamily: F.mono }}>{i + 1}</span>
+                <span className="text-[12px]" style={{ fontFamily: F.mono }}>
+                  {v.toLocaleString("pt-BR")}
+                </span>
+              </div>
             ))}
-          </div>
-          <div className="flex justify-between text-[10px]" style={{ color: C.mute, fontFamily: F.mono }}>
-            <span>{brl(r.v0)}</span><span>{brl(r.v0 + 17 * r.intervalo)}</span>
-          </div>
-
-          <div className="mt-3 text-[11px]" style={{ color: C.mute }}>
-            As cinco maiores:{" "}
-            <span style={{ fontFamily: F.mono, color: C.ink }}>
-              {r.valores.slice().sort((a, b) => b - a).slice(0, 5).map((v) => brl(v)).join(" · ")}
-            </span>
           </div>
         </div>
       )}

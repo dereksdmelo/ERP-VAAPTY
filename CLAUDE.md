@@ -696,11 +696,20 @@ propostas de índice 1 e 45 nascem coladas no piso; as do meio abrem até
 o teto. **Quem "simplificar" para um `Math.random()` entre piso e teto
 muda o formato da nuvem e o valor médio para de bater com a planilha.**
 
+**A tela imita a planilha**, a pedido do Derek: o mesmo cabeçalho de
+quatro linhas (Veículo, Quant. de propostas, Valor médio das propostas,
+Melhor Proposta) e a lista de propostas em três colunas de Num | Valor,
+como nas faixas H/I, K/L e N/O do arquivo. Ele lê esse formato há
+tempo. **A planilha não tem gráfico** — o único desenho embutido nela é
+o logo da Vaapty; o histograma que existiu aqui por um dia era invenção
+minha e saiu junto com a tarja laranja.
+
 **Nada dali é gravado.** O resultado não vai para a tabela `proposta`
-nem para o funil, e a tarja laranja na tela diz "nenhum lojista
-ofereceu isto". Se um dia precisar ser gravado, tem que nascer com
-coluna marcando a simulação — proposta inventada contada como real
-estraga a conversão e pode ir para a mesa do cliente.
+nem para o funil. O que separa simulação de proposta real é o título do
+bloco e o subtítulo ("não vale como proposta"), já que a tarja saiu. Se
+um dia precisar ser gravado, tem que nascer com coluna marcando a
+simulação — proposta inventada contada como real estraga a conversão e
+pode ir para a mesa do cliente.
 
 ### 17. Escuta: o consentimento é a chave, não o microfone
 
