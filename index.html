@@ -1777,14 +1777,26 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
             </span>
           )}
         </div>
-        <h1 className="mt-1 text-[17px] leading-tight" style={{ fontFamily: F.disp, fontWeight: 800 }}>
-          {f.modelo || "Novo atendimento"}
-        </h1>
-        {f.placa && (
-          <div className="mt-1 text-[11px]" style={{ fontFamily: F.mono, opacity: 0.85 }}>
-            {f.placa} · {f.ano} · FIPE {brl(f.fipe)}
-          </div>
-        )}
+        {(() => {
+          const vBanco = (atendimento && (atendimento.veiculo || [])[0]) || null;
+          const titulo = f.modelo || (vBanco && vBanco.marca_modelo) ||
+            (atendimento && atendimento.carro_descricao) || "Novo atendimento";
+          const placa = f.placa || (vBanco && vBanco.placa) || "";
+          const ano = f.ano || (vBanco ? [vBanco.ano_fabricacao, vBanco.ano_modelo].filter(Boolean).join("/") : "");
+          const fipe = f.fipe || (vBanco && vBanco.fipe_valor) || "";
+          return (
+            <>
+              <h1 className="mt-1 text-[17px] leading-tight" style={{ fontFamily: F.disp, fontWeight: 800 }}>
+                {titulo}
+              </h1>
+              {!!placa && (
+                <div className="mt-1 text-[11px]" style={{ fontFamily: F.mono, opacity: 0.85 }}>
+                  {placa}{ano ? ` · ${ano}` : ""}{fipe ? ` · FIPE ${brl(fipe)}` : ""}
+                </div>
+              )}
+            </>
+          );
+        })()}
         <div className="mt-2 flex items-center gap-3">
           {aoVoltar && (
             <button onClick={aoVoltar} className="text-[11px] font-semibold" style={{ color: "#fff" }}>‹ Atendimentos</button>
