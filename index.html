@@ -2672,14 +2672,33 @@ const CL_ADM = [
   ["adm_debitos", "Débitos (estadual e federal)"], ["adm_quitacao", "Quitação"],
   ["adm_outros", "Outros"], ["adm_laudo_cautelar", "Laudo cautelar"],
 ];
-const CL_VALORES = [
-  ["valor_venda", "Venda"], ["valor_cautelar", "Cautelar"], ["valor_debitos", "Débitos"],
-  ["valor_quitacao", "Quitação"], ["comissao_vaapty", "Comissão Vaapty"], ["valor_cliente", "Líquido ao cliente"],
+// O que sai do valor de venda até sobrar o do cliente. A ordem é a do
+// papel, e a soma bate com ele: 8.000 − 390 − 590 − 610 = 6.410.
+const CL_DESCONTOS = [
+  ["valor_cautelar", "Cautelar"],
+  ["valor_debitos", "Débitos"],
+  ["valor_quitacao", "Quitação do financiamento"],
+  ["comissao_vaapty", "Comissão Vaapty"],
 ];
 const CL_BANCO = [
-  ["banco_favorecido", "Favorecido"], ["banco_documento", "CPF / CNPJ"], ["banco_nome", "Banco"],
-  ["banco_agencia", "Agência"], ["banco_conta", "Conta"], ["banco_tipo", "C/C ou C/P"], ["banco_pix", "Chave PIX"],
+  ["banco_favorecido", "Favorecido", "texto"],
+  ["banco_documento", "CPF / CNPJ", "mono"],
+  ["banco_nome", "Banco", "texto"],
+  ["banco_agencia", "Agência", "mono"],
+  ["banco_conta", "Conta", "mono"],
+  ["banco_tipo", "C/C ou C/P", "texto"],
+  ["banco_pix", "Chave PIX", "mono"],
 ];
+
+// Aceita 8000, 8.000 e 8.000,00 — o mesmo que o servidor entende.
+const numeroBR = (v) => {
+  let t = String(v == null ? "" : v).replace(/R\$|\s/g, "").trim();
+  if (!t) return 0;
+  if (t.indexOf(",") >= 0) t = t.replace(/\./g, "").replace(",", ".");
+  else if (/^-?\d{1,3}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, "");
+  const n = Number(t);
+  return Number.isFinite(n) ? n : 0;
+};
 
 /**
  * O check list deixou de ser papel. Duas mãos preenchem: o negociador
@@ -2724,10 +2743,15 @@ function ChecklistDigital({ atendimentoId, ficha, perfil, aoCarregar }) {
 
   const set = (k, v) => setCl({ ...cl, [k]: v });
 
+  // Calculado, não digitado: a fórmula é a do papel e evita erro de
+  // conta feita de cabeça com o cliente na frente.
+  const descontos = CL_DESCONTOS.reduce((soma, [k]) => soma + numeroBR(cl[k]), 0);
+  const liquido = numeroBR(cl.valor_venda) - descontos;
+
   const gravar = async () => {
     setErro(""); setIndo(true);
     try {
-      const d = await salvarChecklist(atendimentoId, cl);
+      const d = await salvarChecklist(atendimentoId, { ...cl, valor_cliente: liquido });
       setCl(d); setSalvoEm(new Date());
       if (aoCarregar) aoCarregar(d);
     } catch (e) { setErro(e.message); }
@@ -2749,32 +2773,84 @@ function ChecklistDigital({ atendimentoId, ficha, perfil, aoCarregar }) {
         </div>
       </div>
 
-      <div>
-        <div className="text-[10px] uppercase tracking-[0.13em]" style={{ color: C.mute }}>A conta do negócio</div>
-        <div className="mt-1.5 grid grid-cols-2 gap-2">
-          {CL_VALORES.map(([k, r]) => (
-            <Campo key={k} label={r}>
-              <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric"
+      {/* A conta, na ordem em que o negociador explica ao cliente:
+          o bruto, o que sai, e o que sobra. O líquido é calculado —
+          conta feita de cabeça na mesa é onde nasce reclamação. */}
+      <div className="rounded-lg" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        <div className="px-3 pt-3 text-[10px] uppercase tracking-[0.13em]" style={{ color: C.mute }}>
+          A conta do negócio
+        </div>
+
+        <div className="flex items-center justify-between gap-3 px-3 py-2.5">
+          <span className="text-[13px] font-semibold">Valor de venda</span>
+          <input className="w-40 rounded-md border px-2 py-1.5 text-right text-[15px] outline-none"
+            style={{ ...inputSty, fontFamily: F.mono, fontWeight: 700 }} inputMode="numeric" placeholder="0,00"
+            value={cl.valor_venda == null ? "" : cl.valor_venda}
+            onChange={(e) => set("valor_venda", e.target.value)} />
+        </div>
+
+        <div style={{ borderTop: `1px solid ${C.line}` }}>
+          {CL_DESCONTOS.map(([k, r]) => (
+            <div key={k} className="flex items-center justify-between gap-3 px-3 py-2"
+              style={{ borderBottom: `1px solid ${C.line}` }}>
+              <span className="text-[12px]" style={{ color: C.mute }}>− {r}</span>
+              <input className="w-40 rounded-md border px-2 py-1.5 text-right text-[13px] outline-none"
+                style={{ ...inputSty, fontFamily: F.mono, color: numeroBR(cl[k]) ? C.laranja : C.ink }}
+                inputMode="numeric" placeholder="0,00"
                 value={cl[k] == null ? "" : cl[k]} onChange={(e) => set(k, e.target.value)} />
-            </Campo>
+            </div>
           ))}
         </div>
+
+        <div className="flex items-center justify-between gap-3 px-3 py-3"
+          style={{ background: liquido >= 0 ? "#F0F8F4" : "#FDEDE6" }}>
+          <span>
+            <span className="block text-[13px] font-semibold" style={{ color: liquido >= 0 ? C.verde : C.laranja }}>
+              Líquido ao cliente
+            </span>
+            <span className="text-[10px]" style={{ color: C.mute }}>
+              {descontos > 0 ? `${brl(numeroBR(cl.valor_venda))} menos ${brl(descontos)} de descontos` : "sem descontos lançados"}
+            </span>
+          </span>
+          <span className="text-[20px] leading-none"
+            style={{ fontFamily: F.mono, fontWeight: 700, color: liquido >= 0 ? C.verde : C.laranja }}>
+            {brl(liquido)}
+          </span>
+        </div>
+
+        {liquido < 0 && (
+          <p className="px-3 pb-3 text-[11px]" style={{ color: C.laranja }}>
+            Os descontos passaram do valor de venda. Confira antes de fechar — deste jeito o cliente teria que pagar para vender.
+          </p>
+        )}
       </div>
 
-      <div>
-        <div className="text-[10px] uppercase tracking-[0.13em]" style={{ color: C.mute }}>
-          Para onde o dinheiro vai — o cliente informa
+      {/* Dados bancários em tabela, não em formulário corrido: é o que
+          o financeiro vai ler para pagar, e erro aqui manda dinheiro
+          para a conta errada. */}
+      <div className="rounded-lg" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        <div className="px-3 pt-3 text-[10px] uppercase tracking-[0.13em]" style={{ color: C.mute }}>
+          Dados bancários do cliente
         </div>
-        <div className="mt-1.5 space-y-2">
-          {CL_BANCO.map(([k, r]) => (
-            <Campo key={k} label={r}>
-              <input className={inputCls} style={{ ...inputSty, fontFamily: k === "banco_favorecido" ? F.body : F.mono }}
-                value={cl[k] || ""} onChange={(e) => set(k, e.target.value)} />
-            </Campo>
-          ))}
-        </div>
-        <p className="mt-1 text-[10px] leading-relaxed" style={{ color: C.mute }}>
-          Conta e chave PIX ficam guardadas no banco de dados, protegidas por login. Confira o favorecido com o cliente antes de salvar — pagamento sai por esses números.
+        <table className="mt-2 w-full" style={{ borderCollapse: "collapse" }}>
+          <tbody>
+            {CL_BANCO.map(([k, r, tipo]) => (
+              <tr key={k} style={{ borderTop: `1px solid ${C.line}` }}>
+                <th className="whitespace-nowrap px-3 py-2 text-left text-[10px] uppercase tracking-[0.08em]"
+                  style={{ color: C.mute, width: 120, background: "#FBFAFC", fontWeight: 400 }}>
+                  {r}
+                </th>
+                <td className="px-2 py-1.5">
+                  <input className="w-full rounded-md border px-2 py-1.5 text-[13px] outline-none"
+                    style={{ ...inputSty, fontFamily: tipo === "mono" ? F.mono : F.body }}
+                    value={cl[k] || ""} onChange={(e) => set(k, e.target.value)} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="px-3 py-2 text-[10px] leading-relaxed" style={{ color: C.mute }}>
+          O pagamento sai por estes números. Confira o favorecido com o cliente antes de salvar — conta errada é dinheiro na mão de outra pessoa.
         </p>
       </div>
 
