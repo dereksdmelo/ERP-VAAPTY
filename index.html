@@ -2062,10 +2062,19 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
           <>
             <Bloco titulo="Mostre como funciona" sub="O cliente aceita um número menor quando entende de onde ele veio.">
               <div className="space-y-2.5">
-                <Pendente>
-                  Aqui entra o vídeo explicando o processo do início ao fim: avaliação, rede de lojistas, propostas, negociação. Me manda o vídeo quando gravar e eu coloco pra tocar direto nesta tela.
-                </Pendente>
+                <a href="/apresentacao.pdf" target="_blank" rel="noopener noreferrer"
+                  onClick={() => set("mostrouProcesso", true)}
+                  className="block w-full rounded-md py-3 text-center text-[14px] font-semibold"
+                  style={{ background: C.roxo, color: "#fff" }}>
+                  Abrir a apresentação
+                </a>
+                <p className="text-[11px] leading-relaxed" style={{ color: C.mute }}>
+                  Onze páginas. Abre em aba nova, para você virar na frente do cliente. Abrir já marca que o processo foi mostrado.
+                </p>
                 <Toggle label="Mostrei o processo completo ao cliente" valor={f.mostrouProcesso} onChange={(v) => set("mostrouProcesso", v)} />
+                <Pendente>
+                  O vídeo do processo ainda não existe — a apresentação cobre a explicação, mas vídeo prende mais atenção do que slide. Me manda quando gravar.
+                </Pendente>
               </div>
             </Bloco>
 
