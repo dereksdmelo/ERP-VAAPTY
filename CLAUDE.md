@@ -10,10 +10,10 @@ durante o atendimento presencial: consulta a placa, monta a ficha do
 veículo, registra as rodadas de negociação e gera as duas saídas que
 alimentam a rede — o descritivo do WhatsApp e o JSON do Shinkai.
 
-Protótipo em produção-leve. Uma página estática mais duas funções de
-servidor na Vercel. **Sem login ainda.** O atendimento inteiro vive no
-`localStorage` do aparelho; só a ficha do veículo tem persistência de
-verdade, gravada no Supabase pela etapa de Lançamento.
+Em produção-leve. Uma página estática mais doze funções de servidor na
+Vercel, com login por papel e Postgres no Supabase. O que ainda vive só
+no `localStorage` do aparelho são as rodadas de negociação, as notas da
+espera e os toggles do APONTE — ver PENDENCIAS.md.
 
 ```
 index.html                       aplicação inteira (React 18 + Babel via CDN, sem build)
@@ -40,7 +40,7 @@ Supabase é chamado pela API REST (PostgREST) com `fetch`. Manter assim
 
 **Teto de 12 funções.** O plano Hobby da Vercel não aceita mais que isso
 por deploy, e o build **falha inteiro** quando passa — foi o que
-aconteceu com o arquivo 13. Hoje são 11. **Antes de criar arquivo novo
+aconteceu com o arquivo 13. **Hoje são 12 — o teto.** Antes de criar arquivo novo
 em `api/`, conte.** O corte que funcionou foi juntar por fonte: tudo que
 fala com a Placa Fipe mora em `api/placa.js`, atrás de `?acao=`.
 
@@ -59,12 +59,12 @@ e um `.env` local para o `vercel dev`):
 
 | variável | usada por |
 |----------|-----------|
-| `PLACAFIPE_TOKEN` | `api/placa.js`, `api/cota.js` |
+| `PLACAFIPE_TOKEN` | `api/placa.js` (placa, cota e desvalorizômetro) |
 | `SUPABASE_URL` | todas as funções de dados |
 | `SUPABASE_ANON_KEY` | `api/config.js` e as chamadas ao banco |
 | `SUPABASE_SERVICE_KEY` | só `api/foto.js`, e só para o Storage |
 
-**Nenhuma das três pode chegar ao navegador** — é essa a razão de as
+**Nenhuma delas, fora a anônima, pode chegar ao navegador** — é essa a razão de as
 funções em `api/` existirem em vez de o `index.html` chamar os serviços
 direto. A chave de serviço do Supabase é a mais grave: ela passa por
 cima do RLS, então quem a tiver lê e escreve a tabela inteira. Em
