@@ -325,6 +325,27 @@ folha; e os valores de perícia cautelar (R$ 390,00) e consulta veicular
 (R$ 90,00) estão no texto assinado. Corrigir por conta própria seria
 pior que reproduzir o que está em vigor.
 
+**"Valor ajustado para venda" é a CONTRAPROPOSTA do cliente**, não o
+extrato que a loja imprimiu. São números diferentes e o papel é
+assinado por ele: sair o valor ofertado ali coloca o número errado no
+contrato. A ordem é `rodada.contra` → `valorFechado` → `impresso`, e a
+tela avisa quando cai no último.
+
+**Não se imprime documento com campo vazio.** Nome, CPF, RG e endereço
+do cliente (colunas da 0007) travam os botões enquanto faltarem. Papel
+com lacuna volta para ser preenchido depois, e é assim que contrato
+acaba assinado pela metade. O bloco que pede esses dados aparece na
+Negociação e no Fechamento.
+
+**Renavam saiu dos documentos.** Ficava sempre em branco porque não há
+campo na tela. Volta quando houver — e, pela decisão do Derek, só
+interessa quando o carro fecha de verdade.
+
+**O formulário do cliente é expressão JSX, não componente.** Componente
+declarado dentro de outro vira tipo novo a cada render: o React remonta
+o formulário e **o campo perde o foco a cada tecla digitada**. Quem
+transformar `blocoCliente` em `<BlocoCliente/>` reintroduz isso.
+
 **O quarto documento é o check list** (0005), que fecha o atendimento e
 vai para o administrativo. Ele imprime o que o sistema sabe e deixa em
 branco o que o cliente escreve à mão — inclusive **conta e chave PIX,

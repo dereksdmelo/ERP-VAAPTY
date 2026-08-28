@@ -1011,7 +1011,6 @@ function blocoVeiculo(f) {
   <tr><td class="r">Marca / modelo</td><td>${ou(f.modelo, "marca e modelo")}</td></tr>
   <tr><td class="r">Ano / modelo</td><td>${ou(f.ano, "ano")}</td></tr>
   <tr><td class="r">Placa</td><td>${ou(f.placa, "placa")}</td></tr>
-  <tr><td class="r">Renavam</td><td>${ou(f.renavam, "renavam — do CRLV")}</td></tr>
   <tr><td class="r">Chassi</td><td>${ou(f.chassi, "chassi — do CRLV")}</td></tr>
   <tr><td class="r">Cor</td><td>${ou(f.cor, "cor")}</td></tr>
   <tr><td class="r">Quilometragem</td><td>${f.km ? Number(f.km).toLocaleString("pt-BR") + " km" : vazio("km")}</td></tr>
@@ -1019,16 +1018,16 @@ function blocoVeiculo(f) {
 }
 
 /**
- * Nome vem do atendimento; CPF, RG e endereço ainda não existem em
- * lugar nenhum do sistema e saem como lacuna para preencher à mão —
- * que é como os modelos de papel são preenchidos hoje.
+ * Tudo vem do atendimento. A tela não deixa imprimir com campo vazio:
+ * papel incompleto volta para ser preenchido depois, e é assim que
+ * contrato acaba assinado pela metade.
  */
 function blocoCliente(f) {
   return `<table class="dados">
   <tr><td class="r">Nome</td><td>${ou(f.cliente_nome, "nome do cliente")}</td></tr>
-  <tr><td class="r">CPF</td><td>${vazio("CPF")}</td></tr>
-  <tr><td class="r">RG</td><td>${vazio("RG")}</td></tr>
-  <tr><td class="r">Endereço</td><td>${vazio("endereço completo")}</td></tr>
+  <tr><td class="r">CPF</td><td>${ou(f.cliente_cpf, "CPF")}</td></tr>
+  <tr><td class="r">RG</td><td>${ou(f.cliente_rg, "RG")}</td></tr>
+  <tr><td class="r">Endereço</td><td>${ou(f.cliente_endereco, "endereço completo")}</td></tr>
   <tr><td class="r">Telefone</td><td>${ou(f.cliente_telefone, "telefone")}</td></tr>
 </table>`;
 }
@@ -1058,11 +1057,17 @@ const VAAPTY_PJ = "Vaapty Intermediação Veicular LTDA · CNPJ 34.840.903/0001-
  * que está assinado hoje.
  */
 function termoAceite(f, rodada, indice) {
-  const valor = rodada && rodada.impresso ? rodada.impresso : f.valorFechado;
+  /**
+   * "Valor ajustado para venda" é o que o CLIENTE aceita receber — a
+   * contraproposta dele —, não o que a loja imprimiu. Sair o valor
+   * ofertado aqui coloca o número errado no papel que ele assina.
+   */
+  const valor = (rodada && rodada.contra) || f.valorFechado || (rodada && rodada.impresso) || "";
   const corpo = `<h1>Termo de vinculação, ciência e aceite de proposta<br>de venda de veículo e multa por desistência</h1>
 
-<p>${ou(f.cliente_nome, "nome do contratante")}, RG nº ${vazio("RG")} e CPF nº ${vazio("CPF")},
-residente e domiciliado(a) à ${vazio("endereço")}.</p>
+<p>${ou(f.cliente_nome, "nome do contratante")}, RG nº ${ou(f.cliente_rg, "RG")} e
+CPF nº ${ou(f.cliente_cpf, "CPF")}, residente e domiciliado(a) à
+${ou(f.cliente_endereco, "endereço")}.</p>
 
 <p>Por meio do presente instrumento particular, o(a) CONTRATANTE declara ter contratado a
 VAAPTY, abaixo assinada, para intermediar a venda do veículo abaixo descrito:</p>
@@ -1183,7 +1188,8 @@ function preContrato(f) {
   const corpo = `<h1>Pré-contrato de intermediação de venda de veículo</h1>
 
 <p>Pelo presente instrumento, de um lado, ${ou(f.cliente_nome, "nome do declarante")}, inscrito(a)
-no CPF sob n. ${vazio("CPF")}, residente e domiciliado(a) na ${vazio("endereço")}, doravante
+no CPF sob n. ${ou(f.cliente_cpf, "CPF")}, residente e domiciliado(a) na
+${ou(f.cliente_endereco, "endereço")}, doravante
 denominada simplesmente <strong>“DECLARANTE”</strong>, e de outro, <strong>Vaapty Intermediação
 Veicular LTDA</strong>, pessoa jurídica de direito privado, inscrita no CNPJ sob
 n. 34.840.903/0001-00, com sede em Rua Anita Garibaldi, 705 – Anita Garibaldi, doravante
@@ -1366,6 +1372,15 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   const [cota, setCota] = useState(null);
 
   const [termoMercado, setTermoMercado] = useState("");
+  const [cliente, setCliente] = useState({
+    cliente_nome: (atendimento && atendimento.cliente_nome) || "",
+    cliente_telefone: (atendimento && atendimento.cliente_telefone) || "",
+    cliente_cpf: (atendimento && atendimento.cliente_cpf) || "",
+    cliente_rg: (atendimento && atendimento.cliente_rg) || "",
+    cliente_endereco: (atendimento && atendimento.cliente_endereco) || "",
+  });
+  const [salvandoCliente, setSalvandoCliente] = useState(false);
+  const [erroCliente, setErroCliente] = useState("");
   const [erroCanais, setErroCanais] = useState("");
   const [propostas, setPropostas] = useState((atendimento && atendimento.proposta) || []);
   const melhorProposta = useMemo(() => {
@@ -1571,6 +1586,55 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     guardarFicha({ ...fRef.current, documentos: [...(fRef.current.documentos || []), reg] });
   };
 
+  const salvarCliente = async () => {
+    if (!atendimento) { setErroCliente("Abra o atendimento pela lista para salvar."); return; }
+    setErroCliente(""); setSalvandoCliente(true);
+    try { await atualizarAtendimento(atendimento.id, cliente); }
+    catch (e) { setErroCliente(e.message); }
+    setSalvandoCliente(false);
+  };
+
+  const blocoCliente = (
+    <Bloco titulo="Dados do cliente" sub="O documento só imprime com os quatro preenchidos. Papel com lacuna volta para ser completado depois — e é assim que contrato acaba assinado pela metade.">
+      <div className="space-y-2.5">
+        <Campo label="Nome completo" req>
+          <input className={inputCls} style={inputSty} value={cliente.cliente_nome}
+            onChange={(e) => setCliente({ ...cliente, cliente_nome: e.target.value })} />
+        </Campo>
+        <div className="grid grid-cols-2 gap-2.5">
+          <Campo label="CPF" req>
+            <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric"
+              value={cliente.cliente_cpf} onChange={(e) => setCliente({ ...cliente, cliente_cpf: e.target.value })} />
+          </Campo>
+          <Campo label="RG" req>
+            <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }}
+              value={cliente.cliente_rg} onChange={(e) => setCliente({ ...cliente, cliente_rg: e.target.value })} />
+          </Campo>
+        </div>
+        <Campo label="Endereço completo" req>
+          <input className={inputCls} style={inputSty} placeholder="Rua, número, bairro, cidade"
+            value={cliente.cliente_endereco} onChange={(e) => setCliente({ ...cliente, cliente_endereco: e.target.value })} />
+        </Campo>
+        <Campo label="Telefone">
+          <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="tel"
+            value={cliente.cliente_telefone} onChange={(e) => setCliente({ ...cliente, cliente_telefone: e.target.value })} />
+        </Campo>
+
+        <button onClick={salvarCliente} disabled={salvandoCliente}
+          className="w-full rounded-md py-2.5 text-[13px] font-semibold"
+          style={{ background: salvandoCliente ? C.line : C.roxo, color: "#fff" }}>
+          {salvandoCliente ? "Salvando…" : "Salvar dados do cliente"}
+        </button>
+        {erroCliente && <p className="text-[12px]" style={{ color: C.laranja }}>{erroCliente}</p>}
+        {!podeImprimir && (
+          <p className="text-[11px]" style={{ color: AMARELO.texto }}>
+            Falta {faltamCliente.map((x) => x[1]).join(" · ")} para liberar a impressão.
+          </p>
+        )}
+      </div>
+    </Bloco>
+  );
+
   const copiar = (t, tag) => {
     const ta = document.createElement("textarea");
     ta.value = t; document.body.appendChild(ta); ta.select();
@@ -1634,15 +1698,23 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   const restante = f.esperaIniciadaEm ? Math.max(0, ESPERA_SEG - Math.floor((agora - f.esperaIniciadaEm) / 1000)) : null;
   const mmss = (s) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
-  // O contrato precisa do cliente, que mora no atendimento, não na
-  // ficha do veículo. CPF, RG e endereço ainda não existem em lugar
-  // nenhum e saem como lacuna.
+  // O contrato precisa do cliente, que mora no atendimento e não na
+  // ficha do veículo.
   const dadosDoc = {
     ...f,
-    cliente_nome: (atendimento && atendimento.cliente_nome) || "",
-    cliente_telefone: (atendimento && atendimento.cliente_telefone) || "",
+    ...cliente,
     valorFechado: f.valorFechado || (atendimento && atendimento.valor_fechado) || "",
   };
+
+  // Sem estes quatro, o documento sai com lacuna. E papel com lacuna
+  // volta para ser preenchido depois — que é como contrato acaba
+  // assinado pela metade.
+  const OBRIG_CLIENTE = [
+    ["cliente_nome", "Nome"], ["cliente_cpf", "CPF"],
+    ["cliente_rg", "RG"], ["cliente_endereco", "Endereço"],
+  ];
+  const faltamCliente = OBRIG_CLIENTE.filter(([k]) => !String(cliente[k] || "").trim());
+  const podeImprimir = faltamCliente.length === 0;
 
   const docs = f.documentos || [];
   const hhmm = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toTimeString().slice(0, 5); };
@@ -2216,6 +2288,8 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               </div>
             )}
 
+            {blocoCliente}
+
             <Bloco titulo="Extratos e contrapropostas" sub="Cada rodada vira número comparável — é assim que se acha o valor de abertura certo por faixa de FIPE.">
               <div className="space-y-2.5">
                 {f.rodadas.map((r, i) => (
@@ -2233,11 +2307,17 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                         <span className="text-[11px]" style={{ color: C.mute }}>contra do cliente</span>
                       </div>
                     )}
-                    <button onClick={() => gerarDocumento("termo_aceite", `Termo de aceite ${i + 1}`, termoAceite(dadosDoc, r, i + 1), i + 1)}
+                    <button disabled={!podeImprimir}
+                      onClick={() => gerarDocumento("termo_aceite", `Termo de aceite ${i + 1}`, termoAceite(dadosDoc, r, i + 1), i + 1)}
                       className="mt-2 w-full rounded-md border py-1.5 text-[11px] font-semibold"
-                      style={{ borderColor: C.roxo, color: C.roxo }}>
-                      Termo de aceite
+                      style={{ borderColor: podeImprimir ? C.roxo : C.line, color: podeImprimir ? C.roxo : C.mute }}>
+                      {podeImprimir ? "Termo de aceite" : "Termo de aceite — faltam dados do cliente"}
                     </button>
+                    {!r.contra && (
+                      <p className="mt-1 text-[10px]" style={{ color: AMARELO.texto }}>
+                        Sem contraproposta registrada, o termo sai com o valor impresso. O campo "valor ajustado" é o que o cliente aceita.
+                      </p>
+                    )}
                     {docsDe("termo_aceite", i + 1).map((d, k) => (
                       <div key={k} className="mt-1 text-[10px]" style={{ color: C.verde }}>
                         Gerado às {hhmm(d.em)}{d.protocolo ? ` · ${d.protocolo}` : ""}{d.noBanco ? "" : " · fora do banco"}
@@ -2275,6 +2355,8 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         {/* ---------- T ---------- */}
         {etapa === "T" && (
           <>
+            {blocoCliente}
+
             <Bloco titulo="Aceite e cautelar">
               <div className="space-y-2.5">
                 <div className="grid grid-cols-2 gap-2.5">
@@ -2288,18 +2370,25 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 <Toggle label="Aceite final assinado" valor={f.aceiteFinal} onChange={(v) => set("aceiteFinal", v)} />
                 <Toggle label="Carro enviado para a cautelar" valor={f.cautelarEnviado} onChange={(v) => set("cautelarEnviado", v)} />
                 <div className="grid grid-cols-2 gap-2">
-                  <button onClick={() => gerarDocumento("autorizacao_cautelar", "Autorização de cautelar", autorizacaoCautelar(dadosDoc), null)}
+                  <button disabled={!podeImprimir}
+                    onClick={() => gerarDocumento("autorizacao_cautelar", "Autorização de cautelar", autorizacaoCautelar(dadosDoc), null)}
                     className="rounded-md border py-2 text-[12px] font-semibold"
-                    style={{ borderColor: C.roxo, color: C.roxo }}>
+                    style={{ borderColor: podeImprimir ? C.roxo : C.line, color: podeImprimir ? C.roxo : C.mute }}>
                     Autorização de cautelar
                   </button>
-                  <button disabled={!f.valorFechado} onClick={() => gerarDocumento("pre_contrato", "Pré-contrato", preContrato(dadosDoc), null)}
+                  <button disabled={!podeImprimir || !f.valorFechado}
+                    onClick={() => gerarDocumento("pre_contrato", "Pré-contrato", preContrato(dadosDoc), null)}
                     className="rounded-md border py-2 text-[12px] font-semibold"
-                    style={{ borderColor: f.valorFechado ? C.roxo : C.line, color: f.valorFechado ? C.roxo : C.mute }}>
+                    style={{ borderColor: podeImprimir && f.valorFechado ? C.roxo : C.line, color: podeImprimir && f.valorFechado ? C.roxo : C.mute }}>
                     Pré-contrato
                   </button>
                 </div>
-                {!f.valorFechado && (
+                {!podeImprimir && (
+                  <p className="text-[11px]" style={{ color: AMARELO.texto }}>
+                    Preencha os dados do cliente acima para liberar a impressão.
+                  </p>
+                )}
+                {podeImprimir && !f.valorFechado && (
                   <p className="text-[11px]" style={{ color: C.mute }}>
                     O pré-contrato precisa do valor fechado — é a cláusula que dá objeto ao documento.
                   </p>
@@ -2320,13 +2409,14 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                     </div>
                   </div>
                 )}
-                <button onClick={() => gerarDocumento("check_list", "Check list", checkList(dadosDoc), null)}
+                <button disabled={!podeImprimir}
+                  onClick={() => gerarDocumento("check_list", "Check list", checkList(dadosDoc), null)}
                   className="w-full rounded-md border py-2 text-[12px] font-semibold"
-                  style={{ borderColor: C.line, color: C.roxo }}>
+                  style={{ borderColor: C.line, color: podeImprimir ? C.roxo : C.mute }}>
                   Check list do negócio
                 </button>
                 <p className="text-[11px] leading-relaxed" style={{ color: C.mute }}>
-                  Os três documentos saem com o texto que a casa assina. CPF, RG, endereço e dados bancários continuam em branco para preencher à mão — o sistema não guarda conta nem chave PIX de cliente.
+                  Os documentos saem com o texto que a casa assina e com os dados do cliente preenchidos. Só os dados bancários ficam em branco: o sistema não guarda conta nem chave PIX.
                 </p>
               </div>
             </Bloco>

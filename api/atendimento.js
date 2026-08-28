@@ -72,6 +72,7 @@ const daLista = (v, lista) => (lista.indexOf(String(v || "")) >= 0 ? String(v) :
 const FONTE = {
   data: "data", negociador_id: "negociador_id", negociador_nome: "negociador_nome",
   prospec: "prospec", cliente_nome: "cliente_nome", cliente_telefone: "cliente_telefone",
+  cliente_cpf: "cliente_cpf", cliente_rg: "cliente_rg", cliente_endereco: "cliente_endereco",
   origem: "origem", status: "status", carro_descricao: "carro_descricao",
   pretensao: "pretensao", valor_fechado: "valor_fechado",
   forma_fechamento: "forma_fechamento", proximo_contato: "proximo_contato",
@@ -86,6 +87,9 @@ function paraColunas(c) {
     prospec: texto(c.prospec),
     cliente_nome: texto(c.cliente_nome),
     cliente_telefone: texto(c.cliente_telefone),
+    cliente_cpf: texto(c.cliente_cpf),
+    cliente_rg: texto(c.cliente_rg),
+    cliente_endereco: texto(c.cliente_endereco),
     origem: daLista(c.origem, ORIGENS),
     status: daLista(c.status, STATUS),
     carro_descricao: texto(c.carro_descricao),

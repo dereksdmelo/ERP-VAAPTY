@@ -86,8 +86,7 @@ consulta.
 
 | o que | situação |
 |-------|----------|
-| `renavam` | tem coluna no banco, não tem campo na tela — e **os contratos imprimem esse campo** |
-| CPF, RG e endereço do cliente | não existem em lugar nenhum; os contratos saem com lacuna para preencher à mão |
+| `renavam` | tem coluna no banco e não tem campo na tela. Saiu dos documentos por isso — volta quando houver campo, e só interessa em carro que fecha |
 | conferência da FIPE | `fipeConferida` e o código de autenticação vivem só no aparelho — não têm coluna no banco |
 | `positivos`, `lataria`, `mecanica` | vão no JSON do Shinkai, sempre vazios — não têm campo |
 | `proposta.apresentada` | coluna existe, não há botão para marcar |
