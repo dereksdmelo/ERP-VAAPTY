@@ -87,6 +87,7 @@ consulta.
 | o que | situação |
 |-------|----------|
 | `renavam` | tem coluna no banco, não tem campo na tela |
+| conferência da FIPE | `fipeConferida` e o código de autenticação vivem só no aparelho — não têm coluna no banco |
 | `positivos`, `lataria`, `mecanica` | vão no JSON do Shinkai, sempre vazios — não têm campo |
 | `proposta.apresentada` | coluna existe, não há botão para marcar |
 | Ativar perfil de negociador | só por SQL |

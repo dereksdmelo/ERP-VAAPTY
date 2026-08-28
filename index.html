@@ -191,6 +191,15 @@ async function consultarPlaca(placa) {
   if (!r.ok) throw new Error(d.erro || "Falha na consulta.");
   return d;
 }
+/* ----------- FIPE oficial, para conferência ----------- */
+async function fipeOficial(params) {
+  const q = Object.keys(params).map((k) => `${k}=${encodeURIComponent(params[k])}`).join("&");
+  const r = await fetchAut(`/api/fipe?${q}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui falar com a FIPE.");
+  return d;
+}
+
 async function consultarDesvalorizacao(chave) {
   const r = await fetch(`/api/desvalorizacao?chave=${encodeURIComponent(chave)}`);
   const d = await r.json().catch(() => ({}));
@@ -431,6 +440,188 @@ function faltamCanais(f) {
   return canaisPossiveis(f).filter((c) => vistos.indexOf(c) < 0);
 }
 
+/* ===================== FIPE oficial ===================== */
+
+const AMARELO = { fundo: "#FFF6E0", borda: "#E0A800", texto: "#8A6100" };
+
+const AvisoFipe = ({ compacto }) => (
+  <div className={compacto ? "inline-block rounded px-2 py-0.5" : "rounded-md px-3 py-2"}
+    style={{ background: AMARELO.fundo, border: `1px solid ${AMARELO.borda}`, color: AMARELO.texto }}>
+    <span className={compacto ? "text-[9px] font-bold uppercase tracking-[0.1em]" : "text-[12px] font-semibold"}>
+      Conferir valor FIPE
+    </span>
+    {!compacto && (
+      <p className="mt-0.5 text-[11px] leading-relaxed">
+        O valor veio da consulta de placa, que <b>adivinha a versão</b>. Confirme na tabela oficial antes de fechar o POR.
+      </p>
+    )}
+  </div>
+);
+
+/**
+ * Conferência na FIPE oficial, na ordem MARCA → ANO → MODELO.
+ *
+ * A FIPE navega marca → modelo → ano, mas aí a lista de modelos mistura
+ * o mesmo carro de vinte anos diferentes. Escolhendo o ano antes, a
+ * lista de modelos já vem curta e só com o que existiu naquele ano.
+ */
+function ConferirFipe({ f, set }) {
+  const [marcas, setMarcas] = useState([]);
+  const [marca, setMarca] = useState("");
+  const [ano, setAno] = useState("");
+  const [modelos, setModelos] = useState([]);
+  const [escolha, setEscolha] = useState("");      // "codigo|combustivel"
+  const [res, setRes] = useState(null);
+  const [erro, setErro] = useState("");
+  const [indo, setIndo] = useState("");            // marcas | modelos | valor
+
+  const anos = useMemo(() => {
+    const atual = new Date().getFullYear();
+    const l = [];
+    for (let a = atual + 1; a >= 1985; a--) l.push(a);
+    return l;
+  }, []);
+
+  useEffect(() => {
+    setIndo("marcas");
+    fipeOficial({ acao: "marcas" })
+      .then((d) => {
+        setMarcas(d.marcas || []);
+        // Adianta o que já se sabe da ficha.
+        const alvo = (d.marcas || []).filter((m) =>
+          m.nome.toLowerCase() === String(f.marca || "").toLowerCase())[0];
+        if (alvo) setMarca(String(alvo.codigo));
+        const a = String(f.ano || "").split("/")[1] || String(f.ano || "").split("/")[0];
+        if (a && /^\d{4}$/.test(a)) setAno(a);
+      })
+      .catch((e) => setErro(e.message))
+      .then(() => setIndo(""));
+  }, []);
+
+  useEffect(() => {
+    setModelos([]); setEscolha(""); setRes(null);
+    if (!marca || !ano) return;
+    setIndo("modelos"); setErro("");
+    fipeOficial({ acao: "modelos", marca, ano })
+      .then((d) => {
+        setModelos(d.modelos || []);
+        if (!(d.modelos || []).length) setErro("A FIPE não tem modelos dessa marca nesse ano.");
+      })
+      .catch((e) => setErro(e.message))
+      .then(() => setIndo(""));
+  }, [marca, ano]);
+
+  const buscarValor = (valorEscolha) => {
+    setEscolha(valorEscolha); setRes(null);
+    if (!valorEscolha) return;
+    const [codigo, comb] = valorEscolha.split("|");
+    setIndo("valor"); setErro("");
+    fipeOficial({ acao: "valor", marca, modelo: codigo, ano, combustivel: comb })
+      .then(setRes)
+      .catch((e) => setErro(e.message))
+      .then(() => setIndo(""));
+  };
+
+  const usar = () => {
+    set({
+      fipe: String(res.valor),
+      fipeCodigo: res.codigo_fipe || f.fipeCodigo,
+      fipeConferida: true,
+      fipeOficialCodigo: res.codigo_fipe || "",
+      fipeOficialMes: res.mes_referencia || "",
+      fipeAutenticacao: res.autenticacao || "",
+    });
+  };
+
+  const daPlaca = Number(f.fipe) || 0;
+  const diferenca = res && daPlaca ? res.valor - daPlaca : 0;
+
+  return (
+    <div className="mt-3 rounded-md p-3"
+      style={{ background: f.fipeConferida ? "#F0F8F4" : AMARELO.fundo,
+               border: `1px solid ${f.fipeConferida ? C.verde : AMARELO.borda}` }}>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-[10px] uppercase tracking-[0.13em]" style={{ color: f.fipeConferida ? C.verde : AMARELO.texto }}>
+          {f.fipeConferida ? "✓ FIPE conferida na fonte" : "Conferir na tabela FIPE oficial"}
+        </span>
+      </div>
+
+      {f.fipeConferida ? (
+        <p className="mt-1 text-[11px] leading-relaxed" style={{ color: C.mute }}>
+          {f.fipeOficialCodigo} · {f.fipeOficialMes}
+          {f.fipeAutenticacao ? ` · autenticação ${f.fipeAutenticacao}` : ""}
+        </p>
+      ) : (
+        <p className="mt-1 text-[11px] leading-relaxed" style={{ color: AMARELO.texto }}>
+          A consulta de placa adivinha a versão. Aqui você confirma na fonte — marca, depois ano, depois modelo.
+        </p>
+      )}
+
+      <div className="mt-2 space-y-2">
+        <div className="grid grid-cols-2 gap-2">
+          <Campo label="Marca">
+            <select className={inputCls} style={inputSty} value={marca} onChange={(e) => setMarca(e.target.value)}>
+              <option value="">{indo === "marcas" ? "carregando…" : "escolha"}</option>
+              {marcas.map((m) => <option key={m.codigo} value={m.codigo}>{m.nome}</option>)}
+            </select>
+          </Campo>
+          <Campo label="Ano do modelo">
+            <select className={inputCls} style={inputSty} value={ano} onChange={(e) => setAno(e.target.value)}>
+              <option value="">escolha</option>
+              {anos.map((a) => <option key={a} value={a}>{a}</option>)}
+            </select>
+          </Campo>
+        </div>
+
+        <Campo label={`Modelo${modelos.length ? ` — ${modelos.length} naquele ano` : ""}`}>
+          <select className={inputCls} style={inputSty} value={escolha}
+            disabled={!modelos.length} onChange={(e) => buscarValor(e.target.value)}>
+            <option value="">
+              {indo === "modelos" ? "carregando…" : !marca || !ano ? "escolha marca e ano antes" : "escolha"}
+            </option>
+            {modelos.map((m) => (
+              <option key={`${m.codigo}-${m.combustivel}`} value={`${m.codigo}|${m.combustivel}`}>{m.nome}</option>
+            ))}
+          </select>
+        </Campo>
+      </div>
+
+      {indo === "valor" && <p className="mt-2 text-[11px]" style={{ color: C.mute }}>Consultando a FIPE…</p>}
+      {erro && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+
+      {res && (
+        <div className="mt-2 rounded-md p-3" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
+          <div className="text-[19px] leading-tight" style={{ fontFamily: F.mono, fontWeight: 700, color: C.roxo }}>
+            {res.valor_texto}
+          </div>
+          <div className="mt-0.5 text-[11px]" style={{ color: C.mute }}>
+            {res.modelo} · {res.combustivel} · {res.ano_modelo}
+          </div>
+          <div className="mt-0.5 text-[10px]" style={{ color: C.mute, fontFamily: F.mono }}>
+            {res.codigo_fipe} · {res.mes_referencia} · autenticação {res.autenticacao}
+          </div>
+
+          {!!daPlaca && diferenca !== 0 && (
+            <div className="mt-2 rounded px-2 py-1.5 text-[11px]"
+              style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
+              A consulta de placa trouxe {brl(daPlaca)} — diferença de {brl(Math.abs(diferenca))}.
+              {" "}Confira se a versão bate antes de usar.
+            </div>
+          )}
+          {!!daPlaca && diferenca === 0 && (
+            <div className="mt-2 text-[11px]" style={{ color: C.verde }}>Bate com o valor da consulta de placa.</div>
+          )}
+
+          <button onClick={usar} className="mt-2 w-full rounded-md py-2 text-[13px] font-semibold"
+            style={{ background: C.roxo, color: "#fff" }}>
+            Usar este valor na ficha
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ===================== desvalorizômetro ===================== */
 
 /**
@@ -559,6 +750,8 @@ const VAZIO = {
   // veículo
   modelo: "", ano: "", cambio: "", km: "", kmEntrada: "", placa: "",
   fipe: "", fipeCodigo: "", fipeDesval: "", pedida: "", por: "", gastos: "",
+  // conferência na FIPE oficial
+  fipeConferida: false, fipeOficialCodigo: "", fipeOficialMes: "", fipeAutenticacao: "",
   marca: "", modeloCurto: "",
   chassi: "", cor: "", combustivel: "",
   pneus: ["", "", "", ""], leilao: false, gnv: false, opcionais: [],
@@ -1418,6 +1611,8 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 );
               })()}
 
+              {!!f.placa && <ConferirFipe f={f} set={setVarios} />}
+
               {!!f.modelo && (() => {
                 const termo = termoMercado || termoMercadoPadrao(f);
                 const [ma, mo] = marcaModeloDa(f);
@@ -1595,6 +1790,8 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               {!liberado && <div className="mt-1 text-[11px]" style={{ color: C.mute }}>{faltas.map((x) => x[1]).join(" · ")}</div>}
             </div>
 
+            {!!f.placa && !f.fipeConferida && <AvisoFipe />}
+
             <Bloco titulo="Fotos" sub={`Primeira é a capa. Até ${MAX_FOTOS}. Cada foto sobe para o servidor na hora; o aparelho não guarda nada depois que sobe.`}>
               <input ref={camRef} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={receberFotos} />
               <input ref={galRef} type="file" accept="image/*" multiple className="hidden" onChange={receberFotos} />
@@ -1663,6 +1860,16 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                   <Campo label="FIPE" req><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.fipe} onChange={(e) => set("fipe", e.target.value)} /></Campo>
                   <Campo label="POR" req><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.por} onChange={(e) => set("por", e.target.value)} /></Campo>
                 </div>
+                {!!f.placa && !f.fipeConferida && (
+                  <p className="text-[11px] leading-relaxed" style={{ color: AMARELO.texto }}>
+                    <b>Conferir valor FIPE.</b> Este número veio da consulta de placa, que adivinha a versão. Confirme na tabela oficial, na etapa de Pesquisa.
+                  </p>
+                )}
+                {f.fipeConferida && (
+                  <p className="text-[11px]" style={{ color: C.verde }}>
+                    ✓ FIPE conferida na tabela oficial{f.fipeOficialMes ? ` — ${f.fipeOficialMes}` : ""}.
+                  </p>
+                )}
                 <Campo label="Gastos / peças" req><input className={inputCls} style={inputSty} value={f.gastos} onChange={(e) => set("gastos", e.target.value)} /></Campo>
                 <div>
                   <Rotulo req>Condição dos pneus</Rotulo>

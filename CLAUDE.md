@@ -29,6 +29,7 @@ api/proposta.js                  GET/POST/PATCH/DELETE — ofertas dos lojistas
 api/desvalorizacao.js            GET  — histórico FIPE mês a mês do veículo
 api/funil.js                     GET  — a aba PIPELINE: fluxo → venda por origem
 api/importar.js                  POST — traz a planilha do CRM para o banco
+api/fipe.js                      GET  — tabela FIPE oficial, para conferência
 documentos.js                    CÓPIA MORTA: o que roda é o bloco colado no index.html
 supabase/migrations/*.sql        esquema do banco, versionado
 PENDENCIAS.md                    o que está em aberto e o que destrava cada coisa
@@ -561,6 +562,42 @@ atendimentos ficam. Aceitável numa importação que se faz uma vez e dá
 para conferir na lista.
 
 O importador só aparece para gerente.
+
+### 14. Duas FIPEs: uma adivinha, a outra confirma
+
+`/api/placa` devolve o valor FIPE a partir da placa — mas a Placa Fipe
+**adivinha a versão**, e por isso manda várias candidatas com
+percentual de similaridade. Versão errada contamina o FIPE, que
+contamina o POR, que contamina a negociação inteira.
+
+`/api/fipe` fala com a **tabela oficial** (`veiculos.fipe.org.br`), onde
+o negociador escolhe à mão e confirma. Ela devolve, além do valor, um
+**código de autenticação emitido pela própria FIPE** — a prova de que o
+número veio da fonte. Ele fica gravado na ficha.
+
+**A ordem é MARCA → ANO → MODELO**, e não a da FIPE (marca → modelo →
+ano). Escolhendo o modelo primeiro, a lista mistura o mesmo carro de
+vinte anos diferentes; escolhendo o ano antes, ela já vem curta e só com
+o que existiu naquele ano. O endpoint `ConsultarModelosAtravesDoAno`
+faz exatamente esse caminho — foi por isso que deu para inverter.
+
+**O ano da FIPE carrega o combustível junto** (`"2010-1"`). Como o
+negociador escolhe só o ano, `api/fipe.js` consulta os três
+combustíveis e junta as listas, marcando cada modelo com o seu — assim a
+consulta de valor sai com o parâmetro certo. `"nadaencontrado"` é como a
+FIPE diz que não há nada; não é erro.
+
+**Enquanto não conferir, aparece o aviso amarelo.** `fipeConferida`
+começa falso e só vira verdadeiro quando o negociador usa o valor da
+tabela oficial. O aviso aparece no Lançamento, ao lado do campo FIPE, e
+some quando confere. **É aviso, não trava** — quem decidir travar mexe
+em `etapaConcluida`.
+
+**A tabela de referência fica em cache de uma hora** no módulo. Ela muda
+uma vez por mês, e sem cache seria uma ida extra à FIPE em cada clique.
+Cache de módulo aqui é seguro: é dado público, igual para todo mundo —
+diferente do token de usuário, que nunca pode viver em escopo
+compartilhado.
 
 ## Convenções do código
 
