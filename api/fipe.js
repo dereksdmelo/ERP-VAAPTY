@@ -36,23 +36,46 @@ const tokenDe = (req) => {
 // evita uma ida extra à FIPE em cada clique do negociador.
 let refCache = { codigo: null, mes: null, em: 0 };
 
+/**
+ * A FIPE recusa requisição que não pareça vir do site dela. Estes
+ * cabeçalhos são os que o navegador manda — sem eles a resposta volta
+ * bloqueada, e do servidor da Vercel isso é ainda mais sensível do que
+ * de um navegador comum.
+ */
 async function chamar(rota, corpo) {
-  const r = await fetch(`${FIPE}/${rota}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Referer: "https://veiculos.fipe.org.br/",
-      "User-Agent": "Mozilla/5.0 (compatible; VaaptyFicha/1.0)",
-    },
-    body: JSON.stringify(corpo),
-  });
-  const texto = await r.text();
+  let r, texto;
+  try {
+    r = await fetch(`${FIPE}/${rota}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/javascript, */*; q=0.01",
+        "Accept-Language": "pt-BR,pt;q=0.9",
+        Origin: "https://veiculos.fipe.org.br",
+        Referer: "https://veiculos.fipe.org.br/",
+        "X-Requested-With": "XMLHttpRequest",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+      },
+      body: JSON.stringify(corpo),
+    });
+    texto = await r.text();
+  } catch (e) {
+    const x = new Error("Não consegui alcançar a FIPE.");
+    x.status = 502;
+    throw x;
+  }
+
   let dado = null;
   try { dado = texto ? JSON.parse(texto) : null; } catch (e) {}
-  if (!r.ok) {
-    const e = new Error("A FIPE não respondeu como esperado.");
-    e.status = 502;
-    throw e;
+
+  if (!r.ok || dado == null) {
+    // A mensagem carrega o status e um pedaço da resposta: sem isso,
+    // "não respondeu como esperado" não diz se é bloqueio, mudança de
+    // rota ou parâmetro errado.
+    const pedaco = String(texto || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 120);
+    const x = new Error(`A FIPE respondeu ${r.status}${pedaco ? `: ${pedaco}` : " sem corpo"}.`);
+    x.status = 502;
+    throw x;
   }
   return dado;
 }
