@@ -2458,7 +2458,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
             </Bloco>
 
             <Bloco titulo="Simulador de propostas" sub="A planilha do Derek, dentro do sistema. Serve para treinar e para mostrar ao cliente como a rodada se comporta — não vale como proposta.">
-              <SimuladorPropostas fipePadrao={f.fipe} veiculo={f.modelo} />
+              <SimuladorPropostas fipePadrao={f.fipe} veiculo={f.modelo} negociador={f.negociador} />
             </Bloco>
 
             <Bloco titulo="Anote o que ouvir" sub="O que ele falar aqui é o argumento que você usa na hora do extrato.">
@@ -3157,34 +3157,85 @@ function simularPropostas(referencia, quantidade) {
 }
 
 /**
- * A tela imita a planilha: o mesmo cabeçalho de quatro linhas
- * (Veículo, Quant. de propostas, Valor médio das propostas, Melhor
- * Proposta) e a lista de propostas em três colunas de Num | Valor,
- * como nas faixas H/I, K/L e N/O do arquivo. O Derek já lê esse
- * formato há tempo — trocar o desenho custaria mais do que ganharia.
- *
- * A planilha não tem gráfico: o único desenho embutido nela é o logo.
- * O histograma que eu tinha posto aqui era invenção minha e saiu.
+ * O logo que está dentro da própria planilha do Derek (xl/media). Vem
+ * embutido em base64 porque a página é um arquivo só e não tem de onde
+ * servir imagem — e porque um logo que depende da rede some justo na
+ * hora de mostrar a tela para o cliente.
  */
-function SimuladorPropostas({ fipePadrao, veiculo }) {
+const LOGO_VAAPTY = "data:image/png;base64,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";
+
+// O vermelho e o cinza são os da planilha, não os da paleta do sistema:
+// é o que faz o negociador reconhecer a tela como sendo a dele.
+const PL_VERMELHO = "#C00000";
+const PL_CINZA = "#BFBFBF";
+
+/**
+ * O simulador com o layout da planilha, como o Derek pediu: o logo, o
+ * resumo de quatro linhas à esquerda com as caixas cinzas do negociador
+ * e da loja, e à direita as noventa posições em três blocos de
+ * Num | Valor — as faixas H/I, K/L e N/O do arquivo.
+ *
+ * As noventa linhas aparecem sempre, com travessão nas que passam da
+ * quantidade pedida. É assim na planilha, e é o que deixa claro que a
+ * rodada tem tamanho fixo e o que variou foi quantos responderam.
+ *
+ * A melhor proposta sai destacada em verde na lista, como a célula
+ * pintada do arquivo.
+ *
+ * Uma coisa do original que NÃO foi copiada: lá a segunda coluna pula
+ * o 53 e o 57, porque duas fórmulas apontam para #REF!. É defeito da
+ * planilha, não formato — aqui a numeração vai limpa de 1 a 90.
+ */
+function SimuladorPropostas({ fipePadrao, veiculo, negociador }) {
   const [ref, setRef] = useState(fipePadrao || "");
   const [qtd, setQtd] = useState("57");
   const [r, setR] = useState(null);
 
   const rodar = () => setR(simularPropostas(numeroBR(ref), Number(qtd) || 0));
 
-  // Três colunas, como na planilha. No celular o grid quebra para duas
-  // e depois para uma, senão o valor não cabe na linha.
-  // Função de render, não componente: componente declarado dentro de
-  // outro vira tipo novo a cada render e remonta. É a mesma armadilha
-  // do blocoCliente, e não custa nada evitar aqui também.
-  const linha = (rot, valor, forte) => (
-    <div key={rot} className="flex items-baseline justify-between gap-3 py-1"
-      style={{ borderBottom: `1px solid ${C.line}` }}>
-      <span className="text-[12px]" style={{ color: C.mute }}>{rot}</span>
-      <span className="text-[14px]" style={{ fontFamily: F.mono, fontWeight: forte ? 700 : 500, color: forte ? C.verde : C.ink }}>
-        {valor}
-      </span>
+  // Duas casas e separador brasileiro: a planilha imprime 18,500.00 no
+  // formato americano dela, e aqui quem lê é o negociador.
+  const num = (v) => v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  // Funções de render, não componentes: componente declarado dentro de
+  // outro vira tipo novo a cada render e remonta. É a armadilha do
+  // blocoCliente, e não custa nada evitar aqui.
+  const caixa = (texto) => (
+    <div className="px-3 py-1 text-center text-[13px]"
+      style={{ background: PL_CINZA, color: "#1A1520", fontWeight: 600 }}>
+      {texto}
+    </div>
+  );
+
+  const valorSublinhado = (v, grande) => (
+    <div className="flex items-baseline justify-between gap-2 pb-1"
+      style={{ borderBottom: `1px solid ${C.ink}`, maxWidth: 240 }}>
+      <span style={{ fontFamily: F.mono, fontWeight: 700, color: PL_VERMELHO, fontSize: grande ? 16 : 13 }}>R$</span>
+      <span style={{ fontFamily: F.mono, fontWeight: 700, color: PL_VERMELHO, fontSize: grande ? 16 : 13 }}>{v}</span>
+    </div>
+  );
+
+  // Os três blocos de 30 da planilha: 1–30, 31–60, 61–90.
+  const bloco = (inicio) => (
+    <div key={inicio}>
+      <div className="flex text-[11px] font-semibold" style={{ color: C.ink, borderBottom: `1px solid ${C.ink}` }}>
+        <span style={{ width: 34 }}>Num</span>
+        <span className="flex-1 text-right">Valor</span>
+      </div>
+      {Array.from({ length: 30 }, (_, k) => {
+        const n = inicio + k;
+        const v = r.valores[n - 1];
+        const melhor = v != null && v === r.melhor;
+        return (
+          <div key={n} className="flex items-baseline py-[1px] text-[11px]"
+            style={{ fontFamily: F.mono, background: melhor ? "#DCEFDC" : "transparent" }}>
+            <span style={{ width: 34, color: C.mute }}>{n}</span>
+            <span className="flex-1 text-right" style={{ color: v == null ? C.mute : C.ink, fontWeight: melhor ? 700 : 400 }}>
+              {v == null ? "—" : num(v)}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 
@@ -3209,23 +3260,43 @@ function SimuladorPropostas({ fipePadrao, veiculo }) {
       </button>
 
       {r && (
-        <div className="mt-3 rounded-md p-3" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
-          {linha("Veículo", veiculo || "—")}
-          {linha("Quant. de propostas", r.quantidade)}
-          {linha("Valor médio das propostas", brl(r.media))}
-          {linha("Melhor Proposta", brl(r.melhor), true)}
+        <div className="mt-3 rounded-md p-4" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
+          <div className="flex flex-wrap gap-6">
 
-          <div className="mt-3 grid gap-x-4 gap-y-0"
-            style={{ gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))" }}>
-            {r.valores.map((v, i) => (
-              <div key={i} className="flex items-baseline justify-between py-[3px]"
-                style={{ borderBottom: `1px solid ${C.line}` }}>
-                <span className="text-[11px]" style={{ color: C.mute, fontFamily: F.mono }}>{i + 1}</span>
-                <span className="text-[12px]" style={{ fontFamily: F.mono }}>
-                  {v.toLocaleString("pt-BR")}
-                </span>
+            {/* o resumo, como na planilha */}
+            <div style={{ flex: "1 1 240px", minWidth: 240 }}>
+              <img src={LOGO_VAAPTY} alt="Vaapty" style={{ height: 34, marginBottom: 18 }} />
+
+              <div className="flex items-center gap-3">
+                <span className="text-[13px]" style={{ fontWeight: 700, fontStyle: "italic" }}>Veículo</span>
+                <div className="flex-1">{caixa(veiculo || "—")}</div>
               </div>
-            ))}
+
+              <div className="mt-4 flex items-baseline justify-between gap-3" style={{ maxWidth: 240 }}>
+                <span className="text-[13px]" style={{ fontWeight: 700 }}>Quant. de propostas</span>
+                <span style={{ fontFamily: F.mono, fontWeight: 700, color: PL_VERMELHO }}>{r.quantidade}</span>
+              </div>
+
+              <div className="mt-4">
+                <div className="text-[13px]" style={{ fontWeight: 700 }}>Valor médio das propostas</div>
+                <div className="mt-1">{valorSublinhado(num(r.media))}</div>
+              </div>
+
+              <div className="mt-6">
+                <div className="text-[16px]" style={{ fontWeight: 700 }}>Melhor Proposta</div>
+                <div className="mt-1">{valorSublinhado(num(r.melhor), true)}</div>
+              </div>
+
+              <div className="mt-6 space-y-2" style={{ maxWidth: 240 }}>
+                {caixa(negociador || "NEGOCIADOR")}
+                {caixa("JOINVILLE")}
+              </div>
+            </div>
+
+            {/* as noventa posições, em três blocos */}
+            <div className="grid gap-x-5 gap-y-4" style={{ flex: "2 1 340px", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}>
+              {[1, 31, 61].map((ini) => bloco(ini))}
+            </div>
           </div>
         </div>
       )}
