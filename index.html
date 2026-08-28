@@ -74,13 +74,54 @@ const ORIGENS = [
   ["outdoor", "Outdoor"], ["recuperacao", "Recuperação"], ["faceleads", "Faceleads"],
   ["outro", "Outro"],
 ];
+/**
+ * Os quinze status que a casa usa, na ordem da planilha — o negociador
+ * já procura nessa sequência.
+ *
+ * Os três antigos ('aberto', 'aguardando_propostas', 'perdido') não
+ * aparecem na lista mas continuam no enum: os atendimentos importados
+ * estão gravados com eles. `rotuloStatus` cobre esse caso.
+ */
 const STATUS_AT = [
-  ["aberto", "Em atendimento", "#6D1B9E"],
-  ["aguardando_propostas", "Aguardando propostas", "#B26B00"],
-  ["em_negociacao", "Em negociação", "#1B5FA8"],
   ["fechado", "Fechado", "#1D7F58"],
-  ["perdido", "Perdido", "#8A8394"],
+  ["cliente_na_loja", "Cliente na loja", "#6D1B9E"],
+  ["aguardando", "Aguardando", "#B26B00"],
+  ["baixar_expectativa", "Baixar expectativa", "#B26B00"],
+  ["vai_voltar", "Vai voltar", "#B26B00"],
+  ["consignado", "Consignado", "#1B5FA8"],
+  ["vendeu_fora", "Vendeu fora", "#8A8394"],
+  ["perseguir", "Perseguir", "#EA5423"],
+  ["em_negociacao", "Em negociação", "#1B5FA8"],
+  ["nao_avaliou", "Não avaliou", "#8A8394"],
+  ["nao_lancado", "Não lançado", "#8A8394"],
+  ["falta_proposta", "Falta proposta", "#B26B00"],
+  ["quitacao_futura", "Quitação futura", "#1B5FA8"],
+  ["rescisao", "Rescisão", "#8A8394"],
+  ["restricao", "Restrição", "#8A8394"],
 ];
+const LEGADOS = { aberto: "Em atendimento", aguardando_propostas: "Aguardando propostas", perdido: "Perdido" };
+const rotuloStatus = (v) => (STATUS_AT.filter((x) => x[0] === v)[0] || [0, LEGADOS[v] || v])[1];
+
+/**
+ * O que o sistema consegue observar sozinho. O resto — vai voltar,
+ * baixar expectativa, vendeu fora — é leitura de quem está na mesa, e
+ * nenhuma automação acerta isso.
+ *
+ * A ordem é de avanço: a transição automática só empurra para frente, e
+ * só quando o status atual ainda é automático. Assim que alguém escolhe
+ * um status à mão, a automação para de mexer.
+ */
+const AUTOMATICOS = ["aberto", "cliente_na_loja", "falta_proposta", "aguardando_propostas", "aguardando", "em_negociacao", "fechado"];
+const avancoDe = (v) => AUTOMATICOS.indexOf(v);
+
+function statusDerivado(f, propostas) {
+  if (f.aceiteFinal && f.valorFechado) return "fechado";
+  if ((f.rodadas || []).length) return "em_negociacao";
+  if ((propostas || []).length) return "aguardando";
+  if (f.publicado) return "falta_proposta";
+  if (f.carroSubiu) return "cliente_na_loja";
+  return null;
+}
 const rotulo = (lista, v) => (lista.filter((x) => x[0] === v)[0] || [v, v])[1];
 const corStatus = (v) => (STATUS_AT.filter((x) => x[0] === v)[0] || [0, 0, "#6B6478"])[2];
 
@@ -371,6 +412,25 @@ function alertaDispersao(vs) {
   const d = Math.max(...a) - Math.min(...a);
   return d < 2000 ? null : `As versões variam ${brl(d)} entre si. Confirme no documento.`;
 }
+
+/* ===================== avaliação no Google ===================== */
+
+/**
+ * Perfil da Vaapty Joinville SC no Google — 4,8 de quase 2 mil
+ * avaliações. O número é o CID do perfil, tirado da URL do Maps em
+ * 28/08/2026; conferi que abre o lugar certo.
+ *
+ * Este link abre o perfil, onde "Escrever avaliação" está a um toque.
+ * O link que cai direto na caixa de avaliação é o `g.page/r/…/review`,
+ * que só o dono pega no painel do Perfil da Empresa — quando o Derek
+ * mandar, troca-se só esta linha.
+ */
+const AVALIACAO_LINK = "https://www.google.com/maps?cid=3248104940544214546";
+
+// QR gerado por serviço externo. Se ele cair, o link ao lado continua
+// funcionando — por isso o texto nunca depende da imagem.
+const qrDe = (url, px) =>
+  `https://api.qrserver.com/v1/create-qr-code/?size=${px}x${px}&margin=8&data=${encodeURIComponent(url)}`;
 
 /* ===================== mercado ===================== */
 
@@ -1406,6 +1466,8 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     cliente_endereco: (atendimento && atendimento.cliente_endereco) || "",
   });
   const [checklist, setChecklist] = useState(null);
+  const [statusAtual, setStatusAtual] = useState((atendimento && atendimento.status) || "aberto");
+  const [erroStatus, setErroStatus] = useState("");
   const [salvandoCliente, setSalvandoCliente] = useState(false);
   const [erroCliente, setErroCliente] = useState("");
   const [erroCanais, setErroCanais] = useState("");
@@ -1623,6 +1685,30 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   const faltamCliente = OBRIG_CLIENTE.filter(([k]) => !String(cliente[k] || "").trim());
   const podeImprimir = faltamCliente.length === 0;
 
+  /**
+   * `manual` distingue o clique do negociador da transição automática.
+   * Escolha à mão vale sempre; a automática só empurra para frente e só
+   * enquanto ninguém escolheu um status que o sistema não sabe deduzir.
+   */
+  const mudarStatus = async (novo, manual) => {
+    if (!atendimento || novo === statusAtual) return;
+    if (!manual) {
+      if (avancoDe(statusAtual) < 0) return;                 // status escolhido à mão: não mexe
+      if (avancoDe(novo) <= avancoDe(statusAtual)) return;   // nunca volta
+    }
+    const antes = statusAtual;
+    setStatusAtual(novo); setErroStatus("");
+    try { await atualizarAtendimento(atendimento.id, { status: novo }); }
+    catch (e) { setStatusAtual(antes); setErroStatus(e.message); }
+  };
+
+  // Segue o preenchimento: carro no pátio, lançamento, propostas,
+  // rodadas, fechamento.
+  useEffect(() => {
+    const derivado = statusDerivado(f, propostas);
+    if (derivado) mudarStatus(derivado, false);
+  }, [f.carroSubiu, f.publicado, f.aceiteFinal, f.valorFechado, f.rodadas.length, propostas.length]);
+
   const salvarCliente = async () => {
     if (!atendimento) { setErroCliente("Abra o atendimento pela lista para salvar."); return; }
     setErroCliente(""); setSalvandoCliente(true);
@@ -1808,7 +1894,10 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         </div>
       </header>
 
-      {atendimento && <StatusAtendimento atendimento={atendimento} />}
+      {atendimento && (
+        <StatusAtendimento valor={statusAtual} erro={erroStatus}
+          aoMudar={(novo) => mudarStatus(novo, true)} />
+      )}
 
       {/* trilho */}
       <div className="rolar flex gap-1.5 overflow-x-auto px-3 py-3" style={{ background: C.paper, borderBottom: `1px solid ${C.line}` }}>
@@ -2489,8 +2578,35 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         {/* ---------- E ---------- */}
         {etapa === "E" && (
           <>
-            <Bloco titulo="Avaliação">
-              <Toggle label="Pedi a avaliação no Google" nota="Entra no score do negociador." valor={f.avaliacaoGoogle} onChange={(v) => set("avaliacaoGoogle", v)} />
+            <Bloco titulo="Avaliação no Google" sub="Mostre o QR para o cliente ler na hora, ainda na loja. Avaliação pedida depois, por mensagem, quase nunca sai.">
+              <div className="flex flex-col items-center">
+                <img src={qrDe(AVALIACAO_LINK, 260)} alt="QR da avaliação da Vaapty no Google"
+                  className="block rounded-lg" style={{ width: 200, height: 200, border: `1px solid ${C.line}`, background: "#fff" }} />
+                <p className="mt-2 text-center text-[11px]" style={{ color: C.mute }}>
+                  Aponte a câmera do cliente para o código.
+                </p>
+              </div>
+
+              <div className="mt-3 space-y-2">
+                <input readOnly className={inputCls} style={{ ...inputSty, fontFamily: F.mono, fontSize: 11 }}
+                  value={AVALIACAO_LINK} onFocus={(e) => e.target.select()} />
+                <div className="flex gap-2">
+                  <button onClick={() => copiar(AVALIACAO_LINK, "av")}
+                    className="flex-1 rounded-md py-2.5 text-[13px] font-semibold"
+                    style={{ background: C.roxo, color: "#fff" }}>
+                    {copiado === "av" ? "Link copiado" : "Copiar link"}
+                  </button>
+                  <a href={AVALIACAO_LINK} target="_blank" rel="noopener noreferrer"
+                    className="flex-1 rounded-md border py-2.5 text-center text-[13px] font-semibold"
+                    style={{ borderColor: C.line, color: C.roxo }}>
+                    Abrir
+                  </a>
+                </div>
+              </div>
+
+              <div className="mt-3">
+                <Toggle label="Pedi a avaliação no Google" nota="Entra no score do negociador." valor={f.avaliacaoGoogle} onChange={(v) => set("avaliacaoGoogle", v)} />
+              </div>
             </Bloco>
 
             <Bloco titulo={`Indicações — ${f.indicacoes.length} de 10`} sub="Quem ele conhece que tem carro. A lista vai para a pré-venda com a promessa do brinde.">
@@ -2626,25 +2742,22 @@ function Propostas({ atendimentoId, iniciais, aoMudar }) {
  * O status é o que faz a lista do CRM valer. Sem isto tudo fica
  * "aberto" para sempre e o funil não conta nada.
  */
-function StatusAtendimento({ atendimento, aoMudar }) {
-  const [v, setV] = useState(atendimento.status);
-  const [erro, setErro] = useState("");
-
-  const mudar = async (novo) => {
-    const antes = v;
-    setV(novo); setErro("");
-    try { await atualizarAtendimento(atendimento.id, { status: novo }); if (aoMudar) aoMudar(novo); }
-    catch (e) { setV(antes); setErro(e.message); }
-  };
-
+function StatusAtendimento({ valor, aoMudar, erro }) {
+  const legado = valor && !STATUS_AT.some((x) => x[0] === valor);
   return (
     <div className="px-4 pt-3">
       <div className="rolar flex gap-1.5 overflow-x-auto">
+        {legado && (
+          <span className="shrink-0 rounded-full px-3 py-1.5 text-[11px]"
+            style={{ background: "#8A8394", color: "#fff", border: "1px solid #8A8394" }}>
+            {rotuloStatus(valor)}
+          </span>
+        )}
         {STATUS_AT.map(([val, rot]) => (
-          <button key={val} onClick={() => mudar(val)}
+          <button key={val} onClick={() => aoMudar(val)}
             className="shrink-0 rounded-full px-3 py-1.5 text-[11px]"
-            style={{ background: v === val ? corStatus(val) : "#fff", color: v === val ? "#fff" : C.mute,
-                     border: `1px solid ${v === val ? corStatus(val) : C.line}` }}>
+            style={{ background: valor === val ? corStatus(val) : "#fff", color: valor === val ? "#fff" : C.mute,
+                     border: `1px solid ${valor === val ? corStatus(val) : C.line}` }}>
             {rot}
           </button>
         ))}
