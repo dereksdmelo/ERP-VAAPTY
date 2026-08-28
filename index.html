@@ -1736,6 +1736,10 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   };
   const set = (k, v) => guardarFicha({ ...fRef.current, [k]: v });
   const setVarios = (o) => guardarFicha({ ...fRef.current, ...o });
+
+  // Uma escuta por atendimento, e não por etapa: aqui em cima ela
+  // sobrevive à troca de passo. Ver o comentário do useEscuta.
+  const escuta = useEscuta(f, set);
   // fotosRef é a versão autoritativa: o upload é assíncrono e não pode
   // ler estado velho de dentro de uma closure.
   const aplicar = (fn) => { const n = fn(fotosRef.current); fotosRef.current = n; setFotos(n); };
@@ -2102,6 +2106,8 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         })}
       </div>
 
+      <BarraEscuta escuta={escuta} />
+
       <div className="px-4 pt-4">
         <h2 className="text-[16px] font-semibold leading-tight">{et.nome}</h2>
       </div>
@@ -2123,6 +2129,16 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               <Toggle label="Carro subiu pro pátio" valor={f.carroSubiu} onChange={(v) => set("carroSubiu", v)} />
               <Toggle label="Combinei o tempo do processo com o cliente" nota="“A avaliação leva cerca de 40 minutos, tudo bem?”" valor={f.tempoCombinado} onChange={(v) => set("tempoCombinado", v)} />
             </div>
+          </Bloco>
+        )}
+
+        {/* A autorização é pedida aqui, no primeiro contato, e vale
+            para o atendimento inteiro. Pedir no meio da negociação
+            seria pedir na pior hora possível. */}
+        {etapa === "A" && (
+          <Bloco titulo="Escutar a conversa"
+            sub="Peça agora, no começo. Uma vez ligada, a escuta acompanha todas as etapas.">
+            <EscutaControle escuta={escuta} f={f} set={set} />
           </Bloco>
         )}
 
@@ -2340,7 +2356,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
             </Bloco>
 
             <Bloco titulo="Escutar a conversa" sub="É aqui que ele conta por que está vendendo. O cliente precisa autorizar antes — é a condição do parecer.">
-              <Escuta f={f} set={set} />
+              <EscutaPainel escuta={escuta} f={f} set={set} />
             </Bloco>
           </>
         )}
@@ -2593,7 +2609,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
             </Bloco>
 
             <Bloco titulo="Escutar a conversa" sub="Transcreve o que for dito e destaca os ganchos. O cliente precisa autorizar antes — é a condição do parecer.">
-              <Escuta f={f} set={set} />
+              <EscutaPainel escuta={escuta} f={f} set={set} />
             </Bloco>
           </>
         )}
@@ -2776,7 +2792,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
             )}
 
             <Bloco titulo="Escutar a conversa" sub="Os ganchos do que ele falar aqui são o argumento da próxima rodada.">
-              <Escuta f={f} set={set} />
+              <EscutaPainel escuta={escuta} f={f} set={set} />
             </Bloco>
 
             <Bloco titulo="Objeção principal" sub="O que travou a conversa.">
@@ -3205,16 +3221,34 @@ const sinaisDe = (texto) => {
   return SINAIS.filter((s) => s.termos.some((termo) => t.indexOf(termo) >= 0));
 };
 
-function Escuta({ f, set }) {
+/**
+ * A escuta vive no atendimento inteiro, não na etapa.
+ *
+ * O Derek pediu que a autorização fosse pedida no começo e o microfone
+ * atravessasse a negociação toda. Enquanto isto era um componente
+ * dentro da etapa, trocar de etapa desmontava o componente e matava o
+ * reconhecimento no meio da conversa — sem aviso nenhum.
+ *
+ * Por isso virou hook, chamado uma vez lá em cima no `VaaptyAponte`,
+ * que fica montado do começo ao fim do atendimento. As etapas só
+ * mostram o que ele já está fazendo. **Quem voltar a declarar isto
+ * dentro de uma etapa reintroduz o corte.**
+ */
+function useEscuta(f, set) {
   const Rec = (typeof window !== "undefined") &&
     (window.SpeechRecognition || window.webkitSpeechRecognition);
 
   const [ouvindo, setOuvindo] = useState(false);
   const [parcial, setParcial] = useState("");
   const [erro, setErro] = useState("");
+  const [desde, setDesde] = useState(null);
   const recRef = useRef(null);
   const ligadoRef = useRef(false);
   const textoRef = useRef(f.transcricao || "");
+  // `set` muda de identidade a cada render; o callback do
+  // reconhecimento não pode ficar preso na versão velha.
+  const setRef = useRef(set);
+  setRef.current = set;
 
   // O navegador encerra a sessão sozinho depois de um silêncio. Se
   // ainda estamos ligados, religa — senão a escuta morre no meio da
@@ -3236,8 +3270,8 @@ function Escuta({ f, set }) {
         // Só o trecho fechado vai para a ficha: gravar a cada palavra
         // provisória escreveria no localStorage dezenas de vezes por
         // minuto.
-        textoRef.current = (textoRef.current + novoFinal).slice(-8000);
-        set("transcricao", textoRef.current);
+        textoRef.current = (textoRef.current + novoFinal).slice(-16000);
+        setRef.current("transcricao", textoRef.current);
       }
     };
     r.onerror = (ev) => {
@@ -3258,27 +3292,37 @@ function Escuta({ f, set }) {
   };
 
   const ligar = () => {
-    if (!Rec || !f.escutaOk) return;
+    if (!Rec || !f.escutaOk || ligadoRef.current) return;
     setErro("");
     ligadoRef.current = true;
     recRef.current = criar();
-    try { recRef.current.start(); setOuvindo(true); }
+    try { recRef.current.start(); setOuvindo(true); setDesde(Date.now()); }
     catch (e) { setErro("Não consegui abrir o microfone."); ligadoRef.current = false; }
   };
 
   const desligar = () => {
     ligadoRef.current = false;
-    setParcial("");
+    setParcial(""); setDesde(null);
     if (recRef.current) { try { recRef.current.stop(); } catch (e) {} }
     setOuvindo(false);
   };
 
-  // Sair da etapa com o microfone aberto seria escuta sem ninguém
-  // olhando. Desliga junto.
-  useEffect(() => () => { ligadoRef.current = false; if (recRef.current) { try { recRef.current.stop(); } catch (e) {} } }, []);
+  // Sair do atendimento com o microfone aberto seria escuta sem
+  // ninguém olhando. Aqui o desmonte é o fim do atendimento, não a
+  // troca de etapa — que é exatamente a diferença.
+  useEffect(() => () => {
+    ligadoRef.current = false;
+    if (recRef.current) { try { recRef.current.stop(); } catch (e) {} }
+  }, []);
 
-  const achados = sinaisDe((f.transcricao || "") + " " + parcial);
+  const limpar = () => { textoRef.current = ""; set("transcricao", ""); setParcial(""); };
 
+  return { Rec, ouvindo, parcial, erro, desde, ligar, desligar, limpar };
+}
+
+/** O aceite e o microfone. Fica na Abordagem: é onde se pede. */
+function EscutaControle({ escuta, f, set }) {
+  const { Rec, ouvindo, erro, ligar, desligar } = escuta;
   return (
     <div>
       <div className="rounded-md p-3" style={{ background: "#FBF7FD", border: `1px solid ${C.line}` }}>
@@ -3314,6 +3358,60 @@ function Escuta({ f, set }) {
 
       {erro && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
 
+      <p className="mt-3 text-[11px]" style={{ color: C.mute }}>
+        Uma vez ligada, a escuta segue por todo o atendimento — você troca de etapa e ela continua. Os ganchos aparecem na Pesquisa, na Espera e na Negociação.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * A tarja que fica no alto, fora das etapas, enquanto o microfone está
+ * aberto. É o que impede a escuta de rodar esquecida: quem olha a tela
+ * vê que está ligada, em qualquer etapa.
+ */
+function BarraEscuta({ escuta }) {
+  const { ouvindo, desligar, desde } = escuta;
+  const [, forcar] = useState(0);
+  useEffect(() => {
+    if (!ouvindo) return;
+    const t = setInterval(() => forcar((x) => x + 1), 1000);
+    return () => clearInterval(t);
+  }, [ouvindo]);
+  if (!ouvindo) return null;
+  const seg = desde ? Math.floor((Date.now() - desde) / 1000) : 0;
+  return (
+    <div className="flex items-center justify-between gap-3 px-4 py-1.5"
+      style={{ background: C.laranja, color: "#fff" }}>
+      <span className="text-[11px] font-semibold">
+        ● Escutando · {String(Math.floor(seg / 60)).padStart(2, "0")}:{String(seg % 60).padStart(2, "0")}
+      </span>
+      <button onClick={desligar} className="text-[11px] underline">parar</button>
+    </div>
+  );
+}
+
+/** O que a escuta achou. Aparece nas etapas onde ajuda a conversar. */
+function EscutaPainel({ escuta, f, set }) {
+  const { ouvindo, parcial, erro } = escuta;
+  const achados = sinaisDe((f.transcricao || "") + " " + parcial);
+
+  if (!f.escutaOk) {
+    return (
+      <p className="text-[12px] leading-relaxed" style={{ color: C.mute }}>
+        A escuta não foi autorizada. O aceite do cliente é pedido na Abordagem — sem ele o microfone não liga.
+      </p>
+    );
+  }
+
+  return (
+    <div>
+      <p className="text-[11px]" style={{ color: ouvindo ? C.verde : C.mute }}>
+        {ouvindo ? "Microfone aberto." : "Autorizada, mas o microfone está parado. Volte à Abordagem para ligar."}
+      </p>
+
+      {erro && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+
       {achados.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-1.5">
           {achados.map((s) => (
@@ -3330,9 +3428,8 @@ function Escuta({ f, set }) {
             <span>{f.transcricao}</span>
             <span style={{ color: C.mute }}>{parcial}</span>
           </div>
-          <div className="mt-2 flex gap-2">
-            <button onClick={() => { textoRef.current = ""; set("transcricao", ""); setParcial(""); }}
-              className="text-[11px] underline" style={{ color: C.mute }}>limpar a transcrição</button>
+          <div className="mt-2 flex gap-3">
+            <button onClick={escuta.limpar} className="text-[11px] underline" style={{ color: C.mute }}>limpar a transcrição</button>
             <button onClick={() => set("notasEspera", (f.notasEspera ? f.notasEspera + "\n\n" : "") + f.transcricao)}
               className="text-[11px] underline" style={{ color: C.roxo }}>copiar para as anotações</button>
           </div>
@@ -3340,7 +3437,7 @@ function Escuta({ f, set }) {
       )}
 
       <p className="mt-3 text-[11px]" style={{ color: C.mute }}>
-        Os destaques acima são busca por palavra, não resumo por IA. Servem para você não perder o gancho — ler a conversa continua sendo seu trabalho.
+        Os destaques são busca por palavra, não resumo por IA. Servem para você não perder o gancho — ler a conversa continua sendo seu trabalho.
       </p>
     </div>
   );
