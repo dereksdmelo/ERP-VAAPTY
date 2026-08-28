@@ -2448,9 +2448,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                   <input className={inputCls} style={inputSty} value={f.necessidadeCliente} onChange={(e) => set("necessidadeCliente", e.target.value)}
                     placeholder="Ex.: precisa quitar dívida rápido" />
                 </Campo>
-                <Pendente>
-                  A biblioteca de testemunhais — prints do Google, fotos e vídeos de clientes que fecharam — entra aqui, filtrada pela necessidade acima. Preciso que vocês reúnam esse material; sem ele a tela fica vazia.
-                </Pendente>
+                <Testemunhais necessidade={f.necessidadeCliente} negociador={f.negociador} />
                 <Toggle label="Mostrei um caso parecido com o dele" valor={f.mostrouTestemunhal} onChange={(v) => set("mostrouTestemunhal", v)} />
               </div>
             </Bloco>
@@ -4810,6 +4808,155 @@ function Anexos({ atendimentoId, rotulos, aoMudar }) {
             </div>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+const TEMAS_TESTEMUNHAL = [
+  "Atendimento", "Negociação", "Agilidade/Rapidez", "Transparência",
+  "Sem burocracia", "Pagamento/Pix rápido", "Preço/Valor justo",
+  "Confiança/Segurança", "Venda rápida do veículo", "Cumpriu o combinado",
+  "Superou expectativas", "Documentação",
+];
+
+/**
+ * Palavras da necessidade do cliente → tema da avaliação.
+ *
+ * O negociador escreve "precisa quitar dívida rápido" e o que ajuda ali
+ * é uma avaliação sobre agilidade e pagamento, não uma sobre o café da
+ * loja. É casamento por palavra, não modelo de linguagem — mesma regra
+ * dos sinais da escuta, e pelo mesmo motivo.
+ */
+const NECESSIDADE_TEMA = [
+  [["pressa", "rapid", "urgent", "hoje", "amanha", "semana", "quitar", "divida", "dinheiro"], ["Agilidade/Rapidez", "Pagamento/Pix rápido", "Venda rápida do veículo"]],
+  [["desconfia", "medo", "golpe", "segur", "confia"], ["Confiança/Segurança", "Transparência"]],
+  [["burocra", "document", "papel", "transfer"], ["Sem burocracia", "Documentação"]],
+  [["preco", "valor", "pouco", "baixo", "caro"], ["Preço/Valor justo", "Negociação"]],
+  [["combinad", "prometeu", "cumpr"], ["Cumpriu o combinado", "Transparência"]],
+];
+
+/**
+ * A biblioteca de testemunhais da etapa O.
+ *
+ * São as avaliações de verdade do perfil da loja no Google — 750 com
+ * texto, tema e colaborador citado, das 994 positivas que o Derek
+ * levantou. Ficam em `testemunhais.json`, servido como arquivo estático:
+ * 171 KB dentro do index.html pesariam em toda abertura do sistema, e
+ * aqui só descem quando o negociador abre o bloco. E arquivo estático
+ * não gasta função da Vercel, que está em 12 de 12.
+ *
+ * O filtro por colaborador é o que faz diferença na mesa: o negociador
+ * mostra avaliação em que o nome dele aparece. Por isso ele já entra
+ * marcado quando o nome bate com alguém citado.
+ */
+function Testemunhais({ necessidade, negociador, aoMostrar }) {
+  const [tudo, setTudo] = useState(null);
+  const [erro, setErro] = useState("");
+  const [tema, setTema] = useState("");
+  const [soMeus, setSoMeus] = useState(false);
+  const [quantos, setQuantos] = useState(5);
+
+  useEffect(() => {
+    fetch("/testemunhais.json")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Não consegui carregar as avaliações."))))
+      .then(setTudo)
+      .catch((e) => { setErro(e.message); setTudo([]); });
+  }, []);
+
+  // O primeiro nome basta: a planilha traz "Tiago/Thiago" e "André".
+  const meuNome = semAcento(String(negociador || "").trim().split(/\s+/)[0] || "").toLowerCase();
+  const ehMeu = (r) => !!meuNome && semAcento(r.c || "").toLowerCase().indexOf(meuNome) >= 0;
+  const tenhoMinhas = !!(tudo || []).some(ehMeu);
+
+  // Sugestão a partir do que o negociador escreveu na necessidade.
+  const sugeridos = useMemo(() => {
+    const t = semAcento(necessidade || "").toLowerCase();
+    if (!t.trim()) return [];
+    const achados = [];
+    NECESSIDADE_TEMA.forEach(([palavras, temas]) => {
+      if (palavras.some((p) => t.indexOf(p) >= 0)) temas.forEach((x) => { if (achados.indexOf(x) < 0) achados.push(x); });
+    });
+    return achados;
+  }, [necessidade]);
+
+  useEffect(() => { if (sugeridos.length && !tema) setTema(sugeridos[0]); }, [sugeridos.length]);
+  useEffect(() => { if (tenhoMinhas) setSoMeus(true); }, [tenhoMinhas]);
+
+  const lista = (tudo || [])
+    .filter((r) => (!tema || (r.k || []).indexOf(tema) >= 0))
+    .filter((r) => (!soMeus || ehMeu(r)));
+
+  if (tudo === null) return <p className="text-[12px]" style={{ color: C.mute }}>Carregando as avaliações…</p>;
+  if (erro) return <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>;
+
+  return (
+    <div>
+      {!!sugeridos.length && (
+        <p className="mb-2 text-[11px]" style={{ color: C.mute }}>
+          Pelo que você escreveu, o que convence este cliente é{" "}
+          <b style={{ color: C.ink }}>{sugeridos.join(" ou ")}</b>.
+        </p>
+      )}
+
+      <div className="flex gap-1.5 overflow-x-auto pb-1">
+        <button onClick={() => setTema("")}
+          className="shrink-0 rounded-full px-3 py-1 text-[11px]"
+          style={{ background: tema === "" ? C.roxo : "#fff", color: tema === "" ? "#fff" : C.mute, border: `1px solid ${C.line}` }}>
+          Todos
+        </button>
+        {TEMAS_TESTEMUNHAL.map((t) => (
+          <button key={t} onClick={() => setTema(t === tema ? "" : t)}
+            className="shrink-0 rounded-full px-3 py-1 text-[11px]"
+            style={{
+              background: tema === t ? C.roxo : "#fff",
+              color: tema === t ? "#fff" : (sugeridos.indexOf(t) >= 0 ? C.roxo : C.mute),
+              border: `1px solid ${sugeridos.indexOf(t) >= 0 ? C.roxo : C.line}`,
+              fontWeight: sugeridos.indexOf(t) >= 0 ? 700 : 400,
+            }}>
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {tenhoMinhas && (
+        <div className="mt-2">
+          <Toggle label={`Só as que citam ${String(negociador).split(/\s+/)[0]}`}
+            nota="Avaliação com o seu nome vale mais que uma genérica."
+            valor={soMeus} onChange={setSoMeus} />
+        </div>
+      )}
+
+      <p className="mt-2 text-[11px]" style={{ color: C.mute }}>
+        {lista.length} avaliação{lista.length === 1 ? "" : "ões"} de 5 estrelas no Google.
+      </p>
+
+      <div className="mt-2 space-y-2">
+        {lista.slice(0, quantos).map((r, i) => (
+          <div key={i} className="rounded-md p-3" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
+            <p className="text-[13px] leading-relaxed">“{r.t}”</p>
+            <div className="mt-1.5 flex items-baseline justify-between gap-2">
+              <span className="text-[11px] font-semibold">{r.n}</span>
+              <span className="text-[10px]" style={{ color: C.mute }}>
+                ★★★★★ · {r.q}{r.c ? ` · ${r.c}` : ""}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {lista.length > quantos && (
+        <button onClick={() => setQuantos(quantos + 10)}
+          className="mt-2 w-full rounded-md border py-2 text-[12px] font-semibold"
+          style={{ borderColor: C.line, color: C.roxo }}>
+          Ver mais {Math.min(10, lista.length - quantos)}
+        </button>
+      )}
+
+      {!lista.length && (
+        <p className="mt-2 text-[12px]" style={{ color: C.mute }}>
+          Nenhuma avaliação com esse filtro. Tire o tema ou desmarque o seu nome.
+        </p>
       )}
     </div>
   );
