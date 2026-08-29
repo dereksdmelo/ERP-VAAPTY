@@ -3144,16 +3144,32 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         {/* ---------- T ---------- */}
         {etapa === "T" && (
           <>
-            <Bloco titulo="Aceite e cautelar">
+            {/* Primeiro de propósito, a pedido do Derek: é aqui que o
+                valor fecha. O pré-contrato e o contrato final saem com
+                esse número, e documento gerado com valor que ainda vai
+                mudar é documento para refazer. */}
+            <Bloco titulo="Quanto fechou" sub="Este número vai para o pré-contrato, para o contrato e para a conta abaixo.">
+              <div className="grid grid-cols-2 gap-2.5">
+                <Campo label="Valor fechado" req>
+                  <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric"
+                    value={f.valorFechado} onChange={(e) => set("valorFechado", e.target.value)} />
+                </Campo>
+                <Campo label="Forma">
+                  <select className={inputCls} style={inputSty} value={f.formaFechamento} onChange={(e) => set("formaFechamento", e.target.value)}>
+                    {FECHAMENTO.map((o) => <option key={o}>{o}</option>)}
+                  </select>
+                </Campo>
+              </div>
+            </Bloco>
+
+            <Bloco titulo="Check list do negócio" sub="A conta do negócio e os dados bancários. Preenchido aqui, não no papel — o administrativo confere na tela dele depois, e o sistema carimba quem conferiu.">
+              <ChecklistDigital atendimentoId={atendimento ? atendimento.id : null}
+                ficha={f} perfil={perfil} aoCarregar={setChecklist} />
+            </Bloco>
+
+            <Bloco titulo="Pré-contrato e cautelar"
+              sub="O pré-contrato é assinado antes de o carro ir para a cautelar — é ele que segura o negócio enquanto o laudo não sai.">
               <div className="space-y-2.5">
-                <div className="grid grid-cols-2 gap-2.5">
-                  <Campo label="Valor fechado"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.valorFechado} onChange={(e) => set("valorFechado", e.target.value)} /></Campo>
-                  <Campo label="Forma">
-                    <select className={inputCls} style={inputSty} value={f.formaFechamento} onChange={(e) => set("formaFechamento", e.target.value)}>
-                      {FECHAMENTO.map((o) => <option key={o}>{o}</option>)}
-                    </select>
-                  </Campo>
-                </div>
                 <Toggle label="Aceite final assinado" valor={f.aceiteFinal} onChange={(v) => set("aceiteFinal", v)} />
                 <Toggle label="Carro enviado para a cautelar" valor={f.cautelarEnviado} onChange={(v) => set("cautelarEnviado", v)} />
                 <div className="grid grid-cols-2 gap-2">
@@ -3307,11 +3323,6 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 key={guardados} />
             </Bloco>
 
-            <Bloco titulo="Check list do negócio" sub="Preenchido aqui, não no papel. O administrativo confere na mesma tela depois, e o sistema carimba quem conferiu.">
-              <ChecklistDigital atendimentoId={atendimento ? atendimento.id : null}
-                ficha={f} perfil={perfil} aoCarregar={setChecklist} />
-            </Bloco>
-
             {/* Por último de propósito, a pedido do Derek: a conta do
                 negócio e os dados bancários vêm antes, porque é o que
                 fecha o valor. Contrato gerado com número que ainda vai
@@ -3322,6 +3333,15 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
             {f.cautelarResultado === "aprovada" && (
               <Bloco titulo="Contrato final" sub="O comprador é o lojista que leva o carro — a outra parte do contrato, não o cliente que vende.">
                 <div className="space-y-2.5">
+                  {/* O renavam também aqui, a pedido do Derek: ele não
+                      vem da consulta de placa, e é no contrato que a
+                      falta aparece. Quem descobre na hora não precisa
+                      voltar até a Pesquisa para digitar. */}
+                  <Campo label="Renavam do carro" req>
+                    <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric"
+                      value={f.renavam} onChange={(e) => set("renavam", e.target.value)}
+                      placeholder="do CRLV — o contrato pede" />
+                  </Campo>
                   <Campo label="Nome do comprador" req>
                     <input className={inputCls} style={inputSty} value={cliente.comprador_nome}
                       onChange={(e) => setCliente({ ...cliente, comprador_nome: e.target.value })} />
