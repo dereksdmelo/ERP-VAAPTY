@@ -926,7 +926,7 @@ consulta por linha.
   letra no descritivo público. Não expor placa cheia em material que vai
   para grupo.
 - **`<Pendente>`** marca o que ainda não existe e por quê (vídeo do
-  processo, argumentos de objeção,
+  argumentos de objeção,
   escuta por IA). São promessas visíveis ao usuário — só remover junto
   com a entrega da funcionalidade.
 

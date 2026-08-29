@@ -2708,19 +2708,15 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
           <>
             <Bloco titulo="Mostre como funciona" sub="O cliente aceita um número menor quando entende de onde ele veio.">
               <div className="space-y-2.5">
-                <a href="/apresentacao.pdf" target="_blank" rel="noopener noreferrer"
-                  onClick={() => set("mostrouProcesso", true)}
-                  className="block w-full rounded-md py-3 text-center text-[14px] font-semibold"
-                  style={{ background: C.roxo, color: "#fff" }}>
-                  Abrir a apresentação
-                </a>
+                <Apresentacao aoAbrir={() => { if (!f.mostrouProcesso) set("mostrouProcesso", true); }} />
                 <p className="text-[11px] leading-relaxed" style={{ color: C.mute }}>
-                  Onze páginas. Abre em aba nova, para você virar na frente do cliente. Abrir já marca que o processo foi mostrado.
+                  Onze páginas, aqui mesmo — arraste ou use os botões para virar na frente do cliente. Abrir já marca que o processo foi mostrado.
                 </p>
                 <Toggle label="Mostrei o processo completo ao cliente" valor={f.mostrouProcesso} onChange={(v) => set("mostrouProcesso", v)} />
-                <Pendente>
-                  O vídeo do processo ainda não existe — a apresentação cobre a explicação, mas vídeo prende mais atenção do que slide. Me manda quando gravar.
-                </Pendente>
+                <a href="/apresentacao.pdf" target="_blank" rel="noopener noreferrer"
+                  className="block text-[11px] underline" style={{ color: C.mute }}>
+                  Baixar o PDF — para mandar por WhatsApp
+                </a>
               </div>
             </Bloco>
 
@@ -5286,6 +5282,77 @@ const NECESSIDADE_TEMA = [
  * mostra avaliação em que o nome dele aparece. Por isso ele já entra
  * marcado quando o nome bate com alguém citado.
  */
+/**
+ * A apresentação na própria tela, em vez de abrir o PDF em outra aba.
+ *
+ * O Derek pediu assim depois de desistir do vídeo: virar as páginas na
+ * frente do cliente, sem sair do sistema e sem depender do leitor de
+ * PDF do celular — que no iPhone abre o arquivo inteiro numa aba e
+ * quase sempre volta para a primeira página.
+ *
+ * As onze páginas foram extraídas do próprio `apresentacao.pdf`, que
+ * era feito de uma imagem por página, e viraram JPEG de 1200 px:
+ * 1,5 MB no total contra 9,2 MB do PDF. Descem uma a uma, e não de
+ * uma vez, porque isso acontece no 4G do pátio.
+ *
+ * O PDF continua no lugar, para quando ele quiser mandar por WhatsApp.
+ */
+const APRESENTACAO_PAGINAS = 11;
+
+function Apresentacao({ aoAbrir }) {
+  const [pag, setPag] = useState(1);
+  const trilho = useRef(null);
+
+  const ir = (n) => {
+    const alvo = Math.min(APRESENTACAO_PAGINAS, Math.max(1, n));
+    setPag(alvo);
+    if (trilho.current) {
+      trilho.current.scrollTo({ left: trilho.current.clientWidth * (alvo - 1), behavior: "smooth" });
+    }
+  };
+
+  // Arrastar com o dedo também conta: o indicador segue o que está na
+  // tela, e não só o que os botões mandaram.
+  const aoRolar = () => {
+    if (!trilho.current) return;
+    const largura = trilho.current.clientWidth || 1;
+    const atual = Math.round(trilho.current.scrollLeft / largura) + 1;
+    if (atual !== pag) setPag(atual);
+  };
+
+  return (
+    <div>
+      <div ref={trilho} onScroll={aoRolar}
+        className="flex overflow-x-auto rounded-md"
+        style={{ scrollSnapType: "x mandatory", border: `1px solid ${C.line}`, background: "#000" }}>
+        {Array.from({ length: APRESENTACAO_PAGINAS }, (_, i) => (
+          <img key={i} src={`/apresentacao/${String(i + 1).padStart(2, "0")}.jpg`}
+            alt={`Página ${i + 1}`}
+            loading={i === 0 ? "eager" : "lazy"}
+            onLoad={i === 0 && aoAbrir ? aoAbrir : undefined}
+            style={{ width: "100%", flex: "0 0 100%", scrollSnapAlign: "start", display: "block" }} />
+        ))}
+      </div>
+
+      <div className="mt-2 flex items-center justify-between gap-3">
+        <button onClick={() => ir(pag - 1)} disabled={pag <= 1}
+          className="rounded-md border px-4 py-2 text-[13px] font-semibold"
+          style={{ borderColor: C.line, color: pag <= 1 ? C.mute : C.roxo }}>
+          ‹ Anterior
+        </button>
+        <span className="text-[12px]" style={{ color: C.mute, fontFamily: F.mono }}>
+          {pag} de {APRESENTACAO_PAGINAS}
+        </span>
+        <button onClick={() => ir(pag + 1)} disabled={pag >= APRESENTACAO_PAGINAS}
+          className="rounded-md border px-4 py-2 text-[13px] font-semibold"
+          style={{ borderColor: C.line, color: pag >= APRESENTACAO_PAGINAS ? C.mute : C.roxo }}>
+          Próxima ›
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Testemunhais({ necessidade, negociador, aoMostrar }) {
   const [tudo, setTudo] = useState(null);
   const [erro, setErro] = useState("");
