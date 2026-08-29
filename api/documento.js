@@ -121,14 +121,21 @@ function emMarkdown(html) {
 }
 
 async function zapsign(req, res, tok) {
+  // GET é o teste de saúde: diz se a chave existe, sem nunca devolvê-la.
+  // Sem isto, a única forma de descobrir que a variável não subiu seria
+  // errar na frente do cliente, na hora de mandar o contrato.
+  if (req.method === "GET") {
+    return res.status(200).json({ configurado: !!ZAP_TOKEN });
+  }
+
   if (!ZAP_TOKEN) {
     return res.status(503).json({
       erro: "A chave do ZapSign não está configurada. Ela vai em ZAPSIGN_TOKEN, nas variáveis de ambiente da Vercel.",
     });
   }
   if (req.method !== "POST") {
-    res.setHeader("Allow", "POST");
-    return res.status(405).json({ erro: "Use POST." });
+    res.setHeader("Allow", "GET, POST");
+    return res.status(405).json({ erro: "Use GET ou POST." });
   }
 
   let c = req.body;

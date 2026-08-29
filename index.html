@@ -489,6 +489,11 @@ async function apagarAnexo(id) {
 /* ----------- assinatura eletrônica ----------- */
 // A chave da conta fica no servidor. Daqui vai só o conteúdo e quem
 // assina — nunca o token.
+async function zapsignConfigurado() {
+  const r = await fetchAut("/api/documento?recurso=zapsign");
+  const d = await r.json().catch(() => ({}));
+  return !!d.configurado;
+}
 async function enviarParaAssinatura(atendimentoId, dados) {
   const r = await fetchAut("/api/documento?recurso=zapsign", {
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -1954,6 +1959,13 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   const [salvandoCliente, setSalvandoCliente] = useState(false);
   const [enviandoZap, setEnviandoZap] = useState(false);
   const [envioZap, setEnvioZap] = useState("");
+  // null enquanto não se sabe; a tela não afirma o que não conferiu.
+  const [zapOk, setZapOk] = useState(null);
+
+  useEffect(() => {
+    if (etapa !== "T") return;
+    zapsignConfigurado().then(setZapOk).catch(() => setZapOk(null));
+  }, [etapa]);
   const [erroCliente, setErroCliente] = useState("");
   const [erroCanais, setErroCanais] = useState("");
   const [novaRodada, setNovaRodada] = useState({ impresso: "", contra: "" });
@@ -3284,6 +3296,11 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                           }}>
                           {enviandoZap ? "Enviando…" : "Enviar para assinatura no ZapSign"}
                         </button>
+                        <p className="text-[11px]" style={{ color: zapOk === false ? C.laranja : C.mute }}>
+                          {zapOk === null ? "Conferindo a chave do ZapSign…"
+                            : zapOk ? "Chave do ZapSign configurada."
+                            : "A chave do ZapSign não chegou à Vercel. Confira a variável ZAPSIGN_TOKEN em Settings → Environment Variables e refaça o deploy."}
+                        </p>
                         {!cliente.comprador_email && !cliente.comprador_telefone && (
                           <p className="text-[11px]" style={{ color: C.mute }}>
                             O ZapSign precisa de e-mail ou telefone do comprador para mandar o convite.
