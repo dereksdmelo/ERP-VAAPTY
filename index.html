@@ -479,6 +479,17 @@ async function enviarAnexo(atendimentoId, arquivo, rotulo) {
   if (!r.ok) throw new Error(d.erro || "Não consegui anexar.");
   return d.anexo;
 }
+// Traz a via assinada do ZapSign para o bucket. O webhook só marca a
+// data: ele chega sem login e não pode escrever arquivo.
+async function guardarContratoAssinado(atendimentoId) {
+  const r = await fetchAut("/api/foto?recurso=anexo&acao=contrato-assinado", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ atendimento_id: atendimentoId }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui guardar o contrato assinado.");
+  return d;
+}
 async function apagarAnexo(id) {
   const r = await fetchAut(`/api/foto?recurso=anexo&id=${encodeURIComponent(id)}`, { method: "DELETE" });
   const d = await r.json().catch(() => ({}));
@@ -1961,6 +1972,11 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   const [envioZap, setEnvioZap] = useState("");
   // null enquanto não se sabe; a tela não afirma o que não conferiu.
   const [zapOk, setZapOk] = useState(null);
+  const [guardandoVia, setGuardandoVia] = useState(false);
+  const [erroVia, setErroVia] = useState("");
+  // Muda a chave do bloco de anexos para ele recarregar depois que a
+  // via assinada entra — senão a lista mostraria o estado de antes.
+  const [guardados, setGuardados] = useState(0);
 
   useEffect(() => {
     if (etapa !== "T") return;
@@ -3313,9 +3329,27 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                           </p>
                         )}
                         {atendimento && atendimento.contrato_assinado_em && (
-                          <p className="text-[12px] font-semibold" style={{ color: C.verde }}>
-                            Contrato assinado em {new Date(atendimento.contrato_assinado_em).toLocaleString("pt-BR")}.
-                          </p>
+                          <div className="rounded-md p-3" style={{ background: "#F0F8F4", border: `1px solid ${C.verde}` }}>
+                            <p className="text-[12px] font-semibold" style={{ color: C.verde }}>
+                              Contrato assinado em {new Date(atendimento.contrato_assinado_em).toLocaleString("pt-BR")}.
+                            </p>
+                            <button
+                              disabled={!!guardandoVia}
+                              onClick={async () => {
+                                setErroVia(""); setGuardandoVia(true);
+                                try {
+                                  const d = await guardarContratoAssinado(atendimento.id);
+                                  setErroVia(d.ja_guardado ? "A via assinada já está nos anexos." : "Guardado nos anexos do fechamento.");
+                                  setGuardados((n) => n + 1);
+                                } catch (e) { setErroVia(e.message); }
+                                setGuardandoVia(false);
+                              }}
+                              className="mt-2 w-full rounded-md py-2 text-[12px] font-semibold"
+                              style={{ background: guardandoVia ? C.line : C.verde, color: "#fff" }}>
+                              {guardandoVia ? "Guardando…" : "Guardar a via assinada nos anexos"}
+                            </button>
+                            {erroVia && <p className="mt-1 text-[11px]" style={{ color: C.mute }}>{erroVia}</p>}
+                          </div>
                         )}
                       </>
                     );
@@ -3327,7 +3361,8 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
             <Bloco titulo="Anexos do fechamento"
               sub="Comprovante de residência, laudo da cautelar e comprovante de pagamento.">
               <Anexos atendimentoId={atendimento ? atendimento.id : null}
-                rotulos={["Comprovante de residência", "Laudo cautelar", "Comprovante de pagamento", "Outro"]} />
+                rotulos={["Comprovante de residência", "Laudo cautelar", "Comprovante de pagamento", "Contrato assinado", "Outro"]}
+                key={guardados} />
             </Bloco>
 
             {/* A cautelar pode reprovar, e aí a negociação reabre.
@@ -3430,9 +3465,6 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
             <Bloco titulo="Depois da cautelar">
               <div className="space-y-2.5">
                 <Toggle label="Contrato assinado" valor={f.contratoAssinado} onChange={(v) => set("contratoAssinado", v)} />
-                <Pendente>
-                  Assinatura pelo ZapSign entra neste ponto, junto com o anexo dos documentos da negociação. Depende do backend: contrato assinado precisa ficar guardado e recuperável.
-                </Pendente>
               </div>
             </Bloco>
           </>

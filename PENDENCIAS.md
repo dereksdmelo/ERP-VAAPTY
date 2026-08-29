@@ -221,7 +221,7 @@ apagar sem entregar é mentir para o negociador.
 | Etapa O | vídeo explicando o processo | vocês gravarem |
 | Etapa O | biblioteca de testemunhais, filtrada pela necessidade do cliente | vocês reunirem prints, fotos e vídeos |
 | Etapa N | argumentos de IA por objeção | coletar com os negociadores o que funciona |
-| Etapa T | assinatura por ZapSign | integração |
+
 | Espera | resumo da conversa por IA de verdade | chave paga de LLM e uma função — a Vercel está em 12 de 12. A escuta e a transcrição já estão no ar (28/08/2026); o que existe hoje são sinais por palavra-chave, e a tela diz isso |
 
 ---

@@ -160,8 +160,11 @@ const TIPOS_DOC = {
 
 const ROTULOS = [
   "CRLV", "CNH", "Identidade", "Comprovante de residência",
-  "Laudo cautelar", "Comprovante de pagamento", "Outro",
+  "Laudo cautelar", "Comprovante de pagamento", "Contrato assinado", "Outro",
 ];
+
+const ZAPSIGN = "https://api.zapsign.com.br/api/v1";
+const ZAP_TOKEN = process.env.ZAPSIGN_TOKEN || "";
 
 /**
  * Anexos do negócio (0008): CRLV em PDF, CNH ou identidade do cliente,
@@ -219,6 +222,92 @@ async function anexos(req, res, tok) {
 
     const aid = String(corpo.atendimento_id || "");
     if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
+
+    /* Guardar o contrato assinado.
+     *
+     * O webhook só marca a data: ele chega sem login e não pode escrever
+     * arquivo. Aqui há sessão, então é onde a via assinada entra para o
+     * bucket e vira anexo como qualquer outro documento do negócio.
+     *
+     * Sem isto, "assinado" seria uma data no banco e um PDF que só
+     * existe dentro do ZapSign — e contrato que a casa não tem em mãos
+     * não serve quando alguém pede. */
+    if (String(req.query.acao || "") === "contrato-assinado") {
+      if (!ZAP_TOKEN) return res.status(503).json({ erro: "A chave do ZapSign não está configurada." });
+
+      // Idempotente: repetir o botão não empilha vias.
+      const jaTem = await banco(
+        `${REST("anexo")}?select=id&atendimento_id=eq.${aid}&rotulo=eq.${encodeURIComponent("Contrato assinado")}&limit=1`,
+        { headers: cabecalhos(tok) }
+      );
+      if (Array.isArray(jaTem) && jaTem[0]) {
+        return res.status(200).json({ ok: true, ja_guardado: true });
+      }
+
+      // A leitura pelo token do usuário é o que confirma o acesso.
+      const at = await banco(
+        `${REST("atendimento")}?select=contrato_zapsign_token,contrato_assinado_em&id=eq.${aid}&limit=1`,
+        { headers: cabecalhos(tok) }
+      );
+      const linhaAt = Array.isArray(at) ? at[0] : null;
+      const zapTok = linhaAt && linhaAt.contrato_zapsign_token;
+      if (!zapTok) return res.status(404).json({ erro: "Este atendimento não tem contrato no ZapSign." });
+
+      let doc;
+      try {
+        const r = await fetch(`${ZAPSIGN}/docs/${encodeURIComponent(zapTok)}/`, {
+          headers: { Authorization: `Bearer ${ZAP_TOKEN}` },
+        });
+        if (!r.ok) return res.status(502).json({ erro: "O ZapSign não devolveu o documento." });
+        doc = await r.json();
+      } catch (e) {
+        return res.status(502).json({ erro: "Não consegui falar com o ZapSign." });
+      }
+
+      if (String(doc.status || "").toLowerCase() !== "signed") {
+        return res.status(409).json({ erro: "O contrato ainda não está assinado no ZapSign." });
+      }
+      const urlPdf = doc.signed_file || doc.original_file;
+      if (!urlPdf) return res.status(502).json({ erro: "O ZapSign não devolveu o arquivo assinado." });
+
+      let pdf;
+      try {
+        const r = await fetch(urlPdf);
+        if (!r.ok) throw new Error("download");
+        pdf = Buffer.from(await r.arrayBuffer());
+      } catch (e) {
+        return res.status(502).json({ erro: "Não consegui baixar o contrato assinado." });
+      }
+      if (!pdf.length || pdf.length > MAX_DOC) {
+        return res.status(413).json({ erro: "Arquivo assinado vazio ou maior que 10 MB." });
+      }
+
+      const caminhoAss = `${aid}/${Date.now()}-${sufixo()}.pdf`;
+      await arquivos(`${STORAGE()}/object/${BUCKET_DOC}/${paraURL(caminhoAss)}`, {
+        method: "POST",
+        headers: hArquivo({ "Content-Type": "application/pdf", "Cache-Control": "3600", "x-upsert": "false" }),
+        body: pdf,
+      });
+
+      let salvo;
+      try {
+        const r = await banco(REST("anexo"), {
+          method: "POST",
+          headers: json(tok, { Prefer: "return=representation" }),
+          body: JSON.stringify({
+            atendimento_id: aid, caminho: caminhoAss, tipo: "application/pdf",
+            bytes: pdf.length, nome: "contrato-assinado.pdf", rotulo: "Contrato assinado",
+          }),
+        });
+        salvo = Array.isArray(r) ? r[0] : r;
+      } catch (e) {
+        await apagarDoc(caminhoAss);
+        throw e;
+      }
+
+      const urls = await assinarDoc([caminhoAss]);
+      return res.status(201).json({ ok: true, anexo: { ...salvo, url: urls[caminhoAss] || null } });
+    }
 
     const tipo = String(corpo.tipo || "");
     const ext = TIPOS_DOC[tipo];

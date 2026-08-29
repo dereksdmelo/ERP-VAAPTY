@@ -819,6 +819,41 @@ batida no botão de duplicar a fila da pré-venda.
 truque dos negociadores em `/api/perfil`. É acomodação do teto de 12
 funções, não arquitetura.
 
+### 21. Assinatura eletrônica: markdown, e uma função estreita no banco
+
+O contrato final vai ao ZapSign como **`markdown_text`**, que a API
+aceita. Foi isso que evitou depender de gerar PDF no servidor — sem
+biblioteca, e este projeto não tem nenhuma de propósito, não haveria
+saída.
+
+**O contrato tem uma fonte só**: o HTML que a tela imprime.
+`emMarkdown()` converte na hora do envio, e conhece apenas as tags que
+`moldura` produz — é isso que a torna confiável. Manter duas versões do
+mesmo texto jurídico seria repetir a armadilha do `documentos.js`.
+
+**A chave da conta (`ZAPSIGN_TOKEN`) só existe em variável de
+ambiente.** Não está no repositório, não vai ao navegador, não aparece
+em log. O `GET /api/documento?recurso=zapsign` responde apenas se ela
+existe, nunca o valor: sem esse teste, descobrir que a variável não
+subiu seria errar na frente do cliente.
+
+**O webhook chega sem login**, e duas coisas o seguram:
+
+1. **O corpo não é acreditado.** O status é confirmado consultando o
+   próprio ZapSign com a nossa chave — POST à toa não marca nada.
+2. **A escrita passa por `marcar_contrato_assinado()`** (0015), função
+   `security definer` que só sabe fazer isso, e só para token que já foi
+   gravado no envio. A chave de serviço continua confinada ao Storage,
+   no `api/foto.js` — era a alternativa, e teria aberto a tabela
+   `atendimento` inteira, que tem CPF e telefone de cliente.
+
+**A via assinada é baixada e guardada.** O webhook só marca a data; ele
+não tem sessão para escrever arquivo. Quem traz o PDF do ZapSign para o
+bucket é `POST /api/foto?recurso=anexo&acao=contrato-assinado`, com o
+token do usuário, e a operação é idempotente. Sem isso, "assinado" seria
+uma data no banco e um PDF que só existe dentro do ZapSign — e contrato
+que a casa não tem em mãos não serve quando alguém pede.
+
 ### 20. A cautelar reprova, e aí o negócio volta para a mesa
 
 Faltava o passo entre o pré-contrato e o contrato: o laudo. Aprovou,
@@ -891,7 +926,7 @@ consulta por linha.
   letra no descritivo público. Não expor placa cheia em material que vai
   para grupo.
 - **`<Pendente>`** marca o que ainda não existe e por quê (vídeo do
-  processo, biblioteca de testemunhais, argumentos de objeção, ZapSign,
+  processo, argumentos de objeção,
   escuta por IA). São promessas visíveis ao usuário — só remover junto
   com a entrega da funcionalidade.
 
