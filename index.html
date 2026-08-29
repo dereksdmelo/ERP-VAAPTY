@@ -1262,6 +1262,10 @@ function moldura({ titulo, corpo, protocolo, logo, paisagem }) {
   table.col td { padding: 1.4px 5px; }
   table.col th:first-child, table.col td.n { width: 8mm; color: #6B6478; }
   table.col td.v { text-align: right; white-space: nowrap; }
+  table.dados td.num { text-align: right; font-family: 'Courier New', monospace;
+                       white-space: nowrap; }
+  table.dados.conta tr.liquido td { font-weight: 700; font-size: 11.5pt;
+                                    background: #F1FAF3; border-top: 2px solid #15121a; }
   table.col td.destaque { background: #DCEFDC; font-weight: 700; }
 </style></head><body>
 ${logo
@@ -1367,7 +1371,50 @@ const VAAPTY_PJ = "Vaapty Intermediação Veicular LTDA · CNPJ 34.840.903/0001-
  * vigor — mas contrato que cita uma parte que não define é o tipo de
  * coisa que aparece quando dá briga.
  */
-function contratoFinal(f) {
+/**
+ * A conta do negócio e os dados bancários, no papel.
+ *
+ * As duas tabelas moram no check list (0008), não na ficha do veículo —
+ * por isso o contrato precisa recebê-lo. Antes disso ele saía sem elas,
+ * que foi o que o Derek viu.
+ *
+ * **Atenção ao que isto expõe.** A conta bancária e a chave PIX são do
+ * VENDEDOR, e este contrato é assinado pelo COMPRADOR. Sair na mesma
+ * folha significa entregar os dados de pagamento de um ao outro — e
+ * conta bancária é dado sensível ao ponto de fraude. Foi pedido assim,
+ * e está feito; se um dia isso tiver que sair, o lugar é um anexo
+ * separado, que o check list já é.
+ */
+function contaDoNegocio(cl) {
+  if (!cl) return "";
+  const c = (v) => numeroBR(v);
+  const descontos = CL_DESCONTOS.reduce((soma, [k]) => soma + c(cl[k]), 0);
+  const venda = c(cl.valor_venda);
+  const liquido = venda - descontos;
+
+  const linhas = CL_DESCONTOS
+    .filter(([k]) => c(cl[k]) > 0)
+    .map(([k, r]) => `<tr><td class="r">− ${r}</td><td class="num">${brlDoc(c(cl[k]))}</td></tr>`)
+    .join("");
+
+  const banco = CL_BANCO
+    .map(([k, r]) => `<tr><td class="r">${r}</td><td>${ou(cl[k], r.toLowerCase())}</td></tr>`)
+    .join("");
+
+  return `<p><strong>A CONTA DO NEGÓCIO</strong></p>
+<table class="dados conta">
+  <tr><td class="r">Valor de venda</td><td class="num">${brlDoc(venda)}</td></tr>
+  ${linhas}
+  <tr class="liquido"><td class="r">Líquido ao cliente</td><td class="num">${brlDoc(liquido)}</td></tr>
+</table>
+
+<p><strong>DADOS BANCÁRIOS PARA O PAGAMENTO</strong></p>
+<table class="dados">
+  ${banco}
+</table>`;
+}
+
+function contratoFinal(f, cl) {
   const anos = String(f.ano || "").split("/");
   const corpo = `<h1>Contrato particular de compra e venda de veículo<br>automotor mediante intermediação</h1>
 
@@ -1420,6 +1467,8 @@ descrito, cuja negociação foi aproximada pela INTERMEDIADORA.</p>
   <tr><td class="r">Valor FIPE</td><td>${brlDoc(f.fipe)}</td></tr>
   <tr><td class="r">Valor da venda</td><td>${brlDoc(f.valorFechado)}</td></tr>
 </table>
+
+${contaDoNegocio(cl)}
 
 <p><strong>CLÁUSULA TERCEIRA – DA NATUREZA JURÍDICA DA INTERMEDIAÇÃO</strong></p>
 <p>A INTERMEDIADORA atua exclusivamente como mandatária e aproximadora das partes, prestando
@@ -3395,7 +3444,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                       <>
                         <button disabled={!pronto}
                           onClick={() => gerarDocumento("contrato_final", "Contrato de compra e venda",
-                            contratoFinal({ ...dadosDoc, ...cliente }), null)}
+                            contratoFinal({ ...dadosDoc, ...cliente }, checklist), null)}
                           className="w-full rounded-md py-3 text-[14px] font-semibold"
                           style={{ background: pronto ? C.roxo : "#E7E3EC", color: pronto ? "#fff" : C.mute }}>
                           Imprimir o contrato de compra e venda
@@ -3415,7 +3464,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                             try {
                               const r = await enviarParaAssinatura(atendimento.id, {
                                 nome: `Contrato de compra e venda — ${f.placa || "sem placa"}`,
-                                conteudo: contratoFinal({ ...dadosDoc, ...cliente }),
+                                conteudo: contratoFinal({ ...dadosDoc, ...cliente }, checklist),
                                 signatarios: [{
                                   nome: cliente.comprador_nome,
                                   email: cliente.comprador_email,
