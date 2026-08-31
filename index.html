@@ -2579,12 +2579,13 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   // Sem estes quatro, o documento sai com lacuna. E papel com lacuna
   // volta para ser preenchido depois — que é como contrato acaba
   // assinado pela metade.
-  // O endereço saiu da trava a pedido do Derek: ele não quer perguntar
-  // ao cliente o que já está na CNH e no CRLV. A cláusula continua nos
-  // documentos — é texto assinado, não se apaga — e sai com a linha em
-  // branco para preencher à mão quando o papel exigir.
+  // Só nome e CPF travam a impressão. Endereço e RG saíram a pedido do
+  // Derek: ele não quer perguntar de saída o que está na CNH e no CRLV,
+  // e os dois são pedidos no fechamento, junto do contrato. As cláusulas
+  // continuam nos documentos — é texto assinado, não se apaga — e saem
+  // com a linha em branco quando o campo estiver vazio.
   const OBRIG_CLIENTE = [
-    ["cliente_nome", "Nome"], ["cliente_cpf", "CPF"], ["cliente_rg", "RG"],
+    ["cliente_nome", "Nome"], ["cliente_cpf", "CPF"],
   ];
   const faltamCliente = OBRIG_CLIENTE.filter(([k]) => !String(cliente[k] || "").trim());
   const podeImprimir = faltamCliente.length === 0;
@@ -2622,33 +2623,19 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   };
 
   const blocoCliente = (
-    <Bloco titulo="Dados do cliente" sub="Nome, CPF e RG travam a impressão — papel com lacuna volta para ser completado depois, e é assim que contrato acaba assinado pela metade. O resto é opcional: anexe o CRLV e a CNH em vez de perguntar.">
+    <Bloco titulo="Dados do cliente" sub="Aqui só o que se pergunta de saída: nome, CPF e telefone. RG e endereço ficam para o fechamento, junto do contrato — e saem do CRLV e da CNH que você anexa abaixo.">
       <div className="space-y-2.5">
         <Campo label="Nome completo" req>
           <input className={inputCls} style={inputSty} value={cliente.cliente_nome}
             onChange={(e) => setCliente({ ...cliente, cliente_nome: e.target.value })} />
         </Campo>
-        <div className="grid grid-cols-2 gap-2.5">
-          <Campo label="CPF" req>
-            <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric"
-              value={cliente.cliente_cpf} onChange={(e) => setCliente({ ...cliente, cliente_cpf: e.target.value })} />
-          </Campo>
-          <Campo label="RG" req>
-            <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }}
-              value={cliente.cliente_rg} onChange={(e) => setCliente({ ...cliente, cliente_rg: e.target.value })} />
-          </Campo>
-        </div>
+        <Campo label="CPF" req>
+          <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric"
+            value={cliente.cliente_cpf} onChange={(e) => setCliente({ ...cliente, cliente_cpf: e.target.value })} />
+        </Campo>
         <Campo label="Telefone">
           <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="tel"
             value={cliente.cliente_telefone} onChange={(e) => setCliente({ ...cliente, cliente_telefone: e.target.value })} />
-        </Campo>
-        {/* Sem `req`: não trava mais a impressão. A cláusula continua no
-            termo e no pré-contrato — é texto assinado — e sai com a
-            linha em branco quando este campo estiver vazio. O endereço
-            do proprietário está no CRLV, que agora é anexado. */}
-        <Campo label="Endereço — opcional, está no CRLV">
-          <input className={inputCls} style={inputSty} placeholder="Só se o papel exigir preenchido"
-            value={cliente.cliente_endereco} onChange={(e) => setCliente({ ...cliente, cliente_endereco: e.target.value })} />
         </Campo>
 
         <button onClick={salvarCliente} disabled={salvandoCliente}
@@ -3740,6 +3727,14 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                   {/* O contrato qualifica o cliente com cidade, bairro,
                       CEP e UF separados, e a 0007 guardava tudo numa
                       linha só. Está tudo no CRLV que ele já anexou. */}
+                  <Campo label="RG ou inscrição estadual">
+                    <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }}
+                      value={cliente.cliente_rg} onChange={(e) => setCliente({ ...cliente, cliente_rg: e.target.value })} />
+                  </Campo>
+                  <Campo label="Endereço">
+                    <input className={inputCls} style={inputSty} placeholder="rua e número, do CRLV"
+                      value={cliente.cliente_endereco} onChange={(e) => setCliente({ ...cliente, cliente_endereco: e.target.value })} />
+                  </Campo>
                   <div className="grid grid-cols-2 gap-2.5">
                     <Campo label="Cidade">
                       <input className={inputCls} style={inputSty} value={cliente.cliente_cidade}
