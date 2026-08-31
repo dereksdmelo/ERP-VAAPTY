@@ -1404,15 +1404,30 @@ function aceiteProposta(f, cl) {
 
   const c = (v) => numeroBR(v);
   const bruto = c(f.valorFechado) || c(cl && cl.valor_venda);
-  const deducoes = cl ? CL_DESCONTOS.filter(([k]) => c(cl[k]) > 0) : [];
-  const total = deducoes.reduce((soma, [k]) => soma + c(cl[k]), 0);
+
+  /* As quatro deduções saem SEMPRE, com valor ou com a linha em branco.
+   * Antes elas dependiam de o check list estar carregado, e sem ele o
+   * contrato imprimia sem dedução nenhuma — que foi o defeito que o
+   * Derek viu mais de uma vez.
+   *
+   * Débitos e quitação também existem na ficha, desde a Pesquisa: se o
+   * check list ainda não foi salvo, o número vem de lá em vez de sumir. */
+  const DEDUCOES = [
+    ["Cautelar", c(cl && cl.valor_cautelar)],
+    ["Débitos", c(cl && cl.valor_debitos) || c(f.debitos)],
+    ["Quitação do financiamento", c(cl && cl.valor_quitacao) || c(f.quitacao)],
+    ["Comissão Vaapty", c(cl && cl.comissao_vaapty)],
+  ];
+  const total = DEDUCOES.reduce((soma, [, v]) => soma + v, 0);
   const liquido = bruto - total;
 
-  const linhasDed = deducoes.length
-    ? deducoes.map(([k, r]) => `<tr><td>${r.toUpperCase()}</td><td class="num">${brlDoc(c(cl[k]))}</td></tr>`).join("")
-    : `<tr><td>—</td><td class="num">${brlDoc(0)}</td></tr>`;
+  const linhasDed = DEDUCOES
+    .map(([r, v]) => `<tr><td>${r.toUpperCase()}</td><td class="num">${v ? brlDoc(v) : brlDoc("")}</td></tr>`)
+    .join("");
 
-  const banco = (k) => ou(cl && cl[k], "");
+  // Com rótulo de verdade: sem check list salvo, a linha sai em branco
+  // para preencher à mão, e não como um espaço vazio sem sentido.
+  const banco = (k, rot) => ou(cl && cl[k], rot);
 
   const corpo = `<h1>Instrumento particular de aceite de proposta<br>de compra de veículo mediante intermediação</h1>
 
@@ -1477,9 +1492,10 @@ conforme demonstrativo abaixo:</p>
 
 <p><strong>VALOR BRUTO NEGOCIADO: ${brlDoc(bruto)}</strong></p>
 <table class="dados conta">
-  <tr><td class="r">Tipo de documento ou despesa</td><td class="num">Valor deduzido</td></tr>
+  <tr><td class="r">Valor negociado</td><td class="num">${brlDoc(bruto)}</td></tr>
   ${linhasDed}
-  <tr class="liquido"><td class="r">Total deduções</td><td class="num">${brlDoc(total)}</td></tr>
+  <tr><td class="r">Total deduções</td><td class="num">${brlDoc(total)}</td></tr>
+  <tr class="liquido"><td class="r">Valor líquido ao cliente</td><td class="num">${brlDoc(liquido)}</td></tr>
 </table>
 
 <p><strong>Do Pagamento</strong></p>
@@ -1488,13 +1504,13 @@ para a conta bancária abaixo indicada, sendo de sua exclusiva responsabilidade 
 
 <p><strong>DADOS BANCÁRIOS</strong></p>
 <table class="dados">
-  <tr><td class="r">Favorecido</td><td>${banco("banco_favorecido")}</td></tr>
-  <tr><td class="r">CPF / CNPJ</td><td>${banco("banco_documento")}</td></tr>
-  <tr><td class="r">Banco</td><td>${banco("banco_nome")}</td></tr>
-  <tr><td class="r">Agência</td><td>${banco("banco_agencia")}</td></tr>
-  <tr><td class="r">Conta</td><td>${banco("banco_conta")}</td></tr>
-  <tr><td class="r">C/C ou C/P</td><td>${banco("banco_tipo")}</td></tr>
-  <tr><td class="r">Chave PIX</td><td>${banco("banco_pix")}</td></tr>
+  <tr><td class="r">Favorecido</td><td>${banco("banco_favorecido", "favorecido")}</td></tr>
+  <tr><td class="r">CPF / CNPJ</td><td>${banco("banco_documento", "CPF ou CNPJ")}</td></tr>
+  <tr><td class="r">Banco</td><td>${banco("banco_nome", "banco")}</td></tr>
+  <tr><td class="r">Agência</td><td>${banco("banco_agencia", "agência")}</td></tr>
+  <tr><td class="r">Conta</td><td>${banco("banco_conta", "conta")}</td></tr>
+  <tr><td class="r">C/C ou C/P</td><td>${banco("banco_tipo", "C/C ou C/P")}</td></tr>
+  <tr><td class="r">Chave PIX</td><td>${banco("banco_pix", "chave PIX")}</td></tr>
   <tr><td class="r">Observação</td><td>${ou(cl && cl.observacoes, "")}</td></tr>
 </table>
 
@@ -3695,13 +3711,19 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 key={guardados} />
             </Bloco>
 
-            {/* Por último de propósito, a pedido do Derek: a conta do
-                negócio e os dados bancários vêm antes, porque é o que
-                fecha o valor. Contrato gerado com número que ainda vai
-                mudar é contrato para refazer.
 
-                E só depois do laudo — antes disso o negócio ainda pode
-                voltar à mesa. */}
+            <Bloco titulo="Depois da cautelar">
+              <div className="space-y-2.5">
+                <Toggle label="Contrato assinado" valor={f.contratoAssinado} onChange={(v) => set("contratoAssinado", v)} />
+              </div>
+            </Bloco>
+
+            {/* No fim de tudo, a pedido do Derek, e por dois motivos:
+                o contrato carrega o valor e a conta bancária, que se
+                fecham acima — documento gerado com número que ainda vai
+                mudar é documento para refazer; e só faz sentido depois
+                do laudo, porque antes disso o negócio ainda pode voltar
+                à mesa. */}
             {f.cautelarResultado === "aprovada" && (
               <Bloco titulo="Contrato de aceite de proposta"
                 sub="É o cliente que assina — ele vende o carro. Sai com a conta do negócio e os dados bancários que estão acima.">
@@ -3844,12 +3866,6 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 </div>
               </Bloco>
             )}
-
-            <Bloco titulo="Depois da cautelar">
-              <div className="space-y-2.5">
-                <Toggle label="Contrato assinado" valor={f.contratoAssinado} onChange={(v) => set("contratoAssinado", v)} />
-              </div>
-            </Bloco>
           </>
         )}
 
