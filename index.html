@@ -1052,11 +1052,14 @@ function etapaConcluida(id, f, fotos) {
 }
 
 /* ===================== UI ===================== */
-const inputCls = "w-full rounded-md border px-3 py-2 text-[14px] outline-none";
+// Onda 1 do redesenho: o corpo sobe de 14 para 16 px e o campo ganha
+// altura. Abaixo de 16 px o Safari do iPhone dá zoom ao focar o campo —
+// e o negociador perde o enquadramento no meio do preenchimento.
+const inputCls = "w-full rounded-md border px-3 py-2.5 text-[16px] outline-none";
 const inputSty = { borderColor: C.line, background: "#fff", color: C.ink };
 
 const Rotulo = ({ children, req }) => (
-  <span className="block text-[10px] uppercase tracking-[0.13em]" style={{ color: C.mute }}>
+  <span className="block text-[12px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>
     {children}{req && <span style={{ color: C.laranja }}> *</span>}
   </span>
 );
@@ -1065,23 +1068,25 @@ const Campo = ({ label, req, children }) => (
 );
 function Toggle({ label, valor, onChange, nota }) {
   return (
-    <button onClick={() => onChange(!valor)} className="flex w-full items-start gap-3 rounded-md border px-3 py-2.5 text-left"
+    <button onClick={() => onChange(!valor)} className="flex w-full items-start gap-3 rounded-md border px-3 py-3 text-left"
       style={{ borderColor: valor ? C.verde : C.line, background: valor ? "#F0F8F4" : "#fff" }}>
-      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded"
+      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded"
         style={{ background: valor ? C.verde : "#fff", border: `1.5px solid ${valor ? C.verde : C.line}`, color: "#fff", fontSize: 12 }}>
         {valor ? "✓" : ""}
       </span>
       <span>
-        <span className="block text-[13px] font-medium leading-snug">{label}</span>
-        {nota && <span className="mt-0.5 block text-[11px]" style={{ color: C.mute }}>{nota}</span>}
+        <span className="block text-[15px] font-medium leading-snug">{label}</span>
+        {nota && <span className="mt-1 block text-[13px] leading-snug" style={{ color: C.mute }}>{nota}</span>}
       </span>
     </button>
   );
 }
 const Bloco = ({ titulo, sub, children }) => (
   <section className="rounded-lg p-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-    <div className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.roxo, fontFamily: F.disp, fontWeight: 700 }}>{titulo}</div>
-    {sub && <p className="mt-1 text-[11px] leading-relaxed" style={{ color: C.mute }}>{sub}</p>}
+    {/* O título deixou de ser roxo: roxo agora é só da ação principal.
+        Antes ele competia com o botão que a pessoa tem que apertar. */}
+    <h3 className="text-[17px] leading-tight" style={{ color: C.ink, fontFamily: F.disp, fontWeight: 700 }}>{titulo}</h3>
+    {sub && <p className="mt-1.5 text-[13.5px] leading-relaxed" style={{ color: C.mute }}>{sub}</p>}
     <div className="mt-3">{children}</div>
   </section>
 );
@@ -2800,8 +2805,11 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
           const ok = etapaConcluida(e.id, f, enviadas);
           const ativa = e.id === etapa;
           return (
-            <button key={e.id} onClick={() => setEtapa(e.id)} className="flex shrink-0 flex-col items-center gap-1" style={{ width: 56 }}>
-              <span className="flex h-9 w-9 items-center justify-center rounded-full text-[15px]"
+            /* Onda 1: 36 px de círculo com rótulo de 9 px ficava abaixo
+               do alvo de toque confortável, e o nome da etapa não se
+               lia em pé. Passa a 44 px com rótulo de 11 px. */
+            <button key={e.id} onClick={() => setEtapa(e.id)} className="flex shrink-0 flex-col items-center gap-1.5" style={{ width: 66 }}>
+              <span className="flex h-11 w-11 items-center justify-center rounded-full text-[17px]"
                 style={{
                   background: ativa ? C.roxo : ok ? C.verde : C.roxoFraco,
                   color: ativa || ok ? "#fff" : C.roxo,
@@ -2809,7 +2817,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 }}>
                 {ok && !ativa ? "✓" : e.letra}
               </span>
-              <span className="text-center text-[9px] leading-tight" style={{ color: ativa ? C.roxo : C.mute, fontWeight: ativa ? 700 : 400 }}>
+              <span className="text-center text-[11px] leading-tight" style={{ color: ativa ? C.roxo : C.mute, fontWeight: ativa ? 700 : 500 }}>
                 {e.curto}
               </span>
             </button>
@@ -6154,6 +6162,7 @@ function CRM({ perfil, aoAbrir, aoAbrirAdm }) {
   const [busca, setBusca] = useState("");
   const [novo, setNovo] = useState(false);
   const [mostrarImportar, setMostrarImportar] = useState(false);
+  const [gestao, setGestao] = useState(false);
 
   const carregar = async (filtros) => {
     setCarregando(true); setErro("");
@@ -6215,37 +6224,94 @@ function CRM({ perfil, aoAbrir, aoAbrirAdm }) {
           </button>
         )}
 
-        <Funil perfil={perfil} />
-
-        <LeadsIndicacao />
-
-        {perfil && (perfil.administrativo || perfil.papel === "gerente") && (
-          <button onClick={aoAbrirAdm} className="w-full rounded-md border py-2.5 text-[13px] font-semibold"
-            style={{ borderColor: C.line, color: C.roxo }}>
-            Conferência do administrativo
+        {/* Onda 1: uma ação em destaque, o resto recolhido.
+            Dashboard, leads, conferência e importação são trabalho de
+            gestão — não podem disputar espaço com quem está com o
+            cliente na frente. Em nove de cada dez aberturas só o botão
+            de cima interessa. */}
+        {!gestao ? (
+          <button onClick={() => setGestao(true)}
+            className="w-full py-2 text-[14px] font-semibold" style={{ color: C.mute }}>
+            Gestão e relatórios ▾
           </button>
-        )}
+        ) : (
+          <div className="space-y-3 rounded-lg p-3" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+            <div className="flex items-center justify-between">
+              <span className="text-[12px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Gestão</span>
+              <button onClick={() => setGestao(false)} className="text-[14px]" style={{ color: C.mute }}>fechar</button>
+            </div>
 
-        {perfil && perfil.papel === "gerente" && (
-          mostrarImportar
-            ? <Importar aoTerminar={async () => { setMostrarImportar(false); await carregar({ status, q: busca }); }} />
-            : <button onClick={() => setMostrarImportar(true)} className="w-full rounded-md border py-2.5 text-[13px]"
-                style={{ borderColor: C.line, color: C.mute }}>
-                Importar planilha do CRM
+            <Funil perfil={perfil} />
+
+            <LeadsIndicacao />
+
+            {perfil && (perfil.administrativo || perfil.papel === "gerente") && (
+              <button onClick={aoAbrirAdm} className="w-full rounded-md border py-2.5 text-[14px] font-semibold"
+                style={{ borderColor: C.line, color: C.roxo }}>
+                Conferência do administrativo
               </button>
+            )}
+
+            {perfil && perfil.papel === "gerente" && (
+              mostrarImportar
+                ? <Importar aoTerminar={async () => { setMostrarImportar(false); await carregar({ status, q: busca }); }} />
+                : <button onClick={() => setMostrarImportar(true)} className="w-full rounded-md border py-2.5 text-[14px]"
+                    style={{ borderColor: C.line, color: C.mute }}>
+                    Importar planilha do CRM
+                  </button>
+            )}
+          </div>
         )}
 
         {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
         {carregando && <p className="text-[12px]" style={{ color: C.mute }}>Carregando…</p>}
 
         {!carregando && !lista.length && !erro && (
-          <p className="text-[12px] leading-relaxed" style={{ color: C.mute }}>
+          <p className="text-[14px] leading-relaxed" style={{ color: C.mute }}>
             Nenhum atendimento ainda. O primeiro carro que entrar no pátio começa aqui.
           </p>
         )}
 
+        {/* No celular, cartão. A tabela de quinze colunas continua, mas
+            só a partir de tela larga — que é onde o gerente está. Ela
+            imita a planilha de propósito, para baixar a curva de
+            aprendizado; no celular a imitação custava rolagem lateral
+            justo na coluna que mais se procura, a de status. */}
         {!!lista.length && (
-          <div className="rolar overflow-x-auto rounded-lg" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+          <div className="grid gap-2 lg:hidden">
+            {lista.map((a) => {
+              const v = (a.veiculo || [])[0] || {};
+              const props = a.proposta || [];
+              const melhor = props.length ? Math.max(...props.map((p) => Number(p.valor) || 0)) : 0;
+              return (
+                <button key={a.id} onClick={() => aoAbrir(a.id)}
+                  className="w-full rounded-lg p-3.5 text-left"
+                  style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="text-[16px] font-semibold leading-tight">
+                      {a.cliente_nome || "Sem nome"}
+                    </span>
+                    <Etiqueta status={a.status} />
+                  </div>
+                  <div className="mt-1 text-[14px]" style={{ color: C.mute }}>
+                    {v.marca_modelo || a.carro_descricao || "carro não informado"}
+                    {v.placa ? <span style={{ fontFamily: F.mono }}> · {v.placa}</span> : null}
+                  </div>
+                  <div className="mt-2.5 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[13px]"
+                    style={{ color: C.mute, fontFamily: F.mono }}>
+                    {a.data && <span>{soData(a.data)}</span>}
+                    {v.fipe_valor ? <span>FIPE {brl(v.fipe_valor)}</span> : null}
+                    {melhor ? <span style={{ color: C.verde }}>Melhor {brl(melhor)}</span> : null}
+                    {a.negociador_nome && <span>{a.negociador_nome}</span>}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {!!lista.length && (
+          <div className="rolar hidden overflow-x-auto rounded-lg lg:block" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
             <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 1180 }}>
               <thead>
                 <tr style={{ background: "#F6F4F8" }}>
@@ -6295,7 +6361,7 @@ function CRM({ perfil, aoAbrir, aoAbrirAdm }) {
           </div>
         )}
         {!!lista.length && (
-          <p className="text-[10px]" style={{ color: C.mute }}>
+          <p className="hidden text-[12px] lg:block" style={{ color: C.mute }}>
             Arraste a tabela para o lado para ver o resto das colunas. Toque na linha para abrir o atendimento.
           </p>
         )}
