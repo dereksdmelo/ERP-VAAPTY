@@ -5246,13 +5246,16 @@ function Funil({ perfil }) {
   const [aberto, setAberto] = useState(false);
   const [cadastro, setCadastro] = useState(false);
   const [desempenho, setDesempenho] = useState({});
+  // Sem isso a régua pisca "nenhuma meta cadastrada" enquanto o
+  // cadastro não chega — texto errado é pior que espaço vazio.
+  const [equipeOk, setEquipeOk] = useState(false);
 
   const eGerente = !!(perfil && perfil.papel === "gerente");
 
   useEffect(() => {
     if (!aberto || d) return;
     consultarFunil().then(setD).catch((e) => setErro(e.message));
-    listarNegociadores().then(setEquipe).catch(() => {});
+    listarNegociadores().then(setEquipe).catch(() => {}).then(() => setEquipeOk(true));
     // Falha aqui não derruba o dashboard: sem confiabilidade os
     // cartões saem com zero, que é o estado real de quem não lançou.
     lerDesempenho().then(setDesempenho).catch(() => {});
@@ -5301,6 +5304,12 @@ function Funil({ perfil }) {
 
       {d && !cadastro && (
         <>
+          {equipeOk && (
+            <div className="mt-3">
+              <ReguaDoMes d={d} equipe={equipe} />
+            </div>
+          )}
+
           <div className="mt-3 grid grid-cols-4 gap-2">
             <Num rot="Fluxo" v={d.total.fluxo} />
             <Num rot="Avaliações" v={d.total.avaliacoes} sub={d.total.avaliacoes_sobre_fluxo != null ? `${d.total.avaliacoes_sobre_fluxo}%` : null} />
@@ -5911,16 +5920,233 @@ function Testemunhais({ necessidade, negociador, aoMostrar }) {
   );
 }
 
+/**
+ * A régua do mês — o quadro branco da parede, em tela.
+ *
+ * A pergunta que ela responde numa olhada é uma só: já passou mais mês
+ * do que entrou faturamento? A barra de cima é a meta da loja,
+ * preenchida na proporção do que foi vendido; a régua de baixo são os
+ * dias, com hoje marcado. As duas dividem a mesma largura de
+ * propósito — é isso que faz o atraso virar distância física.
+ *
+ * Por que a leitura é em DIAS e não em porcentagem: "43% da meta com
+ * 58% do mês" pede conta de cabeça em pé, na frente do quadro.
+ * "Quatro dias atrás do ritmo" não pede.
+ *
+ * O ritmo necessário (`porDia`) é a única projeção aqui, e é
+ * aritmética simples: o que falta dividido pelos dias que sobram. Não
+ * tem tendência, não tem sazonalidade — inventar previsão em cima de
+ * um mês de dado importado seria número bonito e mentiroso.
+ */
+function ReguaDoMes({ d, equipe }) {
+  const [ano, mes] = String(d.de || "").split("-").map(Number);
+  if (!ano || !mes) return null;
+
+  // Dia 0 do mês seguinte é o último dia deste — evita tabela de
+  // bissexto à mão.
+  const diasNoMes = new Date(Date.UTC(ano, mes, 0)).getUTCDate();
+
+  // O período pode ser um mês fechado: aí o mês inteiro já decorreu, e
+  // marcar "hoje" no dia 5 diria que sobram 26 dias que não existem.
+  // O mesmo relógio do api/funil.js: em UTC a virada do mês chega três
+  // horas antes que em Joinville, e a régua marcaria dia 1 com a loja
+  // ainda fechando o mês anterior.
+  const hojeISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+  const mesCorrente = hojeISO.slice(0, 7) === `${ano}-${String(mes).padStart(2, "0")}`;
+  const diaHoje = mesCorrente ? Number(hojeISO.slice(8, 10)) : diasNoMes;
+
+  // Prospecção não vende, e a meta dela não entra na meta de venda da
+  // loja — somar as duas inflaria o alvo e faria o mês parecer pior.
+  const ativos = (equipe || []).filter((x) => x.ativo && x.papel === "negociador");
+  const meta = ativos.reduce((s, x) => s + (Number(x.meta_valor) || 0), 0);
+  const realizado = Number(d.total.valor_vendido) || 0;
+
+  const pctTempo = diaHoje / diasNoMes;
+  const pctMeta = meta ? realizado / meta : 0;
+
+  // Onde o verde para, contra onde hoje está. É a leitura que a régua
+  // entrega de graça.
+  const diaEquivalente = pctMeta * diasNoMes;
+  const atraso = Math.round(diaHoje - diaEquivalente);
+
+  const falta = Math.max(0, meta - realizado);
+  const diasQueSobram = Math.max(0, diasNoMes - diaHoje);
+  const porDia = diasQueSobram ? falta / diasQueSobram : falta;
+
+  const noRitmo = atraso <= 0;
+  const cor = noRitmo ? C.verde : C.laranja;
+
+  const rotuloMes = `${String(mes).padStart(2, "0")}/${String(ano).slice(2)}`;
+
+  // ---- as linhas individuais -------------------------------------
+  // O cadastro manda na lista: negociador com meta e sem venda tem que
+  // aparecer zerado, que é justamente o que precisa ser visto.
+  const porNome = {};
+  (d.por_negociador || []).forEach((n) => { porNome[n.nome] = n; });
+
+  const linhas = ativos.map((x) => {
+    const nome = String(x.nome).toUpperCase();
+    const n = porNome[nome];
+    delete porNome[nome];
+    return {
+      nome,
+      meta: Number(x.meta_valor) || 0,
+      valor: n ? Number(n.valor_vendido) || 0 : 0,
+      vendas: n ? n.vendas : 0,
+      semMeta: false,
+    };
+  });
+
+  // Quem vendeu e não está no cadastro aparece assim mesmo, sem meta.
+  // Sumir com a venda para manter a tabela bonita esconderia
+  // faturamento — e é exatamente o caso dos atendimentos importados,
+  // cujo negociador veio só como texto.
+  Object.keys(porNome).forEach((nome) => {
+    linhas.push({
+      nome,
+      meta: 0,
+      valor: Number(porNome[nome].valor_vendido) || 0,
+      vendas: porNome[nome].vendas,
+      semMeta: true,
+    });
+  });
+
+  linhas.sort((a, b) => b.valor - a.valor);
+
+  // ---- a régua ----------------------------------------------------
+  const dias = [];
+  for (let i = 1; i <= diasNoMes; i++) dias.push(i);
+
+  // Coluna de largura fixa que não encolhe. `width` sozinho num filho
+  // de flex ainda encolhe, e no celular isso quebrava "sem meta" em
+  // duas linhas e transformava o nome do negociador em reticências.
+  const col = (w) => ({ width: w, flex: `0 0 ${w}px` });
+
+  const barra = (pct, corBarra, altura) => (
+    <div className="relative overflow-hidden rounded-[2px]" style={{ height: altura, background: "#E6E1EC" }}>
+      <div className="h-full" style={{ width: `${Math.min(100, Math.max(0, pct * 100))}%`, background: corBarra }} />
+      <div className="absolute top-0 h-full" style={{ left: `${pctTempo * 100}%`, width: 2, marginLeft: -1, background: C.ink }} />
+    </div>
+  );
+
+  return (
+    <div className="rounded-md p-3" style={{ background: "#F7F5FA", border: `1px solid ${C.line}` }}>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <span className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.ink, fontFamily: F.disp, fontWeight: 700 }}>
+          Meta × mês · {rotuloMes}
+        </span>
+        <span className="text-[11px]" style={{ color: C.mute }}>
+          dia {diaHoje} de {diasNoMes} · {Math.round(pctTempo * 100)}% do mês
+        </span>
+      </div>
+
+      {meta === 0 ? (
+        <p className="mt-2 text-[12px]" style={{ color: C.mute }}>
+          Nenhum negociador ativo com meta cadastrada. Abra <span style={{ color: C.roxo }}>negociadores</span> e
+          defina a meta de cada um — a régua é a soma delas.
+        </p>
+      ) : (
+        <>
+          <div className="mt-2 flex items-baseline gap-3">
+            <span className="text-[22px] leading-none" style={{ fontFamily: F.mono, fontWeight: 700, color: cor }}>
+              {brl(realizado)}
+            </span>
+            <span className="text-[12px]" style={{ color: C.mute }}>
+              de {brl(meta)} · {(pctMeta * 100).toFixed(1).replace(".", ",")}%
+            </span>
+          </div>
+
+          {/* A barra e a régua compartilham a largura: é o alinhamento
+              entre as duas que transforma o atraso em distância. */}
+          <div className="mt-2">
+            {barra(pctMeta, cor, 22)}
+            <div className="mt-[3px] flex">
+              {dias.map((n) => {
+                // No celular são 31 casas em 340 px: escrever todos os
+                // números os cola num borrão. A escala fica nas marcas
+                // de 5 em 5 mais hoje; o resto é tique.
+                const marca = n === 1 || n === diasNoMes || n % 5 === 0 || n === diaHoje;
+                return (
+                  <div key={n} className="flex-1 text-center text-[8px] leading-[12px]"
+                    style={{
+                      background: n === diaHoje ? C.ink : (n <= diaHoje ? "#DCD6E4" : "#F1EEF5"),
+                      color: n === diaHoje ? "#fff" : C.mute,
+                      borderLeft: n === 1 ? "none" : "1px solid #fff",
+                      fontFamily: F.mono,
+                      fontWeight: n === diaHoje ? 700 : 400,
+                    }}>
+                    {marca ? n : "\u00b7"}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px]">
+            <span style={{ color: cor, fontWeight: 700 }}>
+              {atraso === 0 ? "No ritmo do mês"
+                : atraso > 0 ? `${atraso} dia${atraso > 1 ? "s" : ""} atrás do ritmo`
+                : `${-atraso} dia${-atraso > 1 ? "s" : ""} à frente do ritmo`}
+            </span>
+            <span style={{ color: C.mute }}>
+              {falta > 0
+                ? <>faltam <b style={{ color: C.ink }}>{brl(falta)}</b>{diasQueSobram ? <> em {diasQueSobram} dia{diasQueSobram > 1 ? "s" : ""} — {brl(porDia)}/dia</> : " e o mês acabou"}</>
+                : "meta batida"}
+            </span>
+          </div>
+
+          {/* ---- as metas individuais, como no quadro ---- */}
+          <div className="mt-3 border-t pt-2" style={{ borderColor: C.line }}>
+            <div className="flex items-baseline gap-[6px] px-1 pb-1 text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>
+              <span style={col(58)}>Neg</span>
+              <span style={{ ...col(62), textAlign: "right" }}>Meta</span>
+              <span style={{ ...col(62), textAlign: "right" }}>Feito</span>
+              <span className="flex-1" style={{ minWidth: 30 }}>Ritmo</span>
+              <span style={{ ...col(30), textAlign: "right" }}>%</span>
+            </div>
+            {linhas.map((l) => {
+              const p = l.meta ? l.valor / l.meta : 0;
+              const dele = l.meta ? (l.valor / l.meta) * diasNoMes : 0;
+              const bateu = l.meta && diaHoje - dele <= 0;
+              return (
+                <div key={l.nome} className="flex items-center gap-[6px] px-1 py-[3px] text-[10px]">
+                  <span className="truncate" style={{ ...col(58), fontSize: 11, fontWeight: 600 }} title={l.nome}>{l.nome}</span>
+                  <span style={{ ...col(62), textAlign: "right", fontFamily: F.mono, color: l.semMeta ? C.mute : C.ink, whiteSpace: "nowrap" }}>
+                    {l.semMeta ? "sem meta" : brl(l.meta)}
+                  </span>
+                  <span style={{ ...col(62), textAlign: "right", fontFamily: F.mono, fontWeight: 700, whiteSpace: "nowrap" }}>
+                    {brl(l.valor)}
+                  </span>
+                  <span className="flex-1" style={{ minWidth: 30 }}>
+                    {l.meta ? barra(p, bateu ? C.verde : C.laranja, 10) : null}
+                  </span>
+                  <span style={{ ...col(30), textAlign: "right", fontFamily: F.mono, color: l.meta ? (bateu ? C.verde : C.laranja) : C.mute }}>
+                    {l.meta ? `${Math.round(p * 100)}%` : "—"}
+                  </span>
+                </div>
+              );
+            })}
+            <p className="mt-1 px-1 text-[10px]" style={{ color: C.mute }}>
+              O traço escuro em cada barra é o dia de hoje. Barra atrás dele, atrasado.
+            </p>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function CartaoNegociador({ n, equipe, loja, desempenho, podeEditar, aoSalvar }) {
   const cad = loja ? null : (equipe || []).filter((x) => String(x.nome).toUpperCase() === n.nome)[0];
 
   // A loja é a soma das metas de quem está ativo — na planilha o mês
   // fechou em R$ 105.000 com seis negociadores de R$ 17.500 na semana.
+  const daLoja = (equipe || []).filter((x) => x.ativo && x.papel === "negociador");
   const metaValor = loja
-    ? (equipe || []).reduce((soma, x) => soma + (Number(x.meta_valor) || 0), 0)
+    ? daLoja.reduce((soma, x) => soma + (Number(x.meta_valor) || 0), 0)
     : (cad ? Number(cad.meta_valor) || 0 : 0);
   const metaVolume = loja
-    ? (equipe || []).reduce((soma, x) => soma + (Number(x.meta_volume) || 0), 0)
+    ? daLoja.reduce((soma, x) => soma + (Number(x.meta_volume) || 0), 0)
     : (cad ? Number(cad.meta_volume) || 0 : 0);
 
   const valor = Number(n.valor_vendido) || 0;

@@ -163,8 +163,10 @@ async function desempenho(req, res, tok) {
   const competencia = (() => {
     const c = String(req.query.competencia || "");
     if (/^\d{4}-\d{2}-\d{2}$/.test(c)) return `${c.slice(0, 8)}01`;
-    const hoje = new Date();
-    return `${hoje.getUTCFullYear()}-${String(hoje.getUTCMonth() + 1).padStart(2, "0")}-01`;
+    // Mesmo relógio do funil: em UTC a virada do mês acontece três
+    // horas antes daqui, e a competência trocaria com a loja aberta.
+    const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+    return `${hoje.slice(0, 8)}01`;
   })();
 
   if (req.method === "GET") {

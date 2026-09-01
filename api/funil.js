@@ -26,6 +26,17 @@ const tokenDe = (req) => {
 
 const dia = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || "")) ? String(v) : null);
 
+/**
+ * Hoje em Joinville, no formato aaaa-mm-dd.
+ *
+ * Em UTC isto quebra de verdade: das 21h à meia-noite do dia 31, o
+ * relógio de Greenwich já virou o mês, e o dashboard trocava o período
+ * inteiro — o mês que a loja estava fechando sumia da tela por três
+ * horas. `en-CA` é o truque para sair ISO sem montar a string à mão.
+ */
+const hojeAqui = () =>
+  new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+
 const media = (a) => (a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length) : null);
 const pct = (parte, todo) => (todo ? Math.round((parte / todo) * 1000) / 10 : null);
 
@@ -36,10 +47,9 @@ module.exports = async function handler(req, res) {
   const tok = tokenDe(req);
   if (!tok) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
 
-  const hoje = new Date();
-  const primeiro = `${hoje.getUTCFullYear()}-${String(hoje.getUTCMonth() + 1).padStart(2, "0")}-01`;
-  const de = dia(req.query.de) || primeiro;
-  const ate = dia(req.query.ate) || hoje.toISOString().slice(0, 10);
+  const hoje = hojeAqui();
+  const de = dia(req.query.de) || `${hoje.slice(0, 8)}01`;
+  const ate = dia(req.query.ate) || hoje;
 
   const campos = "origem,status,data,valor_fechado,negociador_nome,veiculo(fipe_valor),proposta(id)";
   const url = `${URL_BASE}/rest/v1/atendimento?select=${campos}` +

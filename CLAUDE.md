@@ -956,3 +956,48 @@ lista que acumula item resolvido para de ser lida. Os principais:
 
 Postgres no Supabase, login por papel (pré-venda, negociador, gerente,
 prep), fotos no Storage e as fichas saindo do aparelho para o servidor.
+
+### 22. A régua do mês: o quadro da parede, em tela
+
+O quadro branco da loja tem uma régua no topo: os 31 dias do mês, com
+uma faixa verde marcando o quanto já foi feito. Ao lado, a tabela
+NEG / META / REALIZADO. `ReguaDoMes` é isso, no topo do dashboard.
+
+**A pergunta que ela responde é uma só:** já passou mais mês do que
+entrou faturamento? A barra é a meta, preenchida na proporção do que
+foi vendido; a régua logo abaixo são os dias, com hoje marcado. As duas
+dividem a mesma largura **de propósito** — é o alinhamento que
+transforma o atraso em distância física. Quem mexer no layout precisa
+manter as duas com a mesma caixa.
+
+**A leitura é em dias, não em porcentagem.** "43% da meta com 58% do
+mês" pede conta de cabeça em pé na frente do quadro; "quatro dias atrás
+do ritmo" não pede. É a mesma razão pela qual o desvalorizômetro fala
+em perda por mês e não em percentual.
+
+**A meta da loja é a soma de quem está ativo e é negociador.**
+Prospecção tem `meta_valor` no cadastro (o padrão é 70.000) mas não
+vende — somar as duas inflaria o alvo e faria todo mês parecer pior do
+que foi. O cartão LOJA de `CartaoNegociador` usa o mesmo filtro; se um
+dos dois mudar, o outro tem que mudar junto, senão a régua e o cartão
+discordam na mesma tela.
+
+**Quem vendeu e não está no cadastro aparece com "sem meta"** em vez de
+sumir. É o caso dos atendimentos importados, cujo negociador veio só
+como texto: esconder a linha para manter a tabela bonita esconderia
+faturamento.
+
+**O ritmo necessário é aritmética, não previsão** — o que falta dividido
+pelos dias que sobram. Não há tendência nem sazonalidade, e não deve
+haver: projeção em cima de um mês de dado importado é número bonito e
+mentiroso.
+
+**O mês virou America/Sao_Paulo, e isso era bug de verdade.** O
+`api/funil.js` montava o período com `getUTCMonth()`. Em Joinville
+(UTC−3), das 21h à meia-noite do dia 31 o relógio de Greenwich já tinha
+virado o mês: `de` pulava para o dia 1 do mês seguinte e **o mês que a
+loja estava fechando sumia da tela por três horas**. Agora os três
+lugares que precisam saber que dia é hoje — `api/funil.js`, a
+competência do desempenho em `api/perfil.js` e a régua — usam
+`toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" })`.
+**Quem escrever data nova usa o mesmo relógio.**
