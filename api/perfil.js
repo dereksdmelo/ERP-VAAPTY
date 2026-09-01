@@ -20,6 +20,14 @@
  * Mora aqui, e não em arquivo próprio, porque o plano Hobby da Vercel
  * aceita no máximo 12 funções e já estamos nas 12. Cadastro de gente é
  * o assunto deste arquivo, então a costura não é arbitrária.
+ *
+ * ---------------------------------------------------------------------
+ * /api/perfil?recurso=meta-loja
+ *
+ *   GET ?competencia=  a meta da loja no mês (padrão: mês corrente)
+ *   PUT                grava { valor, volume }
+ *
+ * A meta da loja é independente da soma das individuais — ver 0018.
  */
 
 const URL_BASE = (process.env.SUPABASE_URL || "").replace(/\/+$/, "");
@@ -60,6 +68,30 @@ const numero = (v) => {
   return Number.isFinite(n) ? n : null;
 };
 
+const CAMPOS_META = ["meta_atendimentos", "meta_conversao", "meta_ticket"];
+
+/**
+ * O faturamento é consequência, não entrada (0018).
+ *
+ *     atendimentos × conversão = carros ;  carros × ticket = faturamento
+ *
+ * O volume é arredondado ANTES de virar dinheiro para que a conta na
+ * tela feche: 30 atendimentos a 22% dão 7 carros, e 7 × 25.000 é o
+ * número que o negociador vê. Multiplicar por 6,6 daria um
+ * faturamento que nenhuma linha da tela explica.
+ *
+ * Isto roda no servidor porque `meta_valor` é lido pelo dashboard
+ * inteiro: se a tela calculasse, um cliente desatualizado gravaria uma
+ * meta que não corresponde aos três campos ao lado dela.
+ */
+function derivarMeta(atendimentos, conversao, ticket) {
+  const a = Math.max(0, Math.trunc(Number(atendimentos) || 0));
+  const c = Math.max(0, Number(conversao) || 0);
+  const t = Math.max(0, Number(ticket) || 0);
+  const volume = Math.round((a * c) / 100);
+  return { meta_volume: volume, meta_valor: Math.round(volume * t * 100) / 100 };
+}
+
 async function lerCorpo(req) {
   let c = req.body;
   if (c && typeof Buffer !== "undefined" && Buffer.isBuffer(c)) c = c.toString("utf8");
@@ -88,7 +120,8 @@ async function negociadores(req, res, tok) {
   };
 
   if (req.method === "GET") {
-    const r = await fetch(`${base}?select=id,nome,papel,ativo,meta_valor,meta_volume&order=papel.asc,nome.asc`, { headers: cab });
+    const r = await fetch(`${base}?select=id,nome,papel,ativo,meta_valor,meta_volume,` +
+      `${CAMPOS_META.join(",")}&order=papel.asc,nome.asc`, { headers: cab });
     const d = await responder(r);
     if (d === undefined || res.writableEnded) return;
     return res.status(200).json({ negociadores: d || [] });
@@ -101,8 +134,14 @@ async function negociadores(req, res, tok) {
     if (!nome) return res.status(400).json({ erro: "Informe o nome." });
     const papel = PAPEIS.indexOf(String(c.papel || "")) >= 0 ? c.papel : "negociador";
     const linha = { nome, papel };
-    if (c.meta_valor !== undefined) linha.meta_valor = numero(c.meta_valor);
-    if (c.meta_volume !== undefined) linha.meta_volume = Math.trunc(numero(c.meta_volume) || 0);
+    // meta_valor e meta_volume não são aceitos do cliente: são
+    // derivados dos três campos abaixo, e só aqui.
+    if (CAMPOS_META.some((k) => c[k] !== undefined)) {
+      linha.meta_atendimentos = Math.trunc(numero(c.meta_atendimentos) || 0);
+      linha.meta_conversao = numero(c.meta_conversao) || 0;
+      linha.meta_ticket = numero(c.meta_ticket) || 0;
+      Object.assign(linha, derivarMeta(linha.meta_atendimentos, linha.meta_conversao, linha.meta_ticket));
+    }
     const r = await fetch(base, { method: "POST", headers: { ...cabJson, Prefer: "return=representation" }, body: JSON.stringify(linha) });
     const d = await responder(r);
     if (d === undefined || res.writableEnded) return;
@@ -118,8 +157,20 @@ async function negociadores(req, res, tok) {
     if (c.nome !== undefined) mud.nome = texto(c.nome);
     if (c.papel !== undefined && PAPEIS.indexOf(String(c.papel)) >= 0) mud.papel = c.papel;
     if (c.ativo !== undefined) mud.ativo = !!c.ativo;
-    if (c.meta_valor !== undefined) mud.meta_valor = numero(c.meta_valor);
-    if (c.meta_volume !== undefined) mud.meta_volume = Math.trunc(numero(c.meta_volume) || 0);
+
+    // Só recalcula quando um dos três chega. Sem esta guarda, um
+    // "desativar" — que manda apenas `ativo` — zeraria a meta de quem
+    // ainda está com os R$ 70.000 herdados do padrão antigo.
+    if (CAMPOS_META.some((k) => c[k] !== undefined)) {
+      const atual = await fetch(`${base}?id=eq.${id}&select=${CAMPOS_META.join(",")}`, { headers: cab });
+      const linhas = atual.ok ? await atual.json().catch(() => []) : [];
+      const antes = (Array.isArray(linhas) ? linhas[0] : null) || {};
+      CAMPOS_META.forEach((k) => {
+        mud[k] = c[k] !== undefined ? (numero(c[k]) || 0) : (Number(antes[k]) || 0);
+      });
+      mud.meta_atendimentos = Math.trunc(mud.meta_atendimentos);
+      Object.assign(mud, derivarMeta(mud.meta_atendimentos, mud.meta_conversao, mud.meta_ticket));
+    }
     if (!Object.keys(mud).length) return res.status(400).json({ erro: "Nada para atualizar." });
     const r = await fetch(`${base}?id=eq.${id}`, { method: "PATCH", headers: { ...cabJson, Prefer: "return=representation" }, body: JSON.stringify(mud) });
     const d = await responder(r);
@@ -201,6 +252,64 @@ async function desempenho(req, res, tok) {
   return res.status(405).json({ erro: "Use GET ou PUT." });
 }
 
+/**
+ * A meta da loja, uma por mês (0018).
+ *
+ * Independente da soma das metas individuais — e é essa a decisão:
+ * somar as individuais pressupõe que todo mundo bate a sua, o que não
+ * acontece em mês nenhum. O alvo da loja é escolha de gestor.
+ *
+ * A competência é sempre o dia 1: é a chave primária da tabela.
+ */
+async function metaLoja(req, res, tok) {
+  const base = `${URL_BASE}/rest/v1/meta_loja`;
+  const cab = { apikey: ANON, Authorization: tok };
+
+  const competencia = (() => {
+    const c = String(req.query.competencia || "");
+    if (/^\d{4}-\d{2}-\d{2}$/.test(c)) return `${c.slice(0, 8)}01`;
+    // O mesmo relógio do funil: em UTC a virada do mês chega três
+    // horas antes que em Joinville.
+    const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+    return `${hoje.slice(0, 8)}01`;
+  })();
+
+  if (req.method === "GET") {
+    const r = await fetch(`${base}?select=*&competencia=eq.${competencia}`, { headers: cab });
+    if (!r.ok) return res.status(r.status === 401 ? 401 : 502).json({ erro: "Não consegui ler a meta da loja." });
+    const d = await r.json().catch(() => []);
+    // Sem linha, `meta` é null — e a tela diz "não definida" em vez de
+    // mostrar zero, que pareceria meta batida ao contrário.
+    return res.status(200).json({ competencia, meta: (Array.isArray(d) ? d[0] : d) || null });
+  }
+
+  if (req.method === "PUT") {
+    const c = await lerCorpo(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    const linha = {
+      competencia,
+      valor: Math.max(0, numero(c.valor) || 0),
+      volume: Math.max(0, Math.trunc(numero(c.volume) || 0)),
+      atualizado_em: new Date().toISOString(),
+      atualizado_por: donoDoToken(tok),
+    };
+    const r = await fetch(`${base}?on_conflict=competencia`, {
+      method: "POST",
+      headers: { ...cab, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=representation" },
+      body: JSON.stringify(linha),
+    });
+    if (!r.ok) return res.status(r.status === 401 ? 401 : 502).json({ erro: "O banco recusou a gravação." });
+    const d = await r.json().catch(() => []);
+    const salvo = Array.isArray(d) ? d[0] : d;
+    // Upsert que volta vazio é a RLS recusando: só gerente escreve.
+    if (!salvo) return res.status(403).json({ erro: "Só o gerente define a meta da loja." });
+    return res.status(200).json({ ok: true, competencia, meta: salvo });
+  }
+
+  res.setHeader("Allow", "GET, PUT");
+  return res.status(405).json({ erro: "Use GET ou PUT." });
+}
+
 module.exports = async function handler(req, res) {
   if (!URL_BASE || !ANON) {
     return res.status(500).json({ erro: "SUPABASE_URL ou SUPABASE_ANON_KEY não configurados." });
@@ -208,6 +317,11 @@ module.exports = async function handler(req, res) {
 
   const tok = tokenDe(req);
   if (!tok) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
+
+  if (String(req.query.recurso || "") === "meta-loja") {
+    try { return await metaLoja(req, res, tok); }
+    catch (e) { return res.status(502).json({ erro: "Não consegui falar com o banco." }); }
+  }
 
   if (String(req.query.recurso || "") === "desempenho") {
     try { return await desempenho(req, res, tok); }

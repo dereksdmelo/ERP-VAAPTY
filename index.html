@@ -405,6 +405,28 @@ async function atualizarNegociador(id, dados) {
   return d.negociador;
 }
 
+/* ----------- meta da loja (0018) ----------- */
+// A meta da loja é independente da soma das individuais: somar
+// pressupõe que todo mundo bate a sua, o que não acontece em mês
+// nenhum. Mora sob /api/perfil pelo mesmo motivo dos negociadores — a
+// Vercel do Hobby para em 12 funções e nós estamos nas 12.
+async function lerMetaLoja(competencia) {
+  const q = comoQuery({ competencia });
+  const r = await fetchAut(`/api/perfil?recurso=meta-loja${q ? `&${q}` : ""}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui ler a meta da loja.");
+  return d;
+}
+async function gravarMetaLoja(dados, competencia) {
+  const q = comoQuery({ competencia });
+  const r = await fetchAut(`/api/perfil?recurso=meta-loja${q ? `&${q}` : ""}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui salvar a meta da loja.");
+  return d.meta;
+}
+
 /* ----------- leads de indicação (0011) ----------- */
 // Moram sob /api/atendimento porque a Vercel do Hobby para em 12
 // funções e nós estamos nas 12. O `?recurso=` é o mesmo truque dos
@@ -5249,6 +5271,7 @@ function Funil({ perfil }) {
   // Sem isso a régua pisca "nenhuma meta cadastrada" enquanto o
   // cadastro não chega — texto errado é pior que espaço vazio.
   const [equipeOk, setEquipeOk] = useState(false);
+  const [metaLoja, setMetaLoja] = useState(null);
 
   const eGerente = !!(perfil && perfil.papel === "gerente");
 
@@ -5256,6 +5279,8 @@ function Funil({ perfil }) {
     if (!aberto || d) return;
     consultarFunil().then(setD).catch((e) => setErro(e.message));
     listarNegociadores().then(setEquipe).catch(() => {}).then(() => setEquipeOk(true));
+    // Falha aqui cai na soma das individuais, e a régua diz que caiu.
+    lerMetaLoja().then((d) => setMetaLoja(d.meta)).catch(() => {});
     // Falha aqui não derruba o dashboard: sem confiabilidade os
     // cartões saem com zero, que é o estado real de quem não lançou.
     lerDesempenho().then(setDesempenho).catch(() => {});
@@ -5297,7 +5322,7 @@ function Funil({ perfil }) {
         </span>
       </div>
 
-      {cadastro && <CadastroNegociadores perfil={perfil} />}
+      {cadastro && <CadastroNegociadores perfil={perfil} aoMudarMetaLoja={setMetaLoja} />}
 
       {erro && !cadastro && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
       {!d && !erro && !cadastro && <p className="mt-2 text-[12px]" style={{ color: C.mute }}>Calculando…</p>}
@@ -5306,7 +5331,7 @@ function Funil({ perfil }) {
         <>
           {equipeOk && (
             <div className="mt-3">
-              <ReguaDoMes d={d} equipe={equipe} />
+              <ReguaDoMes d={d} equipe={equipe} metaLoja={metaLoja} />
             </div>
           )}
 
@@ -5361,7 +5386,7 @@ function Funil({ perfil }) {
                   <CartaoNegociador key={n.nome} n={n} equipe={equipe}
                     desempenho={desempenho} podeEditar={eGerente} aoSalvar={salvarDesempenho} />
                 ))}
-                <CartaoNegociador n={{ ...d.total, nome: "LOJA" }} equipe={equipe} loja
+                <CartaoNegociador n={{ ...d.total, nome: "LOJA" }} equipe={equipe} loja metaLoja={metaLoja}
                   desempenho={desempenho} podeEditar={false} aoSalvar={null} />
               </div>
             </div>
@@ -5938,7 +5963,7 @@ function Testemunhais({ necessidade, negociador, aoMostrar }) {
  * tem tendência, não tem sazonalidade — inventar previsão em cima de
  * um mês de dado importado seria número bonito e mentiroso.
  */
-function ReguaDoMes({ d, equipe }) {
+function ReguaDoMes({ d, equipe, metaLoja }) {
   const [ano, mes] = String(d.de || "").split("-").map(Number);
   if (!ano || !mes) return null;
 
@@ -5955,10 +5980,18 @@ function ReguaDoMes({ d, equipe }) {
   const mesCorrente = hojeISO.slice(0, 7) === `${ano}-${String(mes).padStart(2, "0")}`;
   const diaHoje = mesCorrente ? Number(hojeISO.slice(8, 10)) : diasNoMes;
 
-  // Prospecção não vende, e a meta dela não entra na meta de venda da
-  // loja — somar as duas inflaria o alvo e faria o mês parecer pior.
+  // Prospecção não vende, e a meta dela não entra na conta — somar as
+  // duas inflaria o alvo e faria o mês parecer pior do que foi.
   const ativos = (equipe || []).filter((x) => x.ativo && x.papel === "negociador");
-  const meta = ativos.reduce((s, x) => s + (Number(x.meta_valor) || 0), 0);
+  const soma = ativos.reduce((s, x) => s + (Number(x.meta_valor) || 0), 0);
+
+  // A meta da loja é digitada (0018), não somada: a soma pressupõe que
+  // todo mundo bate a sua. Enquanto não houver uma digitada, a régua
+  // usa a soma e DIZ que está usando — número sem procedência aqui
+  // vira cobrança em cima de um alvo que ninguém definiu.
+  const metaDigitada = Number(metaLoja && metaLoja.valor) || 0;
+  const meta = metaDigitada || soma;
+  const porSoma = !metaDigitada && soma > 0;
   const realizado = Number(d.total.valor_vendido) || 0;
 
   const pctTempo = diaHoje / diasNoMes;
@@ -6042,8 +6075,8 @@ function ReguaDoMes({ d, equipe }) {
 
       {meta === 0 ? (
         <p className="mt-2 text-[12px]" style={{ color: C.mute }}>
-          Nenhum negociador ativo com meta cadastrada. Abra <span style={{ color: C.roxo }}>negociadores</span> e
-          defina a meta de cada um — a régua é a soma delas.
+          Sem meta para este mês. Abra <span style={{ color: C.roxo }}>negociadores</span> e defina a meta da
+          loja — é ela que a régua mede.
         </p>
       ) : (
         <>
@@ -6055,6 +6088,12 @@ function ReguaDoMes({ d, equipe }) {
               de {brl(meta)} · {(pctMeta * 100).toFixed(1).replace(".", ",")}%
             </span>
           </div>
+          {porSoma && (
+            <p className="mt-1 text-[10px]" style={{ color: C.mute }}>
+              Alvo pela soma das metas individuais — a meta da loja ainda não foi definida
+              em <span style={{ color: C.roxo }}>negociadores</span>.
+            </p>
+          )}
 
           {/* A barra e a régua compartilham a largura: é o alinhamento
               entre as duas que transforma o atraso em distância. */}
@@ -6136,17 +6175,23 @@ function ReguaDoMes({ d, equipe }) {
   );
 }
 
-function CartaoNegociador({ n, equipe, loja, desempenho, podeEditar, aoSalvar }) {
+function CartaoNegociador({ n, equipe, loja, metaLoja, desempenho, podeEditar, aoSalvar }) {
   const cad = loja ? null : (equipe || []).filter((x) => String(x.nome).toUpperCase() === n.nome)[0];
 
   // A loja é a soma das metas de quem está ativo — na planilha o mês
   // fechou em R$ 105.000 com seis negociadores de R$ 17.500 na semana.
+  // A meta da loja é digitada (0018) e não é a soma das individuais —
+  // somar pressupõe que todos batam a sua. A soma só entra como
+  // recurso quando ninguém definiu a meta ainda; assim o cartão nunca
+  // amanhece com alvo zero, que pareceria meta batida ao contrário.
   const daLoja = (equipe || []).filter((x) => x.ativo && x.papel === "negociador");
+  const somaValor = daLoja.reduce((soma, x) => soma + (Number(x.meta_valor) || 0), 0);
+  const somaVolume = daLoja.reduce((soma, x) => soma + (Number(x.meta_volume) || 0), 0);
   const metaValor = loja
-    ? daLoja.reduce((soma, x) => soma + (Number(x.meta_valor) || 0), 0)
+    ? (Number(metaLoja && metaLoja.valor) || somaValor)
     : (cad ? Number(cad.meta_valor) || 0 : 0);
   const metaVolume = loja
-    ? daLoja.reduce((soma, x) => soma + (Number(x.meta_volume) || 0), 0)
+    ? (Number(metaLoja && metaLoja.volume) || somaVolume)
     : (cad ? Number(cad.meta_volume) || 0 : 0);
 
   const valor = Number(n.valor_vendido) || 0;
@@ -6307,15 +6352,39 @@ function CartaoNegociador({ n, equipe, loja, desempenho, podeEditar, aoSalvar })
   );
 }
 
-function CadastroNegociadores({ perfil }) {
+function CadastroNegociadores({ perfil, aoMudarMetaLoja }) {
   const [lista, setLista] = useState([]);
   const [novo, setNovo] = useState({ nome: "", papel: "negociador" });
   const [erro, setErro] = useState("");
   const [indo, setIndo] = useState(false);
+  const [loja, setLoja] = useState(null);
+  const [lojaComp, setLojaComp] = useState("");
+  const [lojaSalvo, setLojaSalvo] = useState("");
   const eGerente = perfil && perfil.papel === "gerente";
 
   const carregar = () => listarNegociadores().then(setLista).catch((e) => setErro(e.message));
-  useEffect(() => { carregar(); }, []);
+  useEffect(() => {
+    carregar();
+    lerMetaLoja().then((d) => { setLojaComp(d.competencia); setLoja(d.meta || { valor: 0, volume: 0 }); })
+      .catch((e) => setErro(e.message));
+  }, []);
+
+  const salvarLoja = async (mud) => {
+    const alvo = { valor: 0, volume: 0, ...(loja || {}), ...mud };
+    setErro(""); setLojaSalvo("");
+    try {
+      const salvo = await gravarMetaLoja({ valor: alvo.valor, volume: alvo.volume }, lojaComp);
+      setLoja(salvo);
+      setLojaSalvo("salvo");
+      if (aoMudarMetaLoja) aoMudarMetaLoja(salvo);
+    } catch (e) { setErro(e.message); }
+  };
+
+  // A soma das individuais não é a meta da loja — é a referência ao
+  // lado dela. Ver as duas juntas é o que deixa a folga explícita.
+  const soma = lista
+    .filter((x) => x.ativo && x.papel === "negociador")
+    .reduce((t, x) => t + (Number(x.meta_valor) || 0), 0);
 
   const cadastrar = async () => {
     if (!novo.nome.trim()) return;
@@ -6331,6 +6400,23 @@ function CadastroNegociadores({ perfil }) {
     catch (e) { setErro(e.message); }
   };
 
+  // Grava no blur, e só quando mudou — cada tecla seria uma escrita no
+  // banco. `defaultValue` em vez de `value` porque o valor autoritativo
+  // é o que o servidor devolveu, não o que está sendo digitado.
+  const campoMeta = (n, chave, rot, largura) => (
+    <label style={{ width: largura, flex: `0 0 ${largura}px` }}>
+      <span className="block text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>{rot}</span>
+      <input className="mt-[2px] w-full rounded-md border px-2 py-1 text-right text-[12px] outline-none"
+        style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal"
+        defaultValue={n[chave] == null || Number(n[chave]) === 0 ? "" : n[chave]}
+        onBlur={(e) => {
+          const antes = Number(n[chave]) || 0;
+          const agora = Number(String(e.target.value).replace(/\./g, "").replace(",", ".")) || 0;
+          if (agora !== antes) mexer(n.id, { [chave]: e.target.value });
+        }} />
+    </label>
+  );
+
   const grupo = (papel, titulo) => {
     const gente = lista.filter((n) => n.papel === papel);
     if (!gente.length) return null;
@@ -6339,28 +6425,43 @@ function CadastroNegociadores({ perfil }) {
         <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>{titulo}</div>
         <div className="mt-1.5 space-y-1.5">
           {gente.map((n) => (
-            <div key={n.id} className="flex items-center gap-2 rounded-md px-3 py-2"
+            <div key={n.id} className="rounded-md px-3 py-2"
               style={{ background: n.ativo ? "#fff" : "#FBFAFC", border: `1px solid ${C.line}`, opacity: n.ativo ? 1 : 0.55 }}>
+              <div className="flex items-center gap-2">
               <span className="flex-1 text-[13px] font-medium">{n.nome}</span>
-              {eGerente ? (
+              <span className="text-[11px]" style={{ color: C.mute, fontFamily: F.mono }}>
+                {brl(n.meta_valor)} · {n.meta_volume} carros
+              </span>
+              {eGerente && (
+                <button onClick={() => mexer(n.id, { ativo: !n.ativo })} className="text-[11px]"
+                  style={{ color: n.ativo ? C.laranja : C.verde }}>
+                  {n.ativo ? "desativar" : "ativar"}
+                </button>
+              )}
+              </div>
+
+              {/* A meta é o que a pessoa controla, não o número final:
+                  atendimentos × conversão × ticket. O faturamento
+                  aparece embaixo porque é consequência — e vem do
+                  servidor, que é quem faz a conta (0018). */}
+              {eGerente && (
                 <>
-                  <input className="w-24 rounded-md border px-2 py-1 text-right text-[12px] outline-none"
-                    style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" title="Meta do mês em R$"
-                    defaultValue={n.meta_valor == null ? "" : Math.round(n.meta_valor)}
-                    onBlur={(e) => e.target.value != Math.round(n.meta_valor) && mexer(n.id, { meta_valor: e.target.value })} />
-                  <input className="w-14 rounded-md border px-2 py-1 text-right text-[12px] outline-none"
-                    style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" title="Meta de carros no mês"
-                    defaultValue={n.meta_volume == null ? "" : n.meta_volume}
-                    onBlur={(e) => e.target.value != n.meta_volume && mexer(n.id, { meta_volume: e.target.value })} />
-                  <button onClick={() => mexer(n.id, { ativo: !n.ativo })} className="text-[11px]"
-                    style={{ color: n.ativo ? C.laranja : C.verde }}>
-                    {n.ativo ? "desativar" : "ativar"}
-                  </button>
+                  {/* O resultado não se repete aqui: ele já está no
+                      cabeçalho da linha, e é o que o servidor gravou. */}
+                  <div className="mt-2 flex items-end gap-1.5">
+                    {campoMeta(n, "meta_atendimentos", "Atend.", 64)}
+                    <span className="pb-1.5 text-[11px]" style={{ color: C.mute }}>×</span>
+                    {campoMeta(n, "meta_conversao", "Conv. %", 64)}
+                    <span className="pb-1.5 text-[11px]" style={{ color: C.mute }}>×</span>
+                    {campoMeta(n, "meta_ticket", "Ticket R$", 92)}
+                  </div>
+                  {!Number(n.meta_atendimentos) && Number(n.meta_valor) > 0 && (
+                    <p className="mt-1 text-[10px] leading-snug" style={{ color: C.laranja }}>
+                      Os {brl(n.meta_valor)} vieram do cadastro antigo. Preencha os três campos para a meta
+                      passar a sair deles.
+                    </p>
+                  )}
                 </>
-              ) : (
-                <span className="text-[11px]" style={{ color: C.mute, fontFamily: F.mono }}>
-                  {brl(n.meta_valor)} · {n.meta_volume} carros
-                </span>
               )}
             </div>
           ))}
@@ -6369,9 +6470,62 @@ function CadastroNegociadores({ perfil }) {
     );
   };
 
+  const rotuloComp = lojaComp
+    ? `${lojaComp.slice(5, 7)}/${lojaComp.slice(2, 4)}`
+    : "";
+
   return (
     <div>
       {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+
+      {/* ---- a meta da loja, independente das individuais ---- */}
+      <div className="rounded-md px-3 py-2.5" style={{ background: C.roxoFraco, border: `1px solid ${C.line}` }}>
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.roxo, fontWeight: 700 }}>
+            Meta da loja · {rotuloComp}
+          </span>
+          {lojaSalvo && <span className="text-[10px]" style={{ color: C.verde }}>{lojaSalvo}</span>}
+        </div>
+
+        {loja === null ? (
+          <p className="mt-1 text-[11px]" style={{ color: C.mute }}>Carregando…</p>
+        ) : eGerente ? (
+          <div className="mt-2 flex items-end gap-2">
+            <label style={{ width: 120, flex: "0 0 120px" }}>
+              <span className="block text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Faturamento R$</span>
+              <input className="mt-[2px] w-full rounded-md border px-2 py-1 text-right text-[13px] outline-none"
+                style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal"
+                defaultValue={Number(loja.valor) ? Math.round(loja.valor) : ""}
+                onBlur={(e) => {
+                  const v = Number(String(e.target.value).replace(/\./g, "").replace(",", ".")) || 0;
+                  if (v !== (Number(loja.valor) || 0)) salvarLoja({ valor: v });
+                }} />
+            </label>
+            <label style={{ width: 70, flex: "0 0 70px" }}>
+              <span className="block text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Carros</span>
+              <input className="mt-[2px] w-full rounded-md border px-2 py-1 text-right text-[13px] outline-none"
+                style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric"
+                defaultValue={Number(loja.volume) ? loja.volume : ""}
+                onBlur={(e) => {
+                  const v = Math.trunc(Number(e.target.value) || 0);
+                  if (v !== (Number(loja.volume) || 0)) salvarLoja({ volume: v });
+                }} />
+            </label>
+          </div>
+        ) : (
+          <div className="mt-1 text-[14px]" style={{ fontFamily: F.mono, fontWeight: 700 }}>
+            {Number(loja.valor) ? brl(loja.valor) : "não definida"}
+            {Number(loja.volume) ? <span className="text-[11px]" style={{ fontWeight: 400, color: C.mute }}> · {loja.volume} carros</span> : null}
+          </div>
+        )}
+
+        <p className="mt-1.5 text-[10px] leading-snug" style={{ color: C.mute }}>
+          A soma das metas individuais dá <b style={{ fontFamily: F.mono }}>{brl(soma)}</b> — mas ela pressupõe
+          que todo mundo bate a sua, o que não acontece em mês nenhum. Por isso a meta da loja é digitada aqui,
+          e é ela que a régua do mês usa.
+        </p>
+      </div>
+
       {grupo("negociador", "Negociadores")}
       {grupo("prospeccao", "Prospecção")}
 
@@ -6392,7 +6546,8 @@ function CadastroNegociadores({ perfil }) {
             {indo ? "Cadastrando…" : "Cadastrar"}
           </button>
           <p className="text-[10px] leading-relaxed" style={{ color: C.mute }}>
-            Os dois números são a meta do mês: valor e quantidade de carros. Saem do campo e já salvam.
+            A meta de cada um é o que ele controla: atendimentos × conversão × ticket médio. O
+            faturamento é consequência, e quem faz a conta é o servidor. Sai do campo e já salva.
           </p>
         </div>
       )}

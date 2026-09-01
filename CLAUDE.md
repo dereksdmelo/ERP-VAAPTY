@@ -987,6 +987,31 @@ sumir. É o caso dos atendimentos importados, cujo negociador veio só
 como texto: esconder a linha para manter a tabela bonita esconderia
 faturamento.
 
+**A meta de cada um deixou de ser um número solto (0018).** Agora são
+três campos — atendimentos, conversão, ticket médio — e o faturamento é
+consequência: `meta_valor` e `meta_volume` viraram **derivados**,
+calculados em `derivarMeta()` no `api/perfil.js` e em lugar nenhum
+mais. O servidor não aceita `meta_valor` do cliente; quem gravar direto
+cria duas verdades para a mesma meta. O volume é arredondado **antes**
+de virar dinheiro para que a conta feche na tela: 30 atendimentos a 22%
+dão 7 carros, e 7 × 25.000 é o número que aparece.
+
+**No PATCH, só recalcula quando um dos três chega.** Sem essa guarda, um
+"desativar" — que manda apenas `ativo` — zeraria a meta de quem ainda
+está com os R$ 70.000 herdados do padrão antigo. Esses R$ 70.000
+continuam de pé até alguém preencher os três, e a tela diz de onde eles
+vieram em vez de fingir que são meta calculada.
+
+**A meta da LOJA é digitada, não somada.** Somar as individuais
+pressupõe que todo mundo bate a sua, o que não acontece em mês nenhum —
+foi a correção do Derek em 01/09/2026. Ela mora em `meta_loja`, uma
+linha por competência, sob `/api/perfil?recurso=meta-loja`. Por
+competência e não linha única porque o dashboard sabe olhar meses
+fechados: guardar só a atual faria agosto ser julgado pelo alvo de
+setembro. Enquanto ninguém definir, a régua cai na soma **e diz que
+caiu** — alvo sem procedência vira cobrança em cima de número que
+ninguém escolheu.
+
 **O ritmo necessário é aritmética, não previsão** — o que falta dividido
 pelos dias que sobram. Não há tendência nem sazonalidade, e não deve
 haver: projeção em cima de um mês de dado importado é número bonito e
