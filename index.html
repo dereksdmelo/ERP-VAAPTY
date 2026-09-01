@@ -5381,7 +5381,7 @@ function Importar({ aoTerminar }) {
   );
 }
 
-function Funil({ perfil }) {
+function Funil({ perfil, comp }) {
   const [d, setD] = useState(null);
   const [equipe, setEquipe] = useState([]);
   const [erro, setErro] = useState("");
@@ -5392,11 +5392,9 @@ function Funil({ perfil }) {
   // cadastro não chega — texto errado é pior que espaço vazio.
   const [equipeOk, setEquipeOk] = useState(false);
   const [metaLoja, setMetaLoja] = useState(null);
-  // O mês que o painel inteiro está mostrando. Tudo aqui dentro —
-  // funil, régua, meta da loja, confiabilidade — sai desta competência.
-  const [comp, setComp] = useState(() => competenciaDe(hojeEmSP()));
-  const MESES = useMemo(() => mesesRecentes(18), []);
-
+  // O mês vem de cima. Ele manda na tela inteira — a lista do CRM e
+  // este painel — e por isso o seletor mora lá, não aqui: dois
+  // seletores discordando na mesma tela é pior que nenhum.
   const eGerente = !!(perfil && perfil.papel === "gerente");
 
   useEffect(() => {
@@ -5442,7 +5440,7 @@ function Funil({ perfil }) {
     return (
       <button onClick={() => setAberto(true)} className="w-full rounded-md border py-2.5 text-[13px] font-semibold"
         style={{ borderColor: C.line, color: C.roxo }}>
-        Ver o dashboard do mês
+        Ver o dashboard de {rotuloMes(comp).split(" de ")[0]}
       </button>
     );
   }
@@ -5450,28 +5448,15 @@ function Funil({ perfil }) {
   return (
     <div className="rounded-lg p-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
       <div className="flex items-baseline justify-between gap-2">
-        <span className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.roxo, fontFamily: F.disp, fontWeight: 700 }}>Dashboard</span>
+        <span className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.roxo, fontFamily: F.disp, fontWeight: 700 }}>
+          Dashboard · {rotuloMes(comp)}
+        </span>
         <span className="flex items-center gap-3">
           <button onClick={() => setCadastro(!cadastro)} className="text-[11px]" style={{ color: C.roxo }}>
             {cadastro ? "ver números" : "negociadores"}
           </button>
           <button onClick={() => setAberto(false)} className="text-[11px]" style={{ color: C.mute }}>fechar</button>
         </span>
-      </div>
-
-      {/* O mês manda em tudo o que está abaixo. Fica no topo e sempre
-          visível porque, sem ele à vista, número de mês fechado passa
-          por número de hoje. */}
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <select className="rounded-md border px-2 py-1.5 text-[13px] outline-none"
-          style={{ ...inputSty, fontWeight: 600 }} value={comp} onChange={(e) => setComp(e.target.value)}>
-          {MESES.map((m) => <option key={m} value={m}>{rotuloMes(m)}</option>)}
-        </select>
-        {comp !== MESES[0] && (
-          <button onClick={() => setComp(MESES[0])} className="text-[11px]" style={{ color: C.roxo }}>
-            voltar para {rotuloMes(MESES[0]).split(" de ")[0]}
-          </button>
-        )}
       </div>
 
       {cadastro && <CadastroNegociadores perfil={perfil} competencia={comp} aoMudarMetaLoja={setMetaLoja} />}
@@ -6732,6 +6717,11 @@ function CRM({ perfil, aoAbrir, aoAbrirAdm, aoAbrirEstoque }) {
   const [novo, setNovo] = useState(false);
   const [mostrarImportar, setMostrarImportar] = useState(false);
   const [gestao, setGestao] = useState(false);
+  // O mês manda na tela inteira — lista e dashboard. Vazio é "todos os
+  // meses", que existe porque procurar um cliente de abril não pode
+  // exigir lembrar em que mês ele passou aqui.
+  const [comp, setComp] = useState(() => competenciaDe(hojeEmSP()));
+  const MESES = useMemo(() => mesesRecentes(18), []);
 
   const carregar = async (filtros) => {
     setCarregando(true); setErro("");
@@ -6740,9 +6730,18 @@ function CRM({ perfil, aoAbrir, aoAbrirAdm, aoAbrirEstoque }) {
     setCarregando(false);
   };
 
-  useEffect(() => { carregar({ status, q: busca }); }, [status]);
+  const filtrosAtuais = (extra) => {
+    const f = { status, ...(extra || {}) };
+    if (comp) {
+      const { de, ate } = faixaDoMes(comp);
+      f.de = de; f.ate = ate;
+    }
+    return f;
+  };
 
-  const buscar = (ev) => { if (ev) ev.preventDefault(); carregar({ status, q: busca }); };
+  useEffect(() => { carregar(filtrosAtuais({ q: busca })); }, [status, comp]);
+
+  const buscar = (ev) => { if (ev) ev.preventDefault(); carregar(filtrosAtuais({ q: busca })); };
 
   const contas = useMemo(() => {
     const c = { total: lista.length };
@@ -6766,6 +6765,20 @@ function CRM({ perfil, aoAbrir, aoAbrirAdm, aoAbrirEstoque }) {
           {contas.total} na lista · {contas.fechado || 0} fechados · {contas.aguardando_propostas || 0} esperando proposta
         </div>
       </header>
+
+      {/* O mês fica acima dos filtros de status porque manda em todos
+          eles: pílula de status dentro de um mês é outra pergunta que
+          pílula de status no ano inteiro. */}
+      <div className="flex items-center gap-2 px-3 py-2" style={{ background: C.paper, borderBottom: `1px solid ${C.line}` }}>
+        <select className="rounded-md border px-2 py-1.5 text-[13px] outline-none"
+          style={{ ...inputSty, fontWeight: 600 }} value={comp} onChange={(e) => setComp(e.target.value)}>
+          {MESES.map((m) => <option key={m} value={m}>{rotuloMes(m)}</option>)}
+          <option value="">Todos os meses</option>
+        </select>
+        <span className="text-[11px] leading-snug" style={{ color: C.mute }}>
+          {comp ? "lista e dashboard deste mês" : "sem filtro de mês"}
+        </span>
+      </div>
 
       <div className="rolar flex gap-1.5 overflow-x-auto px-3 py-3" style={{ background: C.paper, borderBottom: `1px solid ${C.line}` }}>
         {[["", "Todos"]].concat(STATUS_AT.map((x) => [x[0], x[1]])).map(([v, r]) => (
@@ -6810,7 +6823,7 @@ function CRM({ perfil, aoAbrir, aoAbrirAdm, aoAbrirEstoque }) {
               <button onClick={() => setGestao(false)} className="text-[14px]" style={{ color: C.mute }}>fechar</button>
             </div>
 
-            <Funil perfil={perfil} />
+            <Funil perfil={perfil} comp={comp || competenciaDe(hojeEmSP())} />
 
             {/* O estoque é a continuação natural do CRM: o mesmo carro,
                 depois que passa a ser nosso. */}
@@ -6830,7 +6843,7 @@ function CRM({ perfil, aoAbrir, aoAbrirAdm, aoAbrirEstoque }) {
 
             {perfil && perfil.papel === "gerente" && (
               mostrarImportar
-                ? <Importar aoTerminar={async () => { setMostrarImportar(false); await carregar({ status, q: busca }); }} />
+                ? <Importar aoTerminar={async () => { setMostrarImportar(false); await carregar(filtrosAtuais({ q: busca })); }} />
                 : <button onClick={() => setMostrarImportar(true)} className="w-full rounded-md border py-2.5 text-[14px]"
                     style={{ borderColor: C.line, color: C.mute }}>
                     Importar planilha do CRM

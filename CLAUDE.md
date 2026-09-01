@@ -1017,11 +1017,23 @@ pelos dias que sobram. Não há tendência nem sazonalidade, e não deve
 haver: projeção em cima de um mês de dado importado é número bonito e
 mentiroso.
 
-**O mês é escolhido, e manda em tudo abaixo dele.** O seletor fica no
-topo do dashboard, com os últimos 18 meses. Funil, régua, meta da loja
-e confiabilidade saem todos da mesma competência — `gravarDesempenho()`
-passou a receber a competência junto porque, sem isso, editar a
-confiabilidade de agosto gravaria na linha de setembro.
+**O mês é escolhido no CRM, e manda na tela inteira.** O seletor fica
+acima dos filtros de status — pílula de status dentro de um mês é outra
+pergunta que pílula de status no ano inteiro — e vale para a lista de
+atendimentos **e** para o dashboard, que recebe a competência por
+propriedade. Ele nasceu dentro do `Funil` e subiu na primeira vez que o
+Derek usou: filtrar só o painel deixa a lista embaixo mostrando outro
+recorte, e duas verdades na mesma tela é pior que uma só.
+
+**"Todos os meses" existe** porque procurar um cliente de abril não
+pode exigir lembrar em que mês ele passou aqui. Nesse caso o dashboard
+cai no mês corrente — ele mede um mês por definição — e o cabeçalho diz
+qual.
+
+Funil, régua, meta da loja e confiabilidade saem todos da mesma
+competência — `gravarDesempenho()` passou a receber a competência junto
+porque, sem isso, editar a confiabilidade de agosto gravaria na linha
+de setembro.
 
 **Resposta atrasada não sobrescreve mês novo.** Trocar de mês rápido
 faz duas consultas correrem juntas; o `vivo` do efeito descarta a que
