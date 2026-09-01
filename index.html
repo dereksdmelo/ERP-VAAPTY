@@ -300,6 +300,51 @@ async function apagarFotoServidor(id) {
 }
 /* ----------- CRM: atendimentos e propostas ----------- */
 
+/**
+ * Hoje em Joinville, aaaa-mm-dd.
+ *
+ * O relógio da casa é America/Sao_Paulo, e não UTC: das 21h à
+ * meia-noite do dia 31 Greenwich já virou o mês, e o dashboard trocava
+ * o período com a loja ainda fechando o mês anterior. O mesmo relógio
+ * está em api/funil.js e api/perfil.js — quem escrever data nova usa
+ * este.
+ */
+const hojeEmSP = () =>
+  new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+
+const MESES_PT = ["janeiro", "fevereiro", "março", "abril", "maio", "junho",
+                  "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+
+// A competência é sempre o dia 1: é assim que `desempenho` e
+// `meta_loja` guardam o mês, e é a chave dos dois.
+const competenciaDe = (iso) => `${String(iso).slice(0, 8)}01`;
+
+const rotuloMes = (comp) =>
+  `${MESES_PT[Number(String(comp).slice(5, 7)) - 1]} de ${String(comp).slice(0, 4)}`;
+
+/** O período fechado do mês, para o `de`/`ate` do funil. */
+const faixaDoMes = (comp) => {
+  const ano = Number(String(comp).slice(0, 4));
+  const mes = Number(String(comp).slice(5, 7));
+  // Dia 0 do mês seguinte é o último deste — sem tabela de bissexto.
+  const ultimo = new Date(Date.UTC(ano, mes, 0)).getUTCDate();
+  return { de: competenciaDe(comp), ate: `${String(comp).slice(0, 8)}${String(ultimo).padStart(2, "0")}` };
+};
+
+/** Os últimos `n` meses, do atual para trás. */
+const mesesRecentes = (n) => {
+  const hoje = hojeEmSP();
+  const ano = Number(hoje.slice(0, 4));
+  const mes = Number(hoje.slice(5, 7));
+  const lista = [];
+  for (let i = 0; i < n; i++) {
+    // Índice de mês negativo volta o ano sozinho: Date.UTC cuida disso.
+    const d = new Date(Date.UTC(ano, mes - 1 - i, 1));
+    lista.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-01`);
+  }
+  return lista;
+};
+
 const comoQuery = (o) =>
   Object.keys(o).filter((k) => o[k] !== "" && o[k] != null)
     .map((k) => `${k}=${encodeURIComponent(o[k])}`).join("&");
@@ -469,8 +514,11 @@ async function lerDesempenho(competencia) {
   (d.desempenho || []).forEach((x) => { por[x.negociador_id] = x; });
   return por;
 }
-async function gravarDesempenho(negociadorId, dados) {
-  const r = await fetchAut("/api/perfil?recurso=desempenho", {
+// A competência viaja junto: com o seletor de mês, salvar sem ela
+// gravaria a confiabilidade de agosto na linha de setembro.
+async function gravarDesempenho(negociadorId, dados, competencia) {
+  const q = comoQuery({ competencia });
+  const r = await fetchAut(`/api/perfil?recurso=desempenho${q ? `&${q}` : ""}`, {
     method: "PUT", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...dados, negociador_id: negociadorId }),
   });
@@ -5272,23 +5320,40 @@ function Funil({ perfil }) {
   // cadastro não chega — texto errado é pior que espaço vazio.
   const [equipeOk, setEquipeOk] = useState(false);
   const [metaLoja, setMetaLoja] = useState(null);
+  // O mês que o painel inteiro está mostrando. Tudo aqui dentro —
+  // funil, régua, meta da loja, confiabilidade — sai desta competência.
+  const [comp, setComp] = useState(() => competenciaDe(hojeEmSP()));
+  const MESES = useMemo(() => mesesRecentes(18), []);
 
   const eGerente = !!(perfil && perfil.papel === "gerente");
 
   useEffect(() => {
-    if (!aberto || d) return;
-    consultarFunil().then(setD).catch((e) => setErro(e.message));
-    listarNegociadores().then(setEquipe).catch(() => {}).then(() => setEquipeOk(true));
+    if (!aberto) return;
+    // Trocar de mês rápido pode fazer a resposta velha chegar por
+    // último e sobrescrever a nova. `vivo` descarta o que ficou para
+    // trás.
+    let vivo = true;
+    setD(null); setErro(""); setMetaLoja(null); setDesempenho({});
+    const { de, ate } = faixaDoMes(comp);
+    consultarFunil(de, ate).then((x) => { if (vivo) setD(x); })
+      .catch((e) => { if (vivo) setErro(e.message); });
     // Falha aqui cai na soma das individuais, e a régua diz que caiu.
-    lerMetaLoja().then((d) => setMetaLoja(d.meta)).catch(() => {});
+    lerMetaLoja(comp).then((x) => { if (vivo) setMetaLoja(x.meta); }).catch(() => {});
     // Falha aqui não derruba o dashboard: sem confiabilidade os
     // cartões saem com zero, que é o estado real de quem não lançou.
-    lerDesempenho().then(setDesempenho).catch(() => {});
+    lerDesempenho(comp).then((x) => { if (vivo) setDesempenho(x); }).catch(() => {});
+    return () => { vivo = false; };
+  }, [aberto, comp]);
+
+  // O cadastro de gente não muda de mês, então carrega uma vez só.
+  useEffect(() => {
+    if (!aberto || equipeOk) return;
+    listarNegociadores().then(setEquipe).catch(() => {}).then(() => setEquipeOk(true));
   }, [aberto]);
 
   const salvarDesempenho = async (id, valores) => {
     try {
-      const salvo = await gravarDesempenho(id, valores);
+      const salvo = await gravarDesempenho(id, valores, comp);
       setDesempenho((m) => ({ ...m, [id]: salvo }));
     } catch (e) { setErro(e.message); }
   };
@@ -5312,8 +5377,8 @@ function Funil({ perfil }) {
 
   return (
     <div className="rounded-lg p-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-      <div className="flex items-baseline justify-between">
-        <span className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.roxo, fontFamily: F.disp, fontWeight: 700 }}>Dashboard do mês</span>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.roxo, fontFamily: F.disp, fontWeight: 700 }}>Dashboard</span>
         <span className="flex items-center gap-3">
           <button onClick={() => setCadastro(!cadastro)} className="text-[11px]" style={{ color: C.roxo }}>
             {cadastro ? "ver números" : "negociadores"}
@@ -5322,7 +5387,22 @@ function Funil({ perfil }) {
         </span>
       </div>
 
-      {cadastro && <CadastroNegociadores perfil={perfil} aoMudarMetaLoja={setMetaLoja} />}
+      {/* O mês manda em tudo o que está abaixo. Fica no topo e sempre
+          visível porque, sem ele à vista, número de mês fechado passa
+          por número de hoje. */}
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <select className="rounded-md border px-2 py-1.5 text-[13px] outline-none"
+          style={{ ...inputSty, fontWeight: 600 }} value={comp} onChange={(e) => setComp(e.target.value)}>
+          {MESES.map((m) => <option key={m} value={m}>{rotuloMes(m)}</option>)}
+        </select>
+        {comp !== MESES[0] && (
+          <button onClick={() => setComp(MESES[0])} className="text-[11px]" style={{ color: C.roxo }}>
+            voltar para {rotuloMes(MESES[0]).split(" de ")[0]}
+          </button>
+        )}
+      </div>
+
+      {cadastro && <CadastroNegociadores perfil={perfil} competencia={comp} aoMudarMetaLoja={setMetaLoja} />}
 
       {erro && !cadastro && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
       {!d && !erro && !cadastro && <p className="mt-2 text-[12px]" style={{ color: C.mute }}>Calculando…</p>}
@@ -5973,10 +6053,7 @@ function ReguaDoMes({ d, equipe, metaLoja }) {
 
   // O período pode ser um mês fechado: aí o mês inteiro já decorreu, e
   // marcar "hoje" no dia 5 diria que sobram 26 dias que não existem.
-  // O mesmo relógio do api/funil.js: em UTC a virada do mês chega três
-  // horas antes que em Joinville, e a régua marcaria dia 1 com a loja
-  // ainda fechando o mês anterior.
-  const hojeISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+  const hojeISO = hojeEmSP();
   const mesCorrente = hojeISO.slice(0, 7) === `${ano}-${String(mes).padStart(2, "0")}`;
   const diaHoje = mesCorrente ? Number(hojeISO.slice(8, 10)) : diasNoMes;
 
@@ -6069,7 +6146,7 @@ function ReguaDoMes({ d, equipe, metaLoja }) {
           Meta × mês · {rotuloMes}
         </span>
         <span className="text-[11px]" style={{ color: C.mute }}>
-          dia {diaHoje} de {diasNoMes} · {Math.round(pctTempo * 100)}% do mês
+          {mesCorrente ? `dia ${diaHoje} de ${diasNoMes} · ${Math.round(pctTempo * 100)}% do mês` : "mês fechado"}
         </span>
       </div>
 
@@ -6121,17 +6198,30 @@ function ReguaDoMes({ d, equipe, metaLoja }) {
             </div>
           </div>
 
+          {/* Mês fechado não tem ritmo a corrigir: falar em "dias atrás"
+              de um mês que acabou é cobrança sem destino. O que resta
+              dizer é se bateu, e por quanto. */}
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px]">
-            <span style={{ color: cor, fontWeight: 700 }}>
-              {atraso === 0 ? "No ritmo do mês"
-                : atraso > 0 ? `${atraso} dia${atraso > 1 ? "s" : ""} atrás do ritmo`
-                : `${-atraso} dia${-atraso > 1 ? "s" : ""} à frente do ritmo`}
-            </span>
-            <span style={{ color: C.mute }}>
-              {falta > 0
-                ? <>faltam <b style={{ color: C.ink }}>{brl(falta)}</b>{diasQueSobram ? <> em {diasQueSobram} dia{diasQueSobram > 1 ? "s" : ""} — {brl(porDia)}/dia</> : " e o mês acabou"}</>
-                : "meta batida"}
-            </span>
+            {mesCorrente ? (
+              <>
+                <span style={{ color: cor, fontWeight: 700 }}>
+                  {atraso === 0 ? "No ritmo do mês"
+                    : atraso > 0 ? `${atraso} dia${atraso > 1 ? "s" : ""} atrás do ritmo`
+                    : `${-atraso} dia${-atraso > 1 ? "s" : ""} à frente do ritmo`}
+                </span>
+                <span style={{ color: C.mute }}>
+                  {falta > 0
+                    ? <>faltam <b style={{ color: C.ink }}>{brl(falta)}</b>{diasQueSobram ? <> em {diasQueSobram} dia{diasQueSobram > 1 ? "s" : ""} — {brl(porDia)}/dia</> : " e o mês acabou"}</>
+                    : "meta batida"}
+                </span>
+              </>
+            ) : (
+              <span style={{ color: cor, fontWeight: 700 }}>
+                {falta > 0
+                  ? <>Fechou <b>{brl(falta)}</b> abaixo da meta</>
+                  : <>Meta batida — <b>{brl(realizado - meta)}</b> acima</>}
+              </span>
+            )}
           </div>
 
           {/* ---- as metas individuais, como no quadro ---- */}
@@ -6165,9 +6255,11 @@ function ReguaDoMes({ d, equipe, metaLoja }) {
                 </div>
               );
             })}
-            <p className="mt-1 px-1 text-[10px]" style={{ color: C.mute }}>
-              O traço escuro em cada barra é o dia de hoje. Barra atrás dele, atrasado.
-            </p>
+            {mesCorrente && (
+              <p className="mt-1 px-1 text-[10px]" style={{ color: C.mute }}>
+                O traço escuro em cada barra é o dia de hoje. Barra atrás dele, atrasado.
+              </p>
+            )}
           </div>
         </>
       )}
@@ -6352,7 +6444,7 @@ function CartaoNegociador({ n, equipe, loja, metaLoja, desempenho, podeEditar, a
   );
 }
 
-function CadastroNegociadores({ perfil, aoMudarMetaLoja }) {
+function CadastroNegociadores({ perfil, competencia, aoMudarMetaLoja }) {
   const [lista, setLista] = useState([]);
   const [novo, setNovo] = useState({ nome: "", papel: "negociador" });
   const [erro, setErro] = useState("");
@@ -6363,11 +6455,15 @@ function CadastroNegociadores({ perfil, aoMudarMetaLoja }) {
   const eGerente = perfil && perfil.papel === "gerente";
 
   const carregar = () => listarNegociadores().then(setLista).catch((e) => setErro(e.message));
+  useEffect(() => { carregar(); }, []);
+
+  // A meta da loja é por mês: seguir o seletor do painel é o que
+  // impede alguém de digitar a meta de agosto olhando setembro.
   useEffect(() => {
-    carregar();
-    lerMetaLoja().then((d) => { setLojaComp(d.competencia); setLoja(d.meta || { valor: 0, volume: 0 }); })
+    setLoja(null); setLojaSalvo("");
+    lerMetaLoja(competencia).then((d) => { setLojaComp(d.competencia); setLoja(d.meta || { valor: 0, volume: 0 }); })
       .catch((e) => setErro(e.message));
-  }, []);
+  }, [competencia]);
 
   const salvarLoja = async (mud) => {
     const alvo = { valor: 0, volume: 0, ...(loja || {}), ...mud };

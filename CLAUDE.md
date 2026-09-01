@@ -1017,6 +1017,21 @@ pelos dias que sobram. Não há tendência nem sazonalidade, e não deve
 haver: projeção em cima de um mês de dado importado é número bonito e
 mentiroso.
 
+**O mês é escolhido, e manda em tudo abaixo dele.** O seletor fica no
+topo do dashboard, com os últimos 18 meses. Funil, régua, meta da loja
+e confiabilidade saem todos da mesma competência — `gravarDesempenho()`
+passou a receber a competência junto porque, sem isso, editar a
+confiabilidade de agosto gravaria na linha de setembro.
+
+**Resposta atrasada não sobrescreve mês novo.** Trocar de mês rápido
+faz duas consultas correrem juntas; o `vivo` do efeito descarta a que
+ficou para trás. Sem ele, os números de agosto podiam aterrissar
+depois dos de setembro, sob o rótulo de setembro.
+
+**Mês fechado não tem ritmo a corrigir.** "Quatro dias atrás do ritmo"
+num mês que acabou é cobrança sem destino: a régua troca a frase por
+quanto faltou ou quanto sobrou, e some com o traço de hoje.
+
 **O mês virou America/Sao_Paulo, e isso era bug de verdade.** O
 `api/funil.js` montava o período com `getUTCMonth()`. Em Joinville
 (UTC−3), das 21h à meia-noite do dia 31 o relógio de Greenwich já tinha
