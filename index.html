@@ -4797,7 +4797,7 @@ const soData = (iso) => {
 
 function Etiqueta({ status }) {
   return (
-    <span className="rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.08em]"
+    <span className="whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.06em]"
       style={{ background: `${corStatus(status)}1A`, color: corStatus(status) }}>
       {rotulo(STATUS_AT.map((x) => [x[0], x[1]]), status)}
     </span>
