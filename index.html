@@ -450,6 +450,78 @@ async function atualizarNegociador(id, dados) {
   return d.negociador;
 }
 
+/* ----------- estoque (0019) ----------- */
+// Os três recursos moram sob /api/veiculo pelo teto de 12 funções da
+// Vercel. É o mesmo truque das indicações em /api/atendimento e da
+// meta da loja em /api/perfil.
+async function listarEstoque(situacao) {
+  const q = comoQuery({ recurso: "estoque", situacao });
+  const r = await fetchAut(`/api/veiculo?${q}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui carregar o estoque.");
+  return d.estoque || [];
+}
+async function lerEstoqueItem(id) {
+  const r = await fetchAut(`/api/veiculo?recurso=estoque&id=${encodeURIComponent(id)}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui abrir o carro.");
+  if (!d.estoque) throw new Error("Carro não encontrado no estoque.");
+  return d.estoque;
+}
+async function entrarNoEstoque(dados) {
+  const r = await fetchAut("/api/veiculo?recurso=estoque", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui pôr no estoque.");
+  return d.estoque;
+}
+async function atualizarEstoque(id, dados) {
+  const r = await fetchAut(`/api/veiculo?recurso=estoque&id=${encodeURIComponent(id)}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui salvar.");
+  return d.estoque;
+}
+async function criarCusto(dados) {
+  const r = await fetchAut("/api/veiculo?recurso=custo", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui lançar o custo.");
+  return d.custo;
+}
+async function atualizarCusto(id, dados) {
+  const r = await fetchAut(`/api/veiculo?recurso=custo&id=${encodeURIComponent(id)}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui salvar o custo.");
+  return d.custo;
+}
+async function apagarCusto(id) {
+  const r = await fetchAut(`/api/veiculo?recurso=custo&id=${encodeURIComponent(id)}`, { method: "DELETE" });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui apagar.");
+  return true;
+}
+async function listarCompradores(busca) {
+  const q = comoQuery({ recurso: "comprador", busca });
+  const r = await fetchAut(`/api/veiculo?${q}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui carregar os compradores.");
+  return d.compradores || [];
+}
+async function criarComprador(dados) {
+  const r = await fetchAut("/api/veiculo?recurso=comprador", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui cadastrar o comprador.");
+  return d.comprador;
+}
+
 /* ----------- meta da loja (0018) ----------- */
 // A meta da loja é independente da soma das individuais: somar
 // pressupõe que todo mundo bate a sua, o que não acontece em mês
@@ -6651,7 +6723,7 @@ function CadastroNegociadores({ perfil, competencia, aoMudarMetaLoja }) {
   );
 }
 
-function CRM({ perfil, aoAbrir, aoAbrirAdm }) {
+function CRM({ perfil, aoAbrir, aoAbrirAdm, aoAbrirEstoque }) {
   const [lista, setLista] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
@@ -6739,6 +6811,13 @@ function CRM({ perfil, aoAbrir, aoAbrirAdm }) {
             </div>
 
             <Funil perfil={perfil} />
+
+            {/* O estoque é a continuação natural do CRM: o mesmo carro,
+                depois que passa a ser nosso. */}
+            <button onClick={aoAbrirEstoque} className="w-full rounded-md border py-2.5 text-[14px] font-semibold"
+              style={{ borderColor: C.line, color: C.roxo }}>
+              Estoque e custos
+            </button>
 
             <LeadsIndicacao />
 
@@ -6943,6 +7022,712 @@ const Aviso = ({ titulo, children, acao }) => (
  * pendente vem primeiro — é a fila de trabalho de quem senta aqui, e
  * ordenar por data deixaria o atrasado no fim.
  */
+/* ==================================================================
+ * ESTOQUE (0019)
+ * ================================================================== */
+
+const TIPOS_CUSTO = [
+  ["quitacao", "Quitação"], ["debitos", "Débitos"], ["cautelar", "Cautelar"],
+  ["transporte", "Transporte"], ["reparo", "Reparo"], ["juros", "Juros"],
+  ["documentacao", "Documentação"], ["outro", "Outro"],
+];
+const rotuloCusto = (t) => (TIPOS_CUSTO.filter((x) => x[0] === t)[0] || ["", "Outro"])[1];
+
+/**
+ * A conta do carro no pátio.
+ *
+ * `previsto` é o que o negócio combinou; `atual` é o que já foi pago,
+ * mais o previsto do que ainda não foi. É por isso que existe um
+ * terceiro número e não dois: um carro sem nada pago mostraria custo
+ * igual à compra, o que faria todo carro novo parecer barato.
+ *
+ * `realizado` nulo é "ainda não pagou". Zero é "pagou zero" — conta
+ * perdoada, desconto integral. Tratar os dois igual esconderia
+ * justamente o desconto que se conseguiu.
+ */
+function contaDoEstoque(e) {
+  const compra = Number(e.valor_compra) || 0;
+  const custos = e.estoque_custo || [];
+  let previsto = compra;
+  let atual = compra;
+  let aberto = 0;
+  custos.forEach((c) => {
+    const p = Number(c.previsto) || 0;
+    previsto += p;
+    if (c.realizado == null) { atual += p; aberto += 1; }
+    else atual += Number(c.realizado) || 0;
+  });
+  const venda = Number(e.valor_venda) || 0;
+  return {
+    compra, previsto, atual, aberto, venda,
+    desvio: atual - previsto,
+    margem: venda ? venda - atual : null,
+  };
+}
+
+const diasNoPatio = (e) => {
+  const de = String(e.entrou_em || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(de)) return null;
+  const fim = e.vendido_em && /^\d{4}-\d{2}-\d{2}$/.test(e.vendido_em) ? e.vendido_em : hojeEmSP();
+  return Math.max(0, Math.round((Date.parse(fim) - Date.parse(de)) / 86400000));
+};
+
+const diaBR = (v) => {
+  const s = String(v || "").slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? `${s.slice(8, 10)}/${s.slice(5, 7)}` : "—";
+};
+
+/**
+ * A tela do estoque: a fila de espera em cima, o pátio embaixo.
+ *
+ * A fila existe porque o carro não entra sozinho. Entrar no estoque é
+ * um ato — alguém confere o que foi combinado e confirma — e é nesse
+ * momento que o custo previsto nasce do check list. Automatizar a
+ * entrada no fechamento traria para cá todo negócio marcado como
+ * fechado por engano, e o custo de desfazer é maior que o de um toque.
+ */
+function TelaEstoque({ perfil, aoVoltar }) {
+  const [lista, setLista] = useState(null);
+  const [fila, setFila] = useState([]);
+  const [filtro, setFiltro] = useState("em_estoque");
+  const [erro, setErro] = useState("");
+  const [abrindo, setAbrindo] = useState(null);
+  const [entrando, setEntrando] = useState("");
+  const [mostrarFila, setMostrarFila] = useState(8);
+
+  const carregar = async () => {
+    setErro("");
+    try {
+      const e = await listarEstoque();
+      setLista(e);
+      // Quem já fechou e ainda não entrou. Compara por veículo porque é
+      // o veículo que tem o índice único no banco.
+      const dentro = {};
+      e.forEach((x) => { if (x.veiculo_id) dentro[x.veiculo_id] = true; });
+      const fechados = await listarAtendimentos({ status: "fechado", limite: 200 });
+      setFila(fechados.filter((a) => {
+        const v = (a.veiculo || [])[0];
+        return v && v.id && !dentro[v.id];
+      }));
+    } catch (ex) { setErro(ex.message); }
+  };
+  useEffect(() => { carregar(); }, []);
+
+  const entrar = async (a) => {
+    const v = (a.veiculo || [])[0];
+    if (!v) return;
+    setEntrando(a.id); setErro("");
+    try {
+      const cl = Array.isArray(a.checklist) ? a.checklist[0] : a.checklist;
+      // O previsto sai do check list, que é onde esses números já foram
+      // digitados uma vez. A comissão não entra: ela é retida do
+      // cliente, não paga por nós — somar viraria custo inventado.
+      const custos = [
+        { tipo: "quitacao", descricao: "Quitação do financiamento", previsto: cl && cl.valor_quitacao },
+        { tipo: "debitos", descricao: "Débitos do veículo", previsto: cl && cl.valor_debitos },
+        { tipo: "cautelar", descricao: "Perícia cautelar", previsto: cl && cl.valor_cautelar },
+      ];
+      await entrarNoEstoque({
+        veiculo_id: v.id,
+        atendimento_id: a.id,
+        // O que saiu para o cliente. `valor_cliente` é o líquido do
+        // check list; sem check list, cai no valor fechado.
+        valor_compra: (cl && cl.valor_cliente) || a.valor_fechado,
+        custos,
+      });
+      await carregar();
+    } catch (ex) { setErro(ex.message); }
+    setEntrando("");
+  };
+
+  if (abrindo) {
+    return <FichaEstoque id={abrindo} perfil={perfil}
+      aoVoltar={() => { setAbrindo(null); carregar(); }} />;
+  }
+
+  const visivel = (lista || []).filter((e) => filtro === "todos" || e.situacao === filtro);
+  const soma = visivel.reduce((t, e) => {
+    const c = contaDoEstoque(e);
+    return { custo: t.custo + c.atual, margem: t.margem + (c.margem || 0) };
+  }, { custo: 0, margem: 0 });
+
+  return (
+    <div className="mx-auto max-w-3xl space-y-3 px-4 py-4">
+      <div className="flex items-baseline justify-between">
+        <span className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.roxo, fontFamily: F.disp, fontWeight: 700 }}>
+          Estoque
+        </span>
+        <button onClick={aoVoltar} className="text-[13px]" style={{ color: C.mute }}>voltar</button>
+      </div>
+
+      {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+
+      {/* ---- a fila de entrada ---- */}
+      {!!fila.length && (
+        <div className="rounded-lg p-3" style={{ background: AMARELO.fundo, border: `1px solid ${C.line}` }}>
+          <div className="text-[11px] uppercase tracking-[0.12em]" style={{ color: AMARELO.texto, fontWeight: 700 }}>
+            {fila.length} carro{fila.length > 1 ? "s" : ""} fechado{fila.length > 1 ? "s" : ""} fora do estoque
+          </div>
+          <p className="mt-1 text-[11px] leading-snug" style={{ color: AMARELO.texto }}>
+            O custo previsto entra do check list. Ponha no estoque só o que está de fato no pátio —
+            negócio antigo, importado da planilha, também aparece aqui.
+          </p>
+          <div className="mt-2 space-y-1.5">
+            {/* Só os mais recentes, e a lista já vem por data decrescente.
+                Mostrar 55 linhas de negócio fechado em agosto esconderia
+                o carro que fechou hoje no meio delas. */}
+            {fila.slice(0, mostrarFila).map((a) => {
+              const v = (a.veiculo || [])[0] || {};
+              return (
+                <div key={a.id} className="flex items-center gap-2 rounded-md px-2.5 py-2" style={{ background: "#fff" }}>
+                  <span className="flex-1 text-[13px]">
+                    <b>{v.placa || "sem placa"}</b>
+                    <span style={{ color: C.mute }}> · {v.marca_modelo || a.carro_descricao || "—"}</span>
+                  </span>
+                  <button onClick={() => entrar(a)} disabled={entrando === a.id}
+                    className="rounded-md px-3 py-1.5 text-[12px] font-semibold"
+                    style={{ background: C.roxo, color: "#fff", opacity: entrando === a.id ? 0.5 : 1 }}>
+                    {entrando === a.id ? "entrando…" : "pôr no estoque"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          {fila.length > mostrarFila && (
+            <button onClick={() => setMostrarFila(mostrarFila + 20)} className="mt-2 text-[12px]"
+              style={{ color: AMARELO.texto, fontWeight: 600 }}>
+              ver mais {Math.min(20, fila.length - mostrarFila)} de {fila.length - mostrarFila} restantes
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ---- filtro e totais ---- */}
+      <div className="flex flex-wrap items-center gap-2">
+        {[["em_estoque", "No pátio"], ["vendido", "Vendidos"], ["todos", "Todos"]].map(([v, r]) => (
+          <button key={v} onClick={() => setFiltro(v)}
+            className="rounded-full px-3 py-1 text-[12px] font-semibold"
+            style={{
+              background: filtro === v ? C.roxo : "#fff",
+              color: filtro === v ? "#fff" : C.mute,
+              border: `1px solid ${filtro === v ? C.roxo : C.line}`,
+            }}>{r}</button>
+        ))}
+        {!!visivel.length && (
+          <span className="ml-auto text-[11px]" style={{ color: C.mute }}>
+            {visivel.length} carro{visivel.length > 1 ? "s" : ""} · custo {brl(soma.custo)}
+            {filtro === "vendido" && <> · margem <b style={{ color: soma.margem >= 0 ? C.verde : C.laranja }}>{brl(soma.margem)}</b></>}
+          </span>
+        )}
+      </div>
+
+      {lista === null && <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>}
+
+      {lista !== null && !visivel.length && (
+        <p className="text-[14px] leading-relaxed" style={{ color: C.mute }}>
+          {filtro === "em_estoque"
+            ? "Nenhum carro no pátio. O primeiro entra pela fila acima, quando um negócio fecha."
+            : "Nada aqui."}
+        </p>
+      )}
+
+      <div className="grid gap-2">
+        {visivel.map((e) => {
+          const v = e.veiculo || {};
+          const c = contaDoEstoque(e);
+          const dias = diasNoPatio(e);
+          return (
+            <button key={e.id} onClick={() => setAbrindo(e.id)} className="w-full rounded-lg p-3.5 text-left"
+              style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+              <div className="flex items-start justify-between gap-3">
+                <span className="text-[15px] font-semibold leading-tight">
+                  {v.placa || "sem placa"}
+                  <span className="block text-[13px] font-normal" style={{ color: C.mute }}>
+                    {v.marca_modelo || "—"}{v.ano_modelo ? ` ${v.ano_modelo}` : ""}
+                  </span>
+                </span>
+                <span className="text-right">
+                  <span className="block text-[15px]" style={{ fontFamily: F.mono, fontWeight: 700 }}>{brl(c.atual)}</span>
+                  <span className="block text-[10px]" style={{ color: C.mute }}>custo</span>
+                </span>
+              </div>
+
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]" style={{ color: C.mute }}>
+                <span>entrou {diaBR(e.entrou_em)}</span>
+                {dias != null && <span>{dias} dia{dias === 1 ? "" : "s"} {e.situacao === "vendido" ? "até vender" : "no pátio"}</span>}
+                {!!c.aberto && <span style={{ color: AMARELO.texto }}>{c.aberto} conta{c.aberto > 1 ? "s" : ""} em aberto</span>}
+                {c.desvio !== 0 && (
+                  <span style={{ color: c.desvio > 0 ? C.laranja : C.verde, fontWeight: 600 }}>
+                    {c.desvio > 0 ? "+" : "−"}{brl(Math.abs(c.desvio))} vs. previsto
+                  </span>
+                )}
+              </div>
+
+              {e.situacao === "vendido" && (
+                <div className="mt-2 rounded-md px-2.5 py-1.5 text-[12px]"
+                  style={{ background: c.margem >= 0 ? "#E8F3EE" : "#FDECE8" }}>
+                  Vendido {diaBR(e.vendido_em)}{e.comprador ? ` para ${e.comprador.nome}` : ""} por {brl(c.venda)} ·
+                  margem <b style={{ color: c.margem >= 0 ? C.verde : C.laranja }}>{brl(c.margem)}</b>
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A ficha do carro no pátio: o custo linha a linha, e a venda.
+ *
+ * Cada linha tem previsto, realizado e comprovante. É a estrutura que
+ * responde à pergunta que importa quando a margem sai diferente do
+ * combinado: onde, exatamente, ela mudou.
+ */
+function FichaEstoque({ id, perfil, aoVoltar }) {
+  const [e, setE] = useState(null);
+  const [erro, setErro] = useState("");
+  const [novo, setNovo] = useState(null);
+  const [vendendo, setVendendo] = useState(false);
+  const eGerente = !!(perfil && perfil.papel === "gerente");
+
+  const carregar = async () => {
+    try { setE(await lerEstoqueItem(id)); }
+    catch (ex) { setErro(ex.message); }
+  };
+  useEffect(() => { carregar(); }, [id]);
+
+  if (!e) {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-4">
+        <button onClick={aoVoltar} className="text-[13px]" style={{ color: C.mute }}>voltar</button>
+        <p className="mt-3 text-[13px]" style={{ color: erro ? C.laranja : C.mute }}>{erro || "Carregando…"}</p>
+      </div>
+    );
+  }
+
+  const v = e.veiculo || {};
+  const c = contaDoEstoque(e);
+  const custos = (e.estoque_custo || []).slice().sort((a, b) => (a.do_fechamento === b.do_fechamento ? 0 : a.do_fechamento ? -1 : 1));
+  const dias = diasNoPatio(e);
+
+  const salvarLinha = async (linha, mud) => {
+    setErro("");
+    try { await atualizarCusto(linha.id, mud); await carregar(); }
+    catch (ex) { setErro(ex.message); }
+  };
+
+  const anexarComprovante = async (linha, arquivo) => {
+    if (!arquivo) return;
+    setErro("");
+    try {
+      if (!e.atendimento_id) throw new Error("Este carro não tem atendimento de origem — o comprovante precisa de um.");
+      const anexo = await enviarAnexo(e.atendimento_id, arquivo, `Comprovante · ${linha.descricao}`);
+      await atualizarCusto(linha.id, { anexo_id: anexo.id });
+      await carregar();
+    } catch (ex) { setErro(ex.message); }
+  };
+
+  const adicionar = async () => {
+    if (!novo || !String(novo.descricao || "").trim()) return;
+    setErro("");
+    try {
+      await criarCusto({ ...novo, estoque_id: e.id });
+      setNovo(null);
+      await carregar();
+    } catch (ex) { setErro(ex.message); }
+  };
+
+  const num = (rot, valor, cor, forte) => (
+    <div>
+      <div className="text-[9px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>{rot}</div>
+      <div className="text-[17px] leading-tight" style={{ fontFamily: F.mono, fontWeight: forte ? 700 : 500, color: cor || C.ink }}>
+        {valor}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="mx-auto max-w-3xl space-y-3 px-4 py-4">
+      <div className="flex items-baseline justify-between">
+        <span className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.roxo, fontFamily: F.disp, fontWeight: 700 }}>
+          {v.placa || "Carro"}
+        </span>
+        <button onClick={aoVoltar} className="text-[13px]" style={{ color: C.mute }}>voltar ao estoque</button>
+      </div>
+
+      {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+
+      <div className="rounded-lg p-3.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        <div className="text-[15px] font-semibold">{v.marca_modelo || "—"}{v.ano_modelo ? ` ${v.ano_modelo}` : ""}</div>
+        <div className="mt-0.5 text-[12px]" style={{ color: C.mute }}>
+          {[v.cor, v.km_atual ? `${Number(v.km_atual).toLocaleString("pt-BR")} km` : null,
+            v.fipe_valor ? `FIPE ${brl(v.fipe_valor)}` : null].filter(Boolean).join(" · ") || "sem ficha"}
+        </div>
+        <div className="mt-1 text-[11px]" style={{ color: C.mute }}>
+          Entrou {diaBR(e.entrou_em)}{dias != null ? ` · ${dias} dia${dias === 1 ? "" : "s"} ${e.situacao === "vendido" ? "até vender" : "no pátio"}` : ""}
+        </div>
+
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          {num("Previsto", brl(c.previsto))}
+          {num("Custo hoje", brl(c.atual), c.desvio > 0 ? C.laranja : c.desvio < 0 ? C.verde : C.ink, true)}
+          {e.situacao === "vendido"
+            ? num("Margem", brl(c.margem), c.margem >= 0 ? C.verde : C.laranja, true)
+            : num("Diferença", `${c.desvio > 0 ? "+" : c.desvio < 0 ? "−" : ""}${brl(Math.abs(c.desvio))}`,
+                c.desvio > 0 ? C.laranja : c.desvio < 0 ? C.verde : C.mute)}
+        </div>
+
+        {!!c.aberto && (
+          <p className="mt-2 text-[11px]" style={{ color: AMARELO.texto }}>
+            {c.aberto} conta{c.aberto > 1 ? "s" : ""} sem valor pago — o custo de hoje usa o previsto delas.
+          </p>
+        )}
+      </div>
+
+      {/* ---- as linhas ---- */}
+      <div className="rounded-lg p-3.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>O que o carro custou</div>
+
+        <div className="mt-2 flex items-center gap-2 border-b pb-2 text-[13px]" style={{ borderColor: C.line }}>
+          <span className="flex-1 font-semibold">Compra — pago ao cliente</span>
+          <span style={{ fontFamily: F.mono, fontWeight: 700 }}>{brl(c.compra)}</span>
+        </div>
+
+        {custos.map((l) => (
+          <LinhaCusto key={l.id} l={l} eGerente={eGerente}
+            aoSalvar={(mud) => salvarLinha(l, mud)}
+            aoAnexar={(arq) => anexarComprovante(l, arq)}
+            aoApagar={async () => {
+              setErro("");
+              try { await apagarCusto(l.id); await carregar(); } catch (ex) { setErro(ex.message); }
+            }} />
+        ))}
+
+        {!custos.length && (
+          <p className="mt-2 text-[12px]" style={{ color: C.mute }}>
+            Nenhum custo além da compra. Débitos, quitação e cautelar entram do check list quando existem.
+          </p>
+        )}
+
+        {novo ? (
+          <div className="mt-3 space-y-2 rounded-md p-2.5" style={{ background: C.roxoFraco }}>
+            <div className="flex gap-2">
+              <select className="rounded-md border px-2 py-1.5 text-[13px] outline-none" style={inputSty}
+                value={novo.tipo} onChange={(ev) => setNovo({ ...novo, tipo: ev.target.value })}>
+                {TIPOS_CUSTO.map(([v2, r]) => <option key={v2} value={v2}>{r}</option>)}
+              </select>
+              <input className="flex-1 rounded-md border px-2 py-1.5 text-[16px] outline-none" style={inputSty}
+                placeholder="O que é" value={novo.descricao}
+                onChange={(ev) => setNovo({ ...novo, descricao: ev.target.value })} />
+            </div>
+            <div className="flex gap-2">
+              <label className="flex-1">
+                <span className="block text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Previsto</span>
+                <input className="mt-[2px] w-full rounded-md border px-2 py-1.5 text-right text-[16px] outline-none"
+                  style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal" value={novo.previsto}
+                  onChange={(ev) => setNovo({ ...novo, previsto: ev.target.value })} />
+              </label>
+              <label className="flex-1">
+                <span className="block text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Pago</span>
+                <input className="mt-[2px] w-full rounded-md border px-2 py-1.5 text-right text-[16px] outline-none"
+                  style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal" value={novo.realizado}
+                  onChange={(ev) => setNovo({ ...novo, realizado: ev.target.value })} />
+              </label>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={adicionar} className="flex-1 rounded-md py-2 text-[14px] font-semibold"
+                style={{ background: C.roxo, color: "#fff" }}>Lançar</button>
+              <button onClick={() => setNovo(null)} className="px-3 text-[13px]" style={{ color: C.mute }}>cancelar</button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => setNovo({ tipo: "reparo", descricao: "", previsto: "", realizado: "" })}
+            className="mt-3 w-full rounded-md border py-2 text-[13px] font-semibold"
+            style={{ borderColor: C.line, color: C.roxo }}>
+            + lançar um custo
+          </button>
+        )}
+      </div>
+
+      {/* ---- a venda ---- */}
+      {e.situacao === "vendido" ? (
+        <div className="rounded-lg p-3.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+          <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>Venda</div>
+          <div className="mt-1 text-[15px]">
+            {e.comprador ? <b>{e.comprador.nome}</b> : "Comprador não informado"} · {brl(c.venda)} em {diaBR(e.vendido_em)}
+          </div>
+          {e.comprador && e.comprador.telefone && (
+            <a href={`tel:${String(e.comprador.telefone).replace(/\D/g, "")}`} className="text-[13px]" style={{ color: C.roxo }}>
+              {e.comprador.telefone}
+            </a>
+          )}
+          <div className="mt-2 text-[13px]">
+            Margem <b style={{ color: c.margem >= 0 ? C.verde : C.laranja, fontFamily: F.mono }}>{brl(c.margem)}</b>
+            <span style={{ color: C.mute }}> sobre um custo de {brl(c.atual)}</span>
+          </div>
+          {e.nota_venda && <p className="mt-1 text-[12px]" style={{ color: C.mute }}>{e.nota_venda}</p>}
+        </div>
+      ) : vendendo ? (
+        <VenderCarro e={e} aoFechar={() => setVendendo(false)}
+          aoVender={async (dados) => {
+            setErro("");
+            try { await atualizarEstoque(e.id, dados); setVendendo(false); await carregar(); }
+            catch (ex) { setErro(ex.message); }
+          }} />
+      ) : (
+        <button onClick={() => setVendendo(true)} className="w-full rounded-md py-3 text-[15px] font-semibold"
+          style={{ background: C.roxo, color: "#fff" }}>
+          Vender carro
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Uma linha de custo.
+ *
+ * O campo de pago fica sempre visível, e vazio quando ainda não pagou.
+ * Escondê-lo atrás de um botão faria a conta em aberto se parecer com
+ * conta fechada — e é a conta em aberto que precisa saltar aos olhos.
+ */
+function LinhaCusto({ l, eGerente, aoSalvar, aoAnexar, aoApagar }) {
+  const [subindo, setSubindo] = useState(false);
+  const pago = l.realizado != null;
+  const dif = pago ? (Number(l.realizado) || 0) - (Number(l.previsto) || 0) : 0;
+
+  return (
+    <div className="border-b py-2" style={{ borderColor: C.line }}>
+      <div className="flex items-center gap-2">
+        <span className="flex-1 text-[13px] leading-tight">
+          {l.descricao}
+          <span className="block text-[10px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>
+            {rotuloCusto(l.tipo)}{l.do_fechamento ? " · do fechamento" : ""}
+          </span>
+        </span>
+        {eGerente && !l.do_fechamento && (
+          <button onClick={aoApagar} className="text-[11px]" style={{ color: C.mute }}>apagar</button>
+        )}
+      </div>
+
+      <div className="mt-1.5 flex items-end gap-2">
+        <label style={{ width: 92, flex: "0 0 92px" }}>
+          <span className="block text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Previsto</span>
+          <input className="mt-[2px] w-full rounded-md border px-2 py-1 text-right text-[13px] outline-none"
+            style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal"
+            defaultValue={Number(l.previsto) ? Math.round(l.previsto) : ""}
+            onBlur={(ev) => {
+              const n = Number(String(ev.target.value).replace(/\./g, "").replace(",", ".")) || 0;
+              if (n !== (Number(l.previsto) || 0)) aoSalvar({ previsto: ev.target.value });
+            }} />
+        </label>
+        <label style={{ width: 92, flex: "0 0 92px" }}>
+          <span className="block text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Pago</span>
+          <input className="mt-[2px] w-full rounded-md border px-2 py-1 text-right text-[13px] outline-none"
+            style={{ ...inputSty, fontFamily: F.mono, background: pago ? "#fff" : "#FBFAFC" }} inputMode="decimal"
+            placeholder="—" defaultValue={pago ? Math.round(l.realizado) : ""}
+            onBlur={(ev) => {
+              const bruto = String(ev.target.value).trim();
+              const antes = pago ? Number(l.realizado) || 0 : null;
+              const agora = bruto === "" ? null : Number(bruto.replace(/\./g, "").replace(",", ".")) || 0;
+              if (agora !== antes) {
+                // Quem informa o valor pago sem data ganha a data de
+                // hoje: sem ela a conta some do contas a pagar futuro.
+                aoSalvar({ realizado: bruto, pago_em: agora == null ? null : (l.pago_em || hojeEmSP()) });
+              }
+            }} />
+        </label>
+        <span className="flex-1 pb-1 text-right text-[11px]">
+          {pago
+            ? (dif === 0
+                ? <span style={{ color: C.mute }}>igual ao previsto</span>
+                : <span style={{ color: dif > 0 ? C.laranja : C.verde, fontWeight: 600 }}>
+                    {dif > 0 ? "+" : "−"}{brl(Math.abs(dif))}
+                  </span>)
+            : <span style={{ color: AMARELO.texto }}>em aberto</span>}
+        </span>
+      </div>
+
+      <div className="mt-1 flex items-center gap-3 text-[11px]">
+        {pago && l.pago_em && <span style={{ color: C.mute }}>pago {diaBR(l.pago_em)}</span>}
+        {l.anexo_id ? (
+          <span style={{ color: C.verde }}>comprovante anexado</span>
+        ) : (
+          <label style={{ color: C.roxo, cursor: "pointer" }}>
+            {subindo ? "enviando…" : "anexar comprovante"}
+            <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden"
+              onChange={async (ev) => {
+                const arq = ev.target.files && ev.target.files[0];
+                ev.target.value = "";
+                if (!arq) return;
+                setSubindo(true);
+                await aoAnexar(arq);
+                setSubindo(false);
+              }} />
+          </label>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A venda: escolher o comprador e lançar o valor.
+ *
+ * O comprador é cadastro, não texto solto no carro. O mesmo lojista
+ * leva dezenas de carros — sem cadastro, "AUTO CENTER SUL" e "Auto
+ * Center Sul" viram dois compradores e o histórico se parte no meio.
+ */
+function VenderCarro({ e, aoVender, aoFechar }) {
+  const [busca, setBusca] = useState("");
+  const [achados, setAchados] = useState([]);
+  const [escolhido, setEscolhido] = useState(null);
+  const [criando, setCriando] = useState(null);
+  const [valor, setValor] = useState("");
+  const [quando, setQuando] = useState(hojeEmSP());
+  const [nota, setNota] = useState("");
+  const [erro, setErro] = useState("");
+  const c = contaDoEstoque(e);
+
+  useEffect(() => {
+    let vivo = true;
+    const t = setTimeout(() => {
+      listarCompradores(busca).then((l) => { if (vivo) setAchados(l); }).catch(() => {});
+    }, 250);
+    return () => { vivo = false; clearTimeout(t); };
+  }, [busca]);
+
+  const cadastrar = async () => {
+    if (!String(criando.nome || "").trim()) return;
+    setErro("");
+    try {
+      const novo = await criarComprador(criando);
+      setEscolhido(novo); setCriando(null); setBusca("");
+    } catch (ex) { setErro(ex.message); }
+  };
+
+  const valorNum = Number(String(valor).replace(/\./g, "").replace(",", ".")) || 0;
+  const margem = valorNum ? valorNum - c.atual : null;
+  const pronto = !!escolhido && valorNum > 0 && /^\d{4}-\d{2}-\d{2}$/.test(quando);
+
+  return (
+    <div className="rounded-lg p-3.5" style={{ background: C.paper, border: `1px solid ${C.roxo}` }}>
+      <div className="flex items-baseline justify-between">
+        <span className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.roxo, fontWeight: 700 }}>Vender carro</span>
+        <button onClick={aoFechar} className="text-[12px]" style={{ color: C.mute }}>cancelar</button>
+      </div>
+
+      {erro && <p className="mt-1 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+
+      {/* ---- comprador ---- */}
+      {escolhido ? (
+        <div className="mt-2 flex items-center gap-2 rounded-md px-2.5 py-2" style={{ background: C.roxoFraco }}>
+          <span className="flex-1 text-[14px] font-semibold">{escolhido.nome}
+            <span className="block text-[11px] font-normal" style={{ color: C.mute }}>
+              {escolhido.tipo === "lojista" ? "Lojista" : "Pessoa física"}
+              {escolhido.cidade ? ` · ${escolhido.cidade}${escolhido.uf ? `/${escolhido.uf}` : ""}` : ""}
+            </span>
+          </span>
+          <button onClick={() => setEscolhido(null)} className="text-[11px]" style={{ color: C.roxo }}>trocar</button>
+        </div>
+      ) : criando ? (
+        <div className="mt-2 space-y-2">
+          <input className={inputCls} style={inputSty} placeholder="Nome do comprador" value={criando.nome}
+            onChange={(ev) => setCriando({ ...criando, nome: ev.target.value })} />
+          <div className="flex gap-2">
+            <select className="rounded-md border px-2 py-2.5 text-[16px] outline-none" style={inputSty}
+              value={criando.tipo} onChange={(ev) => setCriando({ ...criando, tipo: ev.target.value })}>
+              <option value="lojista">Lojista</option>
+              <option value="pessoa_fisica">Pessoa física</option>
+            </select>
+            <input className={`${inputCls} flex-1`} style={inputSty} placeholder="Telefone" inputMode="tel"
+              value={criando.telefone} onChange={(ev) => setCriando({ ...criando, telefone: ev.target.value })} />
+          </div>
+          <div className="flex gap-2">
+            <input className={`${inputCls} flex-1`} style={inputSty} placeholder="CPF ou CNPJ"
+              value={criando.documento} onChange={(ev) => setCriando({ ...criando, documento: ev.target.value })} />
+            <input className={`${inputCls} flex-1`} style={inputSty} placeholder="Cidade"
+              value={criando.cidade} onChange={(ev) => setCriando({ ...criando, cidade: ev.target.value })} />
+            <input className="w-16 rounded-md border px-2 py-2.5 text-center text-[16px] uppercase outline-none" style={inputSty}
+              placeholder="UF" maxLength={2}
+              value={criando.uf} onChange={(ev) => setCriando({ ...criando, uf: ev.target.value })} />
+          </div>
+          <div className="flex gap-2">
+            <button onClick={cadastrar} className="flex-1 rounded-md py-2 text-[14px] font-semibold"
+              style={{ background: C.roxo, color: "#fff" }}>Cadastrar</button>
+            <button onClick={() => setCriando(null)} className="px-3 text-[13px]" style={{ color: C.mute }}>voltar à busca</button>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-2">
+          <input className={inputCls} style={inputSty} placeholder="Buscar comprador pelo nome"
+            value={busca} onChange={(ev) => setBusca(ev.target.value)} />
+          {!!achados.length && (
+            <div className="mt-1.5 max-h-48 overflow-y-auto rounded-md" style={{ border: `1px solid ${C.line}` }}>
+              {achados.map((x) => (
+                <button key={x.id} onClick={() => setEscolhido(x)}
+                  className="block w-full px-2.5 py-2 text-left text-[13px]" style={{ borderBottom: `1px solid ${C.line}` }}>
+                  {x.nome}
+                  <span style={{ color: C.mute }}> · {x.tipo === "lojista" ? "lojista" : "PF"}{x.cidade ? ` · ${x.cidade}` : ""}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <button onClick={() => setCriando({ nome: busca, tipo: "lojista", telefone: "", documento: "", cidade: "", uf: "" })}
+            className="mt-1.5 text-[12px]" style={{ color: C.roxo }}>
+            + cadastrar comprador novo
+          </button>
+        </div>
+      )}
+
+      {/* ---- valor e data ---- */}
+      <div className="mt-3 flex gap-2">
+        <label className="flex-1">
+          <span className="block text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Valor da venda</span>
+          <input className="mt-[2px] w-full rounded-md border px-2 py-2 text-right text-[18px] outline-none"
+            style={{ ...inputSty, fontFamily: F.mono, fontWeight: 700 }} inputMode="decimal"
+            value={valor} onChange={(ev) => setValor(ev.target.value)} />
+        </label>
+        <label style={{ width: 140, flex: "0 0 140px" }}>
+          <span className="block text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Quando</span>
+          <input type="date" className="mt-[2px] w-full rounded-md border px-2 py-2 text-[15px] outline-none"
+            style={inputSty} value={quando} onChange={(ev) => setQuando(ev.target.value)} />
+        </label>
+      </div>
+
+      {/* A margem aparece ANTES de confirmar, e é de propósito: é a
+          última chance de ver que o carro está saindo no prejuízo. */}
+      <div className="mt-2 rounded-md px-2.5 py-2 text-[13px]"
+        style={{ background: margem == null ? "#F7F5FA" : margem >= 0 ? "#E8F3EE" : "#FDECE8" }}>
+        {margem == null
+          ? <span style={{ color: C.mute }}>Custo de hoje: {brl(c.atual)}. Digite o valor para ver a margem.</span>
+          : <>Margem <b style={{ color: margem >= 0 ? C.verde : C.laranja, fontFamily: F.mono }}>{brl(margem)}</b>
+              <span style={{ color: C.mute }}> — venda {brl(valorNum)} menos custo {brl(c.atual)}</span>
+              {!!c.aberto && <span style={{ color: AMARELO.texto }}> · {c.aberto} conta{c.aberto > 1 ? "s" : ""} ainda em aberto</span>}</>}
+      </div>
+
+      <input className={`${inputCls} mt-2`} style={inputSty} placeholder="Observação da venda (opcional)"
+        value={nota} onChange={(ev) => setNota(ev.target.value)} />
+
+      <button disabled={!pronto}
+        onClick={() => aoVender({
+          situacao: "vendido", comprador_id: escolhido.id,
+          valor_venda: valor, vendido_em: quando, nota_venda: nota,
+        })}
+        className="mt-3 w-full rounded-md py-3 text-[15px] font-semibold"
+        style={{ background: pronto ? C.roxo : C.line, color: pronto ? "#fff" : C.mute }}>
+        Confirmar a venda
+      </button>
+      {!pronto && (
+        <p className="mt-1 text-[11px]" style={{ color: C.mute }}>
+          Falta {!escolhido ? "escolher o comprador" : "informar o valor"}.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function TelaADM({ perfil, aoVoltar }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
@@ -7119,7 +7904,8 @@ function App() {
   const [perfil, setPerfil] = useState(null);
   const [erro, setErro] = useState("");
   const [aberto, setAberto] = useState(null);           // atendimento em foco, ou a lista
-  const [adm, setAdm] = useState(false);                // a tela do administrativo
+  const [adm, setAdm] = useState(false);
+  const [estoque, setEstoque] = useState(false);                // a tela do administrativo
 
   const verQuemSou = async () => {
     try {
@@ -7166,10 +7952,12 @@ function App() {
              aoRecarregar={async () => { try { setAberto(await lerAtendimento(aberto.id)); } catch (e) {} }} />;
   }
   if (adm) return <TelaADM perfil={perfil} aoVoltar={() => setAdm(false)} />;
+  if (estoque) return <TelaEstoque perfil={perfil} aoVoltar={() => setEstoque(false)} />;
 
-  return <CRM perfil={perfil} aoAbrirAdm={() => setAdm(true)} aoAbrir={async (id) => {
-    try { setAberto(await lerAtendimento(id)); } catch (e) { alert(e.message); }
-  }} />;
+  return <CRM perfil={perfil} aoAbrirAdm={() => setAdm(true)} aoAbrirEstoque={() => setEstoque(true)}
+    aoAbrir={async (id) => {
+      try { setAberto(await lerAtendimento(id)); } catch (e) { alert(e.message); }
+    }} />;
 }
 
 ReactDOM.createRoot(document.getElementById('raiz')).render(<App />);

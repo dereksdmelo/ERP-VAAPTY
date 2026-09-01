@@ -181,7 +181,318 @@ async function supa(url, opcoes) {
   return dado;
 }
 
+/* ==================================================================
+ * ESTOQUE (0019)
+ *
+ * Três recursos moram aqui — `estoque`, `custo` e `comprador` — e não
+ * em arquivos próprios porque o plano Hobby da Vercel para em 12
+ * funções e nós estamos nas 12. A costura não é arbitrária: os três
+ * são o carro depois que ele passa a ser nosso, que é o assunto deste
+ * arquivo.
+ *
+ * Tudo aqui vai pelo token do usuário. A chave de serviço continua
+ * confinada ao Storage, no api/foto.js.
+ * ================================================================== */
+
+const RX_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const TIPOS_CUSTO = ["quitacao", "debitos", "cautelar", "transporte",
+                     "reparo", "juros", "documentacao", "outro"];
+const SITUACOES = ["em_estoque", "vendido", "devolvido"];
+const TIPOS_COMPRADOR = ["lojista", "pessoa_fisica"];
+
+const dataISO = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || "")) ? String(v) : null);
+
+async function corpoDe(req) {
+  let c = req.body;
+  if (c && typeof Buffer !== "undefined" && Buffer.isBuffer(c)) c = c.toString("utf8");
+  if (typeof c === "string") { try { c = JSON.parse(c); } catch (e) { c = null; } }
+  return c && typeof c === "object" ? c : null;
+}
+
+const base = (tabela) => `${URL_BASE}/rest/v1/${tabela}`;
+
+/**
+ * O carro no pátio.
+ *
+ * O `select` traz veículo e custos na mesma consulta: sem isso, a
+ * lista faria uma ida ao banco por carro só para somar despesa.
+ */
+const CAMPOS_ESTOQUE =
+  "*,veiculo(id,placa,marca_modelo,ano_modelo,cor,km_atual,fipe_valor,valor_por)," +
+  "comprador(id,nome,tipo,telefone),estoque_custo(id,tipo,descricao,previsto,realizado,pago_em,anexo_id,do_fechamento)";
+
+async function estoque(req, res, tok) {
+  const cab = cabecalhos(tok);
+
+  if (req.method === "GET") {
+    const id = String(req.query.id || "");
+    if (id && RX_ID.test(id)) {
+      const linha = await supa(`${base("estoque")}?select=${CAMPOS_ESTOQUE}&id=eq.${id}`, { headers: cab });
+      return res.status(200).json({ estoque: (linha || [])[0] || null });
+    }
+    const sit = SITUACOES.indexOf(String(req.query.situacao || "")) >= 0
+      ? `&situacao=eq.${req.query.situacao}` : "";
+    const lista = await supa(
+      `${base("estoque")}?select=${CAMPOS_ESTOQUE}${sit}&order=entrou_em.desc&limit=300`,
+      { headers: cab });
+    return res.status(200).json({ estoque: lista || [] });
+  }
+
+  if (req.method === "POST") {
+    const c = await corpoDe(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    const veiculoId = String(c.veiculo_id || "");
+    if (!RX_ID.test(veiculoId)) return res.status(400).json({ erro: "veiculo_id inválido." });
+
+    // Um carro entra uma vez. O índice único da 0019 garante isso no
+    // banco; aqui a checagem existe para a mensagem sair legível em vez
+    // de "duplicate key value violates unique constraint".
+    const jaTem = await supa(`${base("estoque")}?select=id&veiculo_id=eq.${veiculoId}`, { headers: cab });
+    if ((jaTem || []).length) {
+      return res.status(409).json({ erro: "Este carro já está no estoque.", id: jaTem[0].id });
+    }
+
+    const linha = {
+      veiculo_id: veiculoId,
+      atendimento_id: RX_ID.test(String(c.atendimento_id || "")) ? c.atendimento_id : null,
+      valor_compra: decimal(c.valor_compra),
+      observacoes: texto(c.observacoes),
+    };
+    if (dataISO(c.entrou_em)) linha.entrou_em = c.entrou_em;
+
+    const criado = await supa(base("estoque"), {
+      method: "POST", headers: cabecalhos(tok, { Prefer: "return=representation" }),
+      body: JSON.stringify(linha),
+    });
+    const novo = (Array.isArray(criado) ? criado[0] : criado) || null;
+    if (!novo) return res.status(403).json({ erro: "O banco recusou a entrada no estoque." });
+
+    // As linhas de custo do fechamento entram junto, marcadas como
+    // vindas dali. É o que faz o previsto nascer sem ninguém redigitar
+    // o que já está no check list.
+    const doFechamento = Array.isArray(c.custos) ? c.custos : [];
+    const custos = doFechamento
+      .map((x) => ({
+        estoque_id: novo.id,
+        tipo: TIPOS_CUSTO.indexOf(String(x.tipo || "")) >= 0 ? x.tipo : "outro",
+        descricao: texto(x.descricao) || "Custo do fechamento",
+        previsto: decimal(x.previsto) || 0,
+        do_fechamento: true,
+      }))
+      .filter((x) => x.previsto > 0);
+
+    if (custos.length) {
+      await supa(base("estoque_custo"), {
+        method: "POST", headers: cabecalhos(tok), body: JSON.stringify(custos),
+      });
+    }
+
+    const completo = await supa(`${base("estoque")}?select=${CAMPOS_ESTOQUE}&id=eq.${novo.id}`, { headers: cab });
+    return res.status(201).json({ ok: true, estoque: (completo || [])[0] || novo });
+  }
+
+  if (req.method === "PATCH") {
+    const id = String(req.query.id || "");
+    if (!RX_ID.test(id)) return res.status(400).json({ erro: "id inválido." });
+    const c = await corpoDe(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+
+    const mud = {};
+    if (c.situacao !== undefined && SITUACOES.indexOf(String(c.situacao)) >= 0) mud.situacao = c.situacao;
+    if (c.valor_compra !== undefined) mud.valor_compra = decimal(c.valor_compra);
+    if (c.valor_venda !== undefined) mud.valor_venda = decimal(c.valor_venda);
+    if (c.vendido_em !== undefined) mud.vendido_em = dataISO(c.vendido_em);
+    if (c.nota_venda !== undefined) mud.nota_venda = texto(c.nota_venda);
+    if (c.observacoes !== undefined) mud.observacoes = texto(c.observacoes);
+    if (c.comprador_id !== undefined) {
+      mud.comprador_id = RX_ID.test(String(c.comprador_id || "")) ? c.comprador_id : null;
+    }
+    if (!Object.keys(mud).length) return res.status(400).json({ erro: "Nada para atualizar." });
+
+    const salvo = await supa(`${base("estoque")}?id=eq.${id}`, {
+      method: "PATCH", headers: cabecalhos(tok, { Prefer: "return=representation" }),
+      body: JSON.stringify(mud),
+    });
+    if (!(Array.isArray(salvo) ? salvo[0] : salvo)) {
+      return res.status(403).json({ erro: "A regra do banco recusou a alteração." });
+    }
+    const completo = await supa(`${base("estoque")}?select=${CAMPOS_ESTOQUE}&id=eq.${id}`, { headers: cab });
+    return res.status(200).json({ ok: true, estoque: (completo || [])[0] || null });
+  }
+
+  res.setHeader("Allow", "GET, POST, PATCH");
+  return res.status(405).json({ erro: "Use GET, POST ou PATCH." });
+}
+
+/**
+ * As linhas de custo.
+ *
+ * `realizado` aceita null de propósito: null é "ainda não pagou", e
+ * zero é "pagou zero". Trocar um pelo outro faria conta paga de graça
+ * parecer conta em aberto para sempre.
+ */
+async function custo(req, res, tok) {
+  const cab = cabecalhos(tok);
+
+  if (req.method === "GET") {
+    const eid = String(req.query.estoque_id || "");
+    if (!RX_ID.test(eid)) return res.status(400).json({ erro: "estoque_id inválido." });
+    const lista = await supa(
+      `${base("estoque_custo")}?select=*&estoque_id=eq.${eid}&order=criado_em.asc`, { headers: cab });
+    return res.status(200).json({ custos: lista || [] });
+  }
+
+  if (req.method === "POST") {
+    const c = await corpoDe(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    if (!RX_ID.test(String(c.estoque_id || ""))) return res.status(400).json({ erro: "estoque_id inválido." });
+    const descricao = texto(c.descricao);
+    if (!descricao) return res.status(400).json({ erro: "Descreva o custo." });
+
+    const linha = {
+      estoque_id: c.estoque_id,
+      tipo: TIPOS_CUSTO.indexOf(String(c.tipo || "")) >= 0 ? c.tipo : "outro",
+      descricao,
+      previsto: decimal(c.previsto) || 0,
+      realizado: c.realizado === undefined || c.realizado === null || c.realizado === "" ? null : decimal(c.realizado),
+      pago_em: dataISO(c.pago_em),
+      anexo_id: RX_ID.test(String(c.anexo_id || "")) ? c.anexo_id : null,
+      do_fechamento: false,
+    };
+    const criado = await supa(base("estoque_custo"), {
+      method: "POST", headers: cabecalhos(tok, { Prefer: "return=representation" }),
+      body: JSON.stringify(linha),
+    });
+    const novo = Array.isArray(criado) ? criado[0] : criado;
+    if (!novo) return res.status(403).json({ erro: "O banco recusou o lançamento." });
+    return res.status(201).json({ ok: true, custo: novo });
+  }
+
+  if (req.method === "PATCH") {
+    const id = String(req.query.id || "");
+    if (!RX_ID.test(id)) return res.status(400).json({ erro: "id inválido." });
+    const c = await corpoDe(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+
+    const mud = {};
+    if (c.tipo !== undefined && TIPOS_CUSTO.indexOf(String(c.tipo)) >= 0) mud.tipo = c.tipo;
+    if (c.descricao !== undefined) mud.descricao = texto(c.descricao);
+    if (c.previsto !== undefined) mud.previsto = decimal(c.previsto) || 0;
+    if (c.realizado !== undefined) {
+      mud.realizado = c.realizado === null || c.realizado === "" ? null : decimal(c.realizado);
+    }
+    if (c.pago_em !== undefined) mud.pago_em = dataISO(c.pago_em);
+    if (c.anexo_id !== undefined) {
+      mud.anexo_id = RX_ID.test(String(c.anexo_id || "")) ? c.anexo_id : null;
+    }
+    if (!Object.keys(mud).length) return res.status(400).json({ erro: "Nada para atualizar." });
+
+    const salvo = await supa(`${base("estoque_custo")}?id=eq.${id}`, {
+      method: "PATCH", headers: cabecalhos(tok, { Prefer: "return=representation" }),
+      body: JSON.stringify(mud),
+    });
+    const linha = Array.isArray(salvo) ? salvo[0] : salvo;
+    if (!linha) return res.status(403).json({ erro: "A regra do banco recusou a alteração." });
+    return res.status(200).json({ ok: true, custo: linha });
+  }
+
+  if (req.method === "DELETE") {
+    const id = String(req.query.id || "");
+    if (!RX_ID.test(id)) return res.status(400).json({ erro: "id inválido." });
+    const apagado = await supa(`${base("estoque_custo")}?id=eq.${id}`, {
+      method: "DELETE", headers: cabecalhos(tok, { Prefer: "return=representation" }),
+    });
+    // DELETE vazio é a RLS recusando: só gerente apaga linha de custo,
+    // porque linha apagada some com a explicação da margem.
+    if (!(Array.isArray(apagado) ? apagado[0] : apagado)) {
+      return res.status(403).json({ erro: "Só o gerente apaga linha de custo." });
+    }
+    return res.status(200).json({ ok: true });
+  }
+
+  res.setHeader("Allow", "GET, POST, PATCH, DELETE");
+  return res.status(405).json({ erro: "Use GET, POST, PATCH ou DELETE." });
+}
+
+/** O cadastro de compradores. */
+async function comprador(req, res, tok) {
+  const cab = cabecalhos(tok);
+
+  if (req.method === "GET") {
+    const busca = String(req.query.busca || "").trim();
+    // O `ilike` do PostgREST usa vírgula e parêntese como sintaxe —
+    // mesmo cuidado do api/atendimento.js.
+    const seguro = busca.replace(/[,()*]/g, " ").trim();
+    const filtro = seguro ? `&nome=ilike.*${encodeURIComponent(seguro)}*` : "";
+    const lista = await supa(
+      `${base("comprador")}?select=*${filtro}&order=nome.asc&limit=200`, { headers: cab });
+    return res.status(200).json({ compradores: lista || [] });
+  }
+
+  if (req.method === "POST") {
+    const c = await corpoDe(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    const nome = texto(c.nome);
+    if (!nome) return res.status(400).json({ erro: "Informe o nome do comprador." });
+
+    const linha = {
+      nome,
+      tipo: TIPOS_COMPRADOR.indexOf(String(c.tipo || "")) >= 0 ? c.tipo : "lojista",
+      documento: texto(c.documento), telefone: texto(c.telefone), email: texto(c.email),
+      cidade: texto(c.cidade), uf: texto(c.uf) ? String(c.uf).toUpperCase().slice(0, 2) : null,
+      shinkai_id: texto(c.shinkai_id),
+    };
+    let criado;
+    try {
+      criado = await supa(base("comprador"), {
+        method: "POST", headers: cabecalhos(tok, { Prefer: "return=representation" }),
+        body: JSON.stringify(linha),
+      });
+    } catch (e) {
+      // Nome repetido: mensagem própria, porque a do Postgres não diz
+      // nada a quem está cadastrando.
+      if (/duplicate key|already exists|unique/i.test(e.message || "")) {
+        return res.status(409).json({ erro: "Já existe um comprador com esse nome." });
+      }
+      throw e;
+    }
+    const novo = Array.isArray(criado) ? criado[0] : criado;
+    if (!novo) return res.status(403).json({ erro: "O banco recusou o cadastro." });
+    return res.status(201).json({ ok: true, comprador: novo });
+  }
+
+  if (req.method === "PATCH") {
+    const id = String(req.query.id || "");
+    if (!RX_ID.test(id)) return res.status(400).json({ erro: "id inválido." });
+    const c = await corpoDe(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+
+    const mud = {};
+    ["nome", "documento", "telefone", "email", "cidade"].forEach((k) => {
+      if (c[k] !== undefined) mud[k] = texto(c[k]);
+    });
+    if (c.uf !== undefined) mud.uf = texto(c.uf) ? String(c.uf).toUpperCase().slice(0, 2) : null;
+    if (c.tipo !== undefined && TIPOS_COMPRADOR.indexOf(String(c.tipo)) >= 0) mud.tipo = c.tipo;
+    if (c.ativo !== undefined) mud.ativo = !!c.ativo;
+    if (!Object.keys(mud).length) return res.status(400).json({ erro: "Nada para atualizar." });
+
+    const salvo = await supa(`${base("comprador")}?id=eq.${id}`, {
+      method: "PATCH", headers: cabecalhos(tok, { Prefer: "return=representation" }),
+      body: JSON.stringify(mud),
+    });
+    const linha = Array.isArray(salvo) ? salvo[0] : salvo;
+    if (!linha) return res.status(403).json({ erro: "A regra do banco recusou a alteração." });
+    return res.status(200).json({ ok: true, comprador: linha });
+  }
+
+  res.setHeader("Allow", "GET, POST, PATCH");
+  return res.status(405).json({ erro: "Use GET, POST ou PATCH." });
+}
+
 /* ------------------ handler ------------------ */
+
+const RECURSOS = { estoque, custo, comprador };
 
 module.exports = async function handler(req, res) {
   if (!URL_BASE || !ANON) {
@@ -190,6 +501,12 @@ module.exports = async function handler(req, res) {
 
   const tok = tokenDe(req);
   if (!tok) return res.status(401).json(SEM_LOGIN);
+
+  const recurso = RECURSOS[String(req.query.recurso || "")];
+  if (recurso) {
+    try { return await recurso(req, res, tok); }
+    catch (e) { return res.status(e.status || 502).json({ erro: limpar(e.message) }); }
+  }
 
   try {
     if (req.method === "GET") {

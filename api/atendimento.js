@@ -165,11 +165,14 @@ async function lerCorpo(req) {
 
 // O veículo e as propostas vêm junto na mesma consulta: uma ida ao
 // banco em vez de três, e a lista já mostra placa e melhor proposta.
+// Os valores do check list viajam junto porque o estoque (0019) monta
+// o custo previsto a partir deles — sem isso seria uma consulta por
+// carro só para descobrir quanto foi combinado na mesa.
 // `checklist(adm_conferido_em)` entra só para a tela do administrativo
 // saber, na lista, o que já foi conferido — sem isso seria uma consulta
 // por linha. Vem como objeto porque a 0008 tem unique em
 // atendimento_id; a tela aceita os dois formatos por segurança.
-const EMBUTIDO = "*,veiculo(id,placa,marca_modelo,ano_fabricacao,ano_modelo,km_atual,fipe_valor,valor_por,status),proposta(id,lojista,valor,apresentada),checklist(adm_conferido_em)";
+const EMBUTIDO = "*,veiculo(id,placa,marca_modelo,ano_fabricacao,ano_modelo,km_atual,fipe_valor,valor_por,status),proposta(id,lojista,valor,apresentada),checklist(adm_conferido_em,valor_debitos,valor_quitacao,valor_cautelar,comissao_vaapty,valor_cliente)";
 
 const STATUS_INDICACAO = ["novo", "em_contato", "agendado", "virou_atendimento", "sem_interesse"];
 

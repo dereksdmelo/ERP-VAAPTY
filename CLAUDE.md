@@ -1041,3 +1041,74 @@ lugares que precisam saber que dia é hoje — `api/funil.js`, a
 competência do desempenho em `api/perfil.js` e a régua — usam
 `toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" })`.
 **Quem escrever data nova usa o mesmo relógio.**
+
+### 23. Estoque: o carro depois que o negócio fecha
+
+Até a 0019 o sistema terminava no contrato assinado. O que vem depois —
+o carro parado no pátio, custando dinheiro — não existia em lugar
+nenhum. `TelaEstoque` é isso, atrás de "Estoque e custos" na gestão.
+
+**A ideia é uma só: custo previsto contra custo real.** Na mesa se
+combina débitos de R$ 3.000 e quitação de R$ 28.000; na prática se
+consegue desconto na quitação, aparece juros que ninguém viu, o carro
+precisa de pneu. Guardar só o total final esconde de onde veio a
+diferença — e a diferença é o lucro. Por isso o custo é **linha a
+linha**, cada uma com previsto, realizado e comprovante.
+
+**O previsto nasce do check list, e ninguém redigita.** Débitos,
+quitação e cautelar já foram digitados uma vez; a entrada no estoque
+copia esses números e marca as linhas com `do_fechamento`. É isso que
+separa "o negócio combinou isso" de "alguém digitou isso depois".
+
+**A comissão não é custo.** Ela é retida do cliente, não paga por nós:
+somar viraria custo inventado. A conta fecha — negociado R$ 40.000 com
+comissão de R$ 2.000 dá custo de R$ 38.000, que é o líquido ao cliente
+mais os débitos e a cautelar que a Vaapty desembolsa.
+
+**`realizado` nulo é "ainda não pagou"; zero é "pagou zero".** São
+coisas diferentes — zero é a conta perdoada, o desconto integral.
+Tratar as duas igual esconderia justamente o desconto que se conseguiu.
+Por isso a coluna aceita null, e por isso ela se chama `realizado` e
+não `real`: `real` é tipo do Postgres e a coluna precisaria de aspas em
+toda consulta.
+
+**Existe um terceiro número, o "custo hoje":** o que já foi pago mais o
+previsto do que ainda não foi. Sem ele, um carro com nada pago
+mostraria custo igual à compra, e todo carro novo pareceria barato. A
+tela diz quantas contas estão em aberto sustentando esse número.
+
+**O carro não entra sozinho.** A entrada é um ato: alguém confere e
+confirma, e é aí que o previsto nasce. Automatizar no fechamento
+traria para o pátio todo negócio marcado como fechado por engano — e
+desfazer custa mais que um toque. A fila mostra os 8 mais recentes
+porque há 55 fechados importados da planilha, e negócio de agosto
+escondendo o carro que fechou hoje seria pior que a fila comprida.
+
+**Um carro entra uma vez** — índice único em `estoque (veiculo_id)`. Sem
+ele, dois cliques no botão criariam duas fichas de custo para o mesmo
+carro e o total dobraria.
+
+**O comprador é cadastro, não texto solto.** O mesmo lojista leva
+dezenas de carros; sem cadastro, "AUTO CENTER SUL" e "Auto Center Sul"
+viram dois compradores e o histórico se parte no meio. `shinkai_id`
+está lá para quando o cadastro vier de lá — hoje não vem.
+
+**A margem aparece antes de confirmar a venda**, e é de propósito: é a
+última chance de ver que o carro está saindo no prejuízo.
+
+**Apagar linha de custo é do gerente.** Linha apagada some com a
+explicação da margem, e isso é conversa de gerente — a RLS da 0019
+separa o `delete` do resto, que é da equipe.
+
+**Os três recursos moram em `api/veiculo.js`** (`?recurso=estoque`,
+`custo`, `comprador`), pelo teto de 12 funções. Mesmo truque das
+indicações em `/api/atendimento` e da meta da loja em `/api/perfil` —
+mas aqui a costura não é arbitrária: os três são o carro depois que ele
+passa a ser nosso, que é o assunto do arquivo. **O comprovante reusa
+`anexo` (0008) e o bucket que já existe** — bucket novo significaria
+política nova de Storage e mais um lugar para o arquivo se perder.
+
+**O que ainda não existe:** contas a pagar de verdade (hoje `pago_em` é
+só uma data na linha) e a ponte com OMIE ou Conta Azul. Os dados já
+nascem no formato que essa ponte vai pedir — linha, valor, data,
+comprovante — mas nenhuma integração foi escrita.
