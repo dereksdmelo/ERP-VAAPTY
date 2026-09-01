@@ -7094,6 +7094,7 @@ function TelaEstoque({ perfil, aoVoltar }) {
   const [abrindo, setAbrindo] = useState(null);
   const [entrando, setEntrando] = useState("");
   const [mostrarFila, setMostrarFila] = useState(8);
+  const [filaAberta, setFilaAberta] = useState(false);
 
   const carregar = async () => {
     setErro("");
@@ -7162,11 +7163,28 @@ function TelaEstoque({ perfil, aoVoltar }) {
 
       {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
 
-      {/* ---- a fila de entrada ---- */}
-      {!!fila.length && (
+      {/* ---- a fila de entrada ----
+          Recolhida por padrão. São 55 negócios fechados vindos da
+          planilha, e a maioria foi vendida há meses: aberta, a fila
+          empurraria o pátio — que é o assunto da tela — para baixo da
+          dobra todo dia. */}
+      {!!fila.length && !filaAberta && (
+        <button onClick={() => setFilaAberta(true)}
+          className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left"
+          style={{ background: AMARELO.fundo, border: `1px solid ${C.line}` }}>
+          <span className="flex-1 text-[12px]" style={{ color: AMARELO.texto }}>
+            <b>{fila.length}</b> negócio{fila.length > 1 ? "s" : ""} fechado{fila.length > 1 ? "s" : ""} fora do estoque
+          </span>
+          <span className="text-[12px] font-semibold" style={{ color: AMARELO.texto }}>ver ▾</span>
+        </button>
+      )}
+      {!!fila.length && filaAberta && (
         <div className="rounded-lg p-3" style={{ background: AMARELO.fundo, border: `1px solid ${C.line}` }}>
-          <div className="text-[11px] uppercase tracking-[0.12em]" style={{ color: AMARELO.texto, fontWeight: 700 }}>
-            {fila.length} carro{fila.length > 1 ? "s" : ""} fechado{fila.length > 1 ? "s" : ""} fora do estoque
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-[11px] uppercase tracking-[0.12em]" style={{ color: AMARELO.texto, fontWeight: 700 }}>
+              {fila.length} fechado{fila.length > 1 ? "s" : ""} fora do estoque
+            </span>
+            <button onClick={() => setFilaAberta(false)} className="text-[11px]" style={{ color: AMARELO.texto }}>fechar</button>
           </div>
           <p className="mt-1 text-[11px] leading-snug" style={{ color: AMARELO.texto }}>
             O custo previsto entra do check list. Ponha no estoque só o que está de fato no pátio —
@@ -7380,7 +7398,7 @@ function FichaEstoque({ id, perfil, aoVoltar }) {
 
         {!!c.aberto && (
           <p className="mt-2 text-[11px]" style={{ color: AMARELO.texto }}>
-            {c.aberto} conta{c.aberto > 1 ? "s" : ""} sem valor pago — o custo de hoje usa o previsto delas.
+            {c.aberto} conta{c.aberto > 1 ? "s" : ""} sem valor pago — o custo de hoje usa o previsto {c.aberto > 1 ? "delas" : "dela"}.
           </p>
         )}
       </div>
