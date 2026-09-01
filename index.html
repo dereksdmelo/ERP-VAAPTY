@@ -39,6 +39,11 @@ const C = {
   line: "#DCD6E4", roxo: "#6D1B9E", roxoFraco: "#F1E8F7",
   laranja: "#EA5423", verde: "#1D7F58",
 };
+// Dourado de nota. Fica fora do C porque não é cor de marca nem de
+// ação: é semântica de avaliação, e existe justamente para não disputar
+// com o roxo do botão.
+const ESTRELA = "#E0A32E";
+
 const F = {
   disp: "'Archivo', system-ui, sans-serif",
   body: "'Public Sans', system-ui, sans-serif",
@@ -5856,18 +5861,33 @@ function Testemunhais({ necessidade, negociador, aoMostrar }) {
         </div>
       )}
 
-      <p className="mt-2 text-[11px]" style={{ color: C.mute }}>
-        {lista.length} avaliaç{lista.length === 1 ? "ão" : "ões"} de 5 estrelas no Google.
+      <p className="mt-2 text-[13px]" style={{ color: C.mute }}>
+        {lista.length} de 750 avaliações escritas neste filtro.
       </p>
 
-      <div className="mt-2 space-y-2">
+      {/* A âncora do perfil inteiro, e não só do que está filtrado: são
+          os números que o cliente confere no Google em dois toques. O
+          dourado é cor de nota, não a roxa da ação — as duas não
+          disputam. */}
+      <div className="mt-3 flex items-center gap-3 rounded-lg px-4 py-3"
+        style={{ background: "#FFFBF2", border: `1px solid ${ESTRELA}33` }}>
+        <span className="text-[30px] leading-none" style={{ fontFamily: F.disp, fontWeight: 800 }}>4,8</span>
+        <span>
+          <span className="block text-[15px] tracking-[0.14em]" style={{ color: ESTRELA }}>★★★★★</span>
+          <span className="block text-[12px]" style={{ color: C.mute }}>1.996 avaliações no Google</span>
+        </span>
+      </div>
+
+      <div className="mt-3 grid gap-2.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
         {lista.slice(0, quantos).map((r, i) => (
-          <div key={i} className="rounded-md p-3" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
-            <p className="text-[13px] leading-relaxed">“{r.t}”</p>
-            <div className="mt-1.5 flex items-baseline justify-between gap-2">
-              <span className="text-[11px] font-semibold">{r.n}</span>
-              <span className="text-[10px]" style={{ color: C.mute }}>
-                ★★★★★ · {r.q}{r.c ? ` · ${r.c}` : ""}
+          <div key={i} className="flex flex-col rounded-lg p-4"
+            style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+            <span className="text-[15px] tracking-[0.18em]" style={{ color: ESTRELA }}>★★★★★</span>
+            <p className="mt-2 flex-1 text-[15px] leading-relaxed">“{r.t}”</p>
+            <div className="mt-3 border-t pt-2.5" style={{ borderColor: C.line }}>
+              <span className="block text-[13px] font-semibold">{r.n}</span>
+              <span className="block text-[11.5px]" style={{ color: C.mute }}>
+                {r.q}{r.c ? ` · atendido por ${r.c}` : ""}
               </span>
             </div>
           </div>
@@ -5876,7 +5896,7 @@ function Testemunhais({ necessidade, negociador, aoMostrar }) {
 
       {lista.length > quantos && (
         <button onClick={() => setQuantos(quantos + 10)}
-          className="mt-2 w-full rounded-md border py-2 text-[12px] font-semibold"
+          className="mt-3 w-full rounded-md border py-2.5 text-[14px] font-semibold"
           style={{ borderColor: C.line, color: C.roxo }}>
           Ver mais {Math.min(10, lista.length - quantos)}
         </button>
