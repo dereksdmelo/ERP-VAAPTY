@@ -10,7 +10,7 @@
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<style>html,body{margin:0;padding:0;background:#F4F2F7;-webkit-font-smoothing:antialiased}</style>
+<style>html,body{margin:0;padding:0;background:#F4F2F7;-webkit-font-smoothing:antialiased}@media print{aside,nav{display:none!important}main{padding:0!important}body{background:#fff}}</style>
 </head>
 <body>
 <div id="raiz"></div>
@@ -511,6 +511,14 @@ async function apagarCusto(id) {
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.erro || "Não consegui apagar.");
   return true;
+}
+async function importarRentabilidade(linhas) {
+  const r = await fetchAut("/api/veiculo?recurso=estoque&acao=importar", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ linhas }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui importar.");
+  return d;
 }
 async function listarCompradores(busca) {
   const q = comoQuery({ recurso: "comprador", busca });
@@ -6948,7 +6956,7 @@ const Aviso = ({ titulo, children, acao }) => (
 const TIPOS_CUSTO = [
   ["quitacao", "Quitação"], ["debitos", "Débitos"], ["cautelar", "Cautelar"],
   ["transporte", "Transporte"], ["reparo", "Reparo"], ["juros", "Juros"],
-  ["documentacao", "Documentação"], ["outro", "Outro"],
+  ["documentacao", "Documentação"], ["deducao", "Dedução"], ["comissao_externa", "Comissão externa"], ["outro", "Outro"],
 ];
 const rotuloCusto = (t) => (TIPOS_CUSTO.filter((x) => x[0] === t)[0] || ["", "Outro"])[1];
 
@@ -6997,6 +7005,264 @@ const diaBR = (v) => {
 };
 
 /**
+ * A vista de rentabilidade: a planilha CONTROLE DE VEÍCULOS / CLIENTES
+ * do Derek, calculada em cima do estoque.
+ *
+ *   bruta   = venda − valor cliente − débitos − quitação − deduções
+ *   líquida = bruta − cautelar − comissão externa − demais custos
+ *
+ * A planilha separa "custo do carro" (o que foi combinado com o
+ * cliente) de "custo da venda" (cautelar, comissão externa); aqui
+ * cada linha de custo tem um tipo, então a separação é por tipo. A
+ * conta é feita na tela porque a lista do estoque vem inteira (não é
+ * paginada como o CRM) — se um dia passar de 300 carros, isto vai para
+ * o servidor.
+ */
+const CUSTO_DO_CARRO = ["debitos", "quitacao", "deducao"];
+
+function rentabilidadeDe(e) {
+  const c = contaDoEstoque(e);
+  const custos = e.estoque_custo || [];
+  const soma = (filtro) => custos
+    .filter(filtro)
+    .reduce((t, l) => t + (l.realizado == null ? Number(l.previsto) || 0 : Number(l.realizado) || 0), 0);
+  const doCarro = soma((l) => CUSTO_DO_CARRO.indexOf(l.tipo) >= 0);
+  const daVenda = soma((l) => CUSTO_DO_CARRO.indexOf(l.tipo) < 0);
+  const por = (tipo) => soma((l) => l.tipo === tipo);
+  const bruta = c.venda - c.compra - doCarro;
+  return {
+    ...c,
+    debitos: por("debitos"), quitacao: por("quitacao"), deducoes: por("deducao"),
+    cautelar: por("cautelar"), comissaoExterna: por("comissao_externa"),
+    bruta, liquida: bruta - daVenda,
+  };
+}
+
+// 1ª..5ª semana do mês, como a planilha conta: dias 1–7, 8–14…
+const semanaDe = (e) => {
+  if (e.semana_venda) return Number(e.semana_venda);
+  const d = Number(String(e.vendido_em || "").slice(8, 10));
+  return d ? Math.min(5, Math.floor((d - 1) / 7) + 1) : null;
+};
+
+function Rentabilidade({ vendidos, comp }) {
+  const rs = (v) => (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const linhas = vendidos.map((e) => ({ e, r: rentabilidadeDe(e), semana: semanaDe(e), dias: diasNoPatio(e) }));
+
+  const total = linhas.reduce((t, { r }) => ({
+    venda: t.venda + r.venda, compra: t.compra + r.compra, debitos: t.debitos + r.debitos,
+    quitacao: t.quitacao + r.quitacao, deducoes: t.deducoes + r.deducoes, bruta: t.bruta + r.bruta,
+    cautelar: t.cautelar + r.cautelar, custo: t.custo + r.atual, comissao: t.comissao + r.comissaoExterna,
+    liquida: t.liquida + r.liquida,
+  }), { venda: 0, compra: 0, debitos: 0, quitacao: 0, deducoes: 0, bruta: 0, cautelar: 0, custo: 0, comissao: 0, liquida: 0 });
+
+  // A caixa TOTAL NEGOCIADORES da planilha.
+  const porNeg = {};
+  linhas.forEach(({ e, r }) => {
+    const n = String(e.negociador_nome || "sem negociador").toUpperCase();
+    porNeg[n] = porNeg[n] || { nome: n, carros: 0, liquida: 0 };
+    porNeg[n].carros += 1; porNeg[n].liquida += r.liquida;
+  });
+  const negociadores = Object.keys(porNeg).map((k) => porNeg[k]).sort((a, b) => b.liquida - a.liquida);
+
+  const th = (t, dir) => (
+    <th className="whitespace-nowrap px-2 py-2 text-[11px] font-semibold uppercase tracking-[0.04em]"
+      style={{ color: C.mute, textAlign: dir || "right", borderBottom: `1px solid ${C.line}` }}>{t}</th>
+  );
+  const td = (v, opts) => (
+    <td className="whitespace-nowrap px-2 py-1.5 text-[12px]"
+      style={{ textAlign: (opts && opts.dir) || "right", fontVariantNumeric: "tabular-nums",
+               color: (opts && opts.cor) || C.ink, fontWeight: (opts && opts.forte) ? 700 : 400 }}>
+      {v}
+    </td>
+  );
+
+  if (!linhas.length) {
+    return (
+      <div className="rounded-xl px-4 py-8 text-center" style={{ background: C.paper, border: `1px dashed ${C.line}` }}>
+        <p className="text-[15px] font-semibold">Nenhuma venda em {rotuloMes(comp)}.</p>
+        <p className="mt-1 text-[13px]" style={{ color: C.mute }}>
+          Carro vendido no estoque aparece aqui, com a rentabilidade calculada linha a linha.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* ---- o resumo, em cima: é o que se olha primeiro ---- */}
+      <div className="grid grid-cols-2 gap-3 rounded-xl p-4 lg:grid-cols-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        {[["Carros vendidos", linhas.length, null],
+          ["Faturamento", brl(total.venda), null],
+          ["Rentabilidade bruta", brl(total.bruta), total.bruta >= 0 ? C.verde : C.laranja],
+          ["Rentabilidade líquida", brl(total.liquida), total.liquida >= 0 ? C.verde : C.laranja]].map(([rot, v, cor]) => (
+          <div key={rot}>
+            <div className="text-[12px]" style={{ color: C.mute }}>{rot}</div>
+            <div className="text-[22px] leading-tight tracking-tight" style={{ fontWeight: 700, color: cor || C.ink, fontVariantNumeric: "tabular-nums" }}>{v}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
+        {/* ---- a planilha ---- */}
+        <div className="rolar overflow-x-auto rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+          <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 1180 }}>
+            <thead>
+              <tr>
+                {th("Data", "left")}{th("Dias")}{th("Carro", "left")}{th("Placa", "left")}{th("Comprador", "left")}
+                {th("Venda")}{th("Cliente")}{th("Débitos")}{th("Quitação")}{th("Deduções")}{th("Bruta")}
+                {th("Cautelar")}{th("Custo")}{th("Com. ext.")}{th("Sem.")}{th("Líquida")}{th("Negociador", "left")}{th("Meio", "left")}
+              </tr>
+            </thead>
+            <tbody>
+              {linhas.map(({ e, r, semana, dias }) => {
+                const v = e.veiculo || {};
+                return (
+                  <tr key={e.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                    {td(diaBR(e.entrou_em), { dir: "left" })}
+                    {td(dias != null ? dias : "—")}
+                    {td(v.marca_modelo || "—", { dir: "left" })}
+                    {td(v.placa || "—", { dir: "left" })}
+                    {td(e.comprador ? e.comprador.nome : "—", { dir: "left" })}
+                    {td(rs(r.venda), { forte: true })}
+                    {td(rs(r.compra))}
+                    {td(rs(r.debitos))}
+                    {td(rs(r.quitacao))}
+                    {td(rs(r.deducoes))}
+                    {td(rs(r.bruta), { cor: r.bruta >= 0 ? C.verde : C.laranja, forte: true })}
+                    {td(rs(r.cautelar))}
+                    {td(rs(r.atual))}
+                    {td(rs(r.comissaoExterna))}
+                    {td(semana ? `${semana}ª` : "—")}
+                    {td(rs(r.liquida), { cor: r.liquida >= 0 ? C.verde : C.laranja, forte: true })}
+                    {td(e.negociador_nome || "—", { dir: "left" })}
+                    {td(e.meio_alcance || "—", { dir: "left" })}
+                  </tr>
+                );
+              })}
+              <tr style={{ background: "#F3F7F4" }}>
+                {td("Total", { dir: "left", forte: true })}{td("")}{td("")}{td("")}{td("")}
+                {td(rs(total.venda), { forte: true })}{td(rs(total.compra))}{td(rs(total.debitos))}{td(rs(total.quitacao))}{td(rs(total.deducoes))}
+                {td(rs(total.bruta), { forte: true, cor: C.verde })}{td(rs(total.cautelar))}{td(rs(total.custo))}{td(rs(total.comissao))}{td("")}
+                {td(rs(total.liquida), { forte: true, cor: C.verde })}{td("")}{td("")}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        {/* ---- TOTAL NEGOCIADORES ---- */}
+        <div className="rounded-xl p-4 self-start" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+          <div className="text-[12px] font-semibold uppercase tracking-[0.06em]" style={{ color: C.mute }}>Por negociador</div>
+          <div className="mt-2 space-y-1.5">
+            {negociadores.map((n) => (
+              <div key={n.nome} className="flex items-baseline justify-between gap-2 text-[13px]">
+                <span className="truncate">{n.nome} <span style={{ color: C.mute }}>· {n.carros}</span></span>
+                <span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", color: n.liquida >= 0 ? C.verde : C.laranja }}>{brl(n.liquida)}</span>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-[11px] leading-snug" style={{ color: C.mute }}>
+            Rentabilidade líquida por negociador, como a caixa TOTAL NEGOCIADORES da planilha.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Cola a planilha CONTROLE DE VEÍCULOS / CLIENTES. Mesmo gesto do
+ * importador do CRM: seleciona no Sheets, ⌘C, cola. As colunas são
+ * reconhecidas pelo cabeçalho, então a ordem não importa.
+ */
+const COLUNAS_RENTAB = [
+  ["data", /^data$/i], ["carro", /^carro$/i], ["placa", /^placa$/i], ["renavam", /^renavam/i],
+  ["chassi", /^chassi/i], ["comprador", /^comprador/i], ["telefone", /^telefone/i],
+  ["valor_venda", /valor\s*de\s*venda/i], ["valor_cliente", /valor\s*cliente/i],
+  ["debitos", /^d[eé]bitos/i], ["quitacao", /^quita/i], ["deducoes", /^dedu/i],
+  ["cautelar", /cautelar/i], ["comissao_externa", /comiss[aã]o\s*externa/i], ["semana", /^semana/i],
+  ["negociador", /^negociador/i], ["meio_alcance", /meio\s*de\s*alcance/i], ["prospector", /^prospector/i],
+  ["comentarios", /^coment/i],
+];
+
+function lerRentabilidade(txt) {
+  const linhas = String(txt || "").split(/\r?\n/).map((l) => l.split("\t"));
+  const iCab = linhas.findIndex((l) => l.some((c) => /^placa$/i.test(c.trim())) && l.some((c) => /valor\s*de\s*venda/i.test(c)));
+  if (iCab < 0) return { erro: "Não achei o cabeçalho — a linha com PLACA e VALOR DE VENDA precisa vir junto." };
+  const cab = linhas[iCab].map((c) => c.trim());
+  const idx = {};
+  COLUNAS_RENTAB.forEach(([k, rx]) => { const i = cab.findIndex((c) => rx.test(c)); if (i >= 0) idx[k] = i; });
+  const dados = linhas.slice(iCab + 1)
+    .filter((l) => idx.placa != null && String(l[idx.placa] || "").trim())
+    .map((l) => {
+      const o = {};
+      Object.keys(idx).forEach((k) => { o[k] = String(l[idx[k]] || "").trim(); });
+      // R$ 1.234,56 → 1234,56 (o servidor entende a vírgula)
+      ["valor_venda", "valor_cliente", "debitos", "quitacao", "deducoes", "cautelar", "comissao_externa"]
+        .forEach((k) => { if (o[k]) o[k] = o[k].replace(/R\$|\s|\[.*?\]/g, "").replace(/^-$/, ""); });
+      // 03/08/2026 → 2026-08-03
+      const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(o.data || "");
+      o.data = m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : "";
+      return o;
+    });
+  return { dados, colunas: Object.keys(idx) };
+}
+
+function ImportarRentabilidade({ aoTerminar }) {
+  const [txt, setTxt] = useState("");
+  const [indo, setIndo] = useState(false);
+  const [res, setRes] = useState(null);
+  const [erro, setErro] = useState("");
+  const previa = txt ? lerRentabilidade(txt) : null;
+
+  const enviar = async () => {
+    if (!previa || previa.erro) return;
+    setIndo(true); setErro("");
+    try { setRes(await importarRentabilidade(previa.dados)); }
+    catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+
+  return (
+    <div className="rounded-xl p-4" style={{ background: C.paper, border: `1px solid ${C.roxo}` }}>
+      <div className="flex items-baseline justify-between">
+        <span className="text-[14px] font-semibold">Importar planilha de rentabilidade</span>
+        <button onClick={aoTerminar} className="text-[12px]" style={{ color: C.mute }}>fechar</button>
+      </div>
+      <p className="mt-1 text-[12px]" style={{ color: C.mute }}>
+        No Sheets, selecione a aba CONTROLE DE VEÍCULOS com o cabeçalho, ⌘C, e cole aqui. Carro cuja
+        placa já está no estoque é pulado, não duplicado.
+      </p>
+      {res ? (
+        <div className="mt-3 rounded-lg p-3 text-[13px]" style={{ background: "#E8F3EE" }}>
+          <b>{res.inseridos}</b> carro{res.inseridos === 1 ? "" : "s"} no estoque, <b>{res.custos}</b> linhas de custo,{" "}
+          {res.veiculos_criados} veículo{res.veiculos_criados === 1 ? "" : "s"} e {res.compradores_criados} comprador{res.compradores_criados === 1 ? "" : "es"} criados.
+          {!!(res.pulados || []).length && <div className="mt-1" style={{ color: AMARELO.texto }}>Pulados (já estavam no estoque): {res.pulados.join(", ")}</div>}
+          {!!res.sem_placa && <div className="mt-1" style={{ color: AMARELO.texto }}>{res.sem_placa} linha{res.sem_placa > 1 ? "s" : ""} sem placa válida ficaram de fora.</div>}
+          <button onClick={aoTerminar} className="mt-2 text-[13px] font-semibold" style={{ color: C.roxo }}>ver o estoque</button>
+        </div>
+      ) : (
+        <>
+          <textarea className="mt-3 h-40 w-full rounded-lg border p-2 text-[12px] outline-none" style={{ ...inputSty, fontFamily: F.mono }}
+            placeholder="Cole aqui" value={txt} onChange={(e) => setTxt(e.target.value)} />
+          {previa && previa.erro && <p className="mt-1 text-[12px]" style={{ color: C.laranja }}>{previa.erro}</p>}
+          {previa && !previa.erro && (
+            <p className="mt-1 text-[12px]" style={{ color: C.mute }}>
+              {previa.dados.length} linha{previa.dados.length === 1 ? "" : "s"} com placa · colunas reconhecidas: {previa.colunas.join(", ")}
+              {previa.colunas.indexOf("valor_cliente") < 0 && <span style={{ color: C.laranja }}> · falta VALOR CLIENTE</span>}
+            </p>
+          )}
+          {erro && <p className="mt-1 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+          <BotaoPrimario onClick={enviar} disabled={indo || !previa || !!previa.erro || !previa.dados.length} className="mt-2 w-full">
+            {indo ? "Importando…" : "Importar"}
+          </BotaoPrimario>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
  * A tela do estoque: a fila de espera em cima, o pátio embaixo.
  *
  * A fila existe porque o carro não entra sozinho. Entrar no estoque é
@@ -7005,7 +7271,7 @@ const diaBR = (v) => {
  * entrada no fechamento traria para cá todo negócio marcado como
  * fechado por engano, e o custo de desfazer é maior que o de um toque.
  */
-function TelaEstoque({ perfil }) {
+function TelaEstoque({ perfil, comp, mes }) {
   const [lista, setLista] = useState(null);
   const [fila, setFila] = useState([]);
   const [filtro, setFiltro] = useState("em_estoque");
@@ -7014,6 +7280,8 @@ function TelaEstoque({ perfil }) {
   const [entrando, setEntrando] = useState("");
   const [mostrarFila, setMostrarFila] = useState(8);
   const [filaAberta, setFilaAberta] = useState(false);
+  const [importando, setImportando] = useState(false);
+  const eGerente = !!(perfil && perfil.papel === "gerente");
 
   const carregar = async () => {
     setErro("");
@@ -7053,6 +7321,9 @@ function TelaEstoque({ perfil }) {
         // O que saiu para o cliente. `valor_cliente` é o líquido do
         // check list; sem check list, cai no valor fechado.
         valor_compra: (cl && cl.valor_cliente) || a.valor_fechado,
+        negociador_nome: a.negociador_nome,
+        meio_alcance: a.origem,
+        prospector: a.prospec,
         custos,
       });
       await carregar();
@@ -7073,7 +7344,7 @@ function TelaEstoque({ perfil }) {
 
   return (
     <div className="space-y-3">
-      <Cabecalho titulo="Estoque"
+      <Cabecalho titulo="Estoque" mes={filtro === "vendido" ? mes : null}
         sub={lista === null ? "Carregando…" : `${lista.filter((e) => e.situacao === "em_estoque").length} no pátio · ${lista.filter((e) => e.situacao === "vendido").length} vendidos`} />
 
       {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
@@ -7137,7 +7408,7 @@ function TelaEstoque({ perfil }) {
 
       {/* ---- filtro e totais ---- */}
       <div className="flex flex-wrap items-center gap-2">
-        {[["em_estoque", "No pátio"], ["vendido", "Vendidos"], ["todos", "Todos"]].map(([v, r]) => (
+        {[["em_estoque", "No pátio"], ["vendido", "Rentabilidade"]].map(([v, r]) => (
           <button key={v} onClick={() => setFiltro(v)}
             className="rounded-full px-3 py-1 text-[12px] font-semibold"
             style={{
@@ -7146,26 +7417,37 @@ function TelaEstoque({ perfil }) {
               border: `1px solid ${filtro === v ? C.roxo : C.line}`,
             }}>{r}</button>
         ))}
-        {!!visivel.length && (
+        {filtro === "em_estoque" && !!visivel.length && (
           <span className="ml-auto text-[11px]" style={{ color: C.mute }}>
             {visivel.length} carro{visivel.length > 1 ? "s" : ""} · custo {brl(soma.custo)}
-            {filtro === "vendido" && <> · margem <b style={{ color: soma.margem >= 0 ? C.verde : C.laranja }}>{brl(soma.margem)}</b></>}
           </span>
+        )}
+        {eGerente && !importando && (
+          <button onClick={() => setImportando(true)} className="ml-auto text-[12px] font-semibold" style={{ color: C.roxo }}>
+            importar planilha
+          </button>
         )}
       </div>
 
+      {importando && <ImportarRentabilidade aoTerminar={() => { setImportando(false); carregar(); }} />}
+
+      {/* A rentabilidade é a planilha do mês: só carros vendidos, do mês
+          escolhido no cabeçalho. Vendido sem data cai no mês de entrada. */}
+      {filtro === "vendido" && lista !== null && (
+        <Rentabilidade comp={comp}
+          vendidos={lista.filter((e) => e.situacao === "vendido" && String(e.vendido_em || e.entrou_em || "").slice(0, 7) === String(comp).slice(0, 7))} />
+      )}
+
       {lista === null && <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>}
 
-      {lista !== null && !visivel.length && (
+      {lista !== null && filtro === "em_estoque" && !visivel.length && (
         <p className="text-[14px] leading-relaxed" style={{ color: C.mute }}>
-          {filtro === "em_estoque"
-            ? "Nenhum carro no pátio. O primeiro entra pela fila acima, quando um negócio fecha."
-            : "Nada aqui."}
+          Nenhum carro no pátio. O primeiro entra pela fila acima, quando um negócio fecha.
         </p>
       )}
 
       <div className="grid gap-2">
-        {visivel.map((e) => {
+        {filtro === "em_estoque" && visivel.map((e) => {
           const v = e.veiculo || {};
           const c = contaDoEstoque(e);
           const dias = diasNoPatio(e);
@@ -8098,7 +8380,7 @@ function App() {
   return (
     <Shell perfil={perfil} tela={tela} setTela={setTela}>
       {tela === "atendimentos" && <CRM perfil={perfil} aoAbrir={abrir} mes={{ ...mes, todos: true }} />}
-      {tela === "estoque" && <TelaEstoque perfil={perfil} />}
+      {tela === "estoque" && <TelaEstoque perfil={perfil} comp={compOuAtual} mes={mes} />}
       {tela === "painel" && <Funil perfil={perfil} comp={compOuAtual} mes={mes} />}
       {tela === "leads" && <LeadsIndicacao />}
       {tela === "adm" && <TelaADM perfil={perfil} />}

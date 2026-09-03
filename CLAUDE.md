@@ -1161,3 +1161,47 @@ isso que o resultado era colcha de retalhos. **Antes de dar uma tela
 por pronta, olhar nela logado.** O `resize_window` do Chrome não
 encolhe a janela abaixo de ~1.300 px no Mac; para conferir o celular,
 injetar CSS que esconde a `aside` e limita `#raiz` a 390 px.
+
+### 25. Rentabilidade: a planilha CONTROLE DE VEÍCULOS, calculada do estoque
+
+O Derek mandou em 03/09/2026 a planilha de rentabilidade de agosto. Ela
+tem duas abas: a primeira é a compra (o que o check list já guarda); a
+segunda, **CONTROLE DE VEÍCULOS / CLIENTES**, fecha a conta por carro
+vendido e soma por negociador. A conta dela é:
+
+```
+bruta   = venda − valor cliente − débitos − quitação − deduções
+líquida = bruta − cautelar − comissão externa
+```
+
+Isso é `venda − custo` do estoque (0019), **desde que o custo tenha as
+duas linhas que faltavam**: DEDUÇÕES (diferença de quitação, restos) e
+COMISSÃO EXTERNA (paga a quem trouxe o comprador). A 0020 acrescenta
+os dois ao enum. `rentabilidadeDe()` separa custo *do carro* (débitos,
+quitação, dedução — `CUSTO_DO_CARRO`) de custo *da venda* (o resto)
+por tipo da linha; quem criar tipo novo decide de que lado ele fica.
+
+**A vista mora dentro do Estoque**, no filtro "Rentabilidade", e
+obedece ao mês do cabeçalho. É conta na tela, não no servidor — a
+lista do estoque vem inteira (teto 300), diferente do CRM paginado.
+Passou de 300 carros, isto vai para `api/veiculo.js`.
+
+**A planilha só sabe a semana da venda, não o dia.** Por isso
+`semana_venda` existe ao lado de `vendido_em`; `semanaDe()` prefere a
+coluna e deriva do dia quando ela falta. E a coluna DATA da planilha é
+a **data da compra**, que bate com a aba 1 — vira `entrou_em`.
+
+**Carro importado não tem atendimento**, então negociador, meio de
+alcance e prospector ficam em texto no `estoque` (como o lead de
+indicação). Carro que entra pela fila copia os três do atendimento.
+
+**A importação é colada, como a do CRM**, e faz cinco idas ao banco
+em lote, não cinco por linha — sessenta linhas em requisições
+individuais estourariam o tempo da função. `NÃO VENDIDO` e `ADAM
+ASSUMIU` na coluna COMPRADOR não viram comprador: o primeiro entra no
+pátio, o segundo é um caso que a casa ainda vai explicar. Placa já no
+estoque é pulada e devolvida em `pulados`, nunca duplicada.
+
+**A cautelar custa 160–180 e é cobrada a 390.** Isso apareceu ao
+cruzar as duas abas: a diferença é margem, e é exatamente o
+previsto-contra-realizado que o estoque foi feito para mostrar.

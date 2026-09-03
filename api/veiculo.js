@@ -197,7 +197,7 @@ async function supa(url, opcoes) {
 const RX_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const TIPOS_CUSTO = ["quitacao", "debitos", "cautelar", "transporte",
-                     "reparo", "juros", "documentacao", "outro"];
+                     "reparo", "juros", "documentacao", "deducao", "comissao_externa", "outro"];
 const SITUACOES = ["em_estoque", "vendido", "devolvido"];
 const TIPOS_COMPRADOR = ["lojista", "pessoa_fisica"];
 
@@ -222,8 +222,156 @@ const CAMPOS_ESTOQUE =
   "*,veiculo(id,placa,marca_modelo,ano_modelo,cor,km_atual,fipe_valor,valor_por)," +
   "comprador(id,nome,tipo,telefone),estoque_custo(id,tipo,descricao,previsto,realizado,pago_em,anexo_id,do_fechamento)";
 
+/**
+ * Importa a planilha CONTROLE DE VEÍCULOS / CLIENTES colada.
+ *
+ * Cinco idas ao banco, não cinco por linha: procura os veículos pela
+ * placa, cria os que faltam, idem compradores, e insere estoque e
+ * custos em lote. Sessenta linhas em requisições individuais
+ * passariam do tempo que a Vercel dá a uma função.
+ *
+ * Não é transação — se o lote de custos falhar, os carros ficam sem
+ * custo e a tela diz quantos. Mesmo compromisso do importador do CRM.
+ *
+ * Um carro entra uma vez (índice único em veiculo_id): linha cuja
+ * placa já está no estoque é pulada e devolvida em `pulados`, em vez
+ * de dobrar o custo do carro.
+ */
+async function importarEstoque(req, res, tok, c) {
+  const linhas = Array.isArray(c.linhas) ? c.linhas : [];
+  if (!linhas.length) return res.status(400).json({ erro: "Nenhuma linha para importar." });
+  if (linhas.length > 300) return res.status(400).json({ erro: "Cole no máximo 300 linhas por vez." });
+  const cab = cabecalhos(tok);
+  const rep = cabecalhos(tok, { Prefer: "return=representation" });
+
+  const placaDe = (l) => normalizarPlaca(l.placa);
+  const validas = linhas.filter((l) => /^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$/.test(placaDe(l)));
+  const semPlaca = linhas.length - validas.length;
+
+  // 1. veículos que já existem, pela placa (o mais recente de cada)
+  const placas = Array.from(new Set(validas.map(placaDe)));
+  const lista = placas.length
+    ? await supa(`${base("veiculo")}?select=id,placa,atendimento_id,criado_em&placa=in.(${placas.join(",")})&order=criado_em.desc`, { headers: cab })
+    : [];
+  const veiculoPor = {};
+  (lista || []).forEach((v) => { if (!veiculoPor[v.placa]) veiculoPor[v.placa] = v; });
+
+  // 2. cria os que faltam
+  const faltam = placas.filter((p) => !veiculoPor[p]).map((p) => {
+    const l = validas.filter((x) => placaDe(x) === p)[0];
+    return {
+      placa: p, marca_modelo: texto(l.carro), renavam: texto(l.renavam), chassi: texto(l.chassi),
+      status: "comprado",
+    };
+  });
+  if (faltam.length) {
+    const criados = await supa(base("veiculo"), { method: "POST", headers: rep, body: JSON.stringify(faltam) });
+    (criados || []).forEach((v) => { veiculoPor[v.placa] = v; });
+  }
+
+  // 3. quem já está no estoque não entra de novo
+  const ids = Object.keys(veiculoPor).map((p) => veiculoPor[p].id);
+  const jaTem = ids.length
+    ? await supa(`${base("estoque")}?select=veiculo_id&veiculo_id=in.(${ids.join(",")})`, { headers: cab })
+    : [];
+  const noEstoque = {};
+  (jaTem || []).forEach((e) => { noEstoque[e.veiculo_id] = true; });
+
+  // 4. compradores, pelo nome (a chave prática, como no cadastro)
+  const NAO_E_COMPRADOR = /^(n[aã]o vendido|adam assumiu)/i;
+  const nomes = Array.from(new Set(validas
+    .map((l) => String(l.comprador || "").trim())
+    .filter((n) => n && !NAO_E_COMPRADOR.test(n))));
+  const existentes = nomes.length
+    ? await supa(`${base("comprador")}?select=id,nome&nome=in.(${nomes.map((n) => `"${n.replace(/"/g, "")}"`).join(",")})`, { headers: cab })
+    : [];
+  const compradorPor = {};
+  (existentes || []).forEach((x) => { compradorPor[x.nome.toLowerCase()] = x; });
+  const novosComp = nomes.filter((n) => !compradorPor[n.toLowerCase()]).map((n) => {
+    const l = validas.filter((x) => String(x.comprador || "").trim() === n)[0];
+    return { nome: n, tipo: "lojista", telefone: texto(l.telefone) };
+  });
+  if (novosComp.length) {
+    const criados = await supa(base("comprador"), { method: "POST", headers: rep, body: JSON.stringify(novosComp) });
+    (criados || []).forEach((x) => { compradorPor[x.nome.toLowerCase()] = x; });
+  }
+
+  // 5. as linhas do estoque
+  const pulados = [];
+  const paraInserir = [];
+  const vistos = {};
+  validas.forEach((l) => {
+    const p = placaDe(l);
+    const v = veiculoPor[p];
+    if (!v || noEstoque[v.id] || vistos[v.id]) { pulados.push(p); return; }
+    vistos[v.id] = true;
+    const nomeComp = String(l.comprador || "").trim();
+    const comp = nomeComp && !NAO_E_COMPRADOR.test(nomeComp) ? compradorPor[nomeComp.toLowerCase()] : null;
+    const venda = decimal(l.valor_venda);
+    const semana = Number(String(l.semana || "").replace(/\D/g, ""));
+    paraInserir.push({
+      veiculo_id: v.id,
+      atendimento_id: v.atendimento_id || null,
+      situacao: comp && venda ? "vendido" : "em_estoque",
+      entrou_em: dataISO(l.data) || undefined,
+      valor_compra: decimal(l.valor_cliente),
+      comprador_id: comp ? comp.id : null,
+      valor_venda: venda,
+      semana_venda: semana >= 1 && semana <= 5 ? semana : null,
+      negociador_nome: texto(l.negociador),
+      meio_alcance: texto(l.meio_alcance),
+      prospector: texto(l.prospector),
+      observacoes: texto(l.comentarios),
+      importado_em: new Date().toISOString(),
+    });
+  });
+  paraInserir.forEach((x) => { if (x.entrou_em === undefined) delete x.entrou_em; });
+
+  if (!paraInserir.length) {
+    return res.status(200).json({ ok: true, inseridos: 0, pulados, sem_placa: semPlaca, custos: 0 });
+  }
+  const inseridos = await supa(base("estoque"), { method: "POST", headers: rep, body: JSON.stringify(paraInserir) });
+  const estoquePorVeiculo = {};
+  (inseridos || []).forEach((e) => { estoquePorVeiculo[e.veiculo_id] = e.id; });
+
+  // 6. os custos — realizado = o que a planilha diz que custou
+  const custos = [];
+  validas.forEach((l) => {
+    const v = veiculoPor[placaDe(l)];
+    const eid = v && estoquePorVeiculo[v.id];
+    if (!eid) return;
+    [
+      ["debitos", "Débitos do veículo", l.debitos, true],
+      ["quitacao", "Quitação do financiamento", l.quitacao, true],
+      ["cautelar", "Perícia cautelar", l.cautelar, true],
+      ["deducao", "Deduções", l.deducoes, false],
+      ["comissao_externa", "Comissão externa", l.comissao_externa, false],
+    ].forEach(([tipo, desc, valor, doFechamento]) => {
+      const n = decimal(valor);
+      if (!n) return;
+      custos.push({ estoque_id: eid, tipo, descricao: desc, previsto: n, realizado: n, do_fechamento: doFechamento });
+    });
+  });
+  let custosOk = 0;
+  if (custos.length) {
+    const r = await supa(base("estoque_custo"), { method: "POST", headers: rep, body: JSON.stringify(custos) });
+    custosOk = (r || []).length;
+  }
+
+  return res.status(201).json({
+    ok: true, inseridos: (inseridos || []).length, veiculos_criados: faltam.length,
+    compradores_criados: novosComp.length, custos: custosOk, pulados, sem_placa: semPlaca,
+  });
+}
+
 async function estoque(req, res, tok) {
   const cab = cabecalhos(tok);
+
+  if (req.method === "POST" && String(req.query.acao || "") === "importar") {
+    const c = await corpoDe(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    return importarEstoque(req, res, tok, c);
+  }
 
   if (req.method === "GET") {
     const id = String(req.query.id || "");
@@ -258,6 +406,9 @@ async function estoque(req, res, tok) {
       atendimento_id: RX_ID.test(String(c.atendimento_id || "")) ? c.atendimento_id : null,
       valor_compra: decimal(c.valor_compra),
       observacoes: texto(c.observacoes),
+      negociador_nome: texto(c.negociador_nome),
+      meio_alcance: texto(c.meio_alcance),
+      prospector: texto(c.prospector),
     };
     if (dataISO(c.entrou_em)) linha.entrou_em = c.entrou_em;
 
@@ -307,6 +458,13 @@ async function estoque(req, res, tok) {
     if (c.observacoes !== undefined) mud.observacoes = texto(c.observacoes);
     if (c.comprador_id !== undefined) {
       mud.comprador_id = RX_ID.test(String(c.comprador_id || "")) ? c.comprador_id : null;
+    }
+    ["negociador_nome", "meio_alcance", "prospector"].forEach((k) => {
+      if (c[k] !== undefined) mud[k] = texto(c[k]);
+    });
+    if (c.semana_venda !== undefined) {
+      const n = Number(c.semana_venda);
+      mud.semana_venda = n >= 1 && n <= 5 ? Math.trunc(n) : null;
     }
     if (!Object.keys(mud).length) return res.status(400).json({ erro: "Nada para atualizar." });
 
