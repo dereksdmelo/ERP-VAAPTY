@@ -10,7 +10,7 @@
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<style>html,body{margin:0;padding:0;background:#EFECF3}</style>
+<style>html,body{margin:0;padding:0;background:#F4F2F7;-webkit-font-smoothing:antialiased}</style>
 </head>
 <body>
 <div id="raiz"></div>
@@ -35,19 +35,25 @@ const { useState, useEffect, useMemo, useRef } = React;
 
 /* ===================== tokens ===================== */
 const C = {
-  bg: "#EFECF3", paper: "#FFFFFF", ink: "#181221", mute: "#6B6478",
-  line: "#DCD6E4", roxo: "#6D1B9E", roxoFraco: "#F1E8F7",
-  laranja: "#EA5423", verde: "#1D7F58",
+  bg: "#F4F2F7", paper: "#FFFFFF", ink: "#1B1523", mute: "#6E6879",
+  line: "#E3DEE9", roxo: "#6D1B9E", roxoFraco: "#F1E8F7",
+  laranja: "#E1521F", verde: "#1D7F58",
 };
 // Dourado de nota. Fica fora do C porque não é cor de marca nem de
 // ação: é semântica de avaliação, e existe justamente para não disputar
 // com o roxo do botão.
 const ESTRELA = "#E0A32E";
 
+// As três famílias nomeadas antes (Archivo, Public Sans, Roboto Mono)
+// nunca foram carregadas — não há <link> para elas — então cada
+// aparelho caía num fallback diferente, e o mono virava Courier. Agora
+// a escolha é a fonte do sistema, de propósito: SF no iPhone e no Mac,
+// Roboto no Android, Segoe no Windows. Zero download, e é a fonte que
+// o negociador já lê o dia inteiro.
 const F = {
-  disp: "'Archivo', system-ui, sans-serif",
-  body: "'Public Sans', system-ui, sans-serif",
-  mono: "'Roboto Mono', ui-monospace, monospace",
+  disp: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif",
+  body: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif",
+  mono: "ui-monospace, 'SF Mono', Menlo, Consolas, monospace",
 };
 
 const brl = (n) =>
@@ -1202,7 +1208,7 @@ function etapaConcluida(id, f, fotos) {
 // Onda 1 do redesenho: o corpo sobe de 14 para 16 px e o campo ganha
 // altura. Abaixo de 16 px o Safari do iPhone dá zoom ao focar o campo —
 // e o negociador perde o enquadramento no meio do preenchimento.
-const inputCls = "w-full rounded-md border px-3 py-2.5 text-[16px] outline-none";
+const inputCls = "w-full rounded-lg border px-3 py-2.5 text-[16px] outline-none";
 const inputSty = { borderColor: C.line, background: "#fff", color: C.ink };
 
 const Rotulo = ({ children, req }) => (
@@ -1229,7 +1235,7 @@ function Toggle({ label, valor, onChange, nota }) {
   );
 }
 const Bloco = ({ titulo, sub, children }) => (
-  <section className="rounded-lg p-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+  <section className="rounded-xl p-4 lg:p-5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
     {/* O título deixou de ser roxo: roxo agora é só da ação principal.
         Antes ele competia com o botão que a pessoa tem que apertar. */}
     <h3 className="text-[17px] leading-tight" style={{ color: C.ink, fontFamily: F.disp, fontWeight: 700 }}>{titulo}</h3>
@@ -5381,12 +5387,12 @@ function Importar({ aoTerminar }) {
   );
 }
 
-function Funil({ perfil, comp }) {
+function Funil({ perfil, comp, mes }) {
   const [d, setD] = useState(null);
   const [equipe, setEquipe] = useState([]);
   const [erro, setErro] = useState("");
-  const [aberto, setAberto] = useState(false);
-  const [cadastro, setCadastro] = useState(false);
+  // Sempre aberto: é uma página agora, não um widget dentro da lista.
+  const aberto = true;
   const [desempenho, setDesempenho] = useState({});
   // Sem isso a régua pisca "nenhuma meta cadastrada" enquanto o
   // cadastro não chega — texto errado é pior que espaço vazio.
@@ -5436,43 +5442,24 @@ function Funil({ perfil, comp }) {
     </div>
   );
 
-  if (!aberto) {
-    return (
-      <button onClick={() => setAberto(true)} className="w-full rounded-md border py-2.5 text-[13px] font-semibold"
-        style={{ borderColor: C.line, color: C.roxo }}>
-        Ver o dashboard de {rotuloMes(comp).split(" de ")[0]}
-      </button>
-    );
-  }
-
   return (
-    <div className="rounded-lg p-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.roxo, fontFamily: F.disp, fontWeight: 700 }}>
-          Dashboard · {rotuloMes(comp)}
-        </span>
-        <span className="flex items-center gap-3">
-          <button onClick={() => setCadastro(!cadastro)} className="text-[11px]" style={{ color: C.roxo }}>
-            {cadastro ? "ver números" : "negociadores"}
-          </button>
-          <button onClick={() => setAberto(false)} className="text-[11px]" style={{ color: C.mute }}>fechar</button>
-        </span>
-      </div>
+    <div>
+      <Cabecalho titulo="Painel do mês"
+        sub={`${rotuloMes(comp)} · meta, ritmo e conversão por negociador`}
+        mes={mes} />
 
-      {cadastro && <CadastroNegociadores perfil={perfil} competencia={comp} aoMudarMetaLoja={setMetaLoja} />}
+      {erro && <p className="mt-2 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+      {!d && !erro && <p className="mt-2 text-[13px]" style={{ color: C.mute }}>Calculando…</p>}
 
-      {erro && !cadastro && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
-      {!d && !erro && !cadastro && <p className="mt-2 text-[12px]" style={{ color: C.mute }}>Calculando…</p>}
-
-      {d && !cadastro && (
+      {d && (
         <>
           {equipeOk && (
-            <div className="mt-3">
+            <div className="mb-4">
               <ReguaDoMes d={d} equipe={equipe} metaLoja={metaLoja} />
             </div>
           )}
 
-          <div className="mt-3 grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 gap-3 rounded-xl p-4 lg:grid-cols-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
             <Num rot="Fluxo" v={d.total.fluxo} />
             <Num rot="Avaliações" v={d.total.avaliacoes} sub={d.total.avaliacoes_sobre_fluxo != null ? `${d.total.avaliacoes_sobre_fluxo}%` : null} />
             <Num rot="Com proposta" v={d.total.com_proposta} />
@@ -5569,7 +5556,7 @@ const STATUS_LEAD = [
  * página não pode rolar de lado no celular.
  */
 function LeadsIndicacao() {
-  const [aberto, setAberto] = useState(false);
+  const aberto = true;   // é uma página agora
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
   const [filtro, setFiltro] = useState("");
@@ -5590,31 +5577,16 @@ function LeadsIndicacao() {
     }
   };
 
-  if (!aberto) {
-    return (
-      <button onClick={() => setAberto(true)} className="w-full rounded-md border py-2.5 text-[13px] font-semibold"
-        style={{ borderColor: C.line, color: C.roxo }}>
-        Leads de indicação
-      </button>
-    );
-  }
 
   const abertos = lista ? lista.filter((l) => l.status === "novo").length : 0;
 
   return (
-    <div className="rounded-lg p-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-      <div className="flex items-baseline justify-between">
-        <span className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.roxo, fontFamily: F.disp, fontWeight: 700 }}>
-          Leads de indicação
-        </span>
-        <button onClick={() => setAberto(false)} className="text-[11px]" style={{ color: C.mute }}>fechar</button>
-      </div>
-
-      {lista && (
-        <p className="mt-1 text-[12px]" style={{ color: C.mute }}>
-          {lista.length} na fila · <span style={{ color: abertos ? C.laranja : C.mute }}>{abertos} sem ninguém ter ligado</span>
-        </p>
-      )}
+    <div>
+      <Cabecalho titulo="Leads de indicação"
+        sub={lista
+          ? <>{lista.length} na fila · <span style={{ color: abertos ? C.laranja : C.mute }}>{abertos} sem ninguém ter ligado</span></>
+          : "Quem os clientes indicaram, com telefone para ligar do próprio celular."} />
+      <div className="rounded-xl p-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
 
       <div className="mt-3 flex gap-1.5 overflow-x-auto pb-1">
         <button onClick={() => setFiltro("")}
@@ -5681,6 +5653,7 @@ function LeadsIndicacao() {
           </table>
         </div>
       )}
+    </div>
     </div>
   );
 }
@@ -6708,20 +6681,14 @@ function CadastroNegociadores({ perfil, competencia, aoMudarMetaLoja }) {
   );
 }
 
-function CRM({ perfil, aoAbrir, aoAbrirAdm, aoAbrirEstoque }) {
+function CRM({ perfil, aoAbrir, mes }) {
+  const { comp, setComp, MESES } = mes;
   const [lista, setLista] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
   const [status, setStatus] = useState("");
   const [busca, setBusca] = useState("");
   const [novo, setNovo] = useState(false);
-  const [mostrarImportar, setMostrarImportar] = useState(false);
-  const [gestao, setGestao] = useState(false);
-  // O mês manda na tela inteira — lista e dashboard. Vazio é "todos os
-  // meses", que existe porque procurar um cliente de abril não pode
-  // exigir lembrar em que mês ele passou aqui.
-  const [comp, setComp] = useState(() => competenciaDe(hojeEmSP()));
-  const MESES = useMemo(() => mesesRecentes(18), []);
 
   const carregar = async (filtros) => {
     setCarregando(true); setErro("");
@@ -6750,115 +6717,55 @@ function CRM({ perfil, aoAbrir, aoAbrirAdm, aoAbrirEstoque }) {
   }, [lista]);
 
   return (
-    <div className="min-h-screen w-full pb-24" style={{ background: C.bg, fontFamily: F.body, color: C.ink }}>
-      <header className="px-4 pt-4 pb-3" style={{ background: C.roxo, color: "#fff" }}>
-        <div className="flex items-baseline justify-between">
-          <span className="text-[10px] uppercase tracking-[0.22em]" style={{ opacity: 0.7 }}>
-            {perfil ? `${perfil.nome} · ${perfil.papel}` : "Vaapty Joinville"}
-          </span>
-          <button onClick={sair} className="text-[10px] underline" style={{ color: "#fff", opacity: 0.7 }}>Sair</button>
+    <div>
+      <Cabecalho titulo="Atendimentos"
+        sub={`${contas.total} na lista · ${contas.fechado || 0} fechados · ${contas.aguardando_propostas || 0} esperando proposta`}
+        mes={mes}
+        acao={!novo && <BotaoPrimario onClick={() => setNovo(true)}>Novo atendimento</BotaoPrimario>} />
+
+      {novo && (
+        <div className="mb-4">
+          <NovoAtendimento perfil={perfil} aoCancelar={() => setNovo(false)}
+            aoCriar={async (a) => { setNovo(false); await aoAbrir(a.id); }} />
         </div>
-        <h1 className="mt-1 text-[17px] leading-tight" style={{ fontFamily: F.disp, fontWeight: 800 }}>
-          Atendimentos
-        </h1>
-        <div className="mt-1 text-[11px]" style={{ fontFamily: F.mono, opacity: 0.85 }}>
-          {contas.total} na lista · {contas.fechado || 0} fechados · {contas.aguardando_propostas || 0} esperando proposta
-        </div>
-      </header>
+      )}
 
-      {/* O mês fica acima dos filtros de status porque manda em todos
-          eles: pílula de status dentro de um mês é outra pergunta que
-          pílula de status no ano inteiro. */}
-      <div className="flex items-center gap-2 px-3 py-2" style={{ background: C.paper, borderBottom: `1px solid ${C.line}` }}>
-        <select className="rounded-md border px-2 py-1.5 text-[13px] outline-none"
-          style={{ ...inputSty, fontWeight: 600 }} value={comp} onChange={(e) => setComp(e.target.value)}>
-          {MESES.map((m) => <option key={m} value={m}>{rotuloMes(m)}</option>)}
-          <option value="">Todos os meses</option>
-        </select>
-        <span className="text-[11px] leading-snug" style={{ color: C.mute }}>
-          {comp ? "lista e dashboard deste mês" : "sem filtro de mês"}
-        </span>
-      </div>
-
-      <div className="rolar flex gap-1.5 overflow-x-auto px-3 py-3" style={{ background: C.paper, borderBottom: `1px solid ${C.line}` }}>
-        {[["", "Todos"]].concat(STATUS_AT.map((x) => [x[0], x[1]])).map(([v, r]) => (
-          <button key={v || "todos"} onClick={() => setStatus(v)}
-            className="shrink-0 rounded-full px-3 py-1.5 text-[12px]"
-            style={{ background: status === v ? C.roxo : "#fff", color: status === v ? "#fff" : C.mute, border: `1px solid ${status === v ? C.roxo : C.line}` }}>
-            {r}
-          </button>
-        ))}
-      </div>
-
-      <div className="space-y-3 p-4">
+      <div className="rounded-xl p-3 lg:p-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
         <form onSubmit={buscar} className="flex gap-2">
           <input className={inputCls} style={inputSty} placeholder="Cliente, carro ou telefone"
             value={busca} onChange={(e) => setBusca(e.target.value)} />
-          <button type="submit" className="shrink-0 rounded-md border px-4 text-[13px] font-semibold" style={{ borderColor: C.line, color: C.roxo }}>Buscar</button>
+          <button type="submit" className="shrink-0 rounded-lg border px-4 text-[14px] font-semibold"
+            style={{ borderColor: C.line, color: C.roxo }}>Buscar</button>
         </form>
-
-        {novo ? (
-          <NovoAtendimento perfil={perfil} aoCancelar={() => setNovo(false)}
-            aoCriar={async (a) => { setNovo(false); await aoAbrir(a.id); }} />
-        ) : (
-          <button onClick={() => setNovo(true)} className="w-full rounded-md py-3 text-[14px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>
-            Novo atendimento
-          </button>
-        )}
-
-        {/* Onda 1: uma ação em destaque, o resto recolhido.
-            Dashboard, leads, conferência e importação são trabalho de
-            gestão — não podem disputar espaço com quem está com o
-            cliente na frente. Em nove de cada dez aberturas só o botão
-            de cima interessa. */}
-        {!gestao ? (
-          <button onClick={() => setGestao(true)}
-            className="w-full py-2 text-[14px] font-semibold" style={{ color: C.mute }}>
-            Gestão e relatórios ▾
-          </button>
-        ) : (
-          <div className="space-y-3 rounded-lg p-3" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-            <div className="flex items-center justify-between">
-              <span className="text-[12px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Gestão</span>
-              <button onClick={() => setGestao(false)} className="text-[14px]" style={{ color: C.mute }}>fechar</button>
-            </div>
-
-            <Funil perfil={perfil} comp={comp || competenciaDe(hojeEmSP())} />
-
-            {/* O estoque é a continuação natural do CRM: o mesmo carro,
-                depois que passa a ser nosso. */}
-            <button onClick={aoAbrirEstoque} className="w-full rounded-md border py-2.5 text-[14px] font-semibold"
-              style={{ borderColor: C.line, color: C.roxo }}>
-              Estoque e custos
+        {/* No celular a fila rola; no desktop cabe em duas linhas e
+            rolar seria esconder metade dos status. */}
+        <div className="rolar -mx-3 mt-3 flex gap-1.5 overflow-x-auto px-3 lg:mx-0 lg:flex-wrap lg:overflow-visible lg:px-0">
+          {[["", "Todos"]].concat(STATUS_AT.map((x) => [x[0], x[1]])).map(([v, r]) => (
+            <button key={v || "todos"} onClick={() => setStatus(v)}
+              className="shrink-0 rounded-full px-3 py-1.5 text-[13px]"
+              style={{ background: status === v ? C.roxo : C.bg, color: status === v ? "#fff" : C.ink, fontWeight: status === v ? 600 : 500 }}>
+              {r}
             </button>
+          ))}
+        </div>
+      </div>
 
-            <LeadsIndicacao />
-
-            {perfil && (perfil.administrativo || perfil.papel === "gerente") && (
-              <button onClick={aoAbrirAdm} className="w-full rounded-md border py-2.5 text-[14px] font-semibold"
-                style={{ borderColor: C.line, color: C.roxo }}>
-                Conferência do administrativo
-              </button>
-            )}
-
-            {perfil && perfil.papel === "gerente" && (
-              mostrarImportar
-                ? <Importar aoTerminar={async () => { setMostrarImportar(false); await carregar(filtrosAtuais({ q: busca })); }} />
-                : <button onClick={() => setMostrarImportar(true)} className="w-full rounded-md border py-2.5 text-[14px]"
-                    style={{ borderColor: C.line, color: C.mute }}>
-                    Importar planilha do CRM
-                  </button>
-            )}
-          </div>
-        )}
-
+      <div className="mt-4 space-y-3">
         {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
         {carregando && <p className="text-[12px]" style={{ color: C.mute }}>Carregando…</p>}
 
         {!carregando && !lista.length && !erro && (
-          <p className="text-[14px] leading-relaxed" style={{ color: C.mute }}>
-            Nenhum atendimento ainda. O primeiro carro que entrar no pátio começa aqui.
-          </p>
+          <div className="rounded-xl px-4 py-8 text-center" style={{ background: C.paper, border: `1px dashed ${C.line}` }}>
+            <p className="text-[15px]" style={{ color: C.ink, fontWeight: 600 }}>
+              {comp ? `Nenhum atendimento em ${rotuloMes(comp)}` : "Nenhum atendimento ainda"}
+              {status ? ` com este status` : ""}.
+            </p>
+            <p className="mt-1 text-[13px]" style={{ color: C.mute }}>
+              {comp
+                ? <>Pode estar em outro mês — <button onClick={() => setComp("")} className="underline" style={{ color: C.roxo }}>ver todos os meses</button>.</>
+                : "O primeiro carro que entrar no pátio começa aqui."}
+            </p>
+          </div>
         )}
 
         {/* No celular, cartão. A tabela de quinze colunas continua, mas
@@ -7099,7 +7006,7 @@ const diaBR = (v) => {
  * entrada no fechamento traria para cá todo negócio marcado como
  * fechado por engano, e o custo de desfazer é maior que o de um toque.
  */
-function TelaEstoque({ perfil, aoVoltar }) {
+function TelaEstoque({ perfil }) {
   const [lista, setLista] = useState(null);
   const [fila, setFila] = useState([]);
   const [filtro, setFiltro] = useState("em_estoque");
@@ -7166,13 +7073,9 @@ function TelaEstoque({ perfil, aoVoltar }) {
   }, { custo: 0, margem: 0 });
 
   return (
-    <div className="mx-auto max-w-3xl space-y-3 px-4 py-4">
-      <div className="flex items-baseline justify-between">
-        <span className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.roxo, fontFamily: F.disp, fontWeight: 700 }}>
-          Estoque
-        </span>
-        <button onClick={aoVoltar} className="text-[13px]" style={{ color: C.mute }}>voltar</button>
-      </div>
+    <div className="space-y-3">
+      <Cabecalho titulo="Estoque"
+        sub={lista === null ? "Carregando…" : `${lista.filter((e) => e.situacao === "em_estoque").length} no pátio · ${lista.filter((e) => e.situacao === "vendido").length} vendidos`} />
 
       {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
 
@@ -7331,8 +7234,8 @@ function FichaEstoque({ id, perfil, aoVoltar }) {
 
   if (!e) {
     return (
-      <div className="mx-auto max-w-3xl px-4 py-4">
-        <button onClick={aoVoltar} className="text-[13px]" style={{ color: C.mute }}>voltar</button>
+      <div>
+        <button onClick={aoVoltar} className="text-[14px]" style={{ color: C.roxo, fontWeight: 600 }}>‹ Estoque</button>
         <p className="mt-3 text-[13px]" style={{ color: erro ? C.laranja : C.mute }}>{erro || "Carregando…"}</p>
       </div>
     );
@@ -7380,13 +7283,9 @@ function FichaEstoque({ id, perfil, aoVoltar }) {
   );
 
   return (
-    <div className="mx-auto max-w-3xl space-y-3 px-4 py-4">
-      <div className="flex items-baseline justify-between">
-        <span className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.roxo, fontFamily: F.disp, fontWeight: 700 }}>
-          {v.placa || "Carro"}
-        </span>
-        <button onClick={aoVoltar} className="text-[13px]" style={{ color: C.mute }}>voltar ao estoque</button>
-      </div>
+    <div className="space-y-3">
+      <button onClick={aoVoltar} className="text-[14px]" style={{ color: C.roxo, fontWeight: 600 }}>‹ Estoque</button>
+      <Cabecalho titulo={v.placa || "Carro"} sub={`${v.marca_modelo || "—"}${v.ano_modelo ? ` ${v.ano_modelo}` : ""}`} />
 
       {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
 
@@ -7759,7 +7658,7 @@ function VenderCarro({ e, aoVender, aoFechar }) {
   );
 }
 
-function TelaADM({ perfil, aoVoltar }) {
+function TelaADM({ perfil }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
   const [foco, setFoco] = useState(null);      // atendimento aberto
@@ -7884,16 +7783,11 @@ function TelaADM({ perfil, aoVoltar }) {
   }
 
   return (
-    <div className="min-h-screen" style={{ background: C.paper }}>
-      <div className="px-4 py-3" style={{ background: C.roxo, color: "#fff" }}>
-        <button onClick={aoVoltar} className="text-[12px]" style={{ opacity: 0.85 }}>← atendimentos</button>
-        <h1 className="mt-1 text-[20px]" style={{ fontFamily: F.disp, fontWeight: 700 }}>Administrativo</h1>
-        <p className="text-[12px]" style={{ opacity: 0.8 }}>
-          {lista ? `${lista.length} fechados · ${pendentes} esperando conferência` : "Carregando…"}
-        </p>
-      </div>
+    <div>
+      <Cabecalho titulo="Administrativo"
+        sub={lista ? `${lista.length} fechados · ${pendentes} esperando conferência` : "Carregando…"} />
 
-      <div className="space-y-2 p-4">
+      <div className="space-y-2">
         {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
 
         {lista && !lista.length && (
@@ -7930,13 +7824,227 @@ function TelaADM({ perfil, aoVoltar }) {
   );
 }
 
+/* ==================================================================
+ * A CASCA
+ *
+ * Até aqui o sistema era uma tela de celular que crescia junto com a
+ * janela: botão de 1.400 px, tabela de dez colunas a 10 px, e os
+ * destinos da gestão — painel, estoque, leads, administrativo —
+ * escondidos numa sanfona dentro da lista de atendimentos. Navegação
+ * era um widget, não navegação.
+ *
+ * Agora há uma casca única: barra lateral no desktop, barra inferior
+ * no celular, e cada destino é uma página com cabeçalho próprio. O
+ * mês é escolhido uma vez, no cabeçalho, e vale para tudo que mede
+ * um mês.
+ * ================================================================== */
+
+const ICONE = {
+  atendimentos: "M4 6h16M4 12h16M4 18h10",
+  estoque: "M3 13l2-5a2 2 0 0 1 2-1h10a2 2 0 0 1 2 1l2 5v5a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H6v1a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-5zm4 2h.01M17 15h.01",
+  painel: "M4 20V10m6 10V4m6 16v-7",
+  leads: "M5 4h3l2 5-2 1a11 11 0 0 0 6 6l1-2 5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z",
+  adm: "M9 12l2 2 4-4M5 5h14v14H5z",
+  gestao: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm8 4l-2-1 .3-2.2-2-1.2-1.7 1.4L12.5 8l-.5-2h-2l-.5 2-2.1 1-1.7-1.4-2 1.2L4 11l-2 1 2 1-.3 2.2 2 1.2 1.7-1.4 2.1 1 .5 2h2l.5-2 2.1-1 1.7 1.4 2-1.2L18 13z",
+};
+
+const Icone = ({ nome, tam }) => (
+  <svg width={tam || 20} height={tam || 20} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d={ICONE[nome] || ""} />
+  </svg>
+);
+
+/**
+ * Os destinos, e quem vê cada um. Administrativo aparece para quem
+ * confere; gestão (cadastros, metas, importação) só para gerente.
+ */
+function destinosPara(perfil) {
+  const gerente = !!(perfil && perfil.papel === "gerente");
+  const adm = !!(perfil && (perfil.administrativo || gerente));
+  return [
+    { id: "atendimentos", rot: "Atendimentos", curto: "Atend.", principal: true },
+    { id: "estoque", rot: "Estoque", curto: "Estoque", principal: true },
+    { id: "painel", rot: "Painel do mês", curto: "Painel", principal: true },
+    { id: "leads", rot: "Leads de indicação", curto: "Leads" },
+    adm ? { id: "adm", rot: "Administrativo", curto: "Adm." } : null,
+    gerente ? { id: "gestao", rot: "Equipe e metas", curto: "Equipe" } : null,
+  ].filter(Boolean);
+}
+
+const Logotipo = () => (
+  <span className="flex items-center gap-2">
+    <span className="grid h-8 w-8 place-items-center rounded-lg text-[13px]"
+      style={{ background: C.roxo, color: "#fff", fontFamily: F.disp, fontWeight: 800 }}>V</span>
+    <span className="text-[15px] tracking-tight" style={{ fontFamily: F.disp, fontWeight: 800 }}>Vaapty</span>
+  </span>
+);
+
+function Shell({ perfil, tela, setTela, children }) {
+  const destinos = destinosPara(perfil);
+  const principais = destinos.filter((d) => d.principal);
+  const demais = destinos.filter((d) => !d.principal);
+  const [mais, setMais] = useState(false);
+
+  const ir = (id) => { setTela(id); setMais(false); window.scrollTo(0, 0); };
+
+  const itemLateral = (d) => {
+    const ativo = tela === d.id;
+    return (
+      <button key={d.id} onClick={() => ir(d.id)}
+        className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[14px]"
+        style={{
+          background: ativo ? C.roxoFraco : "transparent",
+          color: ativo ? C.roxo : C.ink,
+          fontWeight: ativo ? 700 : 500,
+        }}>
+        <Icone nome={d.id} tam={18} />
+        {d.rot}
+      </button>
+    );
+  };
+
+  const itemInferior = (d, aoClicar, ativo) => (
+    <button key={d.id} onClick={aoClicar} className="flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px]"
+      style={{ color: ativo ? C.roxo : C.mute, fontWeight: ativo ? 700 : 500 }}>
+      <Icone nome={d.id} tam={22} />
+      {d.curto}
+    </button>
+  );
+
+  return (
+    <div className="min-h-screen" style={{ background: C.bg, fontFamily: F.body, color: C.ink }}>
+      {/* ---- barra lateral (desktop) ---- */}
+      <aside className="fixed inset-y-0 left-0 hidden w-60 flex-col lg:flex"
+        style={{ background: C.paper, borderRight: `1px solid ${C.line}` }}>
+        <div className="px-5 pt-5 pb-4"><Logotipo /></div>
+        <nav className="flex-1 space-y-0.5 px-3">
+          {principais.map(itemLateral)}
+          {!!demais.length && <div className="my-3 border-t" style={{ borderColor: C.line }} />}
+          {demais.map(itemLateral)}
+        </nav>
+        <div className="px-5 py-4" style={{ borderTop: `1px solid ${C.line}` }}>
+          <div className="truncate text-[13px] font-semibold">{perfil ? perfil.nome : ""}</div>
+          <div className="flex items-center justify-between text-[12px]" style={{ color: C.mute }}>
+            <span className="capitalize">{perfil ? perfil.papel : ""}</span>
+            <button onClick={sair} style={{ color: C.mute }}>sair</button>
+          </div>
+        </div>
+      </aside>
+
+      {/* ---- conteúdo ---- */}
+      <main className="pb-24 lg:pb-10 lg:pl-60">
+        <div className="mx-auto max-w-[1080px] px-4 pt-4 lg:px-8 lg:pt-8">{children}</div>
+      </main>
+
+      {/* ---- barra inferior (celular) ----
+          Três destinos de todo dia e um "mais". O polegar alcança;
+          a sanfona no meio da lista, não. */}
+      <nav className="fixed inset-x-0 bottom-0 z-30 flex lg:hidden"
+        style={{ background: C.paper, borderTop: `1px solid ${C.line}`, paddingBottom: "env(safe-area-inset-bottom)" }}>
+        {principais.map((d) => itemInferior(d, () => ir(d.id), tela === d.id))}
+        <button onClick={() => setMais(!mais)} className="flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px]"
+          style={{ color: mais || demais.some((d) => d.id === tela) ? C.roxo : C.mute, fontWeight: 500 }}>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" />
+          </svg>
+          Mais
+        </button>
+      </nav>
+
+      {mais && (
+        <div className="fixed inset-0 z-40 lg:hidden" onClick={() => setMais(false)} style={{ background: "rgba(24,18,33,0.35)" }}>
+          <div className="absolute inset-x-0 bottom-0 rounded-t-2xl p-4 pb-8" style={{ background: C.paper }}
+            onClick={(e) => e.stopPropagation()}>
+            <div className="mx-auto mb-3 h-1 w-10 rounded-full" style={{ background: C.line }} />
+            {demais.map((d) => (
+              <button key={d.id} onClick={() => ir(d.id)}
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-[15px]"
+                style={{ color: tela === d.id ? C.roxo : C.ink, fontWeight: tela === d.id ? 700 : 500 }}>
+                <Icone nome={d.id} tam={20} />{d.rot}
+              </button>
+            ))}
+            <div className="mt-2 flex items-center justify-between px-3 pt-3 text-[13px]"
+              style={{ borderTop: `1px solid ${C.line}`, color: C.mute }}>
+              <span>{perfil ? `${perfil.nome} · ${perfil.papel}` : ""}</span>
+              <button onClick={sair} style={{ color: C.roxo, fontWeight: 600 }}>sair</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * O cabeçalho de cada página: título, uma linha de contexto, e no
+ * máximo uma ação principal. O seletor de mês entra aqui nas páginas
+ * que medem um mês — é o mesmo estado, vindo do App.
+ */
+function Cabecalho({ titulo, sub, acao, mes }) {
+  return (
+    <div className="mb-4 flex flex-wrap items-end justify-between gap-x-4 gap-y-3 lg:mb-6">
+      <div className="min-w-0">
+        <h1 className="text-[26px] leading-none tracking-tight lg:text-[30px]" style={{ fontFamily: F.disp, fontWeight: 800 }}>
+          {titulo}
+        </h1>
+        {sub && <p className="mt-1.5 text-[14px]" style={{ color: C.mute }}>{sub}</p>}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {mes && (
+          <select className="rounded-lg border px-3 py-2 text-[14px] outline-none"
+            style={{ ...inputSty, fontWeight: 600 }} value={mes.comp} onChange={(e) => mes.setComp(e.target.value)}>
+            {mes.MESES.map((m) => <option key={m} value={m}>{rotuloMes(m)}</option>)}
+            {mes.todos && <option value="">Todos os meses</option>}
+          </select>
+        )}
+        {acao}
+      </div>
+    </div>
+  );
+}
+
+const BotaoPrimario = ({ children, onClick, disabled, className }) => (
+  <button onClick={onClick} disabled={disabled}
+    className={`rounded-lg px-4 py-2.5 text-[14px] font-semibold ${className || ""}`}
+    style={{ background: disabled ? C.line : C.roxo, color: disabled ? C.mute : "#fff" }}>
+    {children}
+  </button>
+);
+
+/** Equipe, metas e importação — o que era a sanfona da gestão. */
+function TelaGestao({ perfil, comp }) {
+  const [importando, setImportando] = useState(false);
+  return (
+    <div>
+      <Cabecalho titulo="Equipe e metas"
+        sub="Quem vende, a meta de cada um e a meta da loja no mês." />
+      <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+        <Bloco titulo="Negociadores">
+          <CadastroNegociadores perfil={perfil} competencia={comp || competenciaDe(hojeEmSP())} />
+        </Bloco>
+        <div className="space-y-4">
+          <Bloco titulo="Planilha do CRM" sub="Cole o que copiou do Google Sheets. Cada linha vira um atendimento.">
+            {importando
+              ? <Importar aoTerminar={() => setImportando(false)} />
+              : <BotaoPrimario onClick={() => setImportando(true)} className="w-full">Importar planilha</BotaoPrimario>}
+          </Bloco>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [estado, setEstado] = useState("carregando");   // carregando | fora | esperando | dentro | erro
   const [perfil, setPerfil] = useState(null);
   const [erro, setErro] = useState("");
   const [aberto, setAberto] = useState(null);           // atendimento em foco, ou a lista
-  const [adm, setAdm] = useState(false);
-  const [estoque, setEstoque] = useState(false);                // a tela do administrativo
+  // A página atual e o mês. O mês mora aqui porque vale para mais de
+  // uma página — a lista de atendimentos e o painel medem o mesmo mês.
+  const [tela, setTela] = useState("atendimentos");
+  const [comp, setComp] = useState(() => competenciaDe(hojeEmSP()));
+  const MESES = useMemo(() => mesesRecentes(18), []);
 
   const verQuemSou = async () => {
     try {
@@ -7982,13 +8090,22 @@ function App() {
              aoVoltar={() => setAberto(null)}
              aoRecarregar={async () => { try { setAberto(await lerAtendimento(aberto.id)); } catch (e) {} }} />;
   }
-  if (adm) return <TelaADM perfil={perfil} aoVoltar={() => setAdm(false)} />;
-  if (estoque) return <TelaEstoque perfil={perfil} aoVoltar={() => setEstoque(false)} />;
+  const abrir = async (id) => {
+    try { setAberto(await lerAtendimento(id)); } catch (e) { alert(e.message); }
+  };
+  const mes = { comp, setComp, MESES };
+  const compOuAtual = comp || competenciaDe(hojeEmSP());
 
-  return <CRM perfil={perfil} aoAbrirAdm={() => setAdm(true)} aoAbrirEstoque={() => setEstoque(true)}
-    aoAbrir={async (id) => {
-      try { setAberto(await lerAtendimento(id)); } catch (e) { alert(e.message); }
-    }} />;
+  return (
+    <Shell perfil={perfil} tela={tela} setTela={setTela}>
+      {tela === "atendimentos" && <CRM perfil={perfil} aoAbrir={abrir} mes={{ ...mes, todos: true }} />}
+      {tela === "estoque" && <TelaEstoque perfil={perfil} />}
+      {tela === "painel" && <Funil perfil={perfil} comp={compOuAtual} mes={mes} />}
+      {tela === "leads" && <LeadsIndicacao />}
+      {tela === "adm" && <TelaADM perfil={perfil} />}
+      {tela === "gestao" && <TelaGestao perfil={perfil} comp={compOuAtual} />}
+    </Shell>
+  );
 }
 
 ReactDOM.createRoot(document.getElementById('raiz')).render(<App />);
