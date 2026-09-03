@@ -7271,10 +7271,14 @@ function ImportarRentabilidade({ aoTerminar }) {
  * entrada no fechamento traria para cá todo negócio marcado como
  * fechado por engano, e o custo de desfazer é maior que o de um toque.
  */
-function TelaEstoque({ perfil, comp, mes }) {
+function TelaEstoque({ perfil, comp, mes, modo }) {
   const [lista, setLista] = useState(null);
   const [fila, setFila] = useState([]);
-  const [filtro, setFiltro] = useState("em_estoque");
+  // "rentabilidade" é a mesma tela aberta direto na planilha do mês —
+  // ganhou entrada própria no menu porque, escondida atrás de um
+  // filtro dentro do Estoque, o Derek não a achou.
+  const soRentab = modo === "rentabilidade";
+  const [filtro, setFiltro] = useState(soRentab ? "vendido" : "em_estoque");
   const [erro, setErro] = useState("");
   const [abrindo, setAbrindo] = useState(null);
   const [entrando, setEntrando] = useState("");
@@ -7344,8 +7348,10 @@ function TelaEstoque({ perfil, comp, mes }) {
 
   return (
     <div className="space-y-3">
-      <Cabecalho titulo="Estoque" mes={filtro === "vendido" ? mes : null}
-        sub={lista === null ? "Carregando…" : `${lista.filter((e) => e.situacao === "em_estoque").length} no pátio · ${lista.filter((e) => e.situacao === "vendido").length} vendidos`} />
+      <Cabecalho titulo={soRentab ? "Rentabilidade" : "Estoque"} mes={filtro === "vendido" ? mes : null}
+        sub={lista === null ? "Carregando…"
+          : soRentab ? `${rotuloMes(comp)} · a planilha CONTROLE DE VEÍCULOS, por carro vendido`
+          : `${lista.filter((e) => e.situacao === "em_estoque").length} no pátio · ${lista.filter((e) => e.situacao === "vendido").length} vendidos`} />
 
       {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
 
@@ -7354,7 +7360,7 @@ function TelaEstoque({ perfil, comp, mes }) {
           planilha, e a maioria foi vendida há meses: aberta, a fila
           empurraria o pátio — que é o assunto da tela — para baixo da
           dobra todo dia. */}
-      {!!fila.length && !filaAberta && (
+      {!soRentab && !!fila.length && !filaAberta && (
         <button onClick={() => setFilaAberta(true)}
           className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left"
           style={{ background: AMARELO.fundo, border: `1px solid ${C.line}` }}>
@@ -7364,7 +7370,7 @@ function TelaEstoque({ perfil, comp, mes }) {
           <span className="text-[12px] font-semibold" style={{ color: AMARELO.texto }}>ver ▾</span>
         </button>
       )}
-      {!!fila.length && filaAberta && (
+      {!soRentab && !!fila.length && filaAberta && (
         <div className="rounded-lg p-3" style={{ background: AMARELO.fundo, border: `1px solid ${C.line}` }}>
           <div className="flex items-baseline justify-between gap-2">
             <span className="text-[11px] uppercase tracking-[0.12em]" style={{ color: AMARELO.texto, fontWeight: 700 }}>
@@ -7408,7 +7414,7 @@ function TelaEstoque({ perfil, comp, mes }) {
 
       {/* ---- filtro e totais ---- */}
       <div className="flex flex-wrap items-center gap-2">
-        {[["em_estoque", "No pátio"], ["vendido", "Rentabilidade"]].map(([v, r]) => (
+        {!soRentab && [["em_estoque", "No pátio"], ["vendido", "Rentabilidade"]].map(([v, r]) => (
           <button key={v} onClick={() => setFiltro(v)}
             className="rounded-full px-3 py-1 text-[12px] font-semibold"
             style={{
@@ -8124,6 +8130,7 @@ const ICONE = {
   atendimentos: "M4 6h16M4 12h16M4 18h10",
   estoque: "M3 13l2-5a2 2 0 0 1 2-1h10a2 2 0 0 1 2 1l2 5v5a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H6v1a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-5zm4 2h.01M17 15h.01",
   painel: "M4 20V10m6 10V4m6 16v-7",
+  rentabilidade: "M4 18l5-6 4 3 7-9M15 6h5v5",
   leads: "M5 4h3l2 5-2 1a11 11 0 0 0 6 6l1-2 5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z",
   adm: "M9 12l2 2 4-4M5 5h14v14H5z",
   gestao: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm8 4l-2-1 .3-2.2-2-1.2-1.7 1.4L12.5 8l-.5-2h-2l-.5 2-2.1 1-1.7-1.4-2 1.2L4 11l-2 1 2 1-.3 2.2 2 1.2 1.7-1.4 2.1 1 .5 2h2l.5-2 2.1-1 1.7 1.4 2-1.2L18 13z",
@@ -8147,6 +8154,7 @@ function destinosPara(perfil) {
     { id: "atendimentos", rot: "Atendimentos", curto: "Atend.", principal: true },
     { id: "estoque", rot: "Estoque", curto: "Estoque", principal: true },
     { id: "painel", rot: "Painel do mês", curto: "Painel", principal: true },
+    { id: "rentabilidade", rot: "Rentabilidade", curto: "Rentab." },
     { id: "leads", rot: "Leads de indicação", curto: "Leads" },
     adm ? { id: "adm", rot: "Administrativo", curto: "Adm." } : null,
     gerente ? { id: "gestao", rot: "Equipe e metas", curto: "Equipe" } : null,
@@ -8381,6 +8389,7 @@ function App() {
     <Shell perfil={perfil} tela={tela} setTela={setTela}>
       {tela === "atendimentos" && <CRM perfil={perfil} aoAbrir={abrir} mes={{ ...mes, todos: true }} />}
       {tela === "estoque" && <TelaEstoque perfil={perfil} comp={compOuAtual} mes={mes} />}
+      {tela === "rentabilidade" && <TelaEstoque perfil={perfil} comp={compOuAtual} mes={mes} modo="rentabilidade" />}
       {tela === "painel" && <Funil perfil={perfil} comp={compOuAtual} mes={mes} />}
       {tela === "leads" && <LeadsIndicacao />}
       {tela === "adm" && <TelaADM perfil={perfil} />}
