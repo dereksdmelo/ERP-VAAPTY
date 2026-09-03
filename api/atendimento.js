@@ -39,7 +39,18 @@ const RX_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 const ORIGENS = ["fluxo_loja", "prospeccao", "indicacao", "tv", "google",
                  "facebook", "outdoor", "recuperacao", "faceleads", "outro"];
-const STATUS = ["aberto", "aguardando_propostas", "em_negociacao", "fechado", "perdido"];
+// Os quinze status reais da planilha (0009) mais os três da primeira
+// versão. Esta lista ficou nos cinco antigos por três dias: a tela
+// mandava `cliente_na_loja`, daLista() devolvia null, e o banco
+// recusava o INSERT — e as pílulas de status novas na lista não
+// filtravam nada, porque o filtro também passava por aqui. Manter
+// igual à do api/importar.js.
+const STATUS = [
+  "fechado", "cliente_na_loja", "aguardando", "baixar_expectativa", "vai_voltar",
+  "consignado", "vendeu_fora", "perseguir", "em_negociacao", "nao_avaliou",
+  "nao_lancado", "falta_proposta", "quitacao_futura", "rescisao", "restricao",
+  "aberto", "aguardando_propostas", "perdido",
+];
 
 /* ------------------ conversões ------------------ */
 
