@@ -1124,3 +1124,40 @@ política nova de Storage e mais um lugar para o arquivo se perder.
 só uma data na linha) e a ponte com OMIE ou Conta Azul. Os dados já
 nascem no formato que essa ponte vai pedir — linha, valor, data,
 comprovante — mas nenhuma integração foi escrita.
+
+### 24. A casca: navegação fixa, e cada destino é uma página
+
+O Derek olhou o sistema em 01/09/2026 e disse: "menus mal posicionados,
+péssimo UX, aparência feia". Ele tinha razão, e a causa era uma só: o
+sistema era uma tela de celular que crescia com a janela. Botão de
+1.400 px, tabela de dez colunas a 10 px, e os destinos da gestão —
+painel, estoque, leads, administrativo — numa sanfona dentro da lista
+de atendimentos, o painel numa segunda sanfona dentro da primeira.
+**Navegação era um widget.**
+
+**Agora há uma casca única** (`Shell`): barra lateral no desktop
+(≥ 1024 px), barra inferior no celular com três destinos de todo dia
+mais "Mais". Cada destino é uma página com `Cabecalho` — título, uma
+linha de contexto, e no máximo uma ação principal. O mês mora no `App`
+e entra no cabeçalho das páginas que medem um mês. **Quem criar tela
+nova a registra em `destinosPara()` e a roteia no `App`**; tela sem
+entrada lá não existe para o usuário.
+
+**O atendimento aberto (`VaaptyAponte`) fica fora da casca**, de
+propósito: é um fluxo guiado de oito etapas com trilho próprio, e a
+barra inferior competiria com o trilho pelo polegar.
+
+**As fontes nomeadas nunca foram carregadas.** `F` citava Archivo,
+Public Sans e Roboto Mono, mas não havia `<link>` — cada aparelho caía
+num fallback diferente e o mono virava Courier. A escolha agora é a
+fonte do sistema, de propósito: zero download, e é a fonte que o
+negociador já lê o dia inteiro. **Não adicionar Google Fonts sem uma
+razão que valha o download no 4G da loja.**
+
+**Verificação visual passou a ser possível**: o Chrome do Derek tem a
+sessão aberta, e o `claude-in-chrome` enxerga as telas logadas sem
+tocar em credencial. Até aqui tudo era publicado às cegas — e é por
+isso que o resultado era colcha de retalhos. **Antes de dar uma tela
+por pronta, olhar nela logado.** O `resize_window` do Chrome não
+encolhe a janela abaixo de ~1.300 px no Mac; para conferir o celular,
+injetar CSS que esconde a `aside` e limita `#raiz` a 390 px.

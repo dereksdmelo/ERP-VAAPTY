@@ -5436,9 +5436,9 @@ function Funil({ perfil, comp, mes }) {
 
   const Num = ({ rot, v, sub, cor }) => (
     <div>
-      <div className="text-[9px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>{rot}</div>
-      <div className="text-[19px] leading-tight" style={{ fontFamily: F.mono, fontWeight: 700, color: cor || C.ink }}>{v}</div>
-      {sub && <div className="text-[10px]" style={{ color: C.mute }}>{sub}</div>}
+      <div className="text-[12px]" style={{ color: C.mute }}>{rot}</div>
+      <div className="text-[24px] leading-tight tracking-tight" style={{ fontWeight: 700, color: cor || C.ink, fontVariantNumeric: "tabular-nums" }}>{v}</div>
+      {sub && <div className="text-[12px]" style={{ color: C.mute }}>{sub}</div>}
     </div>
   );
 
@@ -5459,15 +5459,14 @@ function Funil({ perfil, comp, mes }) {
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3 rounded-xl p-4 lg:grid-cols-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+          {/* Os seis números do funil num cartão só. Antes dois deles
+              ficavam soltos fora do cartão, como se fossem outra coisa. */}
+          <div className="grid grid-cols-2 gap-4 rounded-xl p-4 lg:grid-cols-6 lg:p-5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
             <Num rot="Fluxo" v={d.total.fluxo} />
-            <Num rot="Avaliações" v={d.total.avaliacoes} sub={d.total.avaliacoes_sobre_fluxo != null ? `${d.total.avaliacoes_sobre_fluxo}%` : null} />
+            <Num rot="Avaliações" v={d.total.avaliacoes} sub={d.total.avaliacoes_sobre_fluxo != null ? `${d.total.avaliacoes_sobre_fluxo}% do fluxo` : null} />
             <Num rot="Com proposta" v={d.total.com_proposta} />
             <Num rot="Vendas" v={d.total.vendas} cor={C.verde}
               sub={d.total.conversao != null ? `${d.total.conversao}% do fluxo` : null} />
-          </div>
-
-          <div className="mt-3 grid grid-cols-2 gap-2">
             <Num rot="FIPE médio" v={d.fipe_medio ? brl(d.fipe_medio) : "—"} />
             <Num rot="Venda média" v={d.venda_media ? brl(d.venda_media) : "—"} />
           </div>
