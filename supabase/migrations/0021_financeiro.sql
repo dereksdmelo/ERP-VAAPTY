@@ -156,6 +156,22 @@ create table fin_folha (
 );
 
 -- ---------------------------------------------------------------------
+-- Fechamento do mês por conta: o saldo que o BANCO diz no último dia.
+-- A conciliação é a diferença entre esse número e o saldo calculado
+-- dos lançamentos. Enquanto não for zero, o mês não fecha.
+-- ---------------------------------------------------------------------
+create table fin_fechamento (
+  id uuid primary key default gen_random_uuid(),
+  conta_id    uuid not null references fin_conta(id),
+  competencia date not null,
+  saldo_banco numeric(14,2),
+  fechado_em  timestamptz,
+  fechado_por uuid references perfil(id),
+  observacao  text,
+  unique (conta_id, competencia)
+);
+
+-- ---------------------------------------------------------------------
 -- RLS: só quem é do financeiro. Tudo — ler, escrever, apagar.
 -- ---------------------------------------------------------------------
 alter table fin_conta       enable row level security;
@@ -164,6 +180,7 @@ alter table fin_funcionario enable row level security;
 alter table fin_lancamento  enable row level security;
 alter table fin_vale        enable row level security;
 alter table fin_folha       enable row level security;
+alter table fin_fechamento  enable row level security;
 
 create policy fin_conta_acesso       on fin_conta       for all to authenticated using (e_financeiro()) with check (e_financeiro());
 create policy fin_categoria_acesso   on fin_categoria   for all to authenticated using (e_financeiro()) with check (e_financeiro());
@@ -171,6 +188,7 @@ create policy fin_funcionario_acesso on fin_funcionario for all to authenticated
 create policy fin_lancamento_acesso  on fin_lancamento  for all to authenticated using (e_financeiro()) with check (e_financeiro());
 create policy fin_vale_acesso        on fin_vale        for all to authenticated using (e_financeiro()) with check (e_financeiro());
 create policy fin_folha_acesso       on fin_folha       for all to authenticated using (e_financeiro()) with check (e_financeiro());
+create policy fin_fechamento_acesso  on fin_fechamento  for all to authenticated using (e_financeiro()) with check (e_financeiro());
 
 -- ---------------------------------------------------------------------
 -- As categorias da planilha, na ordem do DRE. Quem importar a planilha

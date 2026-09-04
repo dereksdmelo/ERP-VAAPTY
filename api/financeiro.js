@@ -141,6 +141,11 @@ const placaNa = (desc) => {
   const m = /([A-Z]{3})[-_ ]?([0-9][A-Z0-9][0-9]{2})\b/i.exec(String(desc || "").toUpperCase());
   return m ? (m[1] + m[2]).toUpperCase() : null;
 };
+// "Pagto cliente Uno_AYL0614 (2ª parte)" → "pagto cliente uno": sem
+// placa, sem número, sem parêntese. É a chave da memória de categoria.
+const normDesc = (d) => String(d || "").toLowerCase()
+  .replace(/[a-z]{3}[-_ ]?[0-9][a-z0-9][0-9]{2}\b/g, "").replace(/\(.*?\)/g, "")
+  .replace(/[\d.,/]+/g, "").replace(/[^a-zà-ú ]/g, " ").replace(/\s+/g, " ").trim();
 const tipoNegNa = (desc) => {
   const d = String(desc || "").toLowerCase();
   if (/reembolso/.test(d)) return "reembolso";
@@ -188,7 +193,24 @@ async function lancamento(req, res, tok) {
       saldoAnterior = (ct ? Number(ct.saldo_inicial) || 0 : 0) +
         (antes || []).reduce((t, x) => t + (Number(x.credito) || 0) - (Number(x.debito) || 0), 0);
     }
-    return res.status(200).json({ competencia: comp, lancamentos: lista || [], saldo_anterior: saldoAnterior, truncado: (lista || []).length >= 2000 });
+    // Sugestão de categoria para o que está sem: a categoria mais usada
+    // nas descrições iguais (sem números, sem placa). É o que o BPO
+    // faria de cabeça — "Facebook" é sempre MKT — só que sem digitar.
+    const semCat = (lista || []).filter((l) => !l.categoria_id);
+    const sugestoes = {};
+    if (semCat.length) {
+      const hist = await supa(`${base("fin_lancamento")}?select=descricao,categoria_id&categoria_id=not.is.null&order=criado_em.desc&limit=5000`, { headers: cab(tok) });
+      const conta = {};
+      (hist || []).forEach((h) => {
+        const k = normDesc(h.descricao); if (!k) return;
+        conta[k] = conta[k] || {}; conta[k][h.categoria_id] = (conta[k][h.categoria_id] || 0) + 1;
+      });
+      semCat.forEach((l) => {
+        const k = normDesc(l.descricao); const c = conta[k]; if (!c) return;
+        sugestoes[l.id] = Object.keys(c).sort((a, b) => c[b] - c[a])[0];
+      });
+    }
+    return res.status(200).json({ competencia: comp, lancamentos: lista || [], saldo_anterior: saldoAnterior, sugestoes, truncado: (lista || []).length >= 2000 });
   }
   if (req.method === "POST") {
     const c = await corpoDe(req);
@@ -203,6 +225,21 @@ async function lancamento(req, res, tok) {
     const r = await supa(base("fin_lancamento"), { method: "POST", headers: cab(tok, REP), body: JSON.stringify(l) });
     if (!um(r)) return recusado(res);
     return res.status(201).json({ ok: true, lancamento: um(r) });
+  }
+  if (req.method === "PATCH" && String(req.query.acao || "") === "lote") {
+    // Vários de uma vez: aplicar sugestões de categoria, conciliar o mês.
+    const c = await corpoDe(req);
+    const itens = c && Array.isArray(c.itens) ? c.itens.slice(0, 500) : [];
+    if (!itens.length) return res.status(400).json({ erro: "Nada para atualizar." });
+    let ok = 0;
+    for (const it of itens) {
+      if (!RX_ID.test(String(it.id || ""))) continue;
+      const l = linhaLancamento(it, tok); delete l.conta_id;
+      if (!Object.keys(l).length) continue;
+      const r = await supa(`${base("fin_lancamento")}?id=eq.${it.id}`, { method: "PATCH", headers: cab(tok, REP), body: JSON.stringify(l) });
+      if (um(r)) ok += 1;
+    }
+    return res.status(200).json({ ok: true, atualizados: ok });
   }
   if (req.method === "PATCH") {
     const id = String(req.query.id || "");
@@ -263,6 +300,11 @@ async function importar(req, res, tok) {
     (est || []).forEach((e) => { const p = e.veiculo && e.veiculo.placa; if (p && !estoquePorPlaca[p]) estoquePorPlaca[p] = e.id; });
   }
 
+  // Memória de categoria para o que vier sem "Tipo pgt".
+  const hist = await supa(`${base("fin_lancamento")}?select=descricao,categoria_id&categoria_id=not.is.null&order=criado_em.desc&limit=5000`, { headers: cab(tok) });
+  const memoria = {};
+  (hist || []).forEach((h) => { const k = normDesc(h.descricao); if (k && !memoria[k]) memoria[k] = h.categoria_id; });
+
   let saldoInicial = null, saldoEm = null, invalidas = 0;
   const corpo = [];
   linhas.forEach((l) => {
@@ -274,10 +316,11 @@ async function importar(req, res, tok) {
     }
     if (!data || (!deb && !cred) || (deb && cred)) { invalidas += 1; return; }
     const cat = catNome ? catPor[catNome.toLowerCase()] : null;
+    const catId = cat ? cat.id : (memoria[normDesc(l.descricao)] || null);
     const placa = placaNa(l.descricao);
     corpo.push({
       conta_id: contaId, data, competencia: competenciaDe(l.competencia) || competenciaDe(data),
-      categoria_id: cat ? cat.id : null, descricao: texto(l.descricao), debito: deb, credito: cred,
+      categoria_id: catId, descricao: texto(l.descricao), debito: deb, credito: cred,
       estoque_id: placa ? estoquePorPlaca[placa] || null : null,
       tipo_negociacao: cat && cat.grupo === "negociacao" ? (tipoNegNa(l.descricao) || "outro") : null,
       conciliado: true, origem: "planilha",
@@ -305,6 +348,51 @@ async function importar(req, res, tok) {
   });
 }
 
+/* ------------------ fechamento / conciliação ------------------ */
+
+/**
+ * O saldo que o banco diz no fim do mês contra o que os lançamentos
+ * somam. Diferença zero é mês conciliado; diferente de zero é
+ * lançamento faltando ou sobrando — e o BPO precisa ver o número, não
+ * só um "ok".
+ */
+async function fechamento(req, res, tok) {
+  const comp = competenciaDe(req.query.competencia) || competenciaDe(hojeAqui());
+  const contaId = idOuNulo(req.query.conta_id);
+  if (!contaId) return res.status(400).json({ erro: "Escolha a conta." });
+  if (req.method === "GET") {
+    const [ct, movs, f] = await Promise.all([
+      supa(`${base("fin_conta")}?select=saldo_inicial&id=eq.${contaId}`, { headers: cab(tok) }),
+      supa(`${base("fin_lancamento")}?select=debito,credito,conciliado&conta_id=eq.${contaId}&data=lte.${fimDoMes(comp)}&limit=100000`, { headers: cab(tok) }),
+      supa(`${base("fin_fechamento")}?select=*&conta_id=eq.${contaId}&competencia=eq.${comp}`, { headers: cab(tok) }),
+    ]);
+    const saldoCalc = (um(ct) ? Number(um(ct).saldo_inicial) || 0 : 0) +
+      (movs || []).reduce((t, x) => t + (Number(x.credito) || 0) - (Number(x.debito) || 0), 0);
+    const naoConciliados = (movs || []).filter((x) => !x.conciliado).length;
+    const fe = um(f);
+    return res.status(200).json({
+      competencia: comp, saldo_calculado: saldoCalc, saldo_banco: fe ? fe.saldo_banco : null,
+      diferenca: fe && fe.saldo_banco != null ? Number(fe.saldo_banco) - saldoCalc : null,
+      fechado_em: fe ? fe.fechado_em : null, observacao: fe ? fe.observacao : null, nao_conciliados: naoConciliados,
+    });
+  }
+  if (req.method === "PUT") {
+    const c = await corpoDe(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    const linha = { conta_id: contaId, competencia: comp };
+    if (c.saldo_banco !== undefined) linha.saldo_banco = decimal(c.saldo_banco);
+    if (c.observacao !== undefined) linha.observacao = texto(c.observacao);
+    if (c.fechar !== undefined) linha.fechado_em = c.fechar ? new Date().toISOString() : null;
+    const r = await supa(`${base("fin_fechamento")}?on_conflict=conta_id,competencia`, {
+      method: "POST", headers: cab(tok, { Prefer: "resolution=merge-duplicates,return=representation" }), body: JSON.stringify(linha),
+    });
+    if (!um(r)) return recusado(res);
+    return res.status(200).json({ ok: true, fechamento: um(r) });
+  }
+  res.setHeader("Allow", "GET, PUT");
+  return res.status(405).json({ erro: "Use GET ou PUT." });
+}
+
 /* ------------------ DRE ------------------ */
 
 // O mesmo cálculo da tela de rentabilidade: venda − compra − custos.
@@ -327,8 +415,40 @@ async function vendidosNoMes(tok, comp) {
   return lista || [];
 }
 
+async function dreMeses(req, res, tok, comp, n) {
+  // Os n meses até `comp`, inclusive.
+  const [a, m] = comp.split("-").map(Number);
+  const meses = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(Date.UTC(a, m - 1 - i, 1));
+    meses.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-01`);
+  }
+  const lanc = await supa(
+    `${base("fin_lancamento")}?select=debito,credito,competencia,fin_categoria(id,nome,grupo,no_dre,ordem)&competencia=gte.${meses[0]}&competencia=lte.${comp}&limit=100000`,
+    { headers: cab(tok) });
+  const cats = {}; const totais = {}; meses.forEach((x) => { totais[x] = 0; });
+  (lanc || []).forEach((l) => {
+    const c = l.fin_categoria; if (!c || !c.no_dre) return;
+    const k = String(l.competencia).slice(0, 7) + "-01"; if (totais[k] === undefined) return;
+    const v = (Number(l.credito) || 0) - (Number(l.debito) || 0);
+    cats[c.id] = cats[c.id] || { id: c.id, nome: c.nome, ordem: c.ordem, por_mes: {} };
+    cats[c.id].por_mes[k] = (cats[c.id].por_mes[k] || 0) + v; totais[k] += v;
+  });
+  // rentabilidade de cada mês, em paralelo
+  const rent = {};
+  await Promise.all(meses.map(async (x) => {
+    const v = await vendidosNoMes(tok, x);
+    rent[x] = v.reduce((t, e) => t + rentabilidadeDe(e).liquida, 0);
+  }));
+  const linhas = Object.keys(cats).map((k) => cats[k]).sort((p, q) => p.ordem - q.ordem || p.nome.localeCompare(q.nome));
+  const lucro = {}; meses.forEach((x) => { lucro[x] = rent[x] + totais[x]; });
+  return res.status(200).json({ meses, linhas, total_despesas: totais, rentabilidade: rent, lucro });
+}
+
 async function dre(req, res, tok) {
   const comp = competenciaDe(req.query.competencia) || competenciaDe(hojeAqui());
+  const n = Math.min(24, Math.max(0, Number(req.query.meses) || 0));
+  if (n > 1) return dreMeses(req, res, tok, comp, n);
   const lanc = await supa(
     `${base("fin_lancamento")}?select=debito,credito,fin_categoria(id,nome,grupo,no_dre,ordem)&competencia=eq.${comp}&limit=10000`,
     { headers: cab(tok) });
@@ -491,7 +611,14 @@ async function folha(req, res, tok) {
 
 /* ------------------ handler ------------------ */
 
-const RECURSOS = { conta, categoria, funcionario, lancamento, importar, dre, carros, vale, folha };
+// Os carros do estoque, só placa e modelo, para o vínculo manual de um
+// lançamento — quando a descrição não trouxe a placa.
+async function estoqueLista(req, res, tok) {
+  const lista = await supa(`${base("estoque")}?select=id,situacao,veiculo(placa,marca_modelo)&order=entrou_em.desc&limit=400`, { headers: cab(tok) });
+  return res.status(200).json({ estoque: (lista || []).map((e) => ({ id: e.id, situacao: e.situacao, placa: e.veiculo && e.veiculo.placa, carro: e.veiculo && e.veiculo.marca_modelo })) });
+}
+
+const RECURSOS = { conta, categoria, funcionario, lancamento, importar, dre, carros, vale, folha, fechamento, estoque: estoqueLista };
 
 module.exports = async function handler(req, res) {
   if (!URL_BASE || !ANON) return res.status(500).json({ erro: "SUPABASE_URL ou SUPABASE_ANON_KEY não configurados." });

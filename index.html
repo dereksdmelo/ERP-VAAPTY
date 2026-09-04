@@ -7803,6 +7803,15 @@ async function fin(recurso, q, opcoes) {
 const finJson = (metodo, corpo) => ({ method: metodo, headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo) });
 
 const rs2 = (v) => (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// CSV com ; e vírgula decimal: abre direto no Excel em português.
+function baixarCSV(nome, cabecalho, linhas) {
+  const esc = (v) => { const t = String(v == null ? "" : v); return /[;"\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+  const num = (v) => (typeof v === "number" ? v.toFixed(2).replace(".", ",") : esc(v));
+  const txt = "\ufeff" + [cabecalho.map(esc).join(";")].concat(linhas.map((l) => l.map(num).join(";"))).join("\r\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([txt], { type: "text/csv;charset=utf-8" })); a.download = nome; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
 const TIPOS_NEG_ROT = { pagto_cliente: "Pagto cliente", quitacao: "Quitação", debitos: "Débitos", pagto_lojista: "Pagto lojista", reembolso: "Reembolso", outro: "Outro" };
 
 function TelaFinanceiro({ perfil, comp, mes }) {
@@ -7837,17 +7846,41 @@ function FinLancamentos({ comp }) {
   const [novo, setNovo] = useState(null);
   const [importando, setImportando] = useState(false);
   const [filtroCat, setFiltroCat] = useState("");
+  const [soPendentes, setSoPendentes] = useState(false);
+  const [fech, setFech] = useState(null);
+  const [carros, setCarros] = useState([]);
 
   useEffect(() => {
     fin("conta").then((x) => { setContas(x.lista); if (!conta && x.lista[0]) setConta(x.lista[0].id); }).catch((e) => setErro(e.message));
     fin("categoria").then((x) => setCats(x.lista)).catch(() => {});
+    fin("estoque").then((x) => setCarros(x.estoque)).catch(() => {});
   }, []);
   const carregar = () => {
     if (!conta) return;
     setD(null); setErro("");
     fin("lancamento", { competencia: comp, conta_id: conta }).then(setD).catch((e) => setErro(e.message));
+    fin("fechamento", { competencia: comp, conta_id: conta }).then(setFech).catch(() => setFech(null));
   };
   useEffect(carregar, [conta, comp]);
+
+  const lote = async (itens) => {
+    if (!itens.length) return;
+    try { await fin("lancamento", { acao: "lote" }, finJson("PATCH", { itens })); carregar(); }
+    catch (e) { setErro(e.message); }
+  };
+  const gravarFech = async (mud) => {
+    try { await fin("fechamento", { competencia: comp, conta_id: conta }, finJson("PUT", mud)); carregar(); }
+    catch (e) { setErro(e.message); }
+  };
+  const exportar = () => {
+    if (!d) return;
+    let sal = d.saldo_anterior || 0;
+    baixarCSV(`lancamentos-${String(comp).slice(0, 7)}.csv`,
+      ["Data", "Competência", "Categoria", "Descrição", "Carro", "Débito", "Crédito", "Saldo", "Conciliado"],
+      d.lancamentos.map((l) => { sal += (Number(l.credito) || 0) - (Number(l.debito) || 0);
+        return [diaBR(l.data) + "/" + String(l.data).slice(0, 4), String(l.competencia).slice(0, 7), l.fin_categoria ? l.fin_categoria.nome : "", l.descricao || "",
+          l.estoque && l.estoque.veiculo ? l.estoque.veiculo.placa : "", Number(l.debito) || 0, Number(l.credito) || 0, sal, l.conciliado ? "sim" : "não"]; }));
+  };
 
   const mudar = async (l, mud) => {
     try { await fin("lancamento", { id: l.id }, finJson("PATCH", mud)); carregar(); }
@@ -7858,14 +7891,23 @@ function FinLancamentos({ comp }) {
     try { await fin("lancamento", { id: l.id }, { method: "DELETE" }); carregar(); }
     catch (e) { setErro(e.message); }
   };
+  // Enter grava e deixa o formulário aberto com a mesma data e
+  // categoria: lançar vinte linhas do dia é o trabalho, e vinte cliques
+  // em "+ lançamento" não são.
   const gravarNovo = async () => {
+    if (!novo) return;
     try {
       await fin("lancamento", null, finJson("POST", { ...novo, conta_id: conta }));
-      setNovo(null); carregar();
+      setNovo({ ...novo, descricao: "", debito: "", credito: "" }); carregar();
     } catch (e) { setErro(e.message); }
   };
+  const aoEnter = (e) => { if (e.key === "Enter") { e.preventDefault(); gravarNovo(); } };
 
-  const lista = (d ? d.lancamentos : []).filter((l) => !filtroCat || (l.fin_categoria && l.fin_categoria.id === filtroCat));
+  const lista = (d ? d.lancamentos : []).filter((l) => (!filtroCat || (l.fin_categoria && l.fin_categoria.id === filtroCat)) && (!soPendentes || !l.categoria_id || !l.conciliado));
+  const sug = (d && d.sugestoes) || {};
+  const comSugestao = (d ? d.lancamentos : []).filter((l) => !l.categoria_id && sug[l.id]);
+  const semCategoria = (d ? d.lancamentos : []).filter((l) => !l.categoria_id).length;
+  const catNome = (id) => { const c = cats.filter((x) => x.id === id)[0]; return c ? c.nome : ""; };
   let saldo = d && d.saldo_anterior != null ? d.saldo_anterior : 0;
   const totais = (d ? d.lancamentos : []).reduce((t, l) => ({ deb: t.deb + (Number(l.debito) || 0), cred: t.cred + (Number(l.credito) || 0) }), { deb: 0, cred: 0 });
   const catSel = (l) => (
@@ -7888,17 +7930,52 @@ function FinLancamentos({ comp }) {
           <option value="">Todas as categorias</option>
           {cats.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
         </select>
-        <span className="ml-auto flex gap-3 text-[13px]">
+        <label className="flex items-center gap-1 text-[12px]" style={{ color: C.mute }}>
+          <input type="checkbox" checked={soPendentes} onChange={(e) => setSoPendentes(e.target.checked)} /> só pendentes
+        </label>
+        <span className="ml-auto flex flex-wrap gap-3 text-[13px]">
+          {!!comSugestao.length && (
+            <button onClick={() => lote(comSugestao.map((l) => ({ id: l.id, categoria_id: sug[l.id] })))} style={{ color: C.verde, fontWeight: 600 }}>
+              aplicar {comSugestao.length} sugest{comSugestao.length === 1 ? "ão" : "ões"}
+            </button>
+          )}
+          <button onClick={exportar} style={{ color: C.mute, fontWeight: 600 }}>CSV</button>
           <button onClick={() => setImportando(!importando)} style={{ color: C.roxo, fontWeight: 600 }}>colar extrato</button>
           <button onClick={() => setNovo({ data: hojeEmSP(), competencia: comp, descricao: "", debito: "", credito: "", categoria_id: "" })} style={{ color: C.roxo, fontWeight: 600 }}>+ lançamento</button>
         </span>
       </div>
 
+      {/* ---- o fechamento: o número do banco contra o número da casa ---- */}
+      {d && fech && (
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl px-4 py-3 text-[13px]"
+          style={{ background: fech.diferenca != null && Math.abs(fech.diferenca) < 0.005 ? "#E8F3EE" : C.paper, border: `1px solid ${C.line}` }}>
+          <span><span style={{ color: C.mute }}>Saldo calculado em {diaBR(faixaDoMes(comp).ate)}</span> <b style={{ fontVariantNumeric: "tabular-nums" }}>{rs2(fech.saldo_calculado)}</b></span>
+          <label className="flex items-center gap-1.5"><span style={{ color: C.mute }}>Saldo no banco</span>
+            <input className="w-32 rounded border px-2 py-1 text-right text-[13px] outline-none" style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal"
+              defaultValue={fech.saldo_banco == null ? "" : rs2(fech.saldo_banco)}
+              onBlur={(e) => { const v = e.target.value.trim(); if ((v === "" ? null : v) !== (fech.saldo_banco == null ? null : rs2(fech.saldo_banco))) gravarFech({ saldo_banco: v === "" ? null : v }); }} />
+          </label>
+          {fech.diferenca != null && (
+            <span style={{ fontWeight: 700, color: Math.abs(fech.diferenca) < 0.005 ? C.verde : C.laranja, fontVariantNumeric: "tabular-nums" }}>
+              {Math.abs(fech.diferenca) < 0.005 ? "conciliado" : `diferença ${rs2(fech.diferenca)}`}
+            </span>
+          )}
+          <span style={{ color: semCategoria ? C.laranja : C.mute }}>{semCategoria} sem categoria</span>
+          <span style={{ color: fech.nao_conciliados ? AMARELO.texto : C.mute }}>{fech.nao_conciliados} não conciliado{fech.nao_conciliados === 1 ? "" : "s"}</span>
+          {!!d.lancamentos.filter((l) => !l.conciliado).length && (
+            <button onClick={() => lote(d.lancamentos.filter((l) => !l.conciliado).map((l) => ({ id: l.id, conciliado: true })))} className="font-semibold" style={{ color: C.roxo }}>conciliar o mês</button>
+          )}
+          <button onClick={() => gravarFech({ fechar: !fech.fechado_em })} className="ml-auto font-semibold" style={{ color: fech.fechado_em ? C.mute : C.roxo }}>
+            {fech.fechado_em ? `fechado em ${diaBR(fech.fechado_em)} · reabrir` : "fechar o mês"}
+          </button>
+        </div>
+      )}
+
       {erro && <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
       {importando && <FinImportar contaId={conta} aoTerminar={() => { setImportando(false); carregar(); fin("categoria").then((x) => setCats(x.lista)).catch(() => {}); }} />}
 
       {novo && (
-        <div className="rounded-xl p-4" style={{ background: C.paper, border: `1px solid ${C.roxo}` }}>
+        <div className="rounded-xl p-4" style={{ background: C.paper, border: `1px solid ${C.roxo}` }} onKeyDown={aoEnter}>
           <div className="grid gap-2 lg:grid-cols-6">
             <label><Rotulo>Data</Rotulo><input type="date" className={inputCls} style={inputSty} value={novo.data} onChange={(e) => setNovo({ ...novo, data: e.target.value })} /></label>
             <label><Rotulo>Competência</Rotulo><input type="month" className={inputCls} style={inputSty} value={String(novo.competencia).slice(0, 7)} onChange={(e) => setNovo({ ...novo, competencia: `${e.target.value}-01` })} /></label>
@@ -7912,7 +7989,8 @@ function FinLancamentos({ comp }) {
               {cats.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
             </select>
             <BotaoPrimario onClick={gravarNovo}>Gravar</BotaoPrimario>
-            <button onClick={() => setNovo(null)} className="text-[13px]" style={{ color: C.mute }}>cancelar</button>
+            <button onClick={() => setNovo(null)} className="text-[13px]" style={{ color: C.mute }}>fechar</button>
+            <span className="text-[11px]" style={{ color: C.mute }}>Enter grava e já abre o próximo</span>
           </div>
         </div>
       )}
@@ -7938,9 +8016,27 @@ function FinLancamentos({ comp }) {
                   <tr key={l.id} style={{ borderBottom: `1px solid ${C.line}` }}>
                     <td className="whitespace-nowrap px-2 py-1 text-[12px]">{diaBR(l.data)}</td>
                     <td className="whitespace-nowrap px-2 py-1 text-[11px]" style={{ color: C.mute }}>{String(l.competencia).slice(5, 7)}/{String(l.competencia).slice(2, 4)}</td>
-                    <td className="px-2 py-1">{catSel(l)}</td>
-                    <td className="px-2 py-1 text-[12px]">{l.descricao}{l.tipo_negociacao && <span className="ml-1 text-[10px]" style={{ color: C.mute }}>· {TIPOS_NEG_ROT[l.tipo_negociacao]}</span>}</td>
-                    <td className="whitespace-nowrap px-2 py-1 text-[11px]" style={{ color: C.mute }}>{v ? v.placa : ""}</td>
+                    <td className="px-2 py-1">
+                      {catSel(l)}
+                      {!l.categoria_id && sug[l.id] && (
+                        <button onClick={() => mudar(l, { categoria_id: sug[l.id] })} className="ml-1 text-[10px]" style={{ color: C.verde }} title="sugestão pelo histórico">
+                          → {catNome(sug[l.id])}
+                        </button>
+                      )}
+                    </td>
+                    <td className="px-2 py-1 text-[12px]">
+                      <input type="checkbox" className="mr-1 align-middle" checked={!!l.conciliado} title="conciliado com o extrato" onChange={(e) => mudar(l, { conciliado: e.target.checked })} />
+                      {l.descricao}{l.tipo_negociacao && <span className="ml-1 text-[10px]" style={{ color: C.mute }}>· {TIPOS_NEG_ROT[l.tipo_negociacao]}</span>}
+                    </td>
+                    <td className="whitespace-nowrap px-2 py-1 text-[11px]">
+                      {l.fin_categoria && l.fin_categoria.grupo === "negociacao" ? (
+                        <select value={l.estoque_id || ""} onChange={(e) => mudar(l, { estoque_id: e.target.value || null })}
+                          className="max-w-[120px] rounded border px-1 py-0.5 text-[11px] outline-none" style={{ ...inputSty, borderColor: l.estoque_id ? C.line : C.laranja }}>
+                          <option value="">— carro —</option>
+                          {carros.map((c) => <option key={c.id} value={c.id}>{c.placa} {c.carro ? `· ${String(c.carro).slice(0, 14)}` : ""}</option>)}
+                        </select>
+                      ) : <span style={{ color: C.mute }}>{v ? v.placa : ""}</span>}
+                    </td>
                     <td className="px-2 py-1 text-right text-[12px]" style={{ fontVariantNumeric: "tabular-nums", color: C.laranja }}>{Number(l.debito) ? rs2(l.debito) : ""}</td>
                     <td className="px-2 py-1 text-right text-[12px]" style={{ fontVariantNumeric: "tabular-nums", color: C.verde }}>{Number(l.credito) ? rs2(l.credito) : ""}</td>
                     <td className="px-2 py-1 text-right text-[12px]" style={{ fontVariantNumeric: "tabular-nums", color: saldo < 0 ? C.laranja : C.ink }}>{filtroCat ? "" : rs2(saldo)}</td>
@@ -8015,15 +8111,55 @@ function FinImportar({ contaId, aoTerminar }) {
 
 function FinDRE({ comp }) {
   const [d, setD] = useState(null); const [erro, setErro] = useState("");
+  const [meses, setMeses] = useState(1);
+  const [mm, setMm] = useState(null);
   useEffect(() => { setD(null); fin("dre", { competencia: comp }).then(setD).catch((e) => setErro(e.message)); }, [comp]);
+  useEffect(() => {
+    if (meses === 1) { setMm(null); return; }
+    setMm(null); fin("dre", { competencia: comp, meses }).then(setMm).catch((e) => setErro(e.message));
+  }, [comp, meses]);
+  const seletor = (
+    <div className="mb-3 flex flex-wrap items-center gap-2 text-[13px]">
+      {[[1, "Este mês"], [3, "3 meses"], [6, "6 meses"], [12, "12 meses"]].map(([n, r]) => (
+        <button key={n} onClick={() => setMeses(n)} className="rounded-full px-3 py-1 font-semibold"
+          style={{ background: meses === n ? C.roxoFraco : "transparent", color: meses === n ? C.roxo : C.mute }}>{r}</button>
+      ))}
+      {mm && <button onClick={() => baixarCSV(`dre-${meses}m-${String(comp).slice(0, 7)}.csv`,
+          ["Categoria"].concat(mm.meses.map((x) => rotuloMes(x))),
+          mm.linhas.map((l) => [l.nome].concat(mm.meses.map((x) => l.por_mes[x] || 0)))
+            .concat([["Total de despesas"].concat(mm.meses.map((x) => mm.total_despesas[x])), ["Rentabilidade"].concat(mm.meses.map((x) => mm.rentabilidade[x])), ["Lucro"].concat(mm.meses.map((x) => mm.lucro[x]))]))}
+          className="ml-auto font-semibold" style={{ color: C.mute }}>CSV</button>}
+    </div>
+  );
   if (erro) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
-  if (!d) return <p className="text-[13px]" style={{ color: C.mute }}>Calculando…</p>;
+  if (meses > 1) {
+    if (!mm) return <div>{seletor}<p className="text-[13px]" style={{ color: C.mute }}>Somando {meses} meses…</p></div>;
+    const cel = (v, forte) => <td className="whitespace-nowrap px-2 py-1 text-right text-[12px]" style={{ fontVariantNumeric: "tabular-nums", fontWeight: forte ? 700 : 400, color: v < 0 ? C.laranja : C.ink }}>{rs2(v)}</td>;
+    return (
+      <div>{seletor}
+        <div className="rolar overflow-x-auto rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+          <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 200 + mm.meses.length * 110 }}>
+            <thead><tr><th className="px-2 py-2 text-left text-[11px] font-semibold uppercase" style={{ color: C.mute, borderBottom: `1px solid ${C.line}` }}>Categoria</th>
+              {mm.meses.map((x) => <th key={x} className="whitespace-nowrap px-2 py-2 text-right text-[11px] font-semibold uppercase" style={{ color: C.mute, borderBottom: `1px solid ${C.line}` }}>{MESES_PT[Number(x.slice(5, 7)) - 1].slice(0, 3)}/{x.slice(2, 4)}</th>)}</tr></thead>
+            <tbody>
+              {mm.linhas.map((l) => <tr key={l.id} style={{ borderBottom: `1px solid ${C.line}` }}><td className="px-2 py-1 text-[12px]">{l.nome}</td>{mm.meses.map((x) => cel(l.por_mes[x] || 0))}</tr>)}
+              <tr style={{ background: C.bg }}><td className="px-2 py-1 text-[12px] font-bold">Total de despesas</td>{mm.meses.map((x) => cel(mm.total_despesas[x], true))}</tr>
+              <tr><td className="px-2 py-1 text-[12px] font-bold">Rentabilidade dos carros</td>{mm.meses.map((x) => cel(mm.rentabilidade[x], true))}</tr>
+              <tr style={{ background: "#F3F7F4" }}><td className="px-2 py-1 text-[13px] font-bold">Lucro</td>{mm.meses.map((x) => cel(mm.lucro[x], true))}</tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+  if (!d) return <div>{seletor}<p className="text-[13px]" style={{ color: C.mute }}>Calculando…</p></div>;
   const linha = (rot, v, forte, cor) => (
     <div className="flex items-baseline justify-between gap-3 px-3 py-1.5 text-[13px]" style={{ borderBottom: `1px solid ${C.line}`, fontWeight: forte ? 700 : 400 }}>
       <span>{rot}</span><span style={{ fontVariantNumeric: "tabular-nums", color: cor || (v < 0 ? C.laranja : C.ink) }}>{rs2(v)}</span>
     </div>
   );
   return (
+    <div>{seletor}
     <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
       <div className="rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
         <div className="px-3 py-2 text-[12px] font-semibold uppercase tracking-[0.06em]" style={{ color: C.mute, borderBottom: `1px solid ${C.line}` }}>Despesas por categoria · {rotuloMes(comp)}</div>
@@ -8041,6 +8177,7 @@ function FinDRE({ comp }) {
         <div className="text-[26px] font-bold" style={{ fontVariantNumeric: "tabular-nums", color: d.lucro >= 0 ? C.verde : C.laranja }}>{rs2(d.lucro)}</div>
         <p className="mt-3 text-[11px] leading-snug" style={{ color: C.mute }}>Como na planilha: despesa é crédito − débito por categoria, e a rentabilidade líquida dos carros vendidos no mês entra como receita. Negociação, retirada e transferência ficam fora.</p>
       </div>
+    </div>
     </div>
   );
 }
