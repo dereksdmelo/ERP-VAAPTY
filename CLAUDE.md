@@ -26,6 +26,7 @@ api/perfil.js                    GET  — quem sou eu; para gerente, a equipe
 api/financeiro.js                área restrita: lançamentos, DRE, carros, folha
 api/atendimento.js               GET/POST/PATCH — a lista do CRM
                                  ?recurso=indicacoes — os leads da etapa E
+                                 ?recurso=lead — pré-vendas e agendamentos
 api/proposta.js                  GET/POST/PATCH/DELETE — ofertas dos lojistas
 api/funil.js                     GET  — a aba PIPELINE: fluxo → venda por origem
 api/importar.js                  POST — traz a planilha do CRM para o banco
@@ -1261,3 +1262,56 @@ a regra de comissão da casa não está em lugar nenhum ainda.
 **O que ainda não existe:** extrato OFX do banco (hoje entra colado
 da planilha), conciliação automática contra o estoque (a aba Carros
 mostra, não concilia), e o cartão de crédito por fatura.
+
+### 27. Pré-vendas: o lead e o agendamento são a mesma linha
+
+O funil da pré-venda tinha duas metades soltas. Os leads de indicação
+(0011) eram só uma origem entre várias, e o agendamento não existia em
+lugar nenhum — era WhatsApp e cabeça. Quando o cliente chegava, o
+negociador redigitava nome, telefone e carro que a pré-venda já tinha
+perguntado ao telefone.
+
+**Uma tabela, não duas.** Um agendamento é um `lead` com
+`agendado_para` preenchido. Duas tabelas obrigariam a um join em toda
+tela e a decidir, a cada remarcação, se nasce agendamento novo ou se o
+velho muda — e nenhuma das duas respostas ajuda quem está com o
+telefone na orelha. As duas abas da tela são dois filtros da mesma
+lista: `?fila=funil` (novo, em contato) e `?fila=agenda` (agendado,
+confirmado).
+
+**A tela inteira serve a um gesto: sair da ligação com o cliente
+agendado.** A barra de captura fica sempre visível, com foco no nome, e
+Enter grava e limpa para o próximo — quem atende telefone não procura
+botão de "novo". "Salvar e agendar" abre o agendador já com o lead
+criado.
+
+**O agendador é de três toques**: dia (chips de Hoje, Amanhã e os
+próximos cinco), hora (`HORARIOS`, os horários que a loja usa) e
+negociador. Campo de data e hora livres ficam ao lado para o caso que
+foge da régua — mas o caminho rápido não passa por eles.
+
+**Remarcar guarda a data velha** em `remarcacoes` (jsonb), como as
+`revisoes` da cautelar: quantas vezes o cliente remarcou é o que diz se
+ele vem mesmo, e some no primeiro clique se só a última data ficar. E
+remarcação **derruba a confirmação** — quem confirmou quarta não
+confirmou sexta.
+
+**A confirmação é um toque e o WhatsApp já abre escrito.** É o que a
+pré-venda faz na véspera, sessenta vezes seguidas: `zap()` monta o
+`wa.me` com 55 na frente de número sem DDI, senão o link abre conversa
+vazia.
+
+**"Chegou" cria o atendimento no servidor**, não na tela: nome,
+telefone, carro, origem e prospector saem do lead, o status nasce
+`cliente_na_loja` e a tela abre o atendimento já pronto. É o ponto
+inteiro desta aba — ninguém redigita com o cliente parado na frente da
+mesa. A ação é **idempotente**: lead que já tem `atendimento_id`
+devolve o mesmo id em vez de criar um segundo.
+
+**Dia que passou fica em laranja** com "passou e ninguém marcou". O
+agendamento que ninguém resolveu é o vazamento silencioso do funil — se
+ele apenas sumisse da lista, ninguém saberia que existiu.
+
+**Mora em `api/atendimento.js` sob `?recurso=lead`**, pelo teto de 12
+funções — mas a costura não é arbitrária: o lead existe para virar
+atendimento, que é o assunto do arquivo.

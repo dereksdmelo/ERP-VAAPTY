@@ -82,6 +82,19 @@ const data = (v) => {
 
 const daLista = (v, lista) => (lista.indexOf(String(v || "")) >= 0 ? String(v) : null);
 
+// O relógio da casa é America/Sao_Paulo, não UTC — mesmo de api/funil.js.
+const hojeAqui = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+
+// O id do usuário, do miolo do token. Quem valida é o banco.
+function donoDoToken(tok) {
+  try {
+    const meio = String(tok).replace(/^Bearer\s+/, "").split(".")[1];
+    if (!meio) return null;
+    const base = meio.replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(Buffer.from(base, "base64").toString("utf8")).sub || null;
+  } catch (e) { return null; }
+}
+
 /**
  * De qual campo veio cada coluna. Como no api/veiculo.js: coluna que
  * a tela não mandou não é apagada no update. Coluna nova exige entrada
@@ -187,6 +200,148 @@ const EMBUTIDO = "*,veiculo(id,placa,marca_modelo,ano_fabricacao,ano_modelo,km_a
 
 const STATUS_INDICACAO = ["novo", "em_contato", "agendado", "virou_atendimento", "sem_interesse"];
 
+const LEAD_STATUS = ["novo", "em_contato", "agendado", "confirmado", "compareceu", "nao_compareceu", "perdido"];
+const CAMPOS_LEAD = "*,negociador(id,nome)";
+
+/**
+ * Pré-vendas (0022): o lead e o agendamento na mesma linha.
+ *
+ *   GET  ?recurso=lead&fila=funil|agenda|hoje  &status= &q=
+ *   POST ?recurso=lead
+ *   PATCH ?recurso=lead&id=
+ *   POST ?recurso=lead&id=&acao=compareceu  → cria o atendimento
+ *
+ * Mora aqui porque o lead vira atendimento — e porque a Vercel do
+ * Hobby para em 12 funções, que já estão todas ocupadas.
+ */
+function paraLead(c) {
+  const l = {};
+  if (c.nome !== undefined) l.nome = texto(c.nome);
+  if (c.telefone !== undefined) l.telefone = texto(c.telefone);
+  if (c.carro !== undefined) l.carro = texto(c.carro);
+  if (c.origem !== undefined) l.origem = daLista(c.origem, ORIGENS) || "outro";
+  if (c.status !== undefined && LEAD_STATUS.indexOf(String(c.status)) >= 0) l.status = c.status;
+  if (c.negociador_id !== undefined) l.negociador_id = RX_UUID.test(String(c.negociador_id || "")) ? c.negociador_id : null;
+  if (c.negociador_nome !== undefined) l.negociador_nome = texto(c.negociador_nome);
+  if (c.prospector_nome !== undefined) l.prospector_nome = texto(c.prospector_nome);
+  if (c.proximo_contato !== undefined) l.proximo_contato = data(c.proximo_contato);
+  if (c.observacoes !== undefined) l.observacoes = texto(c.observacoes);
+  if (c.agendado_para !== undefined) {
+    const t = String(c.agendado_para || "").trim();
+    l.agendado_para = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(t) ? t : null;
+  }
+  return l;
+}
+
+async function leads(req, res, tok) {
+  const base = REST("lead");
+  const cabJson = json(tok);
+
+  if (req.method === "GET") {
+    const f = [];
+    const fila = String(req.query.fila || "funil");
+    const st = String(req.query.status || "");
+    if (LEAD_STATUS.indexOf(st) >= 0) f.push(`status=eq.${st}`);
+    // A agenda é o que tem hora marcada e ainda não foi resolvido; o
+    // funil é o resto. Separar aqui evita a tela filtrar 500 linhas
+    // para mostrar 8.
+    if (fila === "agenda") f.push("status=in.(agendado,confirmado)");
+    else if (fila === "funil" && !f.length) f.push("status=in.(novo,em_contato)");
+    const de = data(req.query.de), ate = data(req.query.ate);
+    if (de) f.push(`agendado_para=gte.${de}T00:00:00`);
+    if (ate) f.push(`agendado_para=lte.${ate}T23:59:59`);
+    const q = String(req.query.q || "").trim().replace(/[(),*]/g, " ").trim();
+    if (q) f.push(`or=(nome.ilike.*${q}*,telefone.ilike.*${q}*,carro.ilike.*${q}*)`);
+    const ordem = fila === "agenda" ? "agendado_para.asc" : "criado_em.desc";
+    const url = `${base}?select=${CAMPOS_LEAD}&order=${ordem}&limit=300${f.length ? `&${f.join("&")}` : ""}`;
+    const lista = await banco(url, { headers: cabecalhos(tok) });
+    return res.status(200).json({ leads: lista || [] });
+  }
+
+  if (req.method === "POST" && String(req.query.acao || "") === "compareceu") {
+    const id = String(req.query.id || "");
+    if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido." });
+    const atual = (await banco(`${base}?select=*&id=eq.${id}`, { headers: cabecalhos(tok) }) || [])[0];
+    if (!atual) return res.status(404).json({ erro: "Lead não encontrado." });
+    if (atual.atendimento_id) return res.status(200).json({ ok: true, atendimento_id: atual.atendimento_id, ja_existia: true });
+
+    // O atendimento nasce com o que a pré-venda já perguntou ao
+    // telefone. É o ponto inteiro desta tela: ninguém redigita nome,
+    // telefone e carro com o cliente parado na frente da mesa.
+    const corpo = await lerCorpo(req) || {};
+    const novoAt = {
+      data: hojeAqui(),
+      cliente_nome: atual.nome,
+      cliente_telefone: atual.telefone,
+      carro_descricao: atual.carro,
+      origem: atual.origem || "outro",
+      status: "cliente_na_loja",
+      negociador_id: RX_UUID.test(String(corpo.negociador_id || "")) ? corpo.negociador_id : null,
+      negociador_nome: texto(corpo.negociador_nome) || atual.negociador_nome,
+      prospec: atual.prospector_nome,
+      observacoes: atual.observacoes,
+    };
+    const criado = await banco(REST("atendimento"), {
+      method: "POST", headers: json(tok, { Prefer: "return=representation" }), body: JSON.stringify(novoAt),
+    });
+    const at = Array.isArray(criado) ? criado[0] : criado;
+    if (!at) return res.status(403).json({ erro: "O banco recusou a criação do atendimento." });
+
+    await banco(`${base}?id=eq.${id}`, {
+      method: "PATCH", headers: cabJson,
+      body: JSON.stringify({ status: "compareceu", atendimento_id: at.id }),
+    });
+    return res.status(201).json({ ok: true, atendimento: at, atendimento_id: at.id });
+  }
+
+  if (req.method === "POST") {
+    const c = await lerCorpo(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    const l = paraLead(c);
+    if (!l.nome) return res.status(400).json({ erro: "Informe o nome." });
+    if (l.agendado_para && !l.status) l.status = "agendado";
+    const r = await banco(base, { method: "POST", headers: json(tok, { Prefer: "return=representation" }), body: JSON.stringify(l) });
+    const salvo = Array.isArray(r) ? r[0] : r;
+    if (!salvo) return res.status(403).json({ erro: "O banco recusou o lead." });
+    return res.status(201).json({ ok: true, lead: salvo });
+  }
+
+  if (req.method === "PATCH") {
+    const id = String(req.query.id || "");
+    if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido." });
+    const c = await lerCorpo(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    const l = paraLead(c);
+
+    // Remarcar guarda a data antiga. Sem isso, "remarcou três vezes"
+    // — que é o que diz se o cliente vem mesmo — some no primeiro
+    // clique.
+    if (l.agendado_para !== undefined) {
+      const atual = (await banco(`${base}?select=agendado_para,remarcacoes,status&id=eq.${id}`, { headers: cabecalhos(tok) }) || [])[0];
+      if (atual && atual.agendado_para && l.agendado_para && atual.agendado_para !== l.agendado_para) {
+        const hist = Array.isArray(atual.remarcacoes) ? atual.remarcacoes : [];
+        l.remarcacoes = hist.concat([{ de: atual.agendado_para, para: l.agendado_para, em: new Date().toISOString(), motivo: texto(c.motivo) }]);
+        // Remarcou: a confirmação anterior não vale mais.
+        l.status = l.status || "agendado";
+        l.confirmado_em = null; l.confirmado_por = null;
+      } else if (atual && !atual.agendado_para && l.agendado_para && !l.status) {
+        l.status = "agendado";
+      }
+    }
+    if (c.confirmado === true) { l.status = "confirmado"; l.confirmado_em = new Date().toISOString(); l.confirmado_por = donoDoToken(tok); }
+    if (c.confirmado === false) { l.status = "agendado"; l.confirmado_em = null; l.confirmado_por = null; }
+    if (!Object.keys(l).length) return res.status(400).json({ erro: "Nada para atualizar." });
+
+    const r = await banco(`${base}?id=eq.${id}`, { method: "PATCH", headers: json(tok, { Prefer: "return=representation" }), body: JSON.stringify(l) });
+    const salvo = Array.isArray(r) ? r[0] : r;
+    if (!salvo) return res.status(403).json({ erro: "A regra do banco recusou a alteração." });
+    return res.status(200).json({ ok: true, lead: salvo });
+  }
+
+  res.setHeader("Allow", "GET, POST, PATCH");
+  return res.status(405).json({ erro: "Use GET, POST ou PATCH." });
+}
+
 /**
  * Leads de indicação (0011).
  *
@@ -279,7 +434,12 @@ module.exports = async function handler(req, res) {
   if (!tok) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
 
   try {
-    if (String(req.query.recurso || "") === "indicacoes") {
+    if (String(req.query.recurso || "") === "lead") {
+    try { return await leads(req, res, tok); }
+    catch (e) { return res.status(e.status || 502).json({ erro: limpar(e.message) }); }
+  }
+
+  if (String(req.query.recurso || "") === "indicacoes") {
       return await indicacoes(req, res, tok);
     }
 

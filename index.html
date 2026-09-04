@@ -7790,6 +7790,403 @@ function LinhaCusto({ l, eGerente, aoSalvar, aoAnexar, aoApagar }) {
 }
 
 /* ==================================================================
+ * PRÉ-VENDAS (0022)
+ *
+ * A tela é feita para uma coisa só: o telefone está tocando, e a
+ * pessoa precisa sair da ligação com o cliente agendado. Tudo aqui
+ * responde a isso — a barra de captura sempre visível, os dias e
+ * horários como botões, e nenhum campo que dê para preencher depois.
+ * ================================================================== */
+
+async function listarLeads(f) {
+  const r = await fetchAut(`/api/atendimento?${comoQuery({ recurso: "lead", ...(f || {}) })}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui carregar os leads.");
+  return d.leads || [];
+}
+async function criarLead(dados) {
+  const r = await fetchAut("/api/atendimento?recurso=lead", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui gravar o lead.");
+  return d.lead;
+}
+async function atualizarLead(id, dados) {
+  const r = await fetchAut(`/api/atendimento?recurso=lead&id=${encodeURIComponent(id)}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui salvar.");
+  return d.lead;
+}
+async function leadCompareceu(id, dados) {
+  const r = await fetchAut(`/api/atendimento?recurso=lead&acao=compareceu&id=${encodeURIComponent(id)}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados || {}),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui abrir o atendimento.");
+  return d;
+}
+
+const LEAD_ROT = {
+  novo: "Novo", em_contato: "Em contato", agendado: "Agendado", confirmado: "Confirmado",
+  compareceu: "Compareceu", nao_compareceu: "Não veio", perdido: "Perdido",
+};
+const HORARIOS = ["09:00", "10:00", "11:00", "13:30", "14:30", "15:30", "16:30", "17:30", "18:30"];
+
+const soDigitos = (t) => String(t || "").replace(/\D/g, "");
+const telBR = (t) => {
+  const d = soDigitos(t);
+  if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return String(t || "");
+};
+// O celular do país é 55 e a loja é de Joinville: número sem DDI vira
+// wa.me com 55 na frente, senão o link abre uma conversa vazia.
+const zap = (tel, msg) => {
+  const d = soDigitos(tel);
+  const num = d.length <= 11 ? `55${d}` : d;
+  return `https://wa.me/${num}?text=${encodeURIComponent(msg)}`;
+};
+const horaBR = (iso) => (iso ? String(iso).slice(11, 16) : "");
+const diaDaSemana = (iso) => ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"][new Date(`${String(iso).slice(0, 10)}T12:00:00`).getDay()];
+
+/** Os próximos sete dias, para o agendamento de dois toques. */
+function proximosDias(n) {
+  const hoje = hojeEmSP();
+  const [a, m, d] = hoje.split("-").map(Number);
+  const lista = [];
+  for (let i = 0; i < n; i++) {
+    const x = new Date(Date.UTC(a, m - 1, d + i));
+    const iso = x.toISOString().slice(0, 10);
+    lista.push({ iso, rot: i === 0 ? "Hoje" : i === 1 ? "Amanhã" : `${String(x.getUTCDate()).padStart(2, "0")}/${String(x.getUTCMonth() + 1).padStart(2, "0")}`, dia: diaDaSemana(iso).slice(0, 3) });
+  }
+  return lista;
+}
+
+/**
+ * O agendador: dia, hora e negociador em três toques.
+ *
+ * Aparece como sobreposição porque é o momento em que a ligação está
+ * acontecendo — qualquer coisa a mais na tela é uma chance de errar.
+ */
+function Agendador({ lead, equipe, aoFechar, aoAgendar }) {
+  const [dia, setDia] = useState(String(lead.agendado_para || "").slice(0, 10) || hojeEmSP());
+  const [hora, setHora] = useState(horaBR(lead.agendado_para) || "");
+  const [neg, setNeg] = useState(lead.negociador_id || "");
+  const [outra, setOutra] = useState("");
+  const dias = proximosDias(7);
+  const pronto = dia && (hora || outra);
+  const chip = (ativo) => ({
+    background: ativo ? C.roxo : C.bg, color: ativo ? "#fff" : C.ink,
+    border: `1px solid ${ativo ? C.roxo : C.line}`, fontWeight: ativo ? 700 : 500,
+  });
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center lg:items-center" style={{ background: "rgba(24,18,33,0.45)" }} onClick={aoFechar}>
+      <div className="w-full max-w-lg rounded-t-2xl p-4 lg:rounded-2xl" style={{ background: C.paper }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-baseline justify-between">
+          <span className="text-[17px] font-bold">{lead.agendado_para ? "Remarcar" : "Agendar"} · {lead.nome}</span>
+          <button onClick={aoFechar} className="text-[13px]" style={{ color: C.mute }}>fechar</button>
+        </div>
+
+        <div className="mt-3 text-[11px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Dia</div>
+        <div className="rolar mt-1 flex gap-1.5 overflow-x-auto pb-1">
+          {dias.map((d) => (
+            <button key={d.iso} onClick={() => setDia(d.iso)} className="shrink-0 rounded-lg px-3 py-2 text-[13px]" style={chip(dia === d.iso)}>
+              {d.rot}<span className="block text-[10px] font-normal" style={{ opacity: 0.75 }}>{d.dia}</span>
+            </button>
+          ))}
+          <input type="date" value={dia} onChange={(e) => setDia(e.target.value)} className="shrink-0 rounded-lg border px-2 text-[13px] outline-none" style={inputSty} />
+        </div>
+
+        <div className="mt-3 text-[11px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Hora</div>
+        <div className="mt-1 flex flex-wrap gap-1.5">
+          {HORARIOS.map((h) => (
+            <button key={h} onClick={() => { setHora(h); setOutra(""); }} className="rounded-lg px-3 py-2 text-[14px]" style={chip(hora === h && !outra)}>{h}</button>
+          ))}
+          <input type="time" value={outra} onChange={(e) => { setOutra(e.target.value); setHora(""); }}
+            className="rounded-lg border px-2 py-1 text-[14px] outline-none" style={inputSty} />
+        </div>
+
+        <div className="mt-3 text-[11px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Negociador</div>
+        <select className={`${inputCls} mt-1`} style={inputSty} value={neg} onChange={(e) => setNeg(e.target.value)}>
+          <option value="">A definir</option>
+          {(equipe || []).filter((n) => n.ativo && n.papel === "negociador").map((n) => <option key={n.id} value={n.id}>{n.nome}</option>)}
+        </select>
+
+        <BotaoPrimario className="mt-4 w-full" disabled={!pronto}
+          onClick={() => {
+            const n = (equipe || []).filter((x) => x.id === neg)[0];
+            aoAgendar({ agendado_para: `${dia}T${outra || hora}:00`, negociador_id: neg || null, negociador_nome: n ? n.nome : null });
+          }}>
+          {lead.agendado_para ? "Remarcar" : "Agendar"} {dia && (hora || outra) ? `· ${dias.filter((d) => d.iso === dia)[0] ? dias.filter((d) => d.iso === dia)[0].rot : diaBR(dia)} ${outra || hora}` : ""}
+        </BotaoPrimario>
+      </div>
+    </div>
+  );
+}
+
+function TelaPreVendas({ perfil, aoAbrirAtendimento }) {
+  const [aba, setAba] = useState("funil");
+  const [equipe, setEquipe] = useState([]);
+  useEffect(() => { listarNegociadores().then(setEquipe).catch(() => {}); }, []);
+  return (
+    <div>
+      <Cabecalho titulo="Pré-vendas" sub="Do telefone tocando ao cliente sentado na mesa." />
+      <div className="mb-4 flex flex-wrap gap-1.5">
+        {[["funil", "Leads"], ["agenda", "Agendamentos"]].map(([v, r]) => (
+          <button key={v} onClick={() => setAba(v)} className="rounded-full px-3.5 py-1.5 text-[13px] font-semibold"
+            style={{ background: aba === v ? C.roxo : C.paper, color: aba === v ? "#fff" : C.ink, border: `1px solid ${aba === v ? C.roxo : C.line}` }}>{r}</button>
+        ))}
+      </div>
+      {aba === "funil" ? <FunilLeads perfil={perfil} equipe={equipe} /> : <Agendamentos perfil={perfil} equipe={equipe} aoAbrirAtendimento={aoAbrirAtendimento} />}
+    </div>
+  );
+}
+
+/**
+ * O funil: a barra de captura em cima, a fila embaixo.
+ *
+ * A barra fica sempre visível e com o foco no nome: o gesto que o
+ * telefone tocando pede é digitar e apertar Enter, não procurar um
+ * botão de "novo".
+ */
+function FunilLeads({ perfil, equipe }) {
+  const [lista, setLista] = useState(null);
+  const [erro, setErro] = useState("");
+  const [busca, setBusca] = useState("");
+  const [novo, setNovo] = useState({ nome: "", telefone: "", carro: "", origem: "google" });
+  const [agendando, setAgendando] = useState(null);
+  const [salvando, setSalvando] = useState(false);
+  const campoNome = React.useRef(null);
+
+  const carregar = () => {
+    setErro("");
+    listarLeads({ fila: "funil", q: busca || undefined }).then(setLista).catch((e) => setErro(e.message));
+  };
+  useEffect(carregar, []);
+
+  const gravar = async (extra) => {
+    if (!novo.nome.trim()) { campoNome.current && campoNome.current.focus(); return null; }
+    setSalvando(true); setErro("");
+    try {
+      const l = await criarLead({ ...novo, prospector_nome: perfil ? perfil.nome : null, ...(extra || {}) });
+      setNovo({ nome: "", telefone: "", carro: "", origem: novo.origem });
+      campoNome.current && campoNome.current.focus();
+      carregar();
+      return l;
+    } catch (e) { setErro(e.message); return null; }
+    finally { setSalvando(false); }
+  };
+  const mexer = async (l, mud) => {
+    setLista((ls) => ls.map((x) => (x.id === l.id ? { ...x, ...mud } : x)));
+    try { await atualizarLead(l.id, mud); carregar(); }
+    catch (e) { setErro(e.message); carregar(); }
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* ---- a captura ---- */}
+      <div className="rounded-xl p-3 lg:p-4" style={{ background: C.paper, border: `2px solid ${C.roxo}` }}
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); gravar(); } }}>
+        <div className="grid gap-2 lg:grid-cols-[1.2fr_1fr_1.2fr_auto]">
+          <input ref={campoNome} className={inputCls} style={inputSty} placeholder="Nome" autoFocus
+            value={novo.nome} onChange={(e) => setNovo({ ...novo, nome: e.target.value })} />
+          <input className={inputCls} style={inputSty} placeholder="Telefone" inputMode="tel"
+            value={novo.telefone} onChange={(e) => setNovo({ ...novo, telefone: e.target.value })} />
+          <input className={inputCls} style={inputSty} placeholder="Carro"
+            value={novo.carro} onChange={(e) => setNovo({ ...novo, carro: e.target.value })} />
+          <select className={inputCls} style={inputSty} value={novo.origem} onChange={(e) => setNovo({ ...novo, origem: e.target.value })}>
+            {ORIGENS.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
+          </select>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <BotaoPrimario onClick={() => gravar()} disabled={salvando || !novo.nome.trim()}>Salvar lead</BotaoPrimario>
+          <button disabled={salvando || !novo.nome.trim()}
+            onClick={async () => { const l = await gravar(); if (l) setAgendando(l); }}
+            className="rounded-lg border px-4 py-2.5 text-[14px] font-semibold"
+            style={{ borderColor: C.roxo, color: novo.nome.trim() ? C.roxo : C.mute }}>
+            Salvar e agendar
+          </button>
+          <span className="text-[11px]" style={{ color: C.mute }}>Enter salva e já limpa para o próximo</span>
+        </div>
+      </div>
+
+      {erro && <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+
+      <form onSubmit={(e) => { e.preventDefault(); carregar(); }} className="flex gap-2">
+        <input className={inputCls} style={inputSty} placeholder="Buscar por nome, telefone ou carro" value={busca} onChange={(e) => setBusca(e.target.value)} />
+        <button type="submit" className="shrink-0 rounded-lg border px-4 text-[14px] font-semibold" style={{ borderColor: C.line, color: C.roxo }}>Buscar</button>
+      </form>
+
+      {lista === null && <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>}
+      {lista && !lista.length && (
+        <div className="rounded-xl px-4 py-8 text-center" style={{ background: C.paper, border: `1px dashed ${C.line}` }}>
+          <p className="text-[15px] font-semibold">Nenhum lead na fila.</p>
+          <p className="mt-1 text-[13px]" style={{ color: C.mute }}>O que você anotar na barra acima aparece aqui até virar agendamento.</p>
+        </div>
+      )}
+
+      <div className="grid gap-2">
+        {(lista || []).map((l) => (
+          <div key={l.id} className="rounded-xl p-3.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-[15px] font-semibold">{l.nome}</div>
+                <div className="text-[13px]" style={{ color: C.mute }}>
+                  {[l.carro, rotulo(ORIGENS, l.origem)].filter(Boolean).join(" · ")}
+                  {l.proximo_contato && <span style={{ color: AMARELO.texto }}> · retornar {diaBR(l.proximo_contato)}</span>}
+                </div>
+              </div>
+              <span className="text-[11px] uppercase tracking-[0.06em]" style={{ color: C.mute }}>{LEAD_ROT[l.status]}</span>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-3 text-[13px]">
+              {l.telefone && <a href={`tel:${soDigitos(l.telefone)}`} style={{ color: C.roxo, fontWeight: 600 }}>{telBR(l.telefone)}</a>}
+              {l.telefone && <a href={zap(l.telefone, `Olá ${l.nome}! Aqui é da Vaapty Joinville. Tudo bem?`)} target="_blank" rel="noreferrer" style={{ color: C.verde, fontWeight: 600 }}>WhatsApp</a>}
+              <button onClick={() => setAgendando(l)} className="rounded-lg px-3 py-1.5 font-semibold" style={{ background: C.roxo, color: "#fff" }}>Agendar</button>
+              <button onClick={() => mexer(l, { status: "em_contato", proximo_contato: hojeEmSP() })} style={{ color: C.mute }}>ligar depois</button>
+              <button onClick={() => mexer(l, { status: "perdido" })} className="ml-auto" style={{ color: C.mute }}>sem interesse</button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {agendando && (
+        <Agendador lead={agendando} equipe={equipe} aoFechar={() => setAgendando(null)}
+          aoAgendar={async (dados) => { await mexer(agendando, dados); setAgendando(null); }} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * A agenda: por dia, com duas ações grandes por linha.
+ *
+ * A confirmação é um toque e o WhatsApp já abre com a mensagem
+ * pronta — é o que a pré-venda faz na véspera, sessenta vezes seguidas.
+ * "Chegou" cria o atendimento com o que já foi perguntado ao telefone.
+ */
+function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
+  const [lista, setLista] = useState(null);
+  const [erro, setErro] = useState("");
+  const [agendando, setAgendando] = useState(null);
+  const [indo, setIndo] = useState("");
+
+  const carregar = () => {
+    setErro("");
+    listarLeads({ fila: "agenda" }).then(setLista).catch((e) => setErro(e.message));
+  };
+  useEffect(carregar, []);
+
+  const mexer = async (l, mud) => {
+    setLista((ls) => ls.map((x) => (x.id === l.id ? { ...x, ...mud } : x)));
+    try { await atualizarLead(l.id, mud); carregar(); }
+    catch (e) { setErro(e.message); carregar(); }
+  };
+  const chegou = async (l) => {
+    setIndo(l.id); setErro("");
+    try {
+      const d = await leadCompareceu(l.id, { negociador_id: l.negociador_id, negociador_nome: l.negociador_nome });
+      carregar();
+      if (aoAbrirAtendimento && d.atendimento_id) aoAbrirAtendimento(d.atendimento_id);
+    } catch (e) { setErro(e.message); }
+    setIndo("");
+  };
+
+  const hoje = hojeEmSP();
+  const grupos = {};
+  (lista || []).forEach((l) => {
+    const d = String(l.agendado_para || "").slice(0, 10);
+    (grupos[d] = grupos[d] || []).push(l);
+  });
+  const dias = Object.keys(grupos).sort();
+  const rotuloDia = (d) => {
+    const p = proximosDias(2);
+    if (d === p[0].iso) return "Hoje";
+    if (d === p[1].iso) return "Amanhã";
+    return `${diaBR(d)} · ${diaDaSemana(d)}`;
+  };
+
+  return (
+    <div className="space-y-4">
+      {erro && <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+      {lista === null && <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>}
+      {lista && !lista.length && (
+        <div className="rounded-xl px-4 py-8 text-center" style={{ background: C.paper, border: `1px dashed ${C.line}` }}>
+          <p className="text-[15px] font-semibold">Nenhum agendamento em aberto.</p>
+          <p className="mt-1 text-[13px]" style={{ color: C.mute }}>Agende alguém em <b>Leads</b> e ele aparece aqui.</p>
+        </div>
+      )}
+
+      {dias.map((d) => {
+        const atrasado = d < hoje;
+        return (
+          <div key={d}>
+            <div className="mb-1.5 flex items-baseline gap-2">
+              <span className="text-[13px] font-bold uppercase tracking-[0.06em]" style={{ color: atrasado ? C.laranja : C.ink }}>{rotuloDia(d)}</span>
+              <span className="text-[12px]" style={{ color: C.mute }}>{grupos[d].length} agendado{grupos[d].length > 1 ? "s" : ""}</span>
+              {atrasado && <span className="text-[12px]" style={{ color: C.laranja }}>· passou e ninguém marcou</span>}
+            </div>
+            <div className="grid gap-2">
+              {grupos[d].map((l) => {
+                const conf = l.status === "confirmado";
+                const remarcou = (l.remarcacoes || []).length;
+                return (
+                  <div key={l.id} className="rounded-xl p-3.5" style={{ background: C.paper, border: `1px solid ${conf ? C.verde : C.line}` }}>
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-[15px] font-semibold">
+                          <span style={{ fontVariantNumeric: "tabular-nums" }}>{horaBR(l.agendado_para)}</span> · {l.nome}
+                        </div>
+                        <div className="text-[13px]" style={{ color: C.mute }}>
+                          {[l.carro, l.negociador_nome || (l.negociador && l.negociador.nome) || "sem negociador"].filter(Boolean).join(" · ")}
+                          {!!remarcou && <span style={{ color: AMARELO.texto }}> · remarcou {remarcou}×</span>}
+                        </div>
+                      </div>
+                      <span className="rounded-full px-2.5 py-1 text-[11px] font-bold uppercase"
+                        style={{ background: conf ? "#E8F3EE" : AMARELO.fundo, color: conf ? C.verde : AMARELO.texto }}>
+                        {conf ? "confirmado" : "a confirmar"}
+                      </span>
+                    </div>
+
+                    <div className="mt-2.5 flex flex-wrap items-center gap-2 text-[13px]">
+                      {!conf ? (
+                        <button onClick={() => mexer(l, { confirmado: true })} className="rounded-lg px-3.5 py-2 font-semibold" style={{ background: C.verde, color: "#fff" }}>Confirmou</button>
+                      ) : (
+                        <button onClick={() => mexer(l, { confirmado: false })} className="rounded-lg px-3 py-2" style={{ color: C.mute, border: `1px solid ${C.line}` }}>desfazer</button>
+                      )}
+                      {l.telefone && (
+                        <a href={zap(l.telefone, `Olá ${l.nome}! Confirmando sua avaliação na Vaapty Joinville ${rotuloDia(d).toLowerCase()} às ${horaBR(l.agendado_para)}. Podemos contar com você?`)}
+                          target="_blank" rel="noreferrer" className="rounded-lg px-3 py-2 font-semibold" style={{ border: `1px solid ${C.verde}`, color: C.verde }}>
+                          WhatsApp
+                        </a>
+                      )}
+                      {l.telefone && <a href={`tel:${soDigitos(l.telefone)}`} style={{ color: C.roxo, fontWeight: 600 }}>{telBR(l.telefone)}</a>}
+                      <button onClick={() => setAgendando(l)} style={{ color: C.mute }}>remarcar</button>
+                      <button onClick={() => mexer(l, { status: "nao_compareceu" })} style={{ color: C.mute }}>não veio</button>
+                      <button onClick={() => chegou(l)} disabled={indo === l.id}
+                        className="ml-auto rounded-lg px-4 py-2 font-semibold" style={{ background: C.roxo, color: "#fff", opacity: indo === l.id ? 0.5 : 1 }}>
+                        {indo === l.id ? "abrindo…" : "Chegou"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+
+      {agendando && (
+        <Agendador lead={agendando} equipe={equipe} aoFechar={() => setAgendando(null)}
+          aoAgendar={async (dados) => { await mexer(agendando, dados); setAgendando(null); }} />
+      )}
+    </div>
+  );
+}
+
+/* ==================================================================
  * FINANCEIRO (0021) — área restrita
  * ================================================================== */
 
@@ -8724,6 +9121,7 @@ function TelaADM({ perfil }) {
 
 const ICONE = {
   atendimentos: "M4 6h16M4 12h16M4 18h10",
+  prevendas: "M5 4h3l2 5-2 1a11 11 0 0 0 6 6l1-2 5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2zM17 3v4M15 5h4",
   estoque: "M3 13l2-5a2 2 0 0 1 2-1h10a2 2 0 0 1 2 1l2 5v5a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H6v1a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-5zm4 2h.01M17 15h.01",
   painel: "M4 20V10m6 10V4m6 16v-7",
   rentabilidade: "M4 18l5-6 4 3 7-9M15 6h5v5",
@@ -8748,9 +9146,10 @@ function destinosPara(perfil) {
   const gerente = !!(perfil && perfil.papel === "gerente");
   const adm = !!(perfil && (perfil.administrativo || gerente));
   return [
+    { id: "prevendas", rot: "Pré-vendas", curto: "Pré-v.", principal: true },
     { id: "atendimentos", rot: "Atendimentos", curto: "Atend.", principal: true },
     { id: "estoque", rot: "Estoque", curto: "Estoque", principal: true },
-    { id: "painel", rot: "Painel do mês", curto: "Painel", principal: true },
+    { id: "painel", rot: "Painel do mês", curto: "Painel" },
     { id: "rentabilidade", rot: "Rentabilidade", curto: "Rentab." },
     { id: "leads", rot: "Leads de indicação", curto: "Leads" },
     adm ? { id: "adm", rot: "Administrativo", curto: "Adm." } : null,
@@ -8987,6 +9386,7 @@ function App() {
 
   return (
     <Shell perfil={perfil} tela={tela} setTela={setTela}>
+      {tela === "prevendas" && <TelaPreVendas perfil={perfil} aoAbrirAtendimento={abrir} />}
       {tela === "atendimentos" && <CRM perfil={perfil} aoAbrir={abrir} mes={{ ...mes, todos: true }} />}
       {tela === "estoque" && <TelaEstoque perfil={perfil} comp={compOuAtual} mes={mes} />}
       {tela === "rentabilidade" && <TelaEstoque perfil={perfil} comp={compOuAtual} mes={mes} modo="rentabilidade" />}
