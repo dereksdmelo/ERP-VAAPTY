@@ -315,6 +315,17 @@ module.exports = async function handler(req, res) {
     return res.status(500).json({ erro: "SUPABASE_URL ou SUPABASE_ANON_KEY não configurados." });
   }
 
+  // ?recurso=config — o que o navegador precisa para falar com o
+  // Supabase Auth, ANTES de ter login. Só sai o que é público por
+  // natureza: a URL e a chave anônima (feita para viver no navegador;
+  // sozinha não abre nada, quem decide é a RLS). Morava em
+  // api/config.js; fundiu aqui para liberar a 12ª função da Vercel
+  // para api/financeiro.js. A SUPABASE_SERVICE_KEY nunca entra aqui.
+  if (String(req.query.recurso || "") === "config") {
+    res.setHeader("Cache-Control", "public, max-age=0, s-maxage=300");
+    return res.status(200).json({ url: URL_BASE, anon: ANON });
+  }
+
   const tok = tokenDe(req);
   if (!tok) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
 
@@ -340,7 +351,7 @@ module.exports = async function handler(req, res) {
 
   let r, corpo;
   try {
-    r = await fetch(`${URL_BASE}/rest/v1/perfil?select=id,nome,papel,ativo,administrativo&order=nome.asc`, {
+    r = await fetch(`${URL_BASE}/rest/v1/perfil?select=id,nome,papel,ativo,administrativo,financeiro&order=nome.asc`, {
       headers: { apikey: ANON, Authorization: tok },
     });
     corpo = await r.text();

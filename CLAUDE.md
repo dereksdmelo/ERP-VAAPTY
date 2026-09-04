@@ -21,8 +21,9 @@ api/placa.js                     GET  — Placa Fipe: ?placa=, ?acao=cota, ?acao
 api/veiculo.js                   POST /api/veiculo — grava a ficha · GET — as 20 últimas
 api/foto.js                      POST/GET/PATCH/DELETE — imagens no Storage
 api/documento.js                 POST/GET — registro dos documentos gerados
-api/config.js                    GET  — URL e chave anônima para o navegador
 api/perfil.js                    GET  — quem sou eu; para gerente, a equipe
+                                 ?recurso=config — URL e chave anônima (sem login)
+api/financeiro.js                área restrita: lançamentos, DRE, carros, folha
 api/atendimento.js               GET/POST/PATCH — a lista do CRM
                                  ?recurso=indicacoes — os leads da etapa E
 api/proposta.js                  GET/POST/PATCH/DELETE — ofertas dos lojistas
@@ -1205,3 +1206,58 @@ estoque é pulada e devolvida em `pulados`, nunca duplicada.
 **A cautelar custa 160–180 e é cobrada a 390.** Isso apareceu ao
 cruzar as duas abas: a diferença é margem, e é exatamente o
 previsto-contra-realizado que o estoque foi feito para mostrar.
+
+
+### 26. Financeiro: a pasta do banco vira área restrita
+
+A pasta "Financeiro Joinville" (janeiro/2024) tem seis abas amarradas:
+Lançamentos (o extrato categorizado, com saldo corrido), DRE (SUMIFS
+por categoria + rentabilidade dos carros = lucro), Negociação (por
+carro: pago cliente / quitação / pago lojista), Salarios, Vales e
+Retiradas. A 0021 é isso em tabelas `fin_*`, e `TelaFinanceiro` são as
+quatro abas: Lançamentos, DRE, Carros, Folha.
+
+**Restrito na RLS, não na tela.** `perfil.financeiro` (como o
+`administrativo` da 0012) e `e_financeiro()` guardam todas as tabelas
+`fin_*` — ler, escrever e apagar. Para quem não tem o sinalizador, o
+PostgREST devolve lista vazia e recusa escrita; a tela só esconde o
+destino por cortesia. Gerente sempre entra.
+
+**A 12ª função veio do `api/config.js`**, que virou `?recurso=config`
+em `api/perfil.js` — é o único recurso de lá que responde sem token,
+e só entrega o que é público (URL e chave anônima). Financeiro merecia
+arquivo próprio; costurar isso no `veiculo.js` seria esconder a área
+mais sensível do sistema no lugar menos óbvio.
+
+**Competência ≠ data.** A luz de dezembro paga em janeiro é despesa de
+dezembro: cada lançamento tem as duas. A lista de lançamentos filtra
+por **data** (é assim que se confere contra o banco); o DRE soma por
+**competência** (é assim que se lê o mês).
+
+**O DRE é o da planilha:** por categoria, `crédito − débito` (despesa
+sai negativa), só das categorias com `no_dre`; negociação, retirada e
+transferência ficam fora, e os carros entram pela **rentabilidade
+líquida dos vendidos no mês** — a mesma conta da tela de
+rentabilidade, repetida em `api/financeiro.js` porque o servidor não
+carrega o `index.html`. **Quem mudar uma precisa mudar a outra.**
+
+**Colar o extrato não duplica.** A chave `data + descrição + valor`
+por conta é única; colar o mês de novo só acrescenta o que faltava
+(`resolution=ignore-duplicates`). "Saldo Anterior" vira o saldo
+inicial da conta, não lançamento. Categoria desconhecida é criada como
+despesa e a tela pede para conferir o grupo.
+
+**A placa na descrição liga ao carro.** "Pagto cliente Uno_AYL0614" é
+a convenção da planilha; `placaNa()` acha a placa, e `tipoNegNa()` a
+parte do negócio (cliente, quitação, débitos, lojista, reembolso). É
+isso que a aba Carros cruza com o estoque: combinado × pago, por
+carro. Descrição fora da convenção só perde o vínculo automático.
+
+**A folha grava o líquido.** `salário + comissão + bonificação − vales`
+é calculado no servidor e gravado em `fin_folha`, para que a folha de
+janeiro não mude se a regra mudar em março. A comissão é digitada —
+a regra de comissão da casa não está em lugar nenhum ainda.
+
+**O que ainda não existe:** extrato OFX do banco (hoje entra colado
+da planilha), conciliação automática contra o estoque (a aba Carros
+mostra, não concilia), e o cartão de crédito por fatura.

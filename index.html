@@ -158,7 +158,7 @@ const AUTH = { cfg: null, sessao: null, aoSair: null };
 
 async function carregarConfig() {
   if (AUTH.cfg) return AUTH.cfg;
-  const r = await fetch("/api/config");
+  const r = await fetch("/api/perfil?recurso=config");
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.erro || "Configuração do servidor indisponível.");
   AUTH.cfg = d;
@@ -7789,6 +7789,384 @@ function LinhaCusto({ l, eGerente, aoSalvar, aoAnexar, aoApagar }) {
   );
 }
 
+/* ==================================================================
+ * FINANCEIRO (0021) — área restrita
+ * ================================================================== */
+
+async function fin(recurso, q, opcoes) {
+  const qs = comoQuery({ recurso, ...(q || {}) });
+  const r = await fetchAut(`/api/financeiro?${qs}`, opcoes);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "O financeiro não respondeu.");
+  return d;
+}
+const finJson = (metodo, corpo) => ({ method: metodo, headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo) });
+
+const rs2 = (v) => (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const TIPOS_NEG_ROT = { pagto_cliente: "Pagto cliente", quitacao: "Quitação", debitos: "Débitos", pagto_lojista: "Pagto lojista", reembolso: "Reembolso", outro: "Outro" };
+
+function TelaFinanceiro({ perfil, comp, mes }) {
+  const [aba, setAba] = useState("lancamentos");
+  const ABAS = [["lancamentos", "Lançamentos"], ["dre", "DRE"], ["carros", "Carros"], ["folha", "Folha"]];
+  return (
+    <div>
+      <Cabecalho titulo="Financeiro" mes={mes}
+        sub="Área restrita: extrato conciliado, DRE, conferência dos carros e folha." />
+      <div className="mb-4 flex flex-wrap gap-1.5">
+        {ABAS.map(([v, r]) => (
+          <button key={v} onClick={() => setAba(v)} className="rounded-full px-3.5 py-1.5 text-[13px] font-semibold"
+            style={{ background: aba === v ? C.roxo : C.paper, color: aba === v ? "#fff" : C.ink, border: `1px solid ${aba === v ? C.roxo : C.line}` }}>{r}</button>
+        ))}
+      </div>
+      {aba === "lancamentos" && <FinLancamentos comp={comp} />}
+      {aba === "dre" && <FinDRE comp={comp} />}
+      {aba === "carros" && <FinCarros comp={comp} />}
+      {aba === "folha" && <FinFolha comp={comp} />}
+    </div>
+  );
+}
+
+/* ---------------- lançamentos ---------------- */
+
+function FinLancamentos({ comp }) {
+  const [contas, setContas] = useState([]);
+  const [conta, setConta] = useState("");
+  const [cats, setCats] = useState([]);
+  const [d, setD] = useState(null);
+  const [erro, setErro] = useState("");
+  const [novo, setNovo] = useState(null);
+  const [importando, setImportando] = useState(false);
+  const [filtroCat, setFiltroCat] = useState("");
+
+  useEffect(() => {
+    fin("conta").then((x) => { setContas(x.lista); if (!conta && x.lista[0]) setConta(x.lista[0].id); }).catch((e) => setErro(e.message));
+    fin("categoria").then((x) => setCats(x.lista)).catch(() => {});
+  }, []);
+  const carregar = () => {
+    if (!conta) return;
+    setD(null); setErro("");
+    fin("lancamento", { competencia: comp, conta_id: conta }).then(setD).catch((e) => setErro(e.message));
+  };
+  useEffect(carregar, [conta, comp]);
+
+  const mudar = async (l, mud) => {
+    try { await fin("lancamento", { id: l.id }, finJson("PATCH", mud)); carregar(); }
+    catch (e) { setErro(e.message); }
+  };
+  const apagar = async (l) => {
+    if (!window.confirm(`Apagar "${l.descricao || "lançamento"}" de ${rs2(l.debito || l.credito)}?`)) return;
+    try { await fin("lancamento", { id: l.id }, { method: "DELETE" }); carregar(); }
+    catch (e) { setErro(e.message); }
+  };
+  const gravarNovo = async () => {
+    try {
+      await fin("lancamento", null, finJson("POST", { ...novo, conta_id: conta }));
+      setNovo(null); carregar();
+    } catch (e) { setErro(e.message); }
+  };
+
+  const lista = (d ? d.lancamentos : []).filter((l) => !filtroCat || (l.fin_categoria && l.fin_categoria.id === filtroCat));
+  let saldo = d && d.saldo_anterior != null ? d.saldo_anterior : 0;
+  const totais = (d ? d.lancamentos : []).reduce((t, l) => ({ deb: t.deb + (Number(l.debito) || 0), cred: t.cred + (Number(l.credito) || 0) }), { deb: 0, cred: 0 });
+  const catSel = (l) => (
+    <select value={(l.fin_categoria && l.fin_categoria.id) || ""} onChange={(e) => mudar(l, { categoria_id: e.target.value || null })}
+      className="max-w-[140px] rounded border px-1 py-0.5 text-[12px] outline-none"
+      style={{ ...inputSty, borderColor: l.fin_categoria ? C.line : C.laranja }}>
+      <option value="">— sem categoria —</option>
+      {cats.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+    </select>
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <select className="rounded-lg border px-3 py-2 text-[14px] outline-none" style={{ ...inputSty, fontWeight: 600 }}
+          value={conta} onChange={(e) => setConta(e.target.value)}>
+          {contas.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.empresa ? ` · ${c.empresa}` : ""}</option>)}
+        </select>
+        <select className="rounded-lg border px-3 py-2 text-[13px] outline-none" style={inputSty} value={filtroCat} onChange={(e) => setFiltroCat(e.target.value)}>
+          <option value="">Todas as categorias</option>
+          {cats.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+        </select>
+        <span className="ml-auto flex gap-3 text-[13px]">
+          <button onClick={() => setImportando(!importando)} style={{ color: C.roxo, fontWeight: 600 }}>colar extrato</button>
+          <button onClick={() => setNovo({ data: hojeEmSP(), competencia: comp, descricao: "", debito: "", credito: "", categoria_id: "" })} style={{ color: C.roxo, fontWeight: 600 }}>+ lançamento</button>
+        </span>
+      </div>
+
+      {erro && <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+      {importando && <FinImportar contaId={conta} aoTerminar={() => { setImportando(false); carregar(); fin("categoria").then((x) => setCats(x.lista)).catch(() => {}); }} />}
+
+      {novo && (
+        <div className="rounded-xl p-4" style={{ background: C.paper, border: `1px solid ${C.roxo}` }}>
+          <div className="grid gap-2 lg:grid-cols-6">
+            <label><Rotulo>Data</Rotulo><input type="date" className={inputCls} style={inputSty} value={novo.data} onChange={(e) => setNovo({ ...novo, data: e.target.value })} /></label>
+            <label><Rotulo>Competência</Rotulo><input type="month" className={inputCls} style={inputSty} value={String(novo.competencia).slice(0, 7)} onChange={(e) => setNovo({ ...novo, competencia: `${e.target.value}-01` })} /></label>
+            <label className="lg:col-span-2"><Rotulo>Descrição</Rotulo><input className={inputCls} style={inputSty} value={novo.descricao} onChange={(e) => setNovo({ ...novo, descricao: e.target.value })} /></label>
+            <label><Rotulo>Débito</Rotulo><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal" value={novo.debito} onChange={(e) => setNovo({ ...novo, debito: e.target.value, credito: "" })} /></label>
+            <label><Rotulo>Crédito</Rotulo><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal" value={novo.credito} onChange={(e) => setNovo({ ...novo, credito: e.target.value, debito: "" })} /></label>
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <select className="rounded-lg border px-3 py-2 text-[14px] outline-none" style={inputSty} value={novo.categoria_id} onChange={(e) => setNovo({ ...novo, categoria_id: e.target.value })}>
+              <option value="">Categoria</option>
+              {cats.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+            </select>
+            <BotaoPrimario onClick={gravarNovo}>Gravar</BotaoPrimario>
+            <button onClick={() => setNovo(null)} className="text-[13px]" style={{ color: C.mute }}>cancelar</button>
+          </div>
+        </div>
+      )}
+
+      {!d && !erro && <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>}
+      {d && (
+        <div className="rolar overflow-x-auto rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+          <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 900 }}>
+            <thead><tr>
+              {["Data", "Comp.", "Categoria", "Descrição", "Carro", "Débito", "Crédito", "Saldo", ""].map((h, i) => (
+                <th key={h || i} className="whitespace-nowrap px-2 py-2 text-[11px] font-semibold uppercase tracking-[0.04em]"
+                  style={{ color: C.mute, textAlign: i >= 5 && i <= 7 ? "right" : "left", borderBottom: `1px solid ${C.line}` }}>{h}</th>))}
+            </tr></thead>
+            <tbody>
+              <tr style={{ background: C.bg }}>
+                <td colSpan={7} className="px-2 py-1.5 text-[12px]" style={{ color: C.mute }}>Saldo anterior</td>
+                <td className="px-2 py-1.5 text-right text-[12px]" style={{ fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>{rs2(d.saldo_anterior)}</td><td />
+              </tr>
+              {lista.map((l) => {
+                saldo += (Number(l.credito) || 0) - (Number(l.debito) || 0);
+                const v = l.estoque && l.estoque.veiculo;
+                return (
+                  <tr key={l.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                    <td className="whitespace-nowrap px-2 py-1 text-[12px]">{diaBR(l.data)}</td>
+                    <td className="whitespace-nowrap px-2 py-1 text-[11px]" style={{ color: C.mute }}>{String(l.competencia).slice(5, 7)}/{String(l.competencia).slice(2, 4)}</td>
+                    <td className="px-2 py-1">{catSel(l)}</td>
+                    <td className="px-2 py-1 text-[12px]">{l.descricao}{l.tipo_negociacao && <span className="ml-1 text-[10px]" style={{ color: C.mute }}>· {TIPOS_NEG_ROT[l.tipo_negociacao]}</span>}</td>
+                    <td className="whitespace-nowrap px-2 py-1 text-[11px]" style={{ color: C.mute }}>{v ? v.placa : ""}</td>
+                    <td className="px-2 py-1 text-right text-[12px]" style={{ fontVariantNumeric: "tabular-nums", color: C.laranja }}>{Number(l.debito) ? rs2(l.debito) : ""}</td>
+                    <td className="px-2 py-1 text-right text-[12px]" style={{ fontVariantNumeric: "tabular-nums", color: C.verde }}>{Number(l.credito) ? rs2(l.credito) : ""}</td>
+                    <td className="px-2 py-1 text-right text-[12px]" style={{ fontVariantNumeric: "tabular-nums", color: saldo < 0 ? C.laranja : C.ink }}>{filtroCat ? "" : rs2(saldo)}</td>
+                    <td className="px-2 py-1 text-right"><button onClick={() => apagar(l)} className="text-[11px]" style={{ color: C.mute }}>apagar</button></td>
+                  </tr>
+                );
+              })}
+              <tr style={{ background: "#F3F7F4" }}>
+                <td colSpan={5} className="px-2 py-1.5 text-[12px] font-semibold">Total do mês · {d.lancamentos.length} lançamento{d.lancamentos.length === 1 ? "" : "s"}</td>
+                <td className="px-2 py-1.5 text-right text-[12px] font-semibold" style={{ fontVariantNumeric: "tabular-nums", color: C.laranja }}>{rs2(totais.deb)}</td>
+                <td className="px-2 py-1.5 text-right text-[12px] font-semibold" style={{ fontVariantNumeric: "tabular-nums", color: C.verde }}>{rs2(totais.cred)}</td>
+                <td className="px-2 py-1.5 text-right text-[12px] font-bold" style={{ fontVariantNumeric: "tabular-nums" }}>{rs2((d.saldo_anterior || 0) + totais.cred - totais.deb)}</td><td />
+              </tr>
+            </tbody>
+          </table>
+          {d.truncado && <p className="px-2 py-1.5 text-[12px]" style={{ color: C.laranja }}>Mais de 2.000 lançamentos: a lista está cortada.</p>}
+          {!d.lancamentos.length && <p className="px-3 py-6 text-center text-[13px]" style={{ color: C.mute }}>Nenhum lançamento em {rotuloMes(comp)}. Cole o extrato ou lance à mão.</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const COLS_EXTRATO = [["data", /^data$/i], ["competencia", /^compet/i], ["categoria", /^tipo|^categoria/i], ["descricao", /^descri/i], ["debito", /^d[eé]bito/i], ["credito", /^cr[eé]dito/i]];
+function lerExtrato(txt) {
+  const linhas = String(txt || "").split(/\r?\n/).map((l) => l.split("\t"));
+  const iCab = linhas.findIndex((l) => l.some((c) => /^descri/i.test(c.trim())) && l.some((c) => /^d[eé]bito/i.test(c.trim())));
+  if (iCab < 0) return { erro: "Não achei o cabeçalho — precisa da linha com Descrição, Débito e Crédito." };
+  const cab = linhas[iCab].map((c) => c.trim()); const idx = {};
+  COLS_EXTRATO.forEach(([k, rx]) => { const i = cab.findIndex((c) => rx.test(c)); if (i >= 0) idx[k] = i; });
+  const dados = linhas.slice(iCab + 1).filter((l) => l.some((c) => c.trim())).map((l) => {
+    const o = {}; Object.keys(idx).forEach((k) => { o[k] = String(l[idx[k]] || "").trim(); }); return o;
+  }).filter((o) => o.data);
+  return { dados, colunas: Object.keys(idx) };
+}
+
+function FinImportar({ contaId, aoTerminar }) {
+  const [txt, setTxt] = useState(""); const [indo, setIndo] = useState(false); const [res, setRes] = useState(null); const [erro, setErro] = useState("");
+  const previa = txt ? lerExtrato(txt) : null;
+  const enviar = async () => {
+    setIndo(true); setErro("");
+    try { setRes(await fin("importar", null, finJson("POST", { conta_id: contaId, linhas: previa.dados }))); }
+    catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+  return (
+    <div className="rounded-xl p-4" style={{ background: C.paper, border: `1px solid ${C.roxo}` }}>
+      <div className="flex items-baseline justify-between"><span className="text-[14px] font-semibold">Colar o extrato</span><button onClick={aoTerminar} className="text-[12px]" style={{ color: C.mute }}>fechar</button></div>
+      <p className="mt-1 text-[12px]" style={{ color: C.mute }}>A aba Lançamentos da planilha (Data, Competência, Tipo pgt, Descrição, Débito, Crédito), com o cabeçalho. O que já entrou não entra de novo; "Saldo Anterior" vira o saldo inicial da conta; placa na descrição liga ao carro do estoque.</p>
+      {res ? (
+        <div className="mt-3 rounded-lg p-3 text-[13px]" style={{ background: "#E8F3EE" }}>
+          <b>{res.inseridos}</b> lançamentos novos · {res.repetidos} já existiam · {res.ligados_a_carro} ligados a carro
+          {!!res.invalidas && <span style={{ color: AMARELO.texto }}> · {res.invalidas} linhas inválidas (sem data ou sem valor)</span>}
+          {res.saldo_inicial != null && <div>Saldo inicial da conta: {rs2(res.saldo_inicial)}</div>}
+          {!!(res.categorias_criadas || []).length && <div>Categorias criadas como despesa: {res.categorias_criadas.join(", ")} — confira o grupo delas.</div>}
+          <button onClick={aoTerminar} className="mt-2 font-semibold" style={{ color: C.roxo }}>ver os lançamentos</button>
+        </div>
+      ) : (
+        <>
+          <textarea className="mt-3 h-40 w-full rounded-lg border p-2 text-[12px] outline-none" style={{ ...inputSty, fontFamily: F.mono }} placeholder="Cole aqui" value={txt} onChange={(e) => setTxt(e.target.value)} />
+          {previa && previa.erro && <p className="mt-1 text-[12px]" style={{ color: C.laranja }}>{previa.erro}</p>}
+          {previa && !previa.erro && <p className="mt-1 text-[12px]" style={{ color: C.mute }}>{previa.dados.length} linhas · colunas: {previa.colunas.join(", ")}</p>}
+          {erro && <p className="mt-1 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+          <BotaoPrimario onClick={enviar} disabled={indo || !contaId || !previa || !!previa.erro || !previa.dados.length} className="mt-2 w-full">{indo ? "Importando…" : "Importar"}</BotaoPrimario>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- DRE ---------------- */
+
+function FinDRE({ comp }) {
+  const [d, setD] = useState(null); const [erro, setErro] = useState("");
+  useEffect(() => { setD(null); fin("dre", { competencia: comp }).then(setD).catch((e) => setErro(e.message)); }, [comp]);
+  if (erro) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
+  if (!d) return <p className="text-[13px]" style={{ color: C.mute }}>Calculando…</p>;
+  const linha = (rot, v, forte, cor) => (
+    <div className="flex items-baseline justify-between gap-3 px-3 py-1.5 text-[13px]" style={{ borderBottom: `1px solid ${C.line}`, fontWeight: forte ? 700 : 400 }}>
+      <span>{rot}</span><span style={{ fontVariantNumeric: "tabular-nums", color: cor || (v < 0 ? C.laranja : C.ink) }}>{rs2(v)}</span>
+    </div>
+  );
+  return (
+    <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+      <div className="rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        <div className="px-3 py-2 text-[12px] font-semibold uppercase tracking-[0.06em]" style={{ color: C.mute, borderBottom: `1px solid ${C.line}` }}>Despesas por categoria · {rotuloMes(comp)}</div>
+        {d.linhas.map((l) => linha(l.nome, l.valor))}
+        {!!d.sem_categoria && linha("Sem categoria", d.sem_categoria, false, C.laranja)}
+        {!d.linhas.length && <p className="px-3 py-6 text-center text-[13px]" style={{ color: C.mute }}>Nenhum lançamento nesta competência.</p>}
+        {linha("Total de despesas", d.total_despesas, true)}
+      </div>
+      <div className="self-start rounded-xl p-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        <div className="text-[12px]" style={{ color: C.mute }}>Rentabilidade dos carros ({d.carros_vendidos} vendido{d.carros_vendidos === 1 ? "" : "s"})</div>
+        <div className="text-[22px] font-bold" style={{ fontVariantNumeric: "tabular-nums", color: C.verde }}>{rs2(d.rentabilidade)}</div>
+        <div className="mt-3 text-[12px]" style={{ color: C.mute }}>Despesas</div>
+        <div className="text-[18px] font-semibold" style={{ fontVariantNumeric: "tabular-nums", color: C.laranja }}>{rs2(d.total_despesas + d.sem_categoria)}</div>
+        <div className="mt-3 text-[12px]" style={{ color: C.mute }}>Lucro</div>
+        <div className="text-[26px] font-bold" style={{ fontVariantNumeric: "tabular-nums", color: d.lucro >= 0 ? C.verde : C.laranja }}>{rs2(d.lucro)}</div>
+        <p className="mt-3 text-[11px] leading-snug" style={{ color: C.mute }}>Como na planilha: despesa é crédito − débito por categoria, e a rentabilidade líquida dos carros vendidos no mês entra como receita. Negociação, retirada e transferência ficam fora.</p>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- carros ---------------- */
+
+function FinCarros({ comp }) {
+  const [d, setD] = useState(null); const [erro, setErro] = useState("");
+  useEffect(() => { setD(null); fin("carros", { competencia: comp }).then(setD).catch((e) => setErro(e.message)); }, [comp]);
+  if (erro) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
+  if (!d) return <p className="text-[13px]" style={{ color: C.mute }}>Cruzando estoque e lançamentos…</p>;
+  const par = (p, pago) => {
+    const ok = p > 0 && Math.abs(pago - p) < 1;
+    const cor = p === 0 && pago === 0 ? C.mute : ok ? C.verde : pago === 0 ? C.laranja : AMARELO.texto;
+    return <span style={{ color: cor, fontVariantNumeric: "tabular-nums" }}>{rs2(pago)}<span style={{ color: C.mute }}> / {rs2(p)}</span></span>;
+  };
+  return (
+    <div className="rolar overflow-x-auto rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+      <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 860 }}>
+        <thead><tr>{["Entrou", "Carro", "Placa", "Comprador", "Pago ao cliente", "Quitação", "Débitos", "Recebido do lojista"].map((h, i) => (
+          <th key={h} className="whitespace-nowrap px-2 py-2 text-[11px] font-semibold uppercase tracking-[0.04em]" style={{ color: C.mute, textAlign: i >= 4 ? "right" : "left", borderBottom: `1px solid ${C.line}` }}>{h}</th>))}</tr></thead>
+        <tbody>
+          {d.carros.map((c) => (
+            <tr key={c.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+              <td className="whitespace-nowrap px-2 py-1.5 text-[12px]">{diaBR(c.entrou_em)}</td>
+              <td className="px-2 py-1.5 text-[12px]">{c.carro || "—"}</td>
+              <td className="px-2 py-1.5 text-[12px]" style={{ fontFamily: F.mono }}>{c.placa || "—"}</td>
+              <td className="px-2 py-1.5 text-[12px]">{c.comprador || <span style={{ color: C.mute }}>{c.situacao === "vendido" ? "—" : "no pátio"}</span>}</td>
+              <td className="px-2 py-1.5 text-right text-[12px]">{par(c.cliente.previsto, c.cliente.pago)}</td>
+              <td className="px-2 py-1.5 text-right text-[12px]">{par(c.quitacao.previsto, c.quitacao.pago)}</td>
+              <td className="px-2 py-1.5 text-right text-[12px]">{par(c.debitos.previsto, c.debitos.pago)}</td>
+              <td className="px-2 py-1.5 text-right text-[12px]">{par(c.lojista.previsto, c.lojista.recebido)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!d.carros.length && <p className="px-3 py-6 text-center text-[13px]" style={{ color: C.mute }}>Nenhum carro entrou ou foi vendido em {rotuloMes(comp)}.</p>}
+      <p className="px-3 py-2 text-[11px]" style={{ color: C.mute }}>pago / combinado. Verde bate; laranja nada pago; amarelo parcial. O vínculo vem da placa na descrição do lançamento.</p>
+    </div>
+  );
+}
+
+/* ---------------- folha ---------------- */
+
+function FinFolha({ comp }) {
+  const [d, setD] = useState(null); const [erro, setErro] = useState(""); const [vales, setVales] = useState([]);
+  const [novoFunc, setNovoFunc] = useState(""); const [novoVale, setNovoVale] = useState(null);
+  const carregar = () => {
+    setErro("");
+    fin("folha", { competencia: comp }).then(setD).catch((e) => setErro(e.message));
+    fin("vale", { competencia: comp }).then((x) => setVales(x.vales)).catch(() => {});
+  };
+  useEffect(() => { setD(null); carregar(); }, [comp]);
+  const gravar = async (l, mud) => {
+    try { await fin("folha", { competencia: comp }, finJson("PUT", { funcionario_id: l.funcionario_id, salario: l.salario, comissao: l.comissao, bonificacao: l.bonificacao, ...mud })); carregar(); }
+    catch (e) { setErro(e.message); }
+  };
+  const campo = (l, k) => (
+    <input className="w-24 rounded border px-1.5 py-1 text-right text-[12px] outline-none" style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal"
+      defaultValue={Number(l[k]) ? Math.round(l[k] * 100) / 100 : ""} onBlur={(e) => { const v = Number(String(e.target.value).replace(/\./g, "").replace(",", ".")) || 0; if (v !== Number(l[k])) gravar(l, { [k]: v }); }} />
+  );
+  if (erro) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
+  if (!d) return <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>;
+  const total = d.folha.reduce((t, l) => t + l.liquido, 0);
+  return (
+    <div className="space-y-4">
+      <div className="rolar overflow-x-auto rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 760 }}>
+          <thead><tr>{["Funcionário", "Salário", "Comissão", "Bonificação", "Vales", "Líquido", "Pago em"].map((h, i) => (
+            <th key={h} className="whitespace-nowrap px-2 py-2 text-[11px] font-semibold uppercase tracking-[0.04em]" style={{ color: C.mute, textAlign: i ? "right" : "left", borderBottom: `1px solid ${C.line}` }}>{h}</th>))}</tr></thead>
+          <tbody>
+            {d.folha.map((l) => (
+              <tr key={l.funcionario_id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                <td className="px-2 py-1.5 text-[13px] font-semibold">{l.nome}{!l.gravada && <span className="ml-1 text-[10px] font-normal" style={{ color: C.mute }}>base</span>}</td>
+                <td className="px-2 py-1.5 text-right">{campo(l, "salario")}</td>
+                <td className="px-2 py-1.5 text-right">{campo(l, "comissao")}</td>
+                <td className="px-2 py-1.5 text-right">{campo(l, "bonificacao")}</td>
+                <td className="px-2 py-1.5 text-right text-[12px]" style={{ fontVariantNumeric: "tabular-nums", color: l.vales ? C.laranja : C.mute }}>{rs2(l.vales)}</td>
+                <td className="px-2 py-1.5 text-right text-[13px] font-bold" style={{ fontVariantNumeric: "tabular-nums" }}>{rs2(l.liquido)}</td>
+                <td className="px-2 py-1.5 text-right"><input type="date" className="rounded border px-1 py-0.5 text-[12px] outline-none" style={inputSty} defaultValue={l.pago_em || ""} onBlur={(e) => { if ((e.target.value || null) !== (l.pago_em || null)) gravar(l, { pago_em: e.target.value || null }); }} /></td>
+              </tr>
+            ))}
+            <tr style={{ background: "#F3F7F4" }}><td colSpan={5} className="px-2 py-1.5 text-[12px] font-semibold">Total da folha · {rotuloMes(comp)}</td><td className="px-2 py-1.5 text-right text-[13px] font-bold" style={{ fontVariantNumeric: "tabular-nums" }}>{rs2(total)}</td><td /></tr>
+          </tbody>
+        </table>
+        {!d.folha.length && <p className="px-3 py-6 text-center text-[13px]" style={{ color: C.mute }}>Nenhum funcionário cadastrado.</p>}
+        <div className="flex items-center gap-2 px-3 py-2" style={{ borderTop: `1px solid ${C.line}` }}>
+          <input className="flex-1 rounded-lg border px-3 py-1.5 text-[13px] outline-none" style={inputSty} placeholder="Novo funcionário" value={novoFunc} onChange={(e) => setNovoFunc(e.target.value)} />
+          <button onClick={async () => { if (!novoFunc.trim()) return; try { await fin("funcionario", null, finJson("POST", { nome: novoFunc.trim() })); setNovoFunc(""); carregar(); } catch (e) { setErro(e.message); } }}
+            className="text-[13px] font-semibold" style={{ color: C.roxo }}>cadastrar</button>
+        </div>
+      </div>
+
+      <div className="rounded-xl p-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        <div className="flex items-baseline justify-between">
+          <span className="text-[12px] font-semibold uppercase tracking-[0.06em]" style={{ color: C.mute }}>Vales descontados em {rotuloMes(comp)}</span>
+          <button onClick={() => setNovoVale({ funcionario_id: d.folha[0] ? d.folha[0].funcionario_id : "", data: hojeEmSP(), valor: "", descricao: "" })} className="text-[13px] font-semibold" style={{ color: C.roxo }}>+ vale</button>
+        </div>
+        {novoVale && (
+          <div className="mt-2 flex flex-wrap items-end gap-2">
+            <select className="rounded-lg border px-2 py-1.5 text-[13px] outline-none" style={inputSty} value={novoVale.funcionario_id} onChange={(e) => setNovoVale({ ...novoVale, funcionario_id: e.target.value })}>
+              {d.folha.map((l) => <option key={l.funcionario_id} value={l.funcionario_id}>{l.nome}</option>)}
+            </select>
+            <input type="date" className="rounded-lg border px-2 py-1.5 text-[13px] outline-none" style={inputSty} value={novoVale.data} onChange={(e) => setNovoVale({ ...novoVale, data: e.target.value })} />
+            <input className="w-28 rounded-lg border px-2 py-1.5 text-right text-[13px] outline-none" style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal" placeholder="Valor" value={novoVale.valor} onChange={(e) => setNovoVale({ ...novoVale, valor: e.target.value })} />
+            <input className="flex-1 rounded-lg border px-2 py-1.5 text-[13px] outline-none" style={inputSty} placeholder="Motivo (opcional)" value={novoVale.descricao} onChange={(e) => setNovoVale({ ...novoVale, descricao: e.target.value })} />
+            <BotaoPrimario onClick={async () => { try { await fin("vale", null, finJson("POST", { ...novoVale, competencia: comp })); setNovoVale(null); carregar(); } catch (e) { setErro(e.message); } }}>Lançar</BotaoPrimario>
+            <button onClick={() => setNovoVale(null)} className="text-[13px]" style={{ color: C.mute }}>cancelar</button>
+          </div>
+        )}
+        <div className="mt-2 space-y-1">
+          {vales.map((v) => (
+            <div key={v.id} className="flex items-center gap-3 text-[13px]">
+              <span className="w-24" style={{ color: C.mute }}>{diaBR(v.data)}</span>
+              <span className="flex-1">{v.fin_funcionario ? v.fin_funcionario.nome : "—"}{v.descricao ? <span style={{ color: C.mute }}> · {v.descricao}</span> : null}</span>
+              <span style={{ fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>{rs2(v.valor)}</span>
+              <button onClick={async () => { try { await fin("vale", { id: v.id }, { method: "DELETE" }); carregar(); } catch (e) { setErro(e.message); } }} className="text-[11px]" style={{ color: C.mute }}>apagar</button>
+            </div>
+          ))}
+          {!vales.length && <p className="text-[12px]" style={{ color: C.mute }}>Nenhum vale neste mês.</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /**
  * A venda: escolher o comprador e lançar o valor.
  *
@@ -8131,6 +8509,7 @@ const ICONE = {
   estoque: "M3 13l2-5a2 2 0 0 1 2-1h10a2 2 0 0 1 2 1l2 5v5a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H6v1a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-5zm4 2h.01M17 15h.01",
   painel: "M4 20V10m6 10V4m6 16v-7",
   rentabilidade: "M4 18l5-6 4 3 7-9M15 6h5v5",
+  financeiro: "M3 7h18v12H3zM3 11h18M7 15h3",
   leads: "M5 4h3l2 5-2 1a11 11 0 0 0 6 6l1-2 5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z",
   adm: "M9 12l2 2 4-4M5 5h14v14H5z",
   gestao: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm8 4l-2-1 .3-2.2-2-1.2-1.7 1.4L12.5 8l-.5-2h-2l-.5 2-2.1 1-1.7-1.4-2 1.2L4 11l-2 1 2 1-.3 2.2 2 1.2 1.7-1.4 2.1 1 .5 2h2l.5-2 2.1-1 1.7 1.4 2-1.2L18 13z",
@@ -8158,6 +8537,9 @@ function destinosPara(perfil) {
     { id: "leads", rot: "Leads de indicação", curto: "Leads" },
     adm ? { id: "adm", rot: "Administrativo", curto: "Adm." } : null,
     gerente ? { id: "gestao", rot: "Equipe e metas", curto: "Equipe" } : null,
+    // Área restrita: só quem tem o sinalizador no perfil (0021). A tela
+    // esconde o destino; quem protege de verdade é a RLS.
+    (perfil && (perfil.financeiro || gerente)) ? { id: "financeiro", rot: "Financeiro", curto: "Financ." } : null,
   ].filter(Boolean);
 }
 
@@ -8394,6 +8776,7 @@ function App() {
       {tela === "leads" && <LeadsIndicacao />}
       {tela === "adm" && <TelaADM perfil={perfil} />}
       {tela === "gestao" && <TelaGestao perfil={perfil} comp={compOuAtual} />}
+      {tela === "financeiro" && <TelaFinanceiro perfil={perfil} comp={compOuAtual} mes={mes} />}
     </Shell>
   );
 }
