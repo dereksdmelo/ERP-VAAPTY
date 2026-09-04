@@ -185,6 +185,67 @@ async function negociadores(req, res, tok) {
   return res.status(405).json({ erro: "Use GET, POST ou PATCH." });
 }
 
+const PAPEIS_PERFIL = ["negociador", "prospeccao", "gerente", "prep"];
+
+/**
+ * Acessos (quem entra no sistema).
+ *
+ * Conta nova nasce desativada — é o oposto do padrão do Supabase, onde
+ * quem se cadastra já entra valendo (0004). Esta é a tela onde o
+ * gerente libera, e é a peça que faltava: sem ela, liberar um colega
+ * exigia SQL no painel do banco.
+ *
+ * Quem pode escrever é a RLS da 0004 (`perfil_gerente_escreve`), não
+ * código daqui. PATCH que volta vazio é ela recusando.
+ */
+async function acessos(req, res, tok) {
+  const base = `${URL_BASE}/rest/v1/perfil`;
+  const cab = { apikey: ANON, Authorization: tok };
+
+  if (req.method === "GET") {
+    const r = await fetch(`${base}?select=id,nome,papel,ativo,administrativo,financeiro,criado_em&order=ativo.asc,nome.asc`, { headers: cab });
+    if (!r.ok) return res.status(r.status === 401 ? 401 : 502).json({ erro: "Não consegui ler os acessos." });
+    const d = await r.json().catch(() => []);
+    return res.status(200).json({ acessos: Array.isArray(d) ? d : [] });
+  }
+
+  if (req.method === "PATCH") {
+    const id = String(req.query.id || "");
+    if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido." });
+    const c = await lerCorpo(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+
+    const mud = {};
+    if (c.nome !== undefined) mud.nome = texto(c.nome);
+    if (c.ativo !== undefined) mud.ativo = !!c.ativo;
+    if (c.administrativo !== undefined) mud.administrativo = !!c.administrativo;
+    if (c.financeiro !== undefined) mud.financeiro = !!c.financeiro;
+    if (c.papel !== undefined && PAPEIS_PERFIL.indexOf(String(c.papel)) >= 0) mud.papel = c.papel;
+    if (!Object.keys(mud).length) return res.status(400).json({ erro: "Nada para atualizar." });
+
+    // Ninguém tira o próprio acesso nem se rebaixa: seria a única
+    // forma de a loja ficar sem gerente e sem quem conserte.
+    const eu = donoDoToken(tok);
+    if (eu && eu === id && (mud.ativo === false || (mud.papel && mud.papel !== "gerente"))) {
+      return res.status(400).json({ erro: "Você não pode remover o próprio acesso. Peça a outro gerente." });
+    }
+
+    const r = await fetch(`${base}?id=eq.${id}`, {
+      method: "PATCH",
+      headers: { ...cab, "Content-Type": "application/json", Prefer: "return=representation" },
+      body: JSON.stringify(mud),
+    });
+    if (!r.ok) return res.status(r.status === 401 ? 401 : 502).json({ erro: "O banco recusou a alteração." });
+    const d = await r.json().catch(() => []);
+    const salvo = Array.isArray(d) ? d[0] : d;
+    if (!salvo) return res.status(403).json({ erro: "Só o gerente libera acesso." });
+    return res.status(200).json({ ok: true, acesso: salvo });
+  }
+
+  res.setHeader("Allow", "GET, PATCH");
+  return res.status(405).json({ erro: "Use GET ou PATCH." });
+}
+
 const CAMPOS_DESEMPENHO = [
   "faltas", "atrasos", "perdeu_atendimento", "prospectou", "avaliacao_google",
   "ficou_mais", "gravou_video", "avaliacao_errada", "postura", "indice_at",
@@ -328,6 +389,11 @@ module.exports = async function handler(req, res) {
 
   const tok = tokenDe(req);
   if (!tok) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
+
+  if (String(req.query.recurso || "") === "acessos") {
+    try { return await acessos(req, res, tok); }
+    catch (e) { return res.status(502).json({ erro: "Não consegui falar com o banco." }); }
+  }
 
   if (String(req.query.recurso || "") === "meta-loja") {
     try { return await metaLoja(req, res, tok); }

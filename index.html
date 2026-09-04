@@ -196,6 +196,35 @@ async function entrar(email, senha) {
   return d;
 }
 
+/**
+ * Criar conta.
+ *
+ * A conta nasce DESATIVADA: o gatilho `ao_criar_usuario` (0004) cria o
+ * perfil com ativo=false, e o gerente libera em Equipe e metas. É o
+ * oposto do padrão do Supabase — aqui dentro tem dado de cliente, e
+ * cadastro aberto sem liberação seria a carteira inteira exposta.
+ *
+ * O nome vai em `data` porque é de lá que o gatilho o lê; sem ele o
+ * perfil nasce com o pedaço do e-mail antes do @.
+ */
+async function criarConta(nome, email, senha) {
+  const cfg = await carregarConfig();
+  const r = await fetch(`${cfg.url}/auth/v1/signup`, {
+    method: "POST",
+    headers: { apikey: cfg.anon, "Content-Type": "application/json" },
+    body: JSON.stringify({ email: String(email).trim(), password: senha, data: { nome: String(nome).trim() } }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const m = String(d.error_description || d.msg || d.error || "");
+    if (/already registered|already exists/i.test(m)) throw new Error("Já existe conta com esse e-mail. Peça ao gerente para liberar.");
+    if (/password/i.test(m)) throw new Error("A senha precisa de pelo menos 6 caracteres.");
+    if (/signups? not allowed|disabled/i.test(m)) throw new Error("O cadastro está desligado no painel do Supabase. Peça ao gerente para ligar em Authentication → Sign In / Providers.");
+    throw new Error(m || "Não consegui criar a conta.");
+  }
+  return d;
+}
+
 async function renovarSessao() {
   const cfg = await carregarConfig();
   const atual = AUTH.sessao;
@@ -541,6 +570,21 @@ async function criarComprador(dados) {
 // pressupõe que todo mundo bate a sua, o que não acontece em mês
 // nenhum. Mora sob /api/perfil pelo mesmo motivo dos negociadores — a
 // Vercel do Hobby para em 12 funções e nós estamos nas 12.
+async function listarAcessos() {
+  const r = await fetchAut("/api/perfil?recurso=acessos");
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui ler os acessos.");
+  return d.acessos || [];
+}
+async function atualizarAcesso(id, dados) {
+  const r = await fetchAut(`/api/perfil?recurso=acessos&id=${encodeURIComponent(id)}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui salvar.");
+  return d.acesso;
+}
+
 async function lerMetaLoja(competencia) {
   const q = comoQuery({ competencia });
   const r = await fetchAut(`/api/perfil?recurso=meta-loja${q ? `&${q}` : ""}`);
@@ -6876,18 +6920,38 @@ function CRM({ perfil, aoAbrir, mes }) {
 /* ===================== entrada ===================== */
 
 function Login({ aoEntrar }) {
+  const [modo, setModo] = useState("entrar");
+  const [nome, setNome] = useState("");
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [indo, setIndo] = useState(false);
   const [erro, setErro] = useState("");
+  const [criada, setCriada] = useState(false);
+  const criando = modo === "criar";
 
   const enviar = async (ev) => {
     if (ev) ev.preventDefault();
-    if (!email.trim() || !senha) return;
+    if (!email.trim() || !senha || (criando && !nome.trim())) return;
     setErro(""); setIndo(true);
-    try { await entrar(email, senha); await aoEntrar(); }
-    catch (e) { setErro(e.message); setIndo(false); }
+    try {
+      if (criando) {
+        await criarConta(nome, email, senha);
+        // Não entra: a conta nasce desativada e a tela seguinte seria
+        // "acesso ainda não liberado". Dizer isso aqui é mais honesto.
+        setCriada(true); setIndo(false); return;
+      }
+      await entrar(email, senha); await aoEntrar();
+    } catch (e) { setErro(e.message); setIndo(false); }
   };
+
+  if (criada) {
+    return (
+      <Aviso titulo="Conta criada"
+        acao={<button onClick={() => { setCriada(false); setModo("entrar"); setSenha(""); }} className="mt-4 text-[13px] underline" style={{ color: C.roxo }}>Voltar para entrar</button>}>
+        Falta o gerente liberar o seu acesso. Avise que a conta <b>{email.trim()}</b> foi criada — assim que ele liberar, é só entrar com essa senha.
+      </Aviso>
+    );
+  }
 
   return (
     <div className="flex min-h-screen flex-col justify-center px-6" style={{ background: C.bg, fontFamily: F.body, color: C.ink }}>
@@ -6898,24 +6962,35 @@ function Login({ aoEntrar }) {
         </h1>
 
         <form onSubmit={enviar} className="mt-6 space-y-3">
+          {criando && (
+            <Campo label="Seu nome">
+              <input autoComplete="name" className={inputCls} style={inputSty}
+                value={nome} onChange={(e) => setNome(e.target.value)} />
+            </Campo>
+          )}
           <Campo label="E-mail">
             <input type="email" autoComplete="username" inputMode="email" className={inputCls} style={inputSty}
               value={email} onChange={(e) => setEmail(e.target.value)} />
           </Campo>
           <Campo label="Senha">
-            <input type="password" autoComplete="current-password" className={inputCls} style={inputSty}
+            <input type="password" autoComplete={criando ? "new-password" : "current-password"} className={inputCls} style={inputSty}
               value={senha} onChange={(e) => setSenha(e.target.value)} />
           </Campo>
-          <button type="submit" disabled={indo || !email.trim() || !senha}
-            className="w-full rounded-md py-3 text-[14px] font-semibold"
-            style={{ background: indo || !email.trim() || !senha ? C.line : C.roxo, color: "#fff" }}>
-            {indo ? "Entrando…" : "Entrar"}
+          <button type="submit" disabled={indo || !email.trim() || !senha || (criando && !nome.trim())}
+            className="w-full rounded-lg py-3 text-[14px] font-semibold"
+            style={{ background: indo || !email.trim() || !senha || (criando && !nome.trim()) ? C.line : C.roxo, color: "#fff" }}>
+            {indo ? (criando ? "Criando…" : "Entrando…") : criando ? "Criar conta" : "Entrar"}
           </button>
           {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
         </form>
 
-        <p className="mt-6 text-[11px] leading-relaxed" style={{ color: C.mute }}>
-          Conta nova precisa ser liberada pelo gerente antes de funcionar. Se você acabou de ser cadastrado e não entra, é isso.
+        <button onClick={() => { setModo(criando ? "entrar" : "criar"); setErro(""); }}
+          className="mt-4 w-full text-[13px] font-semibold" style={{ color: C.roxo }}>
+          {criando ? "Já tenho conta — entrar" : "Primeira vez aqui? Criar conta"}
+        </button>
+
+        <p className="mt-5 text-[11px] leading-relaxed" style={{ color: C.mute }}>
+          Conta nova precisa ser liberada pelo gerente antes de funcionar — aqui dentro tem dado de cliente. Se você acabou de criar a sua e não entra, é isso.
         </p>
       </div>
     </div>
@@ -9531,6 +9606,65 @@ const BotaoPrimario = ({ children, onClick, disabled, className }) => (
   </button>
 );
 
+/**
+ * Quem entra no sistema.
+ *
+ * Conta nova nasce desativada (0004) e alguém precisa liberar. Sem esta
+ * tela isso era SQL no painel do banco — e liberar um colega que está
+ * esperando no WhatsApp não pode depender disso.
+ */
+function Acessos({ perfil }) {
+  const [lista, setLista] = useState(null);
+  const [erro, setErro] = useState("");
+  const carregar = () => listarAcessos().then(setLista).catch((e) => setErro(e.message));
+  useEffect(carregar, []);
+
+  const mexer = async (a, mud) => {
+    setErro("");
+    setLista((ls) => ls.map((x) => (x.id === a.id ? { ...x, ...mud } : x)));
+    try { await atualizarAcesso(a.id, mud); carregar(); }
+    catch (e) { setErro(e.message); carregar(); }
+  };
+  const marca = (a, campo, rot) => (
+    <label className="flex items-center gap-1 text-[12px]" style={{ color: C.mute }}>
+      <input type="checkbox" checked={!!a[campo]} onChange={(e) => mexer(a, { [campo]: e.target.checked })} /> {rot}
+    </label>
+  );
+
+  if (erro && !lista) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
+  if (!lista) return <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>;
+  const esperando = lista.filter((a) => !a.ativo);
+
+  return (
+    <div>
+      {erro && <p className="mb-2 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+      {!!esperando.length && (
+        <p className="mb-2 rounded-lg px-3 py-2 text-[12px]" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
+          {esperando.length} conta{esperando.length > 1 ? "s" : ""} esperando liberação. Sem o visto de <b>entra</b> a pessoa vê a tela de espera.
+        </p>
+      )}
+      <div className="space-y-1.5">
+        {lista.map((a) => (
+          <div key={a.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg px-3 py-2.5"
+            style={{ background: a.ativo ? "#fff" : "#FBFAFC", border: `1px solid ${a.ativo ? C.line : C.laranja}` }}>
+            <span className="min-w-0 flex-1 truncate text-[14px] font-semibold">{a.nome}{a.id === (perfil && perfil.id) ? <span className="ml-1 text-[11px] font-normal" style={{ color: C.mute }}>· você</span> : null}</span>
+            <select className="rounded-lg border px-2 py-1 text-[12px] outline-none" style={inputSty}
+              value={a.papel} onChange={(e) => mexer(a, { papel: e.target.value })}>
+              {[["negociador", "Negociador"], ["prospeccao", "Prospecção"], ["prep", "Prep"], ["gerente", "Gerente"]].map(([v, r]) => <option key={v} value={v}>{r}</option>)}
+            </select>
+            {marca(a, "ativo", "entra")}
+            {marca(a, "administrativo", "administrativo")}
+            {marca(a, "financeiro", "financeiro")}
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-[11px] leading-snug" style={{ color: C.mute }}>
+        A pessoa cria a conta sozinha na tela de entrada e aparece aqui desativada. Gerente enxerga tudo; <b>administrativo</b> abre a conferência; <b>financeiro</b> abre o Financeiro.
+      </p>
+    </div>
+  );
+}
+
 /** Equipe, metas e importação — o que era a sanfona da gestão. */
 function TelaGestao({ perfil, comp }) {
   const [importando, setImportando] = useState(false);
@@ -9543,6 +9677,9 @@ function TelaGestao({ perfil, comp }) {
           <CadastroNegociadores perfil={perfil} competencia={comp || competenciaDe(hojeEmSP())} />
         </Bloco>
         <div className="space-y-4">
+          <Bloco titulo="Quem entra no sistema" sub="Conta nova nasce desativada. Libere aqui.">
+            <Acessos perfil={perfil} />
+          </Bloco>
           <Bloco titulo="Planilha do CRM" sub="Cole o que copiou do Google Sheets. Cada linha vira um atendimento.">
             {importando
               ? <Importar aoTerminar={() => setImportando(false)} />
