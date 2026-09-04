@@ -9617,7 +9617,12 @@ function Acessos({ perfil }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
   const carregar = () => listarAcessos().then(setLista).catch((e) => setErro(e.message));
-  useEffect(carregar, []);
+  // O corpo enxuto de `carregar` devolve a Promise, e um efeito que
+  // devolve algo que não é função quebra o React na DESMONTAGEM — ele
+  // chama o retorno como limpeza. Dá tela branca ao sair da tela, não
+  // ao entrar, que é o que torna isso difícil de achar. Por isso o
+  // efeito ignora o retorno de propósito.
+  useEffect(() => { carregar(); }, []);
 
   const mexer = async (a, mud) => {
     setErro("");
