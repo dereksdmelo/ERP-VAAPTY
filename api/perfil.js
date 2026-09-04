@@ -185,7 +185,10 @@ async function negociadores(req, res, tok) {
   return res.status(405).json({ erro: "Use GET, POST ou PATCH." });
 }
 
-const PAPEIS_PERFIL = ["negociador", "prospeccao", "gerente", "prep"];
+// Os valores do enum `papel_usuario` (0004), não os do cadastro de
+// negociadores: lá `prospeccao` existe, aqui o valor é `pre_venda`.
+// Mandar um valor fora do enum faz o Postgres recusar o update inteiro.
+const PAPEIS_PERFIL = ["pre_venda", "negociador", "gerente", "prep"];
 
 /**
  * Acessos (quem entra no sistema).
@@ -220,7 +223,12 @@ async function acessos(req, res, tok) {
     if (c.ativo !== undefined) mud.ativo = !!c.ativo;
     if (c.administrativo !== undefined) mud.administrativo = !!c.administrativo;
     if (c.financeiro !== undefined) mud.financeiro = !!c.financeiro;
-    if (c.papel !== undefined && PAPEIS_PERFIL.indexOf(String(c.papel)) >= 0) mud.papel = c.papel;
+    if (c.papel !== undefined) {
+      if (PAPEIS_PERFIL.indexOf(String(c.papel)) < 0) {
+        return res.status(400).json({ erro: `Papel "${String(c.papel)}" não existe. Use: ${PAPEIS_PERFIL.join(", ")}.` });
+      }
+      mud.papel = c.papel;
+    }
     if (!Object.keys(mud).length) return res.status(400).json({ erro: "Nada para atualizar." });
 
     // Ninguém tira o próprio acesso nem se rebaixa: seria a única
@@ -235,8 +243,15 @@ async function acessos(req, res, tok) {
       headers: { ...cab, "Content-Type": "application/json", Prefer: "return=representation" },
       body: JSON.stringify(mud),
     });
-    if (!r.ok) return res.status(r.status === 401 ? 401 : 502).json({ erro: "O banco recusou a alteração." });
-    const d = await r.json().catch(() => []);
+    // A razão do banco viaja junto: "O banco recusou" sozinho escondeu
+    // por um dia que o papel enviado não existia no enum.
+    const corpo = await r.text();
+    let d = null;
+    try { d = corpo ? JSON.parse(corpo) : null; } catch (e) {}
+    if (!r.ok) {
+      const msg = (d && (d.message || d.details || d.hint)) || "O banco recusou a alteração.";
+      return res.status(r.status === 401 ? 401 : 502).json({ erro: String(msg) });
+    }
     const salvo = Array.isArray(d) ? d[0] : d;
     if (!salvo) return res.status(403).json({ erro: "Só o gerente libera acesso." });
     return res.status(200).json({ ok: true, acesso: salvo });

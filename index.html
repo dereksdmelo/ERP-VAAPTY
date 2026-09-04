@@ -9655,7 +9655,11 @@ function Acessos({ perfil }) {
             <span className="min-w-0 flex-1 truncate text-[14px] font-semibold">{a.nome}{a.id === (perfil && perfil.id) ? <span className="ml-1 text-[11px] font-normal" style={{ color: C.mute }}>· você</span> : null}</span>
             <select className="rounded-lg border px-2 py-1 text-[12px] outline-none" style={inputSty}
               value={a.papel} onChange={(e) => mexer(a, { papel: e.target.value })}>
-              {[["negociador", "Negociador"], ["prospeccao", "Prospecção"], ["prep", "Prep"], ["gerente", "Gerente"]].map(([v, r]) => <option key={v} value={v}>{r}</option>)}
+              {/* Os valores são os do enum `papel_usuario` (0004). O
+                  cadastro de negociadores usa `prospeccao`; aqui é
+                  `pre_venda`, e trocar um pelo outro faz o banco
+                  recusar o update inteiro. */}
+              {[["negociador", "Negociador"], ["pre_venda", "Pré-venda"], ["prep", "Prep"], ["gerente", "Gerente"]].map(([v, r]) => <option key={v} value={v}>{r}</option>)}
             </select>
             {marca(a, "ativo", "entra")}
             {marca(a, "administrativo", "administrativo")}
