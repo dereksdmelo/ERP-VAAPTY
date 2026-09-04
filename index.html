@@ -8517,7 +8517,7 @@ const TIPOS_NEG_ROT = { pagto_cliente: "Pagto cliente", quitacao: "Quitação", 
 
 function TelaFinanceiro({ perfil, comp, mes }) {
   const [aba, setAba] = useState("lancamentos");
-  const ABAS = [["lancamentos", "Lançamentos"], ["dre", "DRE"], ["carros", "Carros"], ["folha", "Folha"]];
+  const ABAS = [["lancamentos", "Lançamentos"], ["contas", "A pagar / receber"], ["dre", "DRE"], ["carros", "Carros"], ["folha", "Folha"]];
   return (
     <div>
       <Cabecalho titulo="Financeiro" mes={mes}
@@ -8529,6 +8529,7 @@ function TelaFinanceiro({ perfil, comp, mes }) {
         ))}
       </div>
       {aba === "lancamentos" && <FinLancamentos comp={comp} />}
+      {aba === "contas" && <FinContas comp={comp} />}
       {aba === "dre" && <FinDRE comp={comp} />}
       {aba === "carros" && <FinCarros comp={comp} />}
       {aba === "folha" && <FinFolha comp={comp} />}
@@ -8733,6 +8734,7 @@ function FinLancamentos({ comp }) {
   const sug = (d && d.sugestoes) || {};
   const comSugestao = (d ? d.lancamentos : []).filter((l) => !l.categoria_id && sug[l.id]);
   const semCategoria = (d ? d.lancamentos : []).filter((l) => !l.categoria_id).length;
+  const aRevisar = (d ? d.lancamentos : []).filter((l) => l.revisar).length;
   const catNome = (id) => { const c = cats.filter((x) => x.id === id)[0]; return c ? c.nome : ""; };
   let saldo = d && d.saldo_anterior != null ? d.saldo_anterior : 0;
   const totais = (d ? d.lancamentos : []).reduce((t, l) => ({ deb: t.deb + (Number(l.debito) || 0), cred: t.cred + (Number(l.credito) || 0) }), { deb: 0, cred: 0 });
@@ -8787,6 +8789,7 @@ function FinLancamentos({ comp }) {
             </span>
           )}
           <span style={{ color: semCategoria ? C.laranja : C.mute }}>{semCategoria} sem categoria</span>
+          {!!aRevisar && <span style={{ color: AMARELO.texto, fontWeight: 600 }}>{aRevisar} conciliado{aRevisar > 1 ? "s" : ""} sozinho a revisar</span>}
           <span style={{ color: fech.nao_conciliados ? AMARELO.texto : C.mute }}>{fech.nao_conciliados} não conciliado{fech.nao_conciliados === 1 ? "" : "s"}</span>
           {!!d.lancamentos.filter((l) => !l.conciliado).length && (
             <button onClick={() => lote(d.lancamentos.filter((l) => !l.conciliado).map((l) => ({ id: l.id, conciliado: true })))} className="font-semibold" style={{ color: C.roxo }}>conciliar o mês</button>
@@ -8842,7 +8845,10 @@ function FinLancamentos({ comp }) {
                 const temRateio = !!(l.fin_rateio && l.fin_rateio.length);
                 const linhas = [(
                   <tr key={l.id} style={{ borderBottom: temRateio ? "none" : `1px solid ${C.line}` }}>
-                    <td className="whitespace-nowrap px-2 py-1 text-[12px]">{diaBR(l.data)}</td>
+                    <td className="whitespace-nowrap px-2 py-1 text-[12px]">
+                      {diaBR(l.data)}
+                      {l.fin_conta && <span className="block text-[10px]" style={{ color: C.mute }}>{l.fin_conta.nome}</span>}
+                    </td>
                     <td className="whitespace-nowrap px-2 py-1">
                       {/* A competência é o mês a que a despesa pertence,
                           não o do pagamento — e ela muda o DRE, então
@@ -8862,6 +8868,16 @@ function FinLancamentos({ comp }) {
                     <td className="px-2 py-1 text-[12px]">
                       <input type="checkbox" className="mr-1 align-middle" checked={!!l.conciliado} title="conciliado com o extrato" onChange={(e) => mudar(l, { conciliado: e.target.checked })} />
                       {l.descricao}{l.tipo_negociacao && <span className="ml-1 text-[10px]" style={{ color: C.mute }}>· {TIPOS_NEG_ROT[l.tipo_negociacao]}</span>}
+                      {/* Casou com um título em aberto sozinho: fica
+                          aceso até alguém conferir. */}
+                      {l.revisar && (
+                        <button onClick={() => mudar(l, { revisar: false })}
+                          className="ml-1 rounded px-1.5 py-0.5 text-[10px] font-bold"
+                          style={{ background: AMARELO.fundo, color: AMARELO.texto }}
+                          title="Casou com um título a pagar. Clique depois de conferir.">
+                          conciliado sozinho · revisar
+                        </button>
+                      )}
                     </td>
                     <td className="whitespace-nowrap px-2 py-1 text-[11px]">
                       {temRateio ? (
@@ -9049,6 +9065,7 @@ function FinImportar({ contaId, aoTerminar }) {
       {res ? (
         <div className="mt-3 rounded-lg p-3 text-[13px]" style={{ background: "#E8F3EE" }}>
           <b>{res.inseridos}</b> lançamentos novos · {res.repetidos} já existiam · {res.ligados_a_carro} ligados a carro
+          {!!res.conciliados && <div style={{ color: AMARELO.texto }}><b>{res.conciliados}</b> casaram com título em aberto e foram baixados — estão marcados para revisar.</div>}
           {!!res.sem_categoria && <span style={{ color: AMARELO.texto }}> · {res.sem_categoria} sem categoria (a memória vai sugerindo)</span>}
           {!!res.invalidas && <span style={{ color: AMARELO.texto }}> · {res.invalidas} linhas inválidas</span>}
           {res.saldo_inicial != null && <div>Saldo inicial da conta: {rs2(res.saldo_inicial)}</div>}
@@ -9085,6 +9102,187 @@ function FinImportar({ contaId, aoTerminar }) {
       )}
       {!res && erro && <p className="mt-1 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
       {!res && <BotaoPrimario onClick={enviar} disabled={indo || !contaId || !previa || !!previa.erro || !previa.dados.length} className="mt-2 w-full">{indo ? "Importando…" : `Importar${previa && !previa.erro ? ` ${previa.dados.length} movimentos` : ""}`}</BotaoPrimario>}
+    </div>
+  );
+}
+
+/**
+ * Contas a pagar e a receber: o que ainda não passou no banco.
+ *
+ * É a mesma linha do extrato, só que ainda `aberto`. Quando o OFX
+ * trouxer o pagamento, ela vira `efetivado` sozinha — e acende
+ * "revisar", porque acerto automático sem aviso é acerto invisível.
+ */
+function FinContas({ comp }) {
+  const [d, setD] = useState(null);
+  const [erro, setErro] = useState("");
+  const [cats, setCats] = useState([]);
+  const [contas, setContas] = useState([]);
+  const [novo, setNovo] = useState(null);
+  const [baixando, setBaixando] = useState(null);
+
+  const carregar = () => {
+    setErro("");
+    fin("titulo").then(setD).catch((e) => setErro(e.message));
+  };
+  useEffect(() => {
+    carregar();
+    fin("categoria").then((x) => setCats(x.lista)).catch(() => {});
+    fin("conta").then((x) => setContas(x.lista)).catch(() => {});
+  }, []);
+
+  const gravar = async () => {
+    setErro("");
+    try {
+      await fin("lancamento", null, finJson("POST", {
+        ...novo, situacao: "aberto",
+        debito: novo.tipo === "pagar" ? novo.valor : "",
+        credito: novo.tipo === "receber" ? novo.valor : "",
+        competencia: novo.competencia || comp,
+      }));
+      setNovo(null); carregar();
+    } catch (e) { setErro(e.message); }
+  };
+  const baixar = async (l, contaId, quando) => {
+    setErro("");
+    try { await fin("titulo", { acao: "baixar", id: l.id }, finJson("POST", { conta_id: contaId, data: quando, conciliado: true })); setBaixando(null); carregar(); }
+    catch (e) { setErro(e.message); }
+  };
+  const cancelar = async (l) => {
+    if (!window.confirm(`Cancelar "${l.descricao || l.favorecido || "título"}" de ${rs2(l.debito || l.credito)}?`)) return;
+    try { await fin("lancamento", { id: l.id }, finJson("PATCH", { situacao: "cancelado" })); carregar(); }
+    catch (e) { setErro(e.message); }
+  };
+
+  const hoje = hojeEmSP();
+  const titulos = d ? d.titulos : [];
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        {d && (
+          <>
+            <span className="rounded-xl px-4 py-2.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+              <span className="block text-[12px]" style={{ color: C.mute }}>A pagar</span>
+              <b className="text-[18px]" style={{ color: C.laranja, fontVariantNumeric: "tabular-nums" }}>{rs2(d.a_pagar)}</b>
+            </span>
+            <span className="rounded-xl px-4 py-2.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+              <span className="block text-[12px]" style={{ color: C.mute }}>A receber</span>
+              <b className="text-[18px]" style={{ color: C.verde, fontVariantNumeric: "tabular-nums" }}>{rs2(d.a_receber)}</b>
+            </span>
+            {!!d.vencidos && (
+              <span className="rounded-xl px-4 py-2.5" style={{ background: AMARELO.fundo, border: `1px solid ${C.line}` }}>
+                <span className="block text-[12px]" style={{ color: AMARELO.texto }}>Vencidos</span>
+                <b className="text-[18px]" style={{ color: C.laranja }}>{d.vencidos}</b>
+              </span>
+            )}
+          </>
+        )}
+        <span className="ml-auto flex gap-3 text-[13px]">
+          <button onClick={() => setNovo({ tipo: "pagar", favorecido: "", descricao: "", valor: "", vencimento: hoje, categoria_id: "", competencia: comp })}
+            style={{ color: C.roxo, fontWeight: 600 }}>+ conta a pagar</button>
+          <button onClick={() => setNovo({ tipo: "receber", favorecido: "", descricao: "", valor: "", vencimento: hoje, categoria_id: "", competencia: comp })}
+            style={{ color: C.verde, fontWeight: 600 }}>+ a receber</button>
+        </span>
+      </div>
+
+      {erro && <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+
+      {novo && (
+        <div className="rounded-xl p-4" style={{ background: C.paper, border: `1px solid ${C.roxo}` }}>
+          <div className="text-[14px] font-semibold">{novo.tipo === "pagar" ? "Nova conta a pagar" : "Novo título a receber"}</div>
+          <div className="mt-2 grid gap-2 lg:grid-cols-5">
+            <label className="lg:col-span-2"><Rotulo>{novo.tipo === "pagar" ? "Para quem" : "De quem"}</Rotulo>
+              <input className={inputCls} style={inputSty} value={novo.favorecido} onChange={(e) => setNovo({ ...novo, favorecido: e.target.value })} /></label>
+            <label className="lg:col-span-2"><Rotulo>Descrição</Rotulo>
+              <input className={inputCls} style={inputSty} value={novo.descricao} onChange={(e) => setNovo({ ...novo, descricao: e.target.value })} /></label>
+            <label><Rotulo req>Valor</Rotulo>
+              <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal" value={novo.valor} onChange={(e) => setNovo({ ...novo, valor: e.target.value })} /></label>
+            <label><Rotulo req>Vencimento</Rotulo>
+              <input type="date" className={inputCls} style={inputSty} value={novo.vencimento} onChange={(e) => setNovo({ ...novo, vencimento: e.target.value })} /></label>
+            <label><Rotulo>Competência</Rotulo>
+              <input type="month" className={inputCls} style={inputSty} value={String(novo.competencia).slice(0, 7)} onChange={(e) => setNovo({ ...novo, competencia: `${e.target.value}-01` })} /></label>
+            <label className="lg:col-span-2"><Rotulo>Categoria</Rotulo>
+              <select className={inputCls} style={inputSty} value={novo.categoria_id} onChange={(e) => setNovo({ ...novo, categoria_id: e.target.value })}>
+                <option value="">— categoria —</option>
+                {cats.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+              </select></label>
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <BotaoPrimario onClick={gravar} disabled={!novo.valor || !novo.vencimento}>Lançar título</BotaoPrimario>
+            <button onClick={() => setNovo(null)} className="text-[13px]" style={{ color: C.mute }}>cancelar</button>
+            <span className="text-[11px]" style={{ color: C.mute }}>Quando o extrato trouxer esse valor com vencimento próximo, ele casa sozinho.</span>
+          </div>
+        </div>
+      )}
+
+      {!d && !erro && <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>}
+      {d && !titulos.length && (
+        <div className="rounded-xl px-4 py-8 text-center" style={{ background: C.paper, border: `1px dashed ${C.line}` }}>
+          <p className="text-[15px] font-semibold">Nenhum título em aberto.</p>
+          <p className="mt-1 text-[13px]" style={{ color: C.mute }}>Lance o que a loja deve e o que tem a receber; o extrato baixa sozinho quando o dinheiro passar.</p>
+        </div>
+      )}
+
+      <div className="grid gap-2">
+        {titulos.map((l) => {
+          const pagar = Number(l.debito) > 0;
+          const venc = l.vencimento;
+          const vencido = venc && venc < hoje;
+          return (
+            <div key={l.id} className="rounded-xl p-3.5" style={{ background: C.paper, border: `1px solid ${vencido ? C.laranja : C.line}` }}>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[15px] font-semibold">{l.favorecido || l.descricao || "Sem descrição"}</div>
+                  <div className="text-[12px]" style={{ color: C.mute }}>
+                    {[l.favorecido && l.descricao ? l.descricao : null,
+                      l.fin_categoria ? l.fin_categoria.nome : "sem categoria",
+                      `competência ${String(l.competencia).slice(5, 7)}/${String(l.competencia).slice(2, 4)}`].filter(Boolean).join(" · ")}
+                  </div>
+                  <div className="mt-0.5 text-[12px]" style={{ color: vencido ? C.laranja : C.mute, fontWeight: vencido ? 700 : 400 }}>
+                    {venc ? `vence ${diaBR(venc)}${vencido ? " · vencido" : ""}` : "sem vencimento"}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[18px]" style={{ fontFamily: F.mono, fontWeight: 700, color: pagar ? C.laranja : C.verde }}>
+                    {rs2(pagar ? l.debito : l.credito)}
+                  </div>
+                  <div className="text-[11px]" style={{ color: C.mute }}>{pagar ? "a pagar" : "a receber"}</div>
+                </div>
+              </div>
+
+              {baixando === l.id ? (
+                <BaixarTitulo l={l} contas={contas} aoFechar={() => setBaixando(null)} aoBaixar={baixar} />
+              ) : (
+                <div className="mt-2 flex flex-wrap items-center gap-3 text-[13px]">
+                  <button onClick={() => setBaixando(l.id)} className="rounded-lg px-3.5 py-2 font-semibold" style={{ background: C.roxo, color: "#fff" }}>
+                    {pagar ? "Paguei" : "Recebi"}
+                  </button>
+                  <button onClick={() => cancelar(l)} style={{ color: C.mute }}>cancelar título</button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Baixar exige dizer de qual banco saiu — é a informação que falta. */
+function BaixarTitulo({ l, contas, aoFechar, aoBaixar }) {
+  const [conta, setConta] = useState(contas[0] ? contas[0].id : "");
+  const [quando, setQuando] = useState(hojeEmSP());
+  return (
+    <div className="mt-2 flex flex-wrap items-end gap-2 rounded-lg p-2.5" style={{ background: C.bg }}>
+      <label><Rotulo req>De qual banco</Rotulo>
+        <select className="rounded-lg border px-2 py-1.5 text-[13px] outline-none" style={inputSty} value={conta} onChange={(e) => setConta(e.target.value)}>
+          {contas.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.empresa ? ` · ${c.empresa}` : ""}</option>)}
+        </select></label>
+      <label><Rotulo>Quando</Rotulo>
+        <input type="date" className="rounded-lg border px-2 py-1.5 text-[13px] outline-none" style={inputSty} value={quando} onChange={(e) => setQuando(e.target.value)} /></label>
+      <BotaoPrimario disabled={!conta} onClick={() => aoBaixar(l, conta, quando)}>Baixar</BotaoPrimario>
+      <button onClick={aoFechar} className="text-[13px]" style={{ color: C.mute }}>cancelar</button>
     </div>
   );
 }
@@ -9155,6 +9353,13 @@ function FinDRE({ comp }) {
         <div className="text-[22px] font-bold" style={{ fontVariantNumeric: "tabular-nums", color: C.verde }}>{rs2(d.rentabilidade)}</div>
         <div className="mt-3 text-[12px]" style={{ color: C.mute }}>Despesas</div>
         <div className="text-[18px] font-semibold" style={{ fontVariantNumeric: "tabular-nums", color: C.laranja }}>{rs2(d.total_despesas + d.sem_categoria)}</div>
+        {!!d.em_aberto && (
+          <>
+            <div className="mt-3 text-[12px]" style={{ color: C.mute }}>Em aberto nesta competência</div>
+            <div className="text-[16px] font-semibold" style={{ fontVariantNumeric: "tabular-nums", color: AMARELO.texto }}>{rs2(d.em_aberto)}</div>
+            <div className="text-[11px]" style={{ color: C.mute }}>Títulos que ainda não passaram no banco. Fora do lucro abaixo, de propósito.</div>
+          </>
+        )}
         <div className="mt-3 text-[12px]" style={{ color: C.mute }}>Lucro</div>
         <div className="text-[26px] font-bold" style={{ fontVariantNumeric: "tabular-nums", color: d.lucro >= 0 ? C.verde : C.laranja }}>{rs2(d.lucro)}</div>
         <p className="mt-3 text-[11px] leading-snug" style={{ color: C.mute }}>Como na planilha: despesa é crédito − débito por categoria, e a rentabilidade líquida dos carros vendidos no mês entra como receita. Negociação, retirada e transferência ficam fora.</p>

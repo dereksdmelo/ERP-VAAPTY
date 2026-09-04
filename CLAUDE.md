@@ -1288,6 +1288,30 @@ parte. É o "está de acordo?" na própria linha do extrato.
 pertence, não o do pagamento, e é ela que o DRE soma: corrigir isso não
 pode exigir apagar e relançar.
 
+**O título e o movimento do banco são a MESMA linha (0025).** O título
+nasce `aberto`, com vencimento e sem conta; quando o extrato traz o
+pagamento, a mesma linha vira `efetivado` e ganha a conta, a data real
+e a chave do banco. Duas linhas — uma prevista e outra realizada —
+obrigariam a decidir a cada soma qual das duas contar, e a resposta
+erra metade das vezes.
+
+**A lista de lançamentos e o saldo só olham `efetivado`.** Título em
+aberto misturado ali viraria saldo que o banco não tem. O DRE também
+soma só o efetivado — é o número que o Derek confere hoje — e devolve
+`em_aberto` à parte, para não mudar o significado da linha sem ele
+saber.
+
+**O casamento automático é por valor e vencimento, nunca por nome.**
+Nome de favorecido no extrato do Itaú raramente bate com o que se
+digitou. A janela é de sete dias, porque boleto pago no dia seguinte é
+regra e não exceção. **Dois títulos do mesmo valor na mesma semana não
+casam nenhum** — chutar qual é seria pior que deixar para a pessoa.
+
+**`revisar` é o que o acerto automático deixa aceso.** Casei este
+movimento com aquele título; confira. Sem esse sinalizador, conciliação
+automática vira conciliação invisível — e é o tipo de coisa que só se
+descobre quando o saldo não fecha três meses depois.
+
 **O que ainda não existe:** conciliação automática contra o estoque (a
 aba Carros mostra, não concilia) e o cartão de crédito por fatura.
 
