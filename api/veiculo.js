@@ -218,8 +218,15 @@ const base = (tabela) => `${URL_BASE}/rest/v1/${tabela}`;
  * O `select` traz veículo e custos na mesma consulta: sem isso, a
  * lista faria uma ida ao banco por carro só para somar despesa.
  */
+// A ficha do veículo vem inteira porque a tela de venda para lojista
+// monta o descritivo e o JSON do Shinkai a partir dela — sem isso
+// seria uma consulta por carro na hora de anunciar. São colunas
+// pequenas; o teto da lista continua sendo 300 linhas.
 const CAMPOS_ESTOQUE =
-  "*,veiculo(id,placa,marca_modelo,ano_modelo,cor,km_atual,fipe_valor,valor_por)," +
+  "*,veiculo(id,placa,chassi,marca_modelo,ano_fabricacao,ano_modelo,cor,combustivel,cambio," +
+  "km_atual,km_entrada,fipe_codigo,fipe_valor,valor_por,gastos_descricao,opcionais," +
+  "pneu_de,pneu_dd,pneu_te,pneu_td,leilao_sinistro,gnv,detalhes_lataria,detalhes_mecanica," +
+  "pontos_positivos,ressalvas_lojista),foto(id)," +
   "comprador(id,nome,tipo,telefone),estoque_custo(id,tipo,descricao,previsto,realizado,pago_em,anexo_id,do_fechamento)";
 
 /**
@@ -462,6 +469,19 @@ async function estoque(req, res, tok) {
     ["negociador_nome", "meio_alcance", "prospector"].forEach((k) => {
       if (c[k] !== undefined) mud[k] = texto(c[k]);
     });
+    if (c.anunciado_em !== undefined) mud.anunciado_em = c.anunciado_em ? new Date().toISOString() : null;
+    // Mudar o preço guarda o anterior: abaixar preço é decisão, e o
+    // histórico dela é o que explica a margem no fim.
+    if (c.preco_pedido !== undefined) {
+      const novoPreco = decimal(c.preco_pedido);
+      const linha = (await supa(`${base("estoque")}?select=preco_pedido,precos&id=eq.${id}`, { headers: cab }) || [])[0];
+      const antes = linha && linha.preco_pedido != null ? Number(linha.preco_pedido) : null;
+      if (antes != null && novoPreco != null && antes !== novoPreco) {
+        const hist = linha && Array.isArray(linha.precos) ? linha.precos : [];
+        mud.precos = hist.concat([{ de: antes, para: novoPreco, em: new Date().toISOString() }]);
+      }
+      mud.preco_pedido = novoPreco;
+    }
     if (c.semana_venda !== undefined) {
       const n = Number(c.semana_venda);
       mud.semana_venda = n >= 1 && n <= 5 ? Math.trunc(n) : null;

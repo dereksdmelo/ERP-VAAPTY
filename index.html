@@ -8187,6 +8187,235 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
 }
 
 /* ==================================================================
+ * VENDA PARA LOJISTAS
+ *
+ * O pátio visto do lado de quem precisa esvaziá-lo. A pergunta aqui
+ * não é quanto o carro custou — isso é o Estoque — é: por quanto está
+ * sendo oferecido, há quantos dias, e já foi anunciado.
+ *
+ * O carro sai daqui por três caminhos, e os três reaproveitam o que a
+ * avaliação já produziu: o descritivo do WhatsApp, o JSON do Shinkai e
+ * o WhatsApp direto para um lojista do cadastro.
+ * ================================================================== */
+
+const SHINKAI_PAINEL = "https://www.shinkai.com.br/painel";
+
+/**
+ * A linha do estoque no formato que `gerarDescritivo` e
+ * `payloadShinkai` esperam.
+ *
+ * As duas funções nasceram para a ficha do atendimento, que vive no
+ * `localStorage` com nomes próprios. Traduzir aqui é o que evita ter
+ * dois descritivos diferentes no sistema — um para o carro que está
+ * sendo avaliado e outro para o que está no pátio.
+ */
+function fichaDoEstoque(e) {
+  const v = e.veiculo || {};
+  const ano = v.ano_fabricacao && v.ano_modelo && v.ano_fabricacao !== v.ano_modelo
+    ? `${v.ano_fabricacao}/${v.ano_modelo}` : String(v.ano_modelo || v.ano_fabricacao || "");
+  const cap = (p) => (p ? p.charAt(0).toUpperCase() + p.slice(1) : "");
+  return {
+    placa: v.placa || "", chassi: v.chassi || "", modelo: v.marca_modelo || "", ano,
+    cor: v.cor || "", combustivel: v.combustivel || "", cambio: v.cambio || "",
+    km: v.km_atual || 0, kmEntrada: v.km_entrada || 0,
+    fipe: v.fipe_valor, fipeCodigo: v.fipe_codigo,
+    // O preço pedido manda; o valor_por da avaliação é o padrão.
+    por: e.preco_pedido != null ? e.preco_pedido : v.valor_por,
+    gastos: v.gastos_descricao || "",
+    pneus: [cap(v.pneu_de), cap(v.pneu_dd), cap(v.pneu_te), cap(v.pneu_td)],
+    leilao: !!v.leilao_sinistro, gnv: !!v.gnv, opcionais: v.opcionais || [],
+    lataria: v.detalhes_lataria || "", mecanica: v.detalhes_mecanica || "",
+    positivos: (v.pontos_positivos || []).join("\n"),
+    ressalvas: (v.ressalvas_lojista || []).join("\n"),
+    internas: "", negociador: e.negociador_nome || "",
+  };
+}
+
+function TelaVendaLojistas({ perfil }) {
+  const [lista, setLista] = useState(null);
+  const [erro, setErro] = useState("");
+  const [copiado, setCopiado] = useState("");
+  const [enviando, setEnviando] = useState(null);
+  const [compradores, setCompradores] = useState([]);
+  const [vendendo, setVendendo] = useState(null);
+  const [ordem, setOrdem] = useState("patio");
+
+  const carregar = () => {
+    setErro("");
+    listarEstoque("em_estoque").then(setLista).catch((e) => setErro(e.message));
+  };
+  useEffect(() => { carregar(); listarCompradores().then(setCompradores).catch(() => {}); }, []);
+
+  const mexer = async (e, mud) => {
+    setLista((ls) => ls.map((x) => (x.id === e.id ? { ...x, ...mud } : x)));
+    try { await atualizarEstoque(e.id, mud); carregar(); }
+    catch (ex) { setErro(ex.message); carregar(); }
+  };
+  const copiar = async (texto, marca) => {
+    try { await navigator.clipboard.writeText(texto); }
+    catch (ex) {
+      // Safari sem permissão: cai no textarea escondido, que é o que
+      // sempre funcionou no celular da loja.
+      const t = document.createElement("textarea");
+      t.value = texto; t.style.position = "fixed"; t.style.opacity = "0";
+      document.body.appendChild(t); t.select();
+      try { document.execCommand("copy"); } catch (e2) { setErro("Não consegui copiar. Selecione o texto à mão."); }
+      document.body.removeChild(t);
+    }
+    setCopiado(marca); setTimeout(() => setCopiado(""), 2000);
+  };
+
+  const carros = (lista || []).slice().sort((a, b) =>
+    ordem === "patio" ? String(a.entrou_em).localeCompare(String(b.entrou_em))
+      : (Number(b.preco_pedido || 0) - Number(a.preco_pedido || 0)));
+  const semAnuncio = carros.filter((e) => !e.anunciado_em).length;
+  const custoTotal = carros.reduce((t, e) => t + contaDoEstoque(e).atual, 0);
+  const pedidoTotal = carros.reduce((t, e) => t + (Number(e.preco_pedido) || 0), 0);
+
+  return (
+    <div className="space-y-3">
+      <Cabecalho titulo="Venda para lojistas"
+        sub={lista === null ? "Carregando…"
+          : `${carros.length} no pátio · ${semAnuncio} sem anúncio · custo ${brl(custoTotal)}${pedidoTotal ? ` · pedido ${brl(pedidoTotal)}` : ""}`}
+        acao={<a href={SHINKAI_PAINEL} target="_blank" rel="noreferrer"
+          className="rounded-lg px-4 py-2.5 text-[14px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>
+          Abrir o Shinkai
+        </a>} />
+
+      {erro && <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+
+      <div className="flex flex-wrap items-center gap-2 text-[13px]">
+        {[["patio", "Mais tempo no pátio"], ["preco", "Maior preço"]].map(([v, r]) => (
+          <button key={v} onClick={() => setOrdem(v)} className="rounded-full px-3 py-1 font-semibold"
+            style={{ background: ordem === v ? C.roxoFraco : "transparent", color: ordem === v ? C.roxo : C.mute }}>{r}</button>
+        ))}
+      </div>
+
+      {lista && !carros.length && (
+        <div className="rounded-xl px-4 py-8 text-center" style={{ background: C.paper, border: `1px dashed ${C.line}` }}>
+          <p className="text-[15px] font-semibold">Nenhum carro no pátio.</p>
+          <p className="mt-1 text-[13px]" style={{ color: C.mute }}>Assim que um negócio fechar e o carro entrar no estoque, ele aparece aqui para ser anunciado.</p>
+        </div>
+      )}
+
+      <div className="grid gap-2">
+        {carros.map((e) => {
+          const v = e.veiculo || {};
+          const c = contaDoEstoque(e);
+          const dias = diasNoPatio(e);
+          const f = fichaDoEstoque(e);
+          const fotos = (e.foto || []).length;
+          const pedido = Number(e.preco_pedido) || 0;
+          const margem = pedido ? pedido - c.atual : null;
+          // Trinta dias é quando o carro deixa de ser estoque e vira
+          // dinheiro parado. A cor é o único aviso que a tela dá.
+          const corDias = dias == null ? C.mute : dias >= 60 ? C.laranja : dias >= 30 ? AMARELO.texto : C.mute;
+          return (
+            <div key={e.id} className="rounded-xl p-3.5" style={{ background: C.paper, border: `1px solid ${e.anunciado_em ? C.line : C.roxo}` }}>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[15px] font-semibold">
+                    {v.placa || "sem placa"} <span style={{ color: C.mute, fontWeight: 400 }}>· {v.marca_modelo || "—"}{v.ano_modelo ? ` ${v.ano_modelo}` : ""}</span>
+                  </div>
+                  <div className="mt-0.5 text-[12px]" style={{ color: C.mute }}>
+                    {[v.cor, v.km_atual ? `${Number(v.km_atual).toLocaleString("pt-BR")} km` : null, v.cambio,
+                      v.fipe_valor ? `FIPE ${brl(v.fipe_valor)}` : null, `${fotos} foto${fotos === 1 ? "" : "s"}`].filter(Boolean).join(" · ")}
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
+                    <span style={{ color: corDias, fontWeight: dias >= 30 ? 700 : 400 }}>
+                      {dias == null ? "" : `${dias} dia${dias === 1 ? "" : "s"} no pátio`}
+                    </span>
+                    <span style={{ color: C.mute }}>custo {brl(c.atual)}</span>
+                    {margem != null && (
+                      <span style={{ color: margem >= 0 ? C.verde : C.laranja, fontWeight: 600 }}>margem prevista {brl(margem)}</span>
+                    )}
+                    {!!(e.precos || []).length && <span style={{ color: AMARELO.texto }}>preço mudou {(e.precos || []).length}×</span>}
+                  </div>
+                </div>
+                <label className="shrink-0 text-right">
+                  <span className="block text-[10px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Preço pedido</span>
+                  <input className="mt-[2px] w-32 rounded-lg border px-2 py-1.5 text-right text-[15px] outline-none"
+                    style={{ ...inputSty, fontFamily: F.mono, fontWeight: 700, borderColor: pedido ? C.line : C.laranja }}
+                    inputMode="decimal" placeholder="—"
+                    defaultValue={pedido ? Math.round(pedido) : ""}
+                    onBlur={(ev) => {
+                      const n = Number(String(ev.target.value).replace(/\./g, "").replace(",", ".")) || 0;
+                      if (n !== pedido) mexer(e, { preco_pedido: n || null });
+                    }} />
+                </label>
+              </div>
+
+              <div className="mt-2.5 flex flex-wrap items-center gap-2 text-[13px]">
+                <button onClick={() => copiar(gerarDescritivo(f, fotos), `d${e.id}`)}
+                  className="rounded-lg px-3 py-2 font-semibold" style={{ border: `1px solid ${C.verde}`, color: C.verde }}>
+                  {copiado === `d${e.id}` ? "descritivo copiado" : "Copiar descritivo"}
+                </button>
+                <button onClick={async () => {
+                    await copiar(JSON.stringify(payloadShinkai(f, fotos), null, 2), `s${e.id}`);
+                    window.open(SHINKAI_PAINEL, "_blank", "noopener");
+                    if (!e.anunciado_em) mexer(e, { anunciado_em: true });
+                  }}
+                  className="rounded-lg px-3 py-2 font-semibold" style={{ background: C.roxo, color: "#fff" }}>
+                  {copiado === `s${e.id}` ? "JSON copiado · Shinkai aberto" : "Levar para o Shinkai"}
+                </button>
+                <button onClick={() => setEnviando(enviando === e.id ? null : e.id)} style={{ color: C.roxo, fontWeight: 600 }}>
+                  mandar para um lojista
+                </button>
+                {e.anunciado_em ? (
+                  <span className="text-[12px]" style={{ color: C.verde }}>anunciado {diaBR(e.anunciado_em)}</span>
+                ) : (
+                  <span className="text-[12px]" style={{ color: C.laranja, fontWeight: 600 }}>ainda não anunciado</span>
+                )}
+                <button onClick={() => setVendendo(vendendo === e.id ? null : e.id)}
+                  className="ml-auto rounded-lg px-4 py-2 font-semibold" style={{ background: C.verde, color: "#fff" }}>
+                  Vender
+                </button>
+              </div>
+
+              {/* ---- mandar para um lojista do cadastro ---- */}
+              {enviando === e.id && (
+                <div className="mt-2 rounded-lg p-2.5" style={{ background: C.bg }}>
+                  {compradores.length ? (
+                    <>
+                      <div className="text-[11px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Abrir o WhatsApp com o descritivo pronto</div>
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {compradores.filter((k) => k.ativo !== false && k.telefone).map((k) => (
+                          <a key={k.id} href={zap(k.telefone, gerarDescritivo(f, fotos))} target="_blank" rel="noreferrer"
+                            onClick={() => { if (!e.anunciado_em) mexer(e, { anunciado_em: true }); }}
+                            className="rounded-lg px-3 py-1.5 text-[13px] font-semibold"
+                            style={{ background: "#fff", border: `1px solid ${C.verde}`, color: C.verde }}>
+                            {k.nome}
+                          </a>
+                        ))}
+                      </div>
+                      {!compradores.filter((k) => k.telefone).length && (
+                        <p className="mt-1 text-[12px]" style={{ color: C.mute }}>Nenhum lojista com telefone no cadastro. O telefone entra quando você cadastra o comprador numa venda.</p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-[12px]" style={{ color: C.mute }}>Nenhum lojista cadastrado ainda. Eles entram no cadastro quando você registra a primeira venda.</p>
+                  )}
+                </div>
+              )}
+
+              {vendendo === e.id && (
+                <div className="mt-2">
+                  <VenderCarro e={e} aoFechar={() => setVendendo(null)}
+                    aoVender={async (dados) => {
+                      try { await atualizarEstoque(e.id, dados); setVendendo(null); carregar(); }
+                      catch (ex) { setErro(ex.message); }
+                    }} />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ==================================================================
  * FINANCEIRO (0021) — área restrita
  * ================================================================== */
 
@@ -9126,6 +9355,7 @@ const ICONE = {
   painel: "M4 20V10m6 10V4m6 16v-7",
   rentabilidade: "M4 18l5-6 4 3 7-9M15 6h5v5",
   financeiro: "M3 7h18v12H3zM3 11h18M7 15h3",
+  lojistas: "M4 9h16l-1 11H5zM4 9l2-5h12l2 5M9 13v4M15 13v4",
   leads: "M5 4h3l2 5-2 1a11 11 0 0 0 6 6l1-2 5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z",
   adm: "M9 12l2 2 4-4M5 5h14v14H5z",
   gestao: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm8 4l-2-1 .3-2.2-2-1.2-1.7 1.4L12.5 8l-.5-2h-2l-.5 2-2.1 1-1.7-1.4-2 1.2L4 11l-2 1 2 1-.3 2.2 2 1.2 1.7-1.4 2.1 1 .5 2h2l.5-2 2.1-1 1.7 1.4 2-1.2L18 13z",
@@ -9157,6 +9387,7 @@ function destinosPara(perfil) {
     // Área restrita: só quem tem o sinalizador no perfil (0021). A tela
     // esconde o destino; quem protege de verdade é a RLS.
     (perfil && (perfil.financeiro || gerente)) ? { id: "financeiro", rot: "Financeiro", curto: "Financ." } : null,
+    { id: "lojistas", rot: "Venda para lojistas", curto: "Lojistas" },
   ].filter(Boolean);
 }
 
@@ -9395,6 +9626,7 @@ function App() {
       {tela === "adm" && <TelaADM perfil={perfil} />}
       {tela === "gestao" && <TelaGestao perfil={perfil} comp={compOuAtual} />}
       {tela === "financeiro" && <TelaFinanceiro perfil={perfil} comp={compOuAtual} mes={mes} />}
+      {tela === "lojistas" && <TelaVendaLojistas perfil={perfil} />}
     </Shell>
   );
 }
