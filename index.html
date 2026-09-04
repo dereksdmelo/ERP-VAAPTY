@@ -9450,19 +9450,25 @@ const Icone = ({ nome, tam }) => (
 function destinosPara(perfil) {
   const gerente = !!(perfil && perfil.papel === "gerente");
   const adm = !!(perfil && (perfil.administrativo || gerente));
+  // "Gestão" aqui é gerente ou administrativo — o mesmo que `e_adm()`
+  // no banco.
+  const gestao = adm;
   return [
     { id: "prevendas", rot: "Pré-vendas", curto: "Pré-v.", principal: true },
     { id: "atendimentos", rot: "Atendimentos", curto: "Atend.", principal: true },
     { id: "estoque", rot: "Estoque", curto: "Estoque", principal: true },
     { id: "painel", rot: "Painel do mês", curto: "Painel" },
-    { id: "rentabilidade", rot: "Rentabilidade", curto: "Rentab." },
+    // Rentabilidade e Venda para lojistas mostram margem e custo por
+    // carro: é conversa de gestão, não de quem está com o cliente na
+    // mesa. Fora para negociador e pré-venda.
+    gestao ? { id: "rentabilidade", rot: "Rentabilidade", curto: "Rentab." } : null,
     { id: "leads", rot: "Leads de indicação", curto: "Leads" },
     adm ? { id: "adm", rot: "Administrativo", curto: "Adm." } : null,
     gerente ? { id: "gestao", rot: "Equipe e metas", curto: "Equipe" } : null,
     // Área restrita: só quem tem o sinalizador no perfil (0021). A tela
     // esconde o destino; quem protege de verdade é a RLS.
     (perfil && (perfil.financeiro || gerente)) ? { id: "financeiro", rot: "Financeiro", curto: "Financ." } : null,
-    { id: "lojistas", rot: "Venda para lojistas", curto: "Lojistas" },
+    gestao ? { id: "lojistas", rot: "Venda para lojistas", curto: "Lojistas" } : null,
   ].filter(Boolean);
 }
 
@@ -9760,19 +9766,27 @@ function App() {
   };
   const mes = { comp, setComp, MESES };
   const compOuAtual = comp || competenciaDe(hojeEmSP());
+  const podeGestao = !!(perfil && (perfil.administrativo || perfil.papel === "gerente"));
+
+  // Tela que sumiu do menu para este perfil (ou nunca foi dele) volta
+  // para os atendimentos, em vez de deixar a área de conteúdo vazia.
+  const permitida = destinosPara(perfil).some((d) => d.id === tela);
+  if (!permitida && tela !== "atendimentos") { setTela("atendimentos"); return null; }
 
   return (
     <Shell perfil={perfil} tela={tela} setTela={setTela}>
       {tela === "prevendas" && <TelaPreVendas perfil={perfil} aoAbrirAtendimento={abrir} />}
       {tela === "atendimentos" && <CRM perfil={perfil} aoAbrir={abrir} mes={{ ...mes, todos: true }} />}
       {tela === "estoque" && <TelaEstoque perfil={perfil} comp={compOuAtual} mes={mes} />}
-      {tela === "rentabilidade" && <TelaEstoque perfil={perfil} comp={compOuAtual} mes={mes} modo="rentabilidade" />}
+      {/* A rota confere de novo: esconder o item do menu é conveniência,
+          não controle. Quem chegar aqui por outro caminho não passa. */}
+      {tela === "rentabilidade" && podeGestao && <TelaEstoque perfil={perfil} comp={compOuAtual} mes={mes} modo="rentabilidade" />}
       {tela === "painel" && <Funil perfil={perfil} comp={compOuAtual} mes={mes} />}
       {tela === "leads" && <LeadsIndicacao />}
       {tela === "adm" && <TelaADM perfil={perfil} />}
       {tela === "gestao" && <TelaGestao perfil={perfil} comp={compOuAtual} />}
       {tela === "financeiro" && <TelaFinanceiro perfil={perfil} comp={compOuAtual} mes={mes} />}
-      {tela === "lojistas" && <TelaVendaLojistas perfil={perfil} />}
+      {tela === "lojistas" && podeGestao && <TelaVendaLojistas perfil={perfil} />}
     </Shell>
   );
 }
