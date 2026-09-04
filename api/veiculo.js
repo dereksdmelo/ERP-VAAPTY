@@ -226,7 +226,9 @@ const CAMPOS_ESTOQUE =
   "*,veiculo(id,placa,chassi,marca_modelo,ano_fabricacao,ano_modelo,cor,combustivel,cambio," +
   "km_atual,km_entrada,fipe_codigo,fipe_valor,valor_por,gastos_descricao,opcionais," +
   "pneu_de,pneu_dd,pneu_te,pneu_td,leilao_sinistro,gnv,detalhes_lataria,detalhes_mecanica," +
-  "pontos_positivos,ressalvas_lojista),foto(id)," +
+  // A foto pende do VEÍCULO, não do estoque: embutida solta aqui o
+  // PostgREST responde "could not find a relationship".
+  "pontos_positivos,ressalvas_lojista,foto(id))," +
   "comprador(id,nome,tipo,telefone),estoque_custo(id,tipo,descricao,previsto,realizado,pago_em,anexo_id,do_fechamento)";
 
 /**

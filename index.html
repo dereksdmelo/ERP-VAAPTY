@@ -8379,7 +8379,7 @@ function TelaVendaLojistas({ perfil }) {
           const c = contaDoEstoque(e);
           const dias = diasNoPatio(e);
           const f = fichaDoEstoque(e);
-          const fotos = (e.foto || []).length;
+          const fotos = ((v.foto) || []).length;
           const pedido = Number(e.preco_pedido) || 0;
           const margem = pedido ? pedido - c.atual : null;
           // Trinta dias é quando o carro deixa de ser estoque e vira
