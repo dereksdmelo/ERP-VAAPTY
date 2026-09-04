@@ -125,14 +125,50 @@ const conta = cadastro("fin_conta",
   [["nome", texto], ["banco", texto], ["empresa", texto], ["saldo_inicial", (v) => decimal(v) || 0],
    ["saldo_inicial_em", dataISO], ["ativa", bool]], "nome.asc");
 const categoria = cadastro("fin_categoria",
-  [["nome", texto], ["grupo", grupo], ["no_dre", bool], ["ordem", inteiro], ["ativa", bool]], "ordem.asc,nome.asc");
+  [["nome", texto], ["grupo", grupo], ["no_dre", bool], ["ordem", inteiro], ["ativa", bool],
+   ["pede_funcionario", bool]], "ordem.asc,nome.asc");
 const funcionario = cadastro("fin_funcionario",
   [["nome", texto], ["salario_base", (v) => decimal(v) || 0], ["negociador_id", idOuNulo], ["ativo", bool]], "nome.asc");
 
 /* ------------------ lançamentos ------------------ */
 
 const TIPOS_NEG = ["pagto_cliente", "quitacao", "debitos", "pagto_lojista", "reembolso", "outro"];
-const CAMPOS_LANC = "*,fin_categoria(id,nome,grupo,no_dre),estoque(id,veiculo(placa,marca_modelo)),fin_funcionario(id,nome)";
+const CAMPOS_LANC = "*,fin_categoria(id,nome,grupo,no_dre,pede_funcionario)," +
+  "estoque(id,veiculo(placa,marca_modelo)),fin_funcionario(id,nome)," +
+  "fin_rateio(id,valor,categoria_id,estoque_id,tipo_negociacao,funcionario_id,descricao)";
+
+/**
+ * Como um lançamento se reparte, para quem soma.
+ *
+ * Sem rateio, ele é uma parte só: a categoria do cabeçalho. Com
+ * rateio, são as linhas do rateio MAIS o que sobrou, que continua na
+ * categoria do cabeçalho — dinheiro rateado pela metade não pode
+ * sumir da soma.
+ *
+ * O sinal vem do lançamento (débito ou crédito, nunca os dois) e vale
+ * para todas as partes; por isso `fin_rateio.valor` é sempre positivo.
+ */
+function partesDe(l) {
+  const cred = Number(l.credito) || 0, deb = Number(l.debito) || 0;
+  const sinal = cred > 0 ? 1 : -1;
+  const total = cred + deb;
+  const rateios = Array.isArray(l.fin_rateio) ? l.fin_rateio : [];
+  const partes = rateios.map((r) => ({
+    valor: sinal * (Number(r.valor) || 0),
+    categoria_id: r.categoria_id, estoque_id: r.estoque_id,
+    tipo_negociacao: r.tipo_negociacao, funcionario_id: r.funcionario_id,
+  }));
+  const usado = rateios.reduce((t, r) => t + (Number(r.valor) || 0), 0);
+  const sobra = Math.round((total - usado) * 100) / 100;
+  if (!rateios.length || sobra > 0) {
+    partes.push({
+      valor: sinal * (rateios.length ? sobra : total),
+      categoria_id: l.categoria_id, estoque_id: l.estoque_id,
+      tipo_negociacao: l.tipo_negociacao, funcionario_id: l.funcionario_id,
+    });
+  }
+  return partes;
+}
 
 // "Pagto cliente Uno_AYL0614" → a placa e a parte do negócio. É a
 // convenção da planilha; quem escrever descrição de outro jeito só
@@ -444,16 +480,23 @@ async function dreMeses(req, res, tok, comp, n) {
     const d = new Date(Date.UTC(a, m - 1 - i, 1));
     meses.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-01`);
   }
-  const lanc = await supa(
-    `${base("fin_lancamento")}?select=debito,credito,competencia,fin_categoria(id,nome,grupo,no_dre,ordem)&competencia=gte.${meses[0]}&competencia=lte.${comp}&limit=100000`,
-    { headers: cab(tok) });
+  const [lanc, listaCats] = await Promise.all([
+    supa(`${base("fin_lancamento")}?select=debito,credito,competencia,categoria_id,` +
+      `fin_rateio(valor,categoria_id)&competencia=gte.${meses[0]}&competencia=lte.${comp}&limit=100000`,
+      { headers: cab(tok) }),
+    supa(`${base("fin_categoria")}?select=id,nome,no_dre,ordem`, { headers: cab(tok) }),
+  ]);
+  const catPorId = {};
+  (listaCats || []).forEach((c) => { catPorId[c.id] = c; });
   const cats = {}; const totais = {}; meses.forEach((x) => { totais[x] = 0; });
   (lanc || []).forEach((l) => {
-    const c = l.fin_categoria; if (!c || !c.no_dre) return;
     const k = String(l.competencia).slice(0, 7) + "-01"; if (totais[k] === undefined) return;
-    const v = (Number(l.credito) || 0) - (Number(l.debito) || 0);
-    cats[c.id] = cats[c.id] || { id: c.id, nome: c.nome, ordem: c.ordem, por_mes: {} };
-    cats[c.id].por_mes[k] = (cats[c.id].por_mes[k] || 0) + v; totais[k] += v;
+    partesDe(l).forEach((p) => {
+      const c = p.categoria_id ? catPorId[p.categoria_id] : null;
+      if (!c || !c.no_dre) return;
+      cats[c.id] = cats[c.id] || { id: c.id, nome: c.nome, ordem: c.ordem, por_mes: {} };
+      cats[c.id].por_mes[k] = (cats[c.id].por_mes[k] || 0) + p.valor; totais[k] += p.valor;
+    });
   });
   // rentabilidade de cada mês, em paralelo
   const rent = {};
@@ -470,18 +513,28 @@ async function dre(req, res, tok) {
   const comp = competenciaDe(req.query.competencia) || competenciaDe(hojeAqui());
   const n = Math.min(24, Math.max(0, Number(req.query.meses) || 0));
   if (n > 1) return dreMeses(req, res, tok, comp, n);
-  const lanc = await supa(
-    `${base("fin_lancamento")}?select=debito,credito,fin_categoria(id,nome,grupo,no_dre,ordem)&competencia=eq.${comp}&limit=10000`,
-    { headers: cab(tok) });
+  const [lanc, cats] = await Promise.all([
+    supa(`${base("fin_lancamento")}?select=debito,credito,categoria_id,estoque_id,tipo_negociacao,funcionario_id,` +
+      `fin_rateio(valor,categoria_id,estoque_id,tipo_negociacao,funcionario_id)&competencia=eq.${comp}&limit=10000`,
+      { headers: cab(tok) }),
+    supa(`${base("fin_categoria")}?select=id,nome,grupo,no_dre,ordem`, { headers: cab(tok) }),
+  ]);
+  const catPorId = {};
+  (cats || []).forEach((c) => { catPorId[c.id] = c; });
+
   const por = {};
   let semCategoria = 0;
   (lanc || []).forEach((l) => {
-    const c = l.fin_categoria;
-    if (!c) { semCategoria += (Number(l.credito) || 0) - (Number(l.debito) || 0); return; }
-    if (!c.no_dre) return;
-    por[c.id] = por[c.id] || { id: c.id, nome: c.nome, grupo: c.grupo, ordem: c.ordem, valor: 0 };
-    // Como na planilha: DRE = crédito − débito, então despesa é negativa.
-    por[c.id].valor += (Number(l.credito) || 0) - (Number(l.debito) || 0);
+    // Soma pelas PARTES, não pelo cabeçalho: um PIX de despachante
+    // pode ser dois carros (fora do DRE) e uma taxa da loja (dentro).
+    partesDe(l).forEach((p) => {
+      const c = p.categoria_id ? catPorId[p.categoria_id] : null;
+      if (!c) { semCategoria += p.valor; return; }
+      if (!c.no_dre) return;
+      por[c.id] = por[c.id] || { id: c.id, nome: c.nome, grupo: c.grupo, ordem: c.ordem, valor: 0 };
+      // Como na planilha: DRE = crédito − débito, então despesa é negativa.
+      por[c.id].valor += p.valor;
+    });
   });
   const linhas = Object.keys(por).map((k) => por[k]).sort((a, b) => a.ordem - b.ordem || a.nome.localeCompare(b.nome));
   const totalDespesas = linhas.reduce((t, x) => t + x.valor, 0);
@@ -507,11 +560,25 @@ async function carros(req, res, tok) {
     `&or=(and(entrou_em.gte.${comp},entrou_em.lte.${fim}),and(vendido_em.gte.${comp},vendido_em.lte.${fim}))&order=entrou_em.desc&limit=500`,
     { headers: cab(tok) });
   const ids = (est || []).map((e) => e.id);
+  // Pega tudo que aponta para estes carros — pelo cabeçalho OU por uma
+  // linha de rateio. O PIX do despachante repartido entre dois carros
+  // só aparece aqui se as partes forem lidas.
+  const filtro = ids.length ? `or=(estoque_id.in.(${ids.join(",")}),fin_rateio.estoque_id.in.(${ids.join(",")}))` : null;
   const lanc = ids.length
-    ? await supa(`${base("fin_lancamento")}?select=id,estoque_id,tipo_negociacao,data,debito,credito,descricao&estoque_id=in.(${ids.join(",")})&order=data.asc`, { headers: cab(tok) })
+    ? await supa(`${base("fin_lancamento")}?select=id,estoque_id,tipo_negociacao,data,debito,credito,descricao,` +
+        `fin_rateio(valor,estoque_id,tipo_negociacao,descricao)&${filtro}&order=data.asc&limit=5000`, { headers: cab(tok) })
     : [];
   const porEstoque = {};
-  (lanc || []).forEach((l) => { (porEstoque[l.estoque_id] = porEstoque[l.estoque_id] || []).push(l); });
+  (lanc || []).forEach((l) => {
+    partesDe(l).forEach((p) => {
+      if (!p.estoque_id) return;
+      const cred = Number(l.credito) || 0;
+      (porEstoque[p.estoque_id] = porEstoque[p.estoque_id] || []).push({
+        id: l.id, data: l.data, descricao: l.descricao, tipo_negociacao: p.tipo_negociacao,
+        debito: cred > 0 ? 0 : Math.abs(p.valor), credito: cred > 0 ? Math.abs(p.valor) : 0,
+      });
+    });
+  });
 
   const val = (l) => (l.realizado == null ? Number(l.previsto) || 0 : Number(l.realizado) || 0);
   const linhas = (est || []).map((e) => {
@@ -531,6 +598,101 @@ async function carros(req, res, tok) {
     };
   });
   return res.status(200).json({ competencia: comp, carros: linhas });
+}
+
+/**
+ * O rateio de um lançamento.
+ *
+ * PUT troca o conjunto inteiro, não faz diferença de linhas: a tela
+ * edita a repartição como um bloco, e apagar-e-gravar é o que evita
+ * ficar com metade do rateio velho e metade do novo se algo falhar no
+ * meio.
+ */
+async function rateio(req, res, tok) {
+  const lid = idOuNulo(req.query.lancamento_id);
+  if (!lid) return res.status(400).json({ erro: "lancamento_id inválido." });
+
+  if (req.method === "GET") {
+    const lista = await supa(`${base("fin_rateio")}?select=*&lancamento_id=eq.${lid}&order=criado_em.asc`, { headers: cab(tok) });
+    return res.status(200).json({ rateios: lista || [] });
+  }
+
+  if (req.method === "PUT") {
+    const c = await corpoDe(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    const l = um(await supa(`${base("fin_lancamento")}?select=debito,credito&id=eq.${lid}`, { headers: cab(tok) }));
+    if (!l) return res.status(404).json({ erro: "Lançamento não encontrado." });
+    const total = (Number(l.debito) || 0) + (Number(l.credito) || 0);
+
+    const itens = (Array.isArray(c.itens) ? c.itens : []).slice(0, 60)
+      .map((x) => ({
+        lancamento_id: lid,
+        valor: Math.abs(decimal(x.valor) || 0),
+        categoria_id: idOuNulo(x.categoria_id),
+        estoque_id: idOuNulo(x.estoque_id),
+        tipo_negociacao: TIPOS_NEG.indexOf(String(x.tipo_negociacao)) >= 0 ? x.tipo_negociacao : null,
+        funcionario_id: idOuNulo(x.funcionario_id),
+        descricao: texto(x.descricao),
+      }))
+      .filter((x) => x.valor > 0);
+
+    const soma = itens.reduce((t, x) => t + x.valor, 0);
+    // Passar do valor do lançamento inventaria dinheiro; ficar abaixo
+    // é permitido, e a sobra continua na categoria do cabeçalho.
+    if (Math.round(soma * 100) > Math.round(total * 100)) {
+      return res.status(400).json({ erro: `A soma das partes (${soma.toFixed(2)}) passa do valor do lançamento (${total.toFixed(2)}).` });
+    }
+
+    await supa(`${base("fin_rateio")}?lancamento_id=eq.${lid}`, { method: "DELETE", headers: cab(tok) });
+    let salvos = [];
+    if (itens.length) {
+      salvos = await supa(base("fin_rateio"), { method: "POST", headers: cab(tok, REP), body: JSON.stringify(itens) }) || [];
+      if (!salvos.length) return recusado(res);
+    }
+    return res.status(200).json({ ok: true, rateios: salvos, sobra: Math.round((total - soma) * 100) / 100 });
+  }
+
+  res.setHeader("Allow", "GET, PUT");
+  return res.status(405).json({ erro: "Use GET ou PUT." });
+}
+
+/**
+ * O que a negociação combinou, para conferir contra o lançamento.
+ *
+ * É daqui que sai o "está de acordo?": o valor previsto de cada parte
+ * do negócio daquele carro, e o quanto já foi pago nela.
+ */
+async function negociacao(req, res, tok) {
+  const eid = idOuNulo(req.query.estoque_id);
+  if (!eid) return res.status(400).json({ erro: "estoque_id inválido." });
+  const [e, lancs] = await Promise.all([
+    supa(`${base("estoque")}?select=id,valor_compra,valor_venda,veiculo(placa,marca_modelo),comprador(nome),estoque_custo(tipo,previsto,realizado)&id=eq.${eid}`, { headers: cab(tok) }),
+    supa(`${base("fin_lancamento")}?select=id,debito,credito,estoque_id,tipo_negociacao,fin_rateio(valor,estoque_id,tipo_negociacao)&or=(estoque_id.eq.${eid},fin_rateio.estoque_id.eq.${eid})&limit=500`, { headers: cab(tok) }),
+  ]);
+  const est = um(e);
+  if (!est) return res.status(404).json({ erro: "Carro não encontrado." });
+  const val = (x) => (x.realizado == null ? Number(x.previsto) || 0 : Number(x.realizado) || 0);
+  const soma = (tipo) => (est.estoque_custo || []).filter((x) => x.tipo === tipo).reduce((t, x) => t + val(x), 0);
+
+  const pago = {};
+  (lancs || []).forEach((l) => {
+    partesDe(l).forEach((p) => {
+      if (p.estoque_id !== eid || !p.tipo_negociacao) return;
+      pago[p.tipo_negociacao] = (pago[p.tipo_negociacao] || 0) + Math.abs(p.valor);
+    });
+  });
+
+  return res.status(200).json({
+    carro: { placa: est.veiculo && est.veiculo.placa, modelo: est.veiculo && est.veiculo.marca_modelo, comprador: est.comprador && est.comprador.nome },
+    previsto: {
+      pagto_cliente: Number(est.valor_compra) || 0,
+      quitacao: soma("quitacao"),
+      debitos: soma("debitos"),
+      pagto_lojista: Number(est.valor_venda) || 0,
+      reembolso: 0, outro: 0,
+    },
+    pago,
+  });
 }
 
 /* ------------------ vales e folha ------------------ */
@@ -639,7 +801,7 @@ async function estoqueLista(req, res, tok) {
   return res.status(200).json({ estoque: (lista || []).map((e) => ({ id: e.id, situacao: e.situacao, placa: e.veiculo && e.veiculo.placa, carro: e.veiculo && e.veiculo.marca_modelo })) });
 }
 
-const RECURSOS = { conta, categoria, funcionario, lancamento, importar, dre, carros, vale, folha, fechamento, estoque: estoqueLista };
+const RECURSOS = { conta, categoria, funcionario, lancamento, importar, dre, carros, vale, folha, fechamento, rateio, negociacao, estoque: estoqueLista };
 
 module.exports = async function handler(req, res) {
   if (!URL_BASE || !ANON) return res.status(500).json({ erro: "SUPABASE_URL ou SUPABASE_ANON_KEY não configurados." });

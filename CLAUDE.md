@@ -1259,9 +1259,37 @@ carro. Descrição fora da convenção só perde o vínculo automático.
 janeiro não mude se a regra mudar em março. A comissão é digitada —
 a regra de comissão da casa não está em lugar nenhum ainda.
 
-**O que ainda não existe:** extrato OFX do banco (hoje entra colado
-da planilha), conciliação automática contra o estoque (a aba Carros
-mostra, não concilia), e o cartão de crédito por fatura.
+**Um lançamento pode ser repartido (0024).** O extrato traz UM PIX para
+o despachante; na verdade aquilo é a documentação de dois carros —
+custo de carro, fora do DRE — mais uma taxa da loja, que entra.
+`fin_rateio` é essa repartição, e o mesmo mecanismo serve aos outros
+três casos: salário e comissão da mesma pessoa numa transferência só,
+e um pagamento que cobre duas partes de um negócio.
+
+**O que sobra não some.** A soma das partes pode ser menor que o
+lançamento; a diferença continua na categoria do cabeçalho. Sem essa
+regra, um rateio incompleto tiraria dinheiro do DRE em silêncio — e
+`partesDe()`, no servidor, é o único lugar que decide isso. **DRE,
+DRE de vários meses e a aba Carros passam todos por ela**; quem somar
+pelo cabeçalho de novo volta a perder o rateio.
+
+**Categoria diz o que ela exige.** `grupo = 'negociacao'` pede carro e
+parte do negócio; `pede_funcionario` pede a pessoa. Sem a pessoa,
+salário e comissão não conciliam com a folha; sem a parte, o
+lançamento não bate com o combinado do carro. A borda do campo fica
+laranja enquanto falta.
+
+**A conferência da negociação é o previsto contra o lançado.**
+`?recurso=negociacao&estoque_id=` devolve o que aquele carro combinou —
+cliente, quitação, débitos, lojista — e quanto já foi lançado em cada
+parte. É o "está de acordo?" na própria linha do extrato.
+
+**A competência é editável na linha.** Ela é o mês a que a despesa
+pertence, não o do pagamento, e é ela que o DRE soma: corrigir isso não
+pode exigir apagar e relançar.
+
+**O que ainda não existe:** conciliação automática contra o estoque (a
+aba Carros mostra, não concilia) e o cartão de crédito por fatura.
 
 ### 27. Pré-vendas: o lead e o agendamento são a mesma linha
 
