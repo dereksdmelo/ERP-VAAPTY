@@ -7940,7 +7940,7 @@ function FinLancamentos({ comp }) {
             </button>
           )}
           <button onClick={exportar} style={{ color: C.mute, fontWeight: 600 }}>CSV</button>
-          <button onClick={() => setImportando(!importando)} style={{ color: C.roxo, fontWeight: 600 }}>colar extrato</button>
+          <button onClick={() => setImportando(!importando)} style={{ color: C.roxo, fontWeight: 600 }}>importar extrato</button>
           <button onClick={() => setNovo({ data: hojeEmSP(), competencia: comp, descricao: "", debito: "", credito: "", categoria_id: "" })} style={{ color: C.roxo, fontWeight: 600 }}>+ lançamento</button>
         </span>
       </div>
@@ -8060,6 +8060,49 @@ function FinLancamentos({ comp }) {
   );
 }
 
+/**
+ * Lê o OFX do Itaú — e de qualquer banco: é o padrão OFX 1.x, que é
+ * SGML (tag sem fechamento), não XML. Cada <STMTTRN> vira um
+ * movimento: DTPOSTED (aaaammdd…), TRNAMT (negativo é débito), MEMO e
+ * FITID, o identificador do banco. <LEDGERBAL> traz o saldo final e a
+ * data dele.
+ *
+ * O arquivo costuma vir em Windows-1252, não UTF-8: "TRANSFERÊNCIA"
+ * lido como UTF-8 vira "TRANSFER�NCIA". Por isso o arquivo é lido em
+ * bytes e decodificado conforme o cabeçalho CHARSET.
+ */
+function lerOFX(txt) {
+  const bloco = (tag, src) => {
+    const m = new RegExp("<" + tag + ">([\\s\\S]*?)(?=<\\/" + tag + ">|<" + tag + ">|$)", "gi");
+    const r = []; let x; while ((x = m.exec(src))) r.push(x[1]); return r;
+  };
+  const campo = (tag, src) => { const m = new RegExp("<" + tag + ">([^<\\r\\n]*)", "i").exec(src); return m ? m[1].trim() : ""; };
+  const dataDe = (v) => { const m = /^(\d{4})(\d{2})(\d{2})/.exec(String(v || "")); return m ? `${m[1]}-${m[2]}-${m[3]}` : ""; };
+  const numero = (v) => { const n = Number(String(v || "").trim().replace(",", ".")); return Number.isFinite(n) ? n : 0; };
+  const trns = bloco("STMTTRN", txt);
+  if (!trns.length) return { erro: "Não achei movimentos (<STMTTRN>) no arquivo. É um OFX de extrato?" };
+  const dados = trns.map((b) => {
+    const v = numero(campo("TRNAMT", b));
+    const memo = campo("MEMO", b) || campo("NAME", b) || campo("TRNTYPE", b);
+    return { data: dataDe(campo("DTPOSTED", b)), descricao: memo, debito: v < 0 ? String(-v) : "", credito: v > 0 ? String(v) : "", fitid: campo("FITID", b) };
+  }).filter((l) => l.data && (l.debito || l.credito));
+  const led = bloco("LEDGERBAL", txt)[0] || "";
+  const de = dataDe(campo("DTSTART", txt)), ate = dataDe(campo("DTEND", txt));
+  const datas = dados.map((l) => l.data).sort();
+  return {
+    dados, de: de || datas[0], ate: ate || datas[datas.length - 1],
+    saldo_final: led ? numero(campo("BALAMT", led)) : null, saldo_final_em: led ? dataDe(campo("DTASOF", led)) : "",
+    banco: campo("ORG", txt) || campo("BANKID", txt), conta: campo("ACCTID", txt),
+  };
+}
+async function lerArquivoOFX(arquivo) {
+  const bytes = new Uint8Array(await arquivo.arrayBuffer());
+  const cabecalho = new TextDecoder("latin1").decode(bytes.slice(0, 600));
+  const utf8 = /CHARSET:\s*UTF-?8|ENCODING:\s*UTF-?8|encoding="utf-8"/i.test(cabecalho);
+  try { return lerOFX(new TextDecoder(utf8 ? "utf-8" : "windows-1252").decode(bytes)); }
+  catch (e) { return lerOFX(new TextDecoder("latin1").decode(bytes)); }
+}
+
 const COLS_EXTRATO = [["data", /^data$/i], ["competencia", /^compet/i], ["categoria", /^tipo|^categoria/i], ["descricao", /^descri/i], ["debito", /^d[eé]bito/i], ["credito", /^cr[eé]dito/i]];
 function lerExtrato(txt) {
   const linhas = String(txt || "").split(/\r?\n/).map((l) => l.split("\t"));
@@ -8074,35 +8117,73 @@ function lerExtrato(txt) {
 }
 
 function FinImportar({ contaId, aoTerminar }) {
-  const [txt, setTxt] = useState(""); const [indo, setIndo] = useState(false); const [res, setRes] = useState(null); const [erro, setErro] = useState("");
-  const previa = txt ? lerExtrato(txt) : null;
+  const [modo, setModo] = useState("ofx");
+  const [txt, setTxt] = useState(""); const [ofx, setOfx] = useState(null); const [nomeArq, setNomeArq] = useState("");
+  const [indo, setIndo] = useState(false); const [res, setRes] = useState(null); const [erro, setErro] = useState("");
+  const previa = modo === "ofx" ? ofx : (txt ? lerExtrato(txt) : null);
   const enviar = async () => {
     setIndo(true); setErro("");
-    try { setRes(await fin("importar", null, finJson("POST", { conta_id: contaId, linhas: previa.dados }))); }
-    catch (e) { setErro(e.message); }
+    try {
+      const corpo = { conta_id: contaId, linhas: previa.dados };
+      if (modo === "ofx" && previa.saldo_final != null) { corpo.saldo_final = previa.saldo_final; corpo.saldo_final_em = previa.saldo_final_em; }
+      setRes(await fin("importar", null, finJson("POST", corpo)));
+    } catch (e) { setErro(e.message); }
     setIndo(false);
   };
+  const escolher = async (arq) => {
+    if (!arq) return;
+    setNomeArq(arq.name); setErro("");
+    try { setOfx(await lerArquivoOFX(arq)); } catch (e) { setOfx({ erro: "Não consegui ler o arquivo: " + e.message }); }
+  };
+  const aba = (v, r) => (
+    <button onClick={() => setModo(v)} className="rounded-full px-3 py-1 text-[12px] font-semibold"
+      style={{ background: modo === v ? C.roxoFraco : "transparent", color: modo === v ? C.roxo : C.mute }}>{r}</button>
+  );
   return (
     <div className="rounded-xl p-4" style={{ background: C.paper, border: `1px solid ${C.roxo}` }}>
-      <div className="flex items-baseline justify-between"><span className="text-[14px] font-semibold">Colar o extrato</span><button onClick={aoTerminar} className="text-[12px]" style={{ color: C.mute }}>fechar</button></div>
-      <p className="mt-1 text-[12px]" style={{ color: C.mute }}>A aba Lançamentos da planilha (Data, Competência, Tipo pgt, Descrição, Débito, Crédito), com o cabeçalho. O que já entrou não entra de novo; "Saldo Anterior" vira o saldo inicial da conta; placa na descrição liga ao carro do estoque.</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="flex items-center gap-1"><span className="mr-2 text-[14px] font-semibold">Importar extrato</span>{aba("ofx", "Arquivo OFX (Itaú)")}{aba("colar", "Colar da planilha")}</span>
+        <button onClick={aoTerminar} className="text-[12px]" style={{ color: C.mute }}>fechar</button>
+      </div>
       {res ? (
         <div className="mt-3 rounded-lg p-3 text-[13px]" style={{ background: "#E8F3EE" }}>
           <b>{res.inseridos}</b> lançamentos novos · {res.repetidos} já existiam · {res.ligados_a_carro} ligados a carro
-          {!!res.invalidas && <span style={{ color: AMARELO.texto }}> · {res.invalidas} linhas inválidas (sem data ou sem valor)</span>}
+          {!!res.sem_categoria && <span style={{ color: AMARELO.texto }}> · {res.sem_categoria} sem categoria (a memória vai sugerindo)</span>}
+          {!!res.invalidas && <span style={{ color: AMARELO.texto }}> · {res.invalidas} linhas inválidas</span>}
           {res.saldo_inicial != null && <div>Saldo inicial da conta: {rs2(res.saldo_inicial)}</div>}
+          {res.fechamento_gravado && <div>Saldo do banco gravado no fechamento de {rotuloMes(res.fechamento_gravado)}.</div>}
           {!!(res.categorias_criadas || []).length && <div>Categorias criadas como despesa: {res.categorias_criadas.join(", ")} — confira o grupo delas.</div>}
           <button onClick={aoTerminar} className="mt-2 font-semibold" style={{ color: C.roxo }}>ver os lançamentos</button>
         </div>
+      ) : modo === "ofx" ? (
+        <>
+          <p className="mt-1 text-[12px]" style={{ color: C.mute }}>No Itaú: Extrato → período → <b>Salvar</b> → OFX. O identificador do banco impede repetição; se o arquivo terminar no último dia do mês, o saldo final já entra na conciliação.</p>
+          <label className="mt-3 flex cursor-pointer items-center justify-center rounded-lg border border-dashed px-3 py-6 text-[13px]" style={{ borderColor: C.roxo, color: C.roxo, fontWeight: 600 }}>
+            {nomeArq || "Escolher o arquivo .ofx"}
+            <input type="file" accept=".ofx,.OFX,.txt,application/x-ofx,text/plain" className="hidden" onChange={(e) => { escolher(e.target.files && e.target.files[0]); e.target.value = ""; }} />
+          </label>
+          {ofx && ofx.erro && <p className="mt-1 text-[12px]" style={{ color: C.laranja }}>{ofx.erro}</p>}
+          {ofx && !ofx.erro && (
+            <div className="mt-2 text-[12px]" style={{ color: C.mute }}>
+              <b style={{ color: C.ink }}>{ofx.dados.length}</b> movimentos de {diaBR(ofx.de)} a {diaBR(ofx.ate)}{ofx.conta ? ` · conta ${ofx.conta}` : ""}
+              {ofx.saldo_final != null && <> · saldo final <b style={{ color: C.ink }}>{rs2(ofx.saldo_final)}</b> em {diaBR(ofx.saldo_final_em)}</>}
+              <div className="mt-1 max-h-32 overflow-y-auto rounded border p-2" style={{ borderColor: C.line, fontFamily: F.mono, fontSize: 11 }}>
+                {ofx.dados.slice(0, 8).map((l, i) => <div key={i}>{diaBR(l.data)} {String(l.descricao).slice(0, 40)} {l.debito ? "−" + rs2(l.debito) : "+" + rs2(l.credito)}</div>)}
+                {ofx.dados.length > 8 && <div>… mais {ofx.dados.length - 8}</div>}
+              </div>
+            </div>
+          )}
+        </>
       ) : (
         <>
+          <p className="mt-1 text-[12px]" style={{ color: C.mute }}>A aba Lançamentos da planilha (Data, Competência, Tipo pgt, Descrição, Débito, Crédito), com o cabeçalho. "Saldo Anterior" vira o saldo inicial da conta; placa na descrição liga ao carro.</p>
           <textarea className="mt-3 h-40 w-full rounded-lg border p-2 text-[12px] outline-none" style={{ ...inputSty, fontFamily: F.mono }} placeholder="Cole aqui" value={txt} onChange={(e) => setTxt(e.target.value)} />
           {previa && previa.erro && <p className="mt-1 text-[12px]" style={{ color: C.laranja }}>{previa.erro}</p>}
           {previa && !previa.erro && <p className="mt-1 text-[12px]" style={{ color: C.mute }}>{previa.dados.length} linhas · colunas: {previa.colunas.join(", ")}</p>}
-          {erro && <p className="mt-1 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
-          <BotaoPrimario onClick={enviar} disabled={indo || !contaId || !previa || !!previa.erro || !previa.dados.length} className="mt-2 w-full">{indo ? "Importando…" : "Importar"}</BotaoPrimario>
         </>
       )}
+      {!res && erro && <p className="mt-1 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+      {!res && <BotaoPrimario onClick={enviar} disabled={indo || !contaId || !previa || !!previa.erro || !previa.dados.length} className="mt-2 w-full">{indo ? "Importando…" : `Importar${previa && !previa.erro ? ` ${previa.dados.length} movimentos` : ""}`}</BotaoPrimario>}
     </div>
   );
 }

@@ -318,13 +318,21 @@ async function importar(req, res, tok) {
     const cat = catNome ? catPor[catNome.toLowerCase()] : null;
     const catId = cat ? cat.id : (memoria[normDesc(l.descricao)] || null);
     const placa = placaNa(l.descricao);
+    // No OFX o banco dá um identificador por movimento (FITID). É a
+    // chave mais confiável que existe: dois PIX iguais no mesmo dia
+    // têm FITIDs diferentes e entram os dois; o mesmo arquivo colado
+    // duas vezes não duplica nada. O Itaú às vezes repete FITID em
+    // lançamentos distintos, então a data e o valor entram junto.
+    const fitid = texto(l.fitid);
     corpo.push({
       conta_id: contaId, data, competencia: competenciaDe(l.competencia) || competenciaDe(data),
       categoria_id: catId, descricao: texto(l.descricao), debito: deb, credito: cred,
       estoque_id: placa ? estoquePorPlaca[placa] || null : null,
       tipo_negociacao: cat && cat.grupo === "negociacao" ? (tipoNegNa(l.descricao) || "outro") : null,
-      conciliado: true, origem: "planilha",
-      chave_extrato: `${data}|${String(l.descricao || "").trim().toLowerCase()}|${deb}|${cred}`,
+      conciliado: true, origem: fitid ? "ofx" : "planilha",
+      chave_extrato: fitid
+        ? `ofx:${fitid}|${data}|${deb}|${cred}`
+        : `${data}|${String(l.descricao || "").trim().toLowerCase()}|${deb}|${cred}`,
     });
   });
 
@@ -337,6 +345,18 @@ async function importar(req, res, tok) {
     });
     inseridos = (r || []).length;
   }
+  let fechamentoGravado = null;
+  if (decimal(c.saldo_final) != null && dataISO(c.saldo_final_em)) {
+    const em = dataISO(c.saldo_final_em);
+    const comp = competenciaDe(em);
+    if (em === fimDoMes(comp)) {
+      await supa(`${base("fin_fechamento")}?on_conflict=conta_id,competencia`, {
+        method: "POST", headers: cab(tok, { Prefer: "resolution=merge-duplicates" }),
+        body: JSON.stringify({ conta_id: contaId, competencia: comp, saldo_banco: decimal(c.saldo_final) }),
+      });
+      fechamentoGravado = comp;
+    }
+  }
   if (saldoInicial != null) {
     await supa(`${base("fin_conta")}?id=eq.${contaId}`, {
       method: "PATCH", headers: cab(tok), body: JSON.stringify({ saldo_inicial: saldoInicial, saldo_inicial_em: saldoEm }),
@@ -345,6 +365,7 @@ async function importar(req, res, tok) {
   return res.status(201).json({
     ok: true, inseridos, repetidos: corpo.length - inseridos, invalidas,
     categorias_criadas: nomesNovos, saldo_inicial: saldoInicial, ligados_a_carro: corpo.filter((x) => x.estoque_id).length,
+    sem_categoria: corpo.filter((x) => !x.categoria_id).length, fechamento_gravado: fechamentoGravado,
   });
 }
 
