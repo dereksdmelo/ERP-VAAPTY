@@ -9683,6 +9683,181 @@ function FinFolha({ comp }) {
 }
 
 /**
+ * O check list de documentações: a folha que fica no envelope.
+ *
+ * Trinta e seis itens, três vistos cada — administrativo, gerência e
+ * financeiro. Alguns só se resolvem em site de fora, e para esses a
+ * linha traz o link pronto: abrir a consulta custa um toque, e é o
+ * mesmo raciocínio dos canais de preço na avaliação (link pronto, não
+ * raspagem — consulta de órgão público muda de endereço e quebra
+ * sozinha).
+ *
+ * O ConsultCenter pede login. O link abre o portal; quem entra é a
+ * pessoa, com a senha dela. Guardar credencial de terceiro no sistema
+ * seria transformar um vazamento aqui num vazamento lá.
+ */
+const LINKS_DOC = {
+  dossie_detran: ["Extrato Detran-PR", "https://www.detran.pr.gov.br/Pagina/Extrato-de-divida-ativa"],
+  divida_ativa: ["Lista de devedores PGFN", "https://www.listadevedores.pgfn.gov.br/"],
+  prf: ["Multas PRF", "https://cpag.prf.gov.br/multas"],
+  serasa: ["ConsultCenter", "https://sistema.consultcenter.com.br/portal/painel_juridico?q=escolha"],
+  multas_duplicacao: ["Multas PRF", "https://cpag.prf.gov.br/multas"],
+};
+const GRUPOS_DOC = [
+  ["pf", "Pessoa física"],
+  ["pj", "Pessoa jurídica"],
+  ["arquivamento", "Arquivamento"],
+  ["transferencia", "Transferência"],
+];
+const VISTO_ROT = { adm: "Adm.", gerencia: "Gerência", financeiro: "Financeiro" };
+
+async function lerChecklistDoc(atendimentoId) {
+  const r = await fetchAut(`/api/checklist?recurso=documentos&atendimento_id=${encodeURIComponent(atendimentoId)}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui carregar o check list.");
+  return d;
+}
+async function marcarChecklistDoc(dados) {
+  const r = await fetchAut("/api/checklist?recurso=documentos", {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui marcar.");
+  return d.marca;
+}
+
+function ChecklistDocumentos({ atendimentoId, perfil }) {
+  const [d, setD] = useState(null);
+  const [erro, setErro] = useState("");
+  const [so, setSo] = useState("pendentes");
+  const podeVisto = !!(perfil && (perfil.administrativo || perfil.papel === "gerente"));
+
+  const carregar = () => {
+    lerChecklistDoc(atendimentoId).then(setD).catch((e) => setErro(e.message));
+  };
+  useEffect(() => { carregar(); }, [atendimentoId]);
+
+  const marcar = async (item, visto, valor) => {
+    setErro("");
+    // Otimista: o administrativo passa 36 itens em sequência, e esperar
+    // o servidor a cada clique trava a mão.
+    setD((x) => {
+      const marcas = (x.marcas || []).slice();
+      const i = marcas.findIndex((m) => m.item === item);
+      const nova = { ...(i >= 0 ? marcas[i] : { item }), [visto]: valor };
+      if (i >= 0) marcas[i] = nova; else marcas.push(nova);
+      return { ...x, marcas };
+    });
+    try { await marcarChecklistDoc({ atendimento_id: atendimentoId, item, [visto]: valor }); carregar(); }
+    catch (e) { setErro(e.message); carregar(); }
+  };
+
+  if (erro && !d) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
+  if (!d) return <p className="text-[13px]" style={{ color: C.mute }}>Carregando o check list…</p>;
+
+  const marcaDe = (item) => (d.marcas || []).filter((m) => m.item === item)[0] || {};
+  const pendente = (it) => {
+    const m = marcaDe(it[0]);
+    return it[3] === "tres" ? (m.adm == null || m.gerencia == null || m.financeiro == null) : m.adm == null;
+  };
+  const total = d.itens.length;
+  const faltam = d.itens.filter(pendente).length;
+
+  const caixa = (it, visto) => {
+    const m = marcaDe(it[0]);
+    const v = m[visto];
+    const trava = !podeVisto && visto !== "financeiro";
+    const bt = (valor, rot, cor) => (
+      <button key={rot} disabled={trava}
+        onClick={() => marcar(it[0], visto, v === valor ? null : valor)}
+        className="rounded px-2 py-1 text-[11px] font-bold"
+        style={{
+          background: v === valor ? cor : "transparent",
+          color: v === valor ? "#fff" : trava ? C.line : C.mute,
+          border: `1px solid ${v === valor ? cor : C.line}`,
+          cursor: trava ? "not-allowed" : "pointer",
+        }}>{rot}</button>
+    );
+    return (
+      <span className="flex shrink-0 gap-1" title={m[`${visto}_em`] ? `por ${m[`${visto}_por`] === (perfil && perfil.id) ? "você" : "alguém"} em ${diaBR(m[`${visto}_em`])}` : ""}>
+        {bt(true, "Sim", C.verde)}{bt(false, "Não", C.laranja)}
+      </span>
+    );
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-[13px]">
+          <b style={{ color: faltam ? C.laranja : C.verde }}>{total - faltam}</b>
+          <span style={{ color: C.mute }}> de {total} conferidos</span>
+        </span>
+        <div className="flex gap-1.5 text-[12px]">
+          {[["pendentes", "Só o que falta"], ["todos", "Todos"]].map(([v, r]) => (
+            <button key={v} onClick={() => setSo(v)} className="rounded-full px-3 py-1 font-semibold"
+              style={{ background: so === v ? C.roxoFraco : "transparent", color: so === v ? C.roxo : C.mute }}>{r}</button>
+          ))}
+        </div>
+        {!podeVisto && <span className="text-[11px]" style={{ color: C.mute }}>Você marca só a coluna do financeiro — adm e gerência são do administrativo.</span>}
+      </div>
+
+      {erro && <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+
+      {GRUPOS_DOC.map(([g, rot]) => {
+        const itens = d.itens.filter((it) => it[2] === g && (so === "todos" || pendente(it)));
+        if (!itens.length) return null;
+        const tres = itens[0][3] === "tres";
+        return (
+          <div key={g} className="rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+            <div className="flex items-baseline justify-between px-3 py-2" style={{ borderBottom: `1px solid ${C.line}` }}>
+              <span className="text-[12px] font-semibold uppercase tracking-[0.06em]" style={{ color: C.mute }}>{rot}</span>
+              {tres && (
+                <span className="hidden gap-6 text-[10px] uppercase tracking-[0.06em] lg:flex" style={{ color: C.mute }}>
+                  <span style={{ width: 78, textAlign: "center" }}>{VISTO_ROT.adm}</span>
+                  <span style={{ width: 78, textAlign: "center" }}>{VISTO_ROT.gerencia}</span>
+                  <span style={{ width: 78, textAlign: "center" }}>{VISTO_ROT.financeiro}</span>
+                </span>
+              )}
+            </div>
+            {itens.map((it) => {
+              const link = LINKS_DOC[it[0]];
+              return (
+                <div key={it[0]} className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-3 py-2" style={{ borderBottom: `1px solid ${C.line}` }}>
+                  <span className="min-w-[180px] flex-1 text-[13px]">
+                    {it[1]}
+                    {link && (
+                      <a href={link[1]} target="_blank" rel="noreferrer" className="ml-2 text-[11px] font-semibold" style={{ color: C.roxo }}>
+                        {link[0]} ↗
+                      </a>
+                    )}
+                  </span>
+                  <span className="flex gap-6">
+                    {(tres ? VISTOS_DOC : ["adm"]).map((v) => (
+                      <span key={v} className="flex items-center gap-1">
+                        <span className="text-[10px] uppercase lg:hidden" style={{ color: C.mute, width: 46 }}>{VISTO_ROT[v]}</span>
+                        {caixa(it, v)}
+                      </span>
+                    ))}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+
+      {so === "pendentes" && !faltam && (
+        <div className="rounded-xl px-4 py-8 text-center" style={{ background: "#E8F3EE", border: `1px solid ${C.line}` }}>
+          <p className="text-[15px] font-semibold" style={{ color: C.verde }}>Check list completo.</p>
+          <p className="mt-1 text-[13px]" style={{ color: C.mute }}>Os 36 itens receberam os vistos. O envelope pode ser arquivado.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+const VISTOS_DOC = ["adm", "gerencia", "financeiro"];
+
+/**
  * A venda: escolher o comprador e lançar o valor.
  *
  * O comprador é cadastro, não texto solto no carro. O mesmo lojista
@@ -9842,6 +10017,7 @@ function TelaADM({ perfil }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
   const [foco, setFoco] = useState(null);      // atendimento aberto
+  const [aba, setAba] = useState("negocio");
   const [cl, setCl] = useState(null);
   const [indo, setIndo] = useState(false);
   const [salvo, setSalvo] = useState(false);
@@ -9888,18 +10064,21 @@ function TelaADM({ perfil }) {
 
   if (foco) {
     return (
-      <div className="min-h-screen" style={{ background: C.paper }}>
-        <div className="px-4 py-3" style={{ background: C.roxo, color: "#fff" }}>
-          <button onClick={() => { setFoco(null); setCl(null); }} className="text-[12px]" style={{ opacity: 0.85 }}>← voltar à fila</button>
-          <h1 className="mt-1 text-[18px]" style={{ fontFamily: F.disp, fontWeight: 700 }}>
-            {foco.cliente_nome || "Sem nome"}
-          </h1>
-          <p className="text-[12px]" style={{ opacity: 0.8 }}>
-            {foco.carro_descricao || (foco.veiculo && foco.veiculo.marca_modelo) || "—"}
-          </p>
+      <div>
+        <button onClick={() => { setFoco(null); setCl(null); setAba("negocio"); }} className="text-[14px]" style={{ color: C.roxo, fontWeight: 600 }}>‹ Fila do administrativo</button>
+        <Cabecalho titulo={foco.cliente_nome || "Sem nome"}
+          sub={foco.carro_descricao || (foco.veiculo && foco.veiculo.marca_modelo) || "—"} />
+
+        <div className="mb-4 flex flex-wrap gap-1.5">
+          {[["negocio", "O negócio"], ["documentos", "Check list de documentações"]].map(([v, r]) => (
+            <button key={v} onClick={() => setAba(v)} className="rounded-full px-3.5 py-1.5 text-[13px] font-semibold"
+              style={{ background: aba === v ? C.roxo : C.paper, color: aba === v ? "#fff" : C.ink, border: `1px solid ${aba === v ? C.roxo : C.line}` }}>{r}</button>
+          ))}
         </div>
 
-        <div className="space-y-3 p-4">
+        {aba === "documentos" && <ChecklistDocumentos atendimentoId={foco.id} perfil={perfil} />}
+
+        <div className="space-y-3" style={{ display: aba === "negocio" ? "block" : "none" }}>
           {!cl && !erro && <p className="text-[12px]" style={{ color: C.mute }}>Carregando o check list…</p>}
 
           {cl && (

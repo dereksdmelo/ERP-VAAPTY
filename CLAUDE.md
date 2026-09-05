@@ -1445,3 +1445,37 @@ linha, e é assim que se perde a confiança no saldo.
 a chave do extrato pode já pertencer a outro lançamento da conta. O
 `try` refaz o PATCH sem a chave: baixar o título continua valendo, e o
 que se perde é só a amarração com o identificador do banco.
+
+
+### 30. O check list de documentações: a folha do envelope
+
+O Derek fotografou a folha que fica no envelope de cada carro fechado:
+36 itens, e cada um recebe **três vistos** — administrativo, gerência e
+financeiro. Vive na aba Administrativo, ao lado da conferência do
+negócio, e a 0027 é ela em tabela.
+
+**Uma linha por item, não um blob.** São 36 itens × 3 vistos; num jsonb,
+"quem marcou dívida ativa e quando" viraria arqueologia, e "quais
+carros estão parados esperando o dossiê" seria impossível de consultar.
+Linha por item dá o histórico de graça.
+
+**O visto é boolean NULO, não falso.** No papel são duas caixinhas, Sim
+e Não. "Ainda não conferi" e "conferi, e é Não" são coisas diferentes —
+tratar as duas como `false` esconderia exatamente o que falta fazer.
+Clicar de novo no mesmo botão volta para não respondido.
+
+**A lista de itens mora no código, não no banco.** Ela muda quando a
+casa muda o processo, e migração para acrescentar uma linha de
+conferência seria atrito à toa. `ITENS_DOC` em `api/checklist.js` é a
+fonte, e a tela a recebe do servidor — assim as duas não divergem.
+
+**Quem carimba é o servidor.** O visto grava quem e quando a partir do
+token, e `adm`/`gerencia` só de quem é administrativo ou gerente. A
+tela desabilitar o botão é conveniência; a recusa é no servidor.
+
+**Consulta de órgão é link, não raspagem** — mesmo raciocínio dos
+canais de preço na avaliação. Detran-PR, PGFN e PRF abrem em aba nova
+direto da linha do item. **O ConsultCenter pede login, e o sistema não
+guarda essa credencial**: o link abre o portal e a pessoa entra com a
+senha dela. Guardar senha de terceiro aqui transformaria um vazamento
+nosso num vazamento lá.

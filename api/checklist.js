@@ -110,6 +110,114 @@ async function banco(url, opcoes) {
   return dado;
 }
 
+/* ==================================================================
+ * O CHECK LIST DE DOCUMENTAÇÕES (0027)
+ *
+ * A folha do envelope: 36 itens, três vistos cada. A LISTA mora aqui e
+ * não no banco — ela muda quando a casa muda o processo, e migração
+ * para acrescentar uma linha de conferência seria atrito à toa.
+ * ================================================================== */
+
+const VISTOS = ["adm", "gerencia", "financeiro"];
+
+const ITENS_DOC = [
+  // codigo, rótulo, grupo, quem dá visto ("tres" = adm+gerência+financeiro, "um" = só adm)
+  ["fechamento", "Check List Fechamento", "pf", "tres"],
+  ["resumo_negociacao", "Resumo Negociação Sances", "pf", "tres"],
+  ["procuracao", "Procuração", "pf", "tres"],
+  ["crv_dut", "CRV/DUT", "pf", "tres"],
+  ["crlv", "CRLV", "pf", "tres"],
+  ["dossie_detran", "Dossiê Detran", "pf", "tres"],
+  ["prf", "PRF", "pf", "tres"],
+  ["divida_ativa", "Dívida Ativa", "pf", "tres"],
+  ["cnh_contratante", "CNH Contratante", "pf", "tres"],
+  ["cnh_proprietario", "CNH Proprietário", "pf", "tres"],
+  ["comprovante_residencia", "Comprovante de Residência", "pf", "tres"],
+  ["serasa", "Consulta Serasa", "pf", "tres"],
+  ["contrato", "Contrato", "pf", "tres"],
+  ["cautelar", "Cautelar veículo", "pf", "tres"],
+  ["manual", "Manual", "pf", "tres"],
+  ["chave_reserva", "Chave Reserva", "pf", "tres"],
+  ["gnv_selo", "GNV, Selo Atualizado?", "pf", "tres"],
+  ["placa_mercosul", "Tem placa Mercosul?", "pf", "tres"],
+  ["trocar_placa", "Trocar de Placa?", "pf", "tres"],
+  ["tem_financiamento", "Tem Financiamento?", "pf", "tres"],
+  ["financiamento_incluso", "Financiamento está Incluso?", "pf", "tres"],
+  ["financiamento_quitado", "Financiamento está Quitado?", "pf", "tres"],
+  ["tem_debitos", "Tem Débitos?", "pf", "tres"],
+  ["debitos_cobrados", "Foi cobrado os Débitos?", "pf", "tres"],
+  ["debitos_pagos", "Vai ser pago os Débitos?", "pf", "tres"],
+
+  ["cartao_cnpj", "Cartão CNPJ", "pj", "tres"],
+  ["contrato_social", "Contrato Social", "pj", "tres"],
+  ["documentos_socios", "Documentos Sócios", "pj", "tres"],
+  ["multas_duplicacao", "Multas (Duplicação)", "pj", "tres"],
+
+  ["arq_comprovante_cliente", "Comprovante Cliente", "arquivamento", "um"],
+  ["arq_comprovante_lojista", "Comprovante Lojista", "arquivamento", "um"],
+  ["arq_contrato_lojista", "Contrato Lojista", "arquivamento", "um"],
+  ["arq_protocolo_retirada", "Protocolo de Retirada", "arquivamento", "um"],
+
+  ["transf_dut_atpv", "Cópia DUT ou ATPV Reconhecida", "transferencia", "um"],
+  ["transf_procuracao", "Cópia Procuração", "transferencia", "um"],
+  ["transf_comunicado_venda", "Comunicado Venda", "transferencia", "um"],
+];
+const CODIGOS_DOC = ITENS_DOC.map((x) => x[0]);
+
+async function documentos(req, res, tok) {
+  const RESTD = `${URL_BASE}/rest/v1/checklist_doc`;
+
+  if (req.method === "GET") {
+    const aid = String(req.query.atendimento_id || "");
+    if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
+    const linhas = await banco(`${RESTD}?select=*&atendimento_id=eq.${aid}`, { headers: cabecalhos(tok) });
+    return res.status(200).json({ itens: ITENS_DOC, marcas: linhas || [] });
+  }
+
+  if (req.method === "PUT") {
+    const corpo = await lerCorpo(req);
+    if (!corpo) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    const aid = String(corpo.atendimento_id || "");
+    if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
+    const item = String(corpo.item || "");
+    if (CODIGOS_DOC.indexOf(item) < 0) return res.status(400).json({ erro: "Item desconhecido." });
+
+    const eu = donoDoToken(tok);
+    const adm = await eAdministrativo(tok);
+    const linha = { atendimento_id: aid, item, atualizado_em: new Date().toISOString() };
+
+    // Quem carimba é o servidor, a partir do token. Sem isso,
+    // "conferido" não responde a pergunta que importa quando algo dá
+    // errado: conferido por quem.
+    VISTOS.forEach((v) => {
+      if (corpo[v] === undefined) return;
+      linha[v] = corpo[v] === null ? null : !!corpo[v];
+      linha[`${v}_por`] = corpo[v] === null ? null : eu;
+      linha[`${v}_em`] = corpo[v] === null ? null : new Date().toISOString();
+    });
+    if (corpo.observacao !== undefined) linha.observacao = texto(corpo.observacao);
+    if (Object.keys(linha).length <= 3) return res.status(400).json({ erro: "Nada para marcar." });
+
+    // O visto do administrativo e o da gerência são permissão, não
+    // conveniência de tela: quem não é adm nem gerente não carimba.
+    if ((linha.adm !== undefined || linha.gerencia !== undefined) && !adm) {
+      return res.status(403).json({ erro: "Só o administrativo ou o gerente dá esse visto." });
+    }
+
+    const r = await banco(`${RESTD}?on_conflict=atendimento_id,item`, {
+      method: "POST",
+      headers: json(tok, { Prefer: "resolution=merge-duplicates,return=representation" }),
+      body: JSON.stringify(linha),
+    });
+    const salvo = Array.isArray(r) ? r[0] : r;
+    if (!salvo) return res.status(403).json({ erro: "O banco recusou a marcação." });
+    return res.status(200).json({ ok: true, marca: salvo });
+  }
+
+  res.setHeader("Allow", "GET, PUT");
+  return res.status(405).json({ erro: "Use GET ou PUT." });
+}
+
 module.exports = async function handler(req, res) {
   if (!URL_BASE || !ANON) {
     return res.status(500).json({ erro: "SUPABASE_URL ou SUPABASE_ANON_KEY não configurados." });
@@ -121,6 +229,11 @@ module.exports = async function handler(req, res) {
   if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
 
   try {
+    if (String(req.query.recurso || "") === "documentos") {
+    try { return await documentos(req, res, tok); }
+    catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Falhou." }); }
+  }
+
     if (req.method === "GET") {
       const r = await banco(`${REST}?select=${CAMPOS}&atendimento_id=eq.${aid}&limit=1`,
                             { headers: cabecalhos(tok) });
