@@ -429,9 +429,12 @@ async function importar(req, res, tok) {
     (jaTem || []).forEach((f) => { favPor[f.documento] = f.id; });
     const novos = listaDocs.filter((d) => !favPor[d]).map((d) => ({ nome: docs[d], documento: d }));
     if (novos.length) {
-      const criados = await supa(`${base("fin_favorecido")}?on_conflict=documento`, {
-        method: "POST", headers: cab(tok, { Prefer: "resolution=merge-duplicates,return=representation" }),
-        body: JSON.stringify(novos),
+      // Sem `on_conflict`: o índice de documento é PARCIAL (só onde o
+      // documento não é nulo), e o Postgres não infere índice parcial
+      // num ON CONFLICT — devolve "no unique or exclusion constraint
+      // matching". A consulta acima já tirou os repetidos.
+      const criados = await supa(base("fin_favorecido"), {
+        method: "POST", headers: cab(tok, REP), body: JSON.stringify(novos),
       });
       (criados || []).forEach((f) => { favPor[f.documento] = f.id; });
     }
