@@ -9048,16 +9048,30 @@ function FinImportar({ contaId, aoTerminar }) {
   const [modo, setModo] = useState("ofx");
   const [txt, setTxt] = useState(""); const [ofx, setOfx] = useState(null); const [nomeArq, setNomeArq] = useState("");
   const [indo, setIndo] = useState(false); const [res, setRes] = useState(null); const [erro, setErro] = useState("");
+  const [conf, setConf] = useState(null);
   const previa = modo === "ofx" ? ofx : (txt ? lerExtrato(txt) : null);
-  const enviar = async () => {
-    setIndo(true); setErro("");
-    try {
-      const corpo = { conta_id: contaId, linhas: previa.dados };
-      if (modo === "ofx" && previa.saldo_final != null) { corpo.saldo_final = previa.saldo_final; corpo.saldo_final_em = previa.saldo_final_em; }
-      setRes(await fin("importar", null, finJson("POST", corpo)));
-    } catch (e) { setErro(e.message); }
+
+  const corpoDe = () => {
+    const corpo = { conta_id: contaId, linhas: previa.dados };
+    if (modo === "ofx" && previa.saldo_final != null) { corpo.saldo_final = previa.saldo_final; corpo.saldo_final_em = previa.saldo_final_em; }
+    return corpo;
+  };
+  // Conferir primeiro: o BPO vê o que vai entrar e o que já está lá
+  // ANTES de gravar. Descobrir depois que entrou repetido é o tipo de
+  // coisa que se conserta apagando linha a linha.
+  const conferir = async () => {
+    setIndo(true); setErro(""); setConf(null);
+    try { setConf(await fin("importar", { acao: "conferir" }, finJson("POST", corpoDe()))); }
+    catch (e) { setErro(e.message); }
     setIndo(false);
   };
+  const enviar = async () => {
+    setIndo(true); setErro("");
+    try { setRes(await fin("importar", null, finJson("POST", corpoDe()))); }
+    catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+  useEffect(() => { setConf(null); }, [txt, ofx, contaId]);
   const escolher = async (arq) => {
     if (!arq) return;
     setNomeArq(arq.name); setErro("");
@@ -9076,6 +9090,11 @@ function FinImportar({ contaId, aoTerminar }) {
       {res ? (
         <div className="mt-3 rounded-lg p-3 text-[13px]" style={{ background: "#E8F3EE" }}>
           <b>{res.inseridos}</b> lançamentos novos · {res.repetidos} já existiam · {res.ligados_a_carro} ligados a carro
+          {!!res.repetidos && (
+            <div className="text-[12px]" style={{ color: C.mute }}>
+              Dos repetidos: {res.repetidos_chave || 0} pela chave do banco, {res.repetidos_data || 0} pela data e valor (mesmo movimento vindo por outro caminho).
+            </div>
+          )}
           {!!res.conciliados && <div style={{ color: AMARELO.texto }}><b>{res.conciliados}</b> casaram com título em aberto e foram baixados — estão marcados para revisar.</div>}
           {!!res.favorecidos_criados && <div><b>{res.favorecidos_criados}</b> favorecidos reconhecidos pelo CNPJ/CPF da descrição.</div>}
           {!!res.sem_categoria && <span style={{ color: AMARELO.texto }}> · {res.sem_categoria} sem categoria (a memória vai sugerindo)</span>}
@@ -9113,7 +9132,36 @@ function FinImportar({ contaId, aoTerminar }) {
         </>
       )}
       {!res && erro && <p className="mt-1 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
-      {!res && <BotaoPrimario onClick={enviar} disabled={indo || !contaId || !previa || !!previa.erro || !previa.dados.length} className="mt-2 w-full">{indo ? "Importando…" : `Importar${previa && !previa.erro ? ` ${previa.dados.length} movimentos` : ""}`}</BotaoPrimario>}
+
+      {!res && conf && (
+        <div className="mt-2 rounded-lg p-3 text-[13px]" style={{ background: conf.entrariam ? "#EEF6F1" : AMARELO.fundo }}>
+          {conf.entrariam
+            ? <><b>{conf.entrariam}</b> movimento{conf.entrariam === 1 ? "" : "s"} novo{conf.entrariam === 1 ? "" : "s"} de {diaBR(conf.de)} a {diaBR(conf.ate)}</>
+            : <span style={{ color: AMARELO.texto, fontWeight: 600 }}>Nada de novo: tudo neste arquivo já está no sistema.</span>}
+          {!!conf.ja_existiam && <div style={{ color: C.mute }}>{conf.ja_existiam} já {conf.ja_existiam === 1 ? "estava" : "estavam"} lançado{conf.ja_existiam === 1 ? "" : "s"} — não entram de novo.</div>}
+          {!!conf.casariam && <div style={{ color: AMARELO.texto }}>{conf.casariam} casam com título em aberto e serão baixados.</div>}
+          {!!conf.invalidas && <div style={{ color: AMARELO.texto }}>{conf.invalidas} linha{conf.invalidas === 1 ? "" : "s"} sem data ou sem valor ficam de fora.</div>}
+        </div>
+      )}
+
+      {!res && (
+        <div className="mt-2 flex gap-2">
+          {!conf ? (
+            <button onClick={conferir} disabled={indo || !contaId || !previa || !!previa.erro || !previa.dados.length}
+              className="w-full rounded-lg border py-2.5 text-[14px] font-semibold"
+              style={{ borderColor: C.roxo, color: C.roxo }}>
+              {indo ? "Conferindo…" : `Conferir${previa && !previa.erro ? ` ${previa.dados.length} movimentos` : ""}`}
+            </button>
+          ) : (
+            <>
+              <BotaoPrimario onClick={enviar} disabled={indo || !conf.entrariam && !conf.casariam} className="flex-1">
+                {indo ? "Importando…" : conf.entrariam || conf.casariam ? `Importar ${conf.entrariam} e baixar ${conf.casariam}` : "Nada para importar"}
+              </BotaoPrimario>
+              <button onClick={() => setConf(null)} className="px-3 text-[13px]" style={{ color: C.mute }}>voltar</button>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

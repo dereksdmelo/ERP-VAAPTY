@@ -1409,3 +1409,39 @@ banco) e puxar o extrato sozinho por API bancária (o Itaú exige
 contrato de Open Banking; aqui o OFX é baixado à mão). O resto — a
 conciliação, o DRE, o fluxo, a folha, o rateio — está aqui, e amarrado
 ao carro, que nenhum ERP genérico faz.
+
+
+### 29. Duplicidade na importação: duas redes, e a conferência antes
+
+A integração direta com o Itaú não vai acontecer — o portal do banco
+não expõe extrato de conta corrente para autoatendimento, e o Open
+Finance exige ser instituição autorizada. Fica o OFX baixado à mão, e
+então **não duplicar é a única coisa que precisa estar certa.**
+
+**Rede 1 — a chave do banco.** Índice único em
+`(conta_id, chave_extrato)`. No OFX a chave é o FITID mais data e
+valor; na planilha é data + descrição + valor. Isso barra o mesmo
+arquivo importado duas vezes.
+
+**Rede 2 — data e valor, por contagem.** A rede 1 não barra o mesmo
+movimento vindo por caminhos diferentes: a planilha de agosto e o OFX
+de agosto montam chaves de formatos distintos para o mesmo PIX. Nem
+barra o banco reemitindo FITID diferente para o mesmo período. Então a
+importação conta quantos movimentos com aquela data e aquele valor já
+existem na conta e **só deixa entrar o excedente**.
+
+**É contagem, não presença** — e essa distinção é a razão de a rede 2
+existir desse jeito. Dois PIX de R$ 100 no mesmo dia são dois
+movimentos de verdade; barrar o segundo apagaria dinheiro do saldo. Se
+o banco já tem um e o arquivo traz dois, entra um.
+
+**Conferir antes de gravar.** `?recurso=importar&acao=conferir` roda
+tudo e não escreve nada: diz quantos entrariam, quantos já existem e
+quantos casam com título em aberto. A tela obriga a passar por ele —
+descobrir depois que entrou repetido se conserta apagando linha a
+linha, e é assim que se perde a confiança no saldo.
+
+**O PATCH do casamento não derruba a importação.** Ao baixar um título,
+a chave do extrato pode já pertencer a outro lançamento da conta. O
+`try` refaz o PATCH sem a chave: baixar o título continua valendo, e o
+que se perde é só a amarração com o identificador do banco.

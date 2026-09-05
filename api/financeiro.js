@@ -363,6 +363,8 @@ async function importar(req, res, tok) {
   const linhas = Array.isArray(c.linhas) ? c.linhas : [];
   if (!linhas.length) return res.status(400).json({ erro: "Nenhuma linha." });
   if (linhas.length > 1500) return res.status(400).json({ erro: "Cole no máximo 1.500 linhas por vez." });
+  // `conferir` não grava nada: diz o que entraria e o que já existe.
+  const soConferir = String(req.query.acao || "") === "conferir";
 
   const cats = await supa(`${base("fin_categoria")}?select=id,nome,grupo`, { headers: cab(tok) });
   const catPor = {};
@@ -435,6 +437,32 @@ async function importar(req, res, tok) {
     }
   }
 
+  // ---- a rede contra duplicidade ----
+  //
+  // A chave única (conta + chave_extrato) já barra o MESMO arquivo
+  // importado duas vezes. Ela não barra o mesmo movimento vindo por
+  // caminhos diferentes: a planilha monta a chave com a descrição, o
+  // OFX com o identificador do banco — formatos distintos para o mesmo
+  // PIX. E não barra o Itaú reemitindo FITID diferente para o mesmo
+  // período, que alguns bancos fazem.
+  //
+  // Por isso a segunda rede: conta quantos movimentos com aquela DATA e
+  // aquele VALOR já existem na conta, e só deixa entrar o excedente.
+  // É contagem, não presença — dois PIX de R$ 100 no mesmo dia são dois
+  // movimentos de verdade, e barrar o segundo apagaria dinheiro.
+  const datas = linhas.map((l) => dataISO(l.data)).filter(Boolean).sort();
+  const jaLa = {};
+  if (datas.length) {
+    const antigos = await supa(
+      `${base("fin_lancamento")}?select=data,debito,credito&situacao=eq.efetivado&conta_id=eq.${contaId}` +
+      `&data=gte.${datas[0]}&data=lte.${datas[datas.length - 1]}&limit=20000`, { headers: cab(tok) });
+    (antigos || []).forEach((x) => {
+      const k = `${x.data}|${Number(x.debito) || 0}|${Number(x.credito) || 0}`;
+      jaLa[k] = (jaLa[k] || 0) + 1;
+    });
+  }
+  let repetidosData = 0;
+
   let saldoInicial = null, saldoEm = null, invalidas = 0;
   const corpo = [];
   linhas.forEach((l) => {
@@ -457,6 +485,11 @@ async function importar(req, res, tok) {
     const chave = fitid
       ? `ofx:${fitid}|${data}|${deb}|${cred}`
       : `${data}|${String(l.descricao || "").trim().toLowerCase()}|${deb}|${cred}`;
+
+    // Este movimento já está no sistema, por qualquer caminho? Consome
+    // uma das ocorrências e sai fora.
+    const kData = `${data}|${deb}|${cred}`;
+    if (jaLa[kData] > 0) { jaLa[kData] -= 1; repetidosData += 1; return; }
 
     // Já existe um título aberto com este valor e vencimento perto?
     // Então este movimento é o pagamento dele: efetiva a MESMA linha em
@@ -484,15 +517,34 @@ async function importar(req, res, tok) {
     });
   });
 
+  if (soConferir) {
+    return res.status(200).json({
+      conferencia: true, entrariam: corpo.length, ja_existiam: repetidosData,
+      casariam: casados.length, invalidas, sem_categoria: corpo.filter((x) => !x.categoria_id).length,
+      de: datas[0] || null, ate: datas[datas.length - 1] || null,
+    });
+  }
+
   // Os casados vão um a um: são poucos, e cada um é um UPDATE em linha
   // diferente — não há upsert em lote que sirva.
   let conciliados = 0;
   for (const k of casados) {
     const { id, ...mud } = k;
     if (mud.competencia === undefined) delete mud.competencia;
-    const r = await supa(`${base("fin_lancamento")}?id=eq.${id}&situacao=eq.aberto`, {
-      method: "PATCH", headers: cab(tok, REP), body: JSON.stringify(mud),
-    });
+    let r;
+    try {
+      r = await supa(`${base("fin_lancamento")}?id=eq.${id}&situacao=eq.aberto`, {
+        method: "PATCH", headers: cab(tok, REP), body: JSON.stringify(mud),
+      });
+    } catch (e) {
+      // A chave do extrato pode já pertencer a outro lançamento desta
+      // conta. Baixar o título continua valendo — o que se perde é só a
+      // amarração com o identificador do banco.
+      const { chave_extrato, ...semChave } = mud;
+      r = await supa(`${base("fin_lancamento")}?id=eq.${id}&situacao=eq.aberto`, {
+        method: "PATCH", headers: cab(tok, REP), body: JSON.stringify(semChave),
+      });
+    }
     if (um(r)) conciliados += 1;
   }
 
@@ -523,7 +575,12 @@ async function importar(req, res, tok) {
     });
   }
   return res.status(201).json({
-    ok: true, inseridos, repetidos: corpo.length - inseridos, invalidas, conciliados,
+    ok: true, inseridos,
+    // Duas redes, dois números: o que a chave do banco barrou e o que a
+    // varredura por data e valor barrou.
+    repetidos: (corpo.length - inseridos) + repetidosData,
+    repetidos_chave: corpo.length - inseridos, repetidos_data: repetidosData,
+    invalidas, conciliados,
     favorecidos_criados: listaDocs.filter((d) => docs[d]).length ? Object.keys(favPor).length : 0,
     categorias_criadas: nomesNovos, saldo_inicial: saldoInicial, ligados_a_carro: corpo.filter((x) => x.estoque_id).length,
     sem_categoria: corpo.filter((x) => !x.categoria_id).length, fechamento_gravado: fechamentoGravado,
