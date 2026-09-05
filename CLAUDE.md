@@ -1367,3 +1367,45 @@ ele apenas sumisse da lista, ninguém saberia que existiu.
 **Mora em `api/atendimento.js` sob `?recurso=lead`**, pelo teto de 12
 funções — mas a costura não é arbitrária: o lead existe para virar
 atendimento, que é o assunto do arquivo.
+
+
+### 28. O que faz um BPO preferir o Conta Azul, e o que dá para ter aqui
+
+A pergunta do Derek em 04/09/2026: um BPO exigente quer integrar o
+Conta Azul; dá para resolver com o nosso? A 0026 fecha quatro buracos
+que eram os motivos reais.
+
+**O extrato do Itaú já traz o CNPJ, e ninguém estava usando.** "PIX
+ENVIADO BARBOSA CONSULTORIA LTDA 62.762.461/0001-59" carrega o
+documento de graça. `docNa()` o extrai e a importação cria ou liga o
+`fin_favorecido` sozinha — o cadastro de fornecedores se monta pelo
+uso, sem ninguém digitar. **O documento é a chave, não o nome:** o
+nome vem escrito de um jeito no extrato e de outro no contrato; o CNPJ
+não muda. Corrigir o nome uma vez conserta todos os lançamentos
+daquele fornecedor.
+
+**Parcelamento e conta fixa são o mesmo gesto.** "Repetir" gera N
+títulos amarrados por `grupo_id`; com "dividir o valor" é a compra em
+12×, sem dividir é o aluguel do ano. **Gera tudo de uma vez de
+propósito** — não há tarefa agendada neste sistema, e uma regra
+invisível que alguém precisa lembrar de rodar é pior que a fila cheia.
+
+**O fluxo projetado é a pergunta de segunda-feira.** Saldo de hoje
+mais o que vence, semana a semana, e a data em que fica negativo. A
+lista de títulos sozinha não responde "dá para pagar a folha dia 5". O
+vencido entra na primeira coluna, porque a conta continua devendo.
+
+**BPO responde por número, e número sem histórico não se defende.**
+`fin_log` é um gatilho `after update` que anota só o que muda um valor
+ou um mês — valor, competência, categoria, situação, conta, data,
+vencimento. Anotar mudança de descrição encheria a tabela e esconderia
+o que importa. A política é **só de leitura**: quem escreve é o
+gatilho, que roda como dono.
+
+**O que o Conta Azul faz e nós não fazemos — e não vamos fazer sem
+decisão sua:** emitir nota fiscal (precisa de certificado digital e
+integração com a prefeitura), emitir boleto (precisa de convênio com o
+banco) e puxar o extrato sozinho por API bancária (o Itaú exige
+contrato de Open Banking; aqui o OFX é baixado à mão). O resto — a
+conciliação, o DRE, o fluxo, a folha, o rateio — está aqui, e amarrado
+ao carro, que nenhum ERP genérico faz.

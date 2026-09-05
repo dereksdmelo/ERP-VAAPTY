@@ -121,6 +121,37 @@ const GRUPOS = ["despesa", "receita", "negociacao", "retirada", "transferencia",
 const grupo = (v) => (GRUPOS.indexOf(String(v)) >= 0 ? String(v) : "despesa");
 const idOuNulo = (v) => (RX_ID.test(String(v || "")) ? String(v) : null);
 
+/**
+ * O CNPJ ou CPF que o extrato do Itaú já traz na descrição.
+ *
+ * "PIX ENVIADO BARBOSA CONSULTORIA LTDA 62.762.461/0001-59" carrega o
+ * documento de graça. É a chave certa para o cadastro de favorecidos:
+ * o nome vem escrito de um jeito no extrato e de outro no contrato, o
+ * documento não muda.
+ */
+const docNa = (desc) => {
+  const t = String(desc || "");
+  const cnpj = /(\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2})/.exec(t);
+  if (cnpj) return cnpj[1].replace(/\D/g, "");
+  const cpf = /(\d{3}\.\d{3}\.\d{3}-\d{2})/.exec(t);
+  return cpf ? cpf[1].replace(/\D/g, "") : null;
+};
+// O nome, sem o verbo do banco e sem o documento.
+const nomeNa = (desc) => {
+  const t = String(desc || "")
+    .replace(/\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}/g, "")
+    .replace(/\d{3}\.\d{3}\.\d{3}-\d{2}/g, "")
+    .replace(/^\s*(PIX\s+(ENVIADO|RECEBIDO)|TED\s*(RECEBIDA|ENVIADA)?|DOC|TRANSFERENCIA|TRANSFER[ÊE]NCIA|PAGAMENTO)\s*/i, "")
+    .replace(/\d{2}\/\d{2}/g, "")
+    .replace(/\s+/g, " ").trim();
+  return t.length >= 3 ? t.slice(0, 120) : null;
+};
+const documento = (v) => { const d = String(v || "").replace(/\D/g, ""); return d ? d : null; };
+
+const favorecido = cadastro("fin_favorecido",
+  [["nome", texto], ["documento", documento], ["tipo", texto], ["observacao", texto], ["ativo", bool]],
+  "nome.asc");
+
 const conta = cadastro("fin_conta",
   [["nome", texto], ["banco", texto], ["empresa", texto], ["saldo_inicial", (v) => decimal(v) || 0],
    ["saldo_inicial_em", dataISO], ["ativa", bool]], "nome.asc");
@@ -135,7 +166,7 @@ const funcionario = cadastro("fin_funcionario",
 const TIPOS_NEG = ["pagto_cliente", "quitacao", "debitos", "pagto_lojista", "reembolso", "outro"];
 const SITUACOES = ["aberto", "efetivado", "cancelado"];
 const CAMPOS_LANC = "*,fin_categoria(id,nome,grupo,no_dre,pede_funcionario)," +
-  "fin_conta(id,nome,empresa),estoque(id,veiculo(placa,marca_modelo)),fin_funcionario(id,nome)," +
+  "fin_conta(id,nome,empresa),fin_favorecido(id,nome,documento),estoque(id,veiculo(placa,marca_modelo)),fin_funcionario(id,nome)," +
   "fin_rateio(id,valor,categoria_id,estoque_id,tipo_negociacao,funcionario_id,descricao)";
 
 /**
@@ -211,6 +242,7 @@ function linhaLancamento(c, tok) {
   if (c.favorecido !== undefined) l.favorecido = texto(c.favorecido);
   if (c.observacao !== undefined) l.observacao = texto(c.observacao);
   if (c.revisar !== undefined) l.revisar = !!c.revisar;
+  if (c.favorecido_id !== undefined) l.favorecido_id = idOuNulo(c.favorecido_id);
   return l;
 }
 
@@ -380,6 +412,29 @@ async function importar(req, res, tok) {
     return cand.length === 1 ? cand[0] : null;
   };
 
+  // Favorecidos: o documento na descrição é a chave. Quem ainda não
+  // existe é criado com o nome que o banco escreveu — e o BPO corrige
+  // o nome depois, uma vez, para todos os lançamentos daquele CNPJ.
+  const docs = {};
+  linhas.forEach((l) => {
+    const d = docNa(l.descricao);
+    if (d && !docs[d]) docs[d] = nomeNa(l.descricao) || d;
+  });
+  const listaDocs = Object.keys(docs);
+  const favPor = {};
+  if (listaDocs.length) {
+    const jaTem = await supa(`${base("fin_favorecido")}?select=id,documento&documento=in.(${listaDocs.join(",")})`, { headers: cab(tok) });
+    (jaTem || []).forEach((f) => { favPor[f.documento] = f.id; });
+    const novos = listaDocs.filter((d) => !favPor[d]).map((d) => ({ nome: docs[d], documento: d }));
+    if (novos.length) {
+      const criados = await supa(`${base("fin_favorecido")}?on_conflict=documento`, {
+        method: "POST", headers: cab(tok, { Prefer: "resolution=merge-duplicates,return=representation" }),
+        body: JSON.stringify(novos),
+      });
+      (criados || []).forEach((f) => { favPor[f.documento] = f.id; });
+    }
+  }
+
   let saldoInicial = null, saldoEm = null, invalidas = 0;
   const corpo = [];
   linhas.forEach((l) => {
@@ -424,6 +479,7 @@ async function importar(req, res, tok) {
       estoque_id: placa ? estoquePorPlaca[placa] || null : null,
       tipo_negociacao: cat && cat.grupo === "negociacao" ? (tipoNegNa(l.descricao) || "outro") : null,
       conciliado: true, origem: fitid ? "ofx" : "planilha",
+      favorecido_id: favPor[docNa(l.descricao)] || null,
       chave_extrato: chave,
     });
   });
@@ -468,6 +524,7 @@ async function importar(req, res, tok) {
   }
   return res.status(201).json({
     ok: true, inseridos, repetidos: corpo.length - inseridos, invalidas, conciliados,
+    favorecidos_criados: listaDocs.filter((d) => docs[d]).length ? Object.keys(favPor).length : 0,
     categorias_criadas: nomesNovos, saldo_inicial: saldoInicial, ligados_a_carro: corpo.filter((x) => x.estoque_id).length,
     sem_categoria: corpo.filter((x) => !x.categoria_id).length, fechamento_gravado: fechamentoGravado,
   });
@@ -700,6 +757,51 @@ async function titulo(req, res, tok) {
     });
   }
 
+  // Parcelamento e conta fixa são o mesmo gesto: um título vira N,
+  // amarrados por `grupo_id`. Não há tarefa agendada neste sistema, e
+  // gerar tudo de uma vez é honesto — a fila mostra o que vem, e o
+  // extrato baixa cada um quando passar.
+  if (req.method === "POST" && String(req.query.acao || "") === "repetir") {
+    const id = idOuNulo(req.query.id);
+    if (!id) return res.status(400).json({ erro: "id inválido." });
+    const c = await corpoDe(req) || {};
+    const n = Math.min(60, Math.max(1, Math.trunc(Number(c.vezes) || 0)));
+    if (n < 1) return res.status(400).json({ erro: "Quantas vezes?" });
+    const base0 = um(await supa(`${base("fin_lancamento")}?select=*&id=eq.${id}`, { headers: cab(tok) }));
+    if (!base0) return res.status(404).json({ erro: "Título não encontrado." });
+
+    const grupo = base0.grupo_id || id;
+    const venc0 = base0.vencimento || base0.data;
+    const dividir = !!c.dividir;      // parcelar o valor, ou repetir o mesmo
+    const total = (Number(base0.debito) || 0) + (Number(base0.credito) || 0);
+    const cada = dividir ? Math.round((total / (n + 1)) * 100) / 100 : total;
+
+    const novos = [];
+    for (let i = 1; i <= n; i++) {
+      const d = new Date(`${venc0}T12:00:00Z`);
+      d.setUTCMonth(d.getUTCMonth() + i);
+      const venc = d.toISOString().slice(0, 10);
+      novos.push({
+        conta_id: null, data: venc, competencia: competenciaDe(venc),
+        categoria_id: base0.categoria_id, descricao: base0.descricao,
+        favorecido: base0.favorecido, favorecido_id: base0.favorecido_id,
+        debito: Number(base0.debito) > 0 ? cada : 0,
+        credito: Number(base0.credito) > 0 ? cada : 0,
+        estoque_id: base0.estoque_id, tipo_negociacao: base0.tipo_negociacao,
+        funcionario_id: base0.funcionario_id,
+        situacao: "aberto", vencimento: venc, origem: "serie",
+        grupo_id: grupo, parcela: i + 1, parcelas: n + 1,
+      });
+    }
+    const r = await supa(base("fin_lancamento"), { method: "POST", headers: cab(tok, REP), body: JSON.stringify(novos) });
+    if (!(r || []).length) return recusado(res);
+    // O primeiro passa a fazer parte da série.
+    const mud = { grupo_id: grupo, parcela: 1, parcelas: n + 1 };
+    if (dividir) { if (Number(base0.debito) > 0) mud.debito = cada; else mud.credito = cada; }
+    await supa(`${base("fin_lancamento")}?id=eq.${id}`, { method: "PATCH", headers: cab(tok), body: JSON.stringify(mud) });
+    return res.status(201).json({ ok: true, criados: (r || []).length });
+  }
+
   if (req.method === "POST" && String(req.query.acao || "") === "baixar") {
     const id = idOuNulo(req.query.id);
     if (!id) return res.status(400).json({ erro: "id inválido." });
@@ -717,6 +819,69 @@ async function titulo(req, res, tok) {
 
   res.setHeader("Allow", "GET, POST");
   return res.status(405).json({ erro: "Use GET ou POST." });
+}
+
+/**
+ * O fluxo de caixa projetado: o saldo de hoje mais o que vence.
+ *
+ * É a pergunta que o BPO faz toda segunda — "dá para pagar a folha
+ * dia 5?" — e a única que a lista de títulos sozinha não responde.
+ * Semana a semana, para caber na cabeça; o dia exato está na fila.
+ */
+async function fluxo(req, res, tok) {
+  const semanas = Math.min(26, Math.max(2, Math.trunc(Number(req.query.semanas) || 8)));
+  const hoje = hojeAqui();
+  const [contas, mov, abertos] = await Promise.all([
+    supa(`${base("fin_conta")}?select=id,nome,saldo_inicial&ativa=is.true`, { headers: cab(tok) }),
+    supa(`${base("fin_lancamento")}?select=debito,credito&situacao=eq.efetivado&data=lte.${hoje}&limit=100000`, { headers: cab(tok) }),
+    supa(`${base("fin_lancamento")}?select=id,debito,credito,vencimento,descricao,favorecido,fin_favorecido(nome)&situacao=eq.aberto&limit=2000`, { headers: cab(tok) }),
+  ]);
+  const saldoHoje = (contas || []).reduce((t, c) => t + (Number(c.saldo_inicial) || 0), 0) +
+    (mov || []).reduce((t, l) => t + (Number(l.credito) || 0) - (Number(l.debito) || 0), 0);
+
+  const dia = (iso, mais) => { const d = new Date(`${iso}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + mais); return d.toISOString().slice(0, 10); };
+  const faixas = [];
+  for (let i = 0; i < semanas; i++) faixas.push({ de: dia(hoje, i * 7), ate: dia(hoje, i * 7 + 6), entra: 0, sai: 0, vencido: 0 });
+
+  let atrasado = 0;
+  (abertos || []).forEach((l) => {
+    const v = l.vencimento || hoje;
+    const deb = Number(l.debito) || 0, cred = Number(l.credito) || 0;
+    if (v < hoje) { atrasado += cred - deb; faixas[0].vencido += deb; return; }
+    const f = faixas.filter((x) => v >= x.de && v <= x.ate)[0];
+    // O que vence depois da última semana fica de fora e é dito à parte.
+    if (!f) return;
+    f.entra += cred; f.sai += deb;
+  });
+
+  let acumulado = saldoHoje + atrasado;
+  const linhas = faixas.map((f) => {
+    acumulado += f.entra - f.sai;
+    return { ...f, saldo: Math.round(acumulado * 100) / 100 };
+  });
+  const negativa = linhas.filter((l) => l.saldo < 0)[0] || null;
+
+  return res.status(200).json({
+    hoje, saldo_hoje: Math.round(saldoHoje * 100) / 100,
+    vencido: Math.round(atrasado * 100) / 100,
+    semanas: linhas,
+    fica_negativo_em: negativa ? negativa.de : null,
+  });
+}
+
+/** O histórico de um lançamento: quem mudou o quê. */
+async function log(req, res, tok) {
+  const id = idOuNulo(req.query.lancamento_id);
+  if (!id) return res.status(400).json({ erro: "lancamento_id inválido." });
+  const [linhas, quem] = await Promise.all([
+    supa(`${base("fin_log")}?select=*&lancamento_id=eq.${id}&order=quando.desc&limit=100`, { headers: cab(tok) }),
+    supa(`${URL_BASE}/rest/v1/perfil?select=id,nome`, { headers: cab(tok) }),
+  ]);
+  const nomes = {};
+  (quem || []).forEach((p) => { nomes[p.id] = p.nome; });
+  return res.status(200).json({
+    log: (linhas || []).map((l) => ({ ...l, quem_nome: nomes[l.quem] || null })),
+  });
 }
 
 /**
@@ -920,7 +1085,8 @@ async function estoqueLista(req, res, tok) {
   return res.status(200).json({ estoque: (lista || []).map((e) => ({ id: e.id, situacao: e.situacao, placa: e.veiculo && e.veiculo.placa, carro: e.veiculo && e.veiculo.marca_modelo })) });
 }
 
-const RECURSOS = { conta, categoria, funcionario, lancamento, importar, dre, carros, vale, folha, fechamento, rateio, negociacao, titulo, estoque: estoqueLista };
+const RECURSOS = { conta, categoria, funcionario, favorecido, lancamento, importar, dre, carros, vale, folha,
+                   fechamento, rateio, negociacao, titulo, fluxo, log, estoque: estoqueLista };
 
 module.exports = async function handler(req, res) {
   if (!URL_BASE || !ANON) return res.status(500).json({ erro: "SUPABASE_URL ou SUPABASE_ANON_KEY não configurados." });

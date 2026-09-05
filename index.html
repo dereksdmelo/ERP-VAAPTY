@@ -8675,6 +8675,7 @@ function FinLancamentos({ comp }) {
   const [carros, setCarros] = useState([]);
   const [funcs, setFuncs] = useState([]);
   const [repartindo, setRepartindo] = useState("");
+  const [historico, setHistorico] = useState("");
 
   useEffect(() => {
     fin("conta").then((x) => { setContas(x.lista); if (!conta && x.lista[0]) setConta(x.lista[0].id); }).catch((e) => setErro(e.message));
@@ -8867,7 +8868,9 @@ function FinLancamentos({ comp }) {
                     </td>
                     <td className="px-2 py-1 text-[12px]">
                       <input type="checkbox" className="mr-1 align-middle" checked={!!l.conciliado} title="conciliado com o extrato" onChange={(e) => mudar(l, { conciliado: e.target.checked })} />
-                      {l.descricao}{l.tipo_negociacao && <span className="ml-1 text-[10px]" style={{ color: C.mute }}>· {TIPOS_NEG_ROT[l.tipo_negociacao]}</span>}
+                      {l.fin_favorecido ? <b>{l.fin_favorecido.nome}</b> : null}
+                      {l.fin_favorecido ? <span className="block text-[10px]" style={{ color: C.mute }}>{l.descricao}</span> : l.descricao}
+                      {l.tipo_negociacao && <span className="ml-1 text-[10px]" style={{ color: C.mute }}>· {TIPOS_NEG_ROT[l.tipo_negociacao]}</span>}
                       {/* Casou com um título em aberto sozinho: fica
                           aceso até alguém conferir. */}
                       {l.revisar && (
@@ -8910,6 +8913,7 @@ function FinLancamentos({ comp }) {
                     <td className="px-2 py-1 text-right text-[12px]" style={{ fontVariantNumeric: "tabular-nums", color: saldo < 0 ? C.laranja : C.ink }}>{filtroCat ? "" : rs2(saldo)}</td>
                     <td className="whitespace-nowrap px-2 py-1 text-right">
                       <button onClick={() => setRepartindo(repartindo === l.id ? "" : l.id)} className="text-[11px]" style={{ color: C.roxo, fontWeight: 600 }}>repartir</button>
+                      <button onClick={() => setHistorico(historico === l.id ? "" : l.id)} className="ml-2 text-[11px]" style={{ color: C.mute }}>histórico</button>
                       <button onClick={() => apagar(l)} className="ml-2 text-[11px]" style={{ color: C.mute }}>apagar</button>
                     </td>
                   </tr>
@@ -8942,6 +8946,13 @@ function FinLancamentos({ comp }) {
                           })}
                         </span>
                       </td>
+                    </tr>
+                  );
+                }
+                if (historico === l.id) {
+                  linhas.push(
+                    <tr key={`${l.id}-hist`} style={{ borderBottom: `1px solid ${C.line}` }}>
+                      <td colSpan={9} className="px-2 pb-2"><HistoricoLanc id={l.id} aoFechar={() => setHistorico("")} /></td>
                     </tr>
                   );
                 }
@@ -9066,6 +9077,7 @@ function FinImportar({ contaId, aoTerminar }) {
         <div className="mt-3 rounded-lg p-3 text-[13px]" style={{ background: "#E8F3EE" }}>
           <b>{res.inseridos}</b> lançamentos novos · {res.repetidos} já existiam · {res.ligados_a_carro} ligados a carro
           {!!res.conciliados && <div style={{ color: AMARELO.texto }}><b>{res.conciliados}</b> casaram com título em aberto e foram baixados — estão marcados para revisar.</div>}
+          {!!res.favorecidos_criados && <div><b>{res.favorecidos_criados}</b> favorecidos reconhecidos pelo CNPJ/CPF da descrição.</div>}
           {!!res.sem_categoria && <span style={{ color: AMARELO.texto }}> · {res.sem_categoria} sem categoria (a memória vai sugerindo)</span>}
           {!!res.invalidas && <span style={{ color: AMARELO.texto }}> · {res.invalidas} linhas inválidas</span>}
           {res.saldo_inicial != null && <div>Saldo inicial da conta: {rs2(res.saldo_inicial)}</div>}
@@ -9107,6 +9119,84 @@ function FinImportar({ contaId, aoTerminar }) {
 }
 
 /**
+ * O fluxo de caixa projetado.
+ *
+ * É a pergunta que o BPO faz toda segunda — "dá para pagar a folha no
+ * dia 5?" — e a única que a lista de títulos sozinha não responde.
+ * Semana a semana, porque quinze dias em dias vira uma parede de
+ * números; o dia exato está na fila logo abaixo.
+ */
+function FinFluxo() {
+  const [d, setD] = useState(null);
+  const [erro, setErro] = useState("");
+  useEffect(() => { fin("fluxo", { semanas: 10 }).then(setD).catch((e) => setErro(e.message)); }, []);
+  if (erro) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
+  if (!d) return <p className="text-[13px]" style={{ color: C.mute }}>Projetando…</p>;
+  const pico = Math.max(1, ...d.semanas.map((s) => Math.abs(s.saldo)));
+  return (
+    <div className="rounded-xl p-4" style={{ background: C.paper, border: `1px solid ${d.fica_negativo_em ? C.laranja : C.line}` }}>
+      <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1">
+        <span className="text-[12px] font-semibold uppercase tracking-[0.06em]" style={{ color: C.mute }}>Fluxo projetado</span>
+        <span className="text-[13px]"><span style={{ color: C.mute }}>saldo hoje</span> <b style={{ fontVariantNumeric: "tabular-nums" }}>{rs2(d.saldo_hoje)}</b></span>
+        {!!d.vencido && <span className="text-[13px]" style={{ color: C.laranja }}>vencido {rs2(d.vencido)}</span>}
+        {d.fica_negativo_em && (
+          <span className="text-[13px] font-bold" style={{ color: C.laranja }}>fica negativo na semana de {diaBR(d.fica_negativo_em)}</span>
+        )}
+      </div>
+      <div className="rolar mt-3 flex gap-2 overflow-x-auto pb-1">
+        {d.semanas.map((s) => {
+          const neg = s.saldo < 0;
+          const h = Math.round((Math.abs(s.saldo) / pico) * 44) + 4;
+          return (
+            <div key={s.de} className="shrink-0 text-center" style={{ width: 78 }}>
+              <div className="flex h-[52px] items-end justify-center">
+                <div style={{ width: 26, height: h, background: neg ? C.laranja : C.verde, borderRadius: 3 }} />
+              </div>
+              <div className="mt-1 text-[11px]" style={{ fontVariantNumeric: "tabular-nums", fontWeight: 700, color: neg ? C.laranja : C.ink }}>
+                {Math.round(s.saldo / 1000)}k
+              </div>
+              <div className="text-[10px]" style={{ color: C.mute }}>{diaBR(s.de)}</div>
+              {(s.sai > 0 || s.entra > 0) && (
+                <div className="text-[9px]" style={{ color: C.mute }}>
+                  {s.entra > 0 ? `+${Math.round(s.entra / 1000)}k ` : ""}{s.sai > 0 ? `−${Math.round(s.sai / 1000)}k` : ""}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-1 text-[11px]" style={{ color: C.mute }}>
+        Saldo de hoje mais o que vence em cada semana. O vencido entra na primeira coluna, porque a conta continua devendo.
+      </p>
+    </div>
+  );
+}
+
+/** O histórico de um lançamento: quem mudou o quê, e quando. */
+function HistoricoLanc({ id, aoFechar }) {
+  const [l, setL] = useState(null);
+  useEffect(() => { fin("log", { lancamento_id: id }).then((x) => setL(x.log)).catch(() => setL([])); }, [id]);
+  const ROT = { debito: "Débito", credito: "Crédito", competencia: "Competência", categoria_id: "Categoria",
+                situacao: "Situação", conta_id: "Conta", data: "Data", vencimento: "Vencimento" };
+  return (
+    <div className="rounded-lg p-2.5" style={{ background: C.bg }}>
+      <div className="flex items-baseline justify-between">
+        <span className="text-[12px] font-semibold">Histórico</span>
+        <button onClick={aoFechar} className="text-[11px]" style={{ color: C.mute }}>fechar</button>
+      </div>
+      {!l && <p className="text-[12px]" style={{ color: C.mute }}>Carregando…</p>}
+      {l && !l.length && <p className="text-[12px]" style={{ color: C.mute }}>Nunca foi alterado depois de lançado.</p>}
+      {(l || []).map((x) => (
+        <div key={x.id} className="text-[12px]" style={{ color: C.mute }}>
+          {diaBR(x.quando)} · {x.quem_nome || "alguém"} mudou <b style={{ color: C.ink }}>{ROT[x.campo] || x.campo}</b>{" "}
+          de {x.de || "vazio"} para {x.para || "vazio"}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
  * Contas a pagar e a receber: o que ainda não passou no banco.
  *
  * É a mesma linha do extrato, só que ainda `aberto`. Quando o OFX
@@ -9120,6 +9210,8 @@ function FinContas({ comp }) {
   const [contas, setContas] = useState([]);
   const [novo, setNovo] = useState(null);
   const [baixando, setBaixando] = useState(null);
+  const [favs, setFavs] = useState([]);
+  const [repetindo, setRepetindo] = useState(null);
 
   const carregar = () => {
     setErro("");
@@ -9129,7 +9221,14 @@ function FinContas({ comp }) {
     carregar();
     fin("categoria").then((x) => setCats(x.lista)).catch(() => {});
     fin("conta").then((x) => setContas(x.lista)).catch(() => {});
+    fin("favorecido").then((x) => setFavs(x.lista)).catch(() => {});
   }, []);
+
+  const repetir = async (l, vezes, dividir) => {
+    setErro("");
+    try { await fin("titulo", { acao: "repetir", id: l.id }, finJson("POST", { vezes, dividir })); setRepetindo(null); carregar(); }
+    catch (e) { setErro(e.message); }
+  };
 
   const gravar = async () => {
     setErro("");
@@ -9159,6 +9258,7 @@ function FinContas({ comp }) {
 
   return (
     <div className="space-y-3">
+      <FinFluxo />
       <div className="flex flex-wrap items-center gap-3">
         {d && (
           <>
@@ -9193,7 +9293,17 @@ function FinContas({ comp }) {
           <div className="text-[14px] font-semibold">{novo.tipo === "pagar" ? "Nova conta a pagar" : "Novo título a receber"}</div>
           <div className="mt-2 grid gap-2 lg:grid-cols-5">
             <label className="lg:col-span-2"><Rotulo>{novo.tipo === "pagar" ? "Para quem" : "De quem"}</Rotulo>
-              <input className={inputCls} style={inputSty} value={novo.favorecido} onChange={(e) => setNovo({ ...novo, favorecido: e.target.value })} /></label>
+              {/* Lista com o que já existe, mas aceita nome novo: o
+                  cadastro se enche sozinho pelo CNPJ do extrato, e
+                  obrigar a cadastrar antes travaria o lançamento. */}
+              <input className={inputCls} style={inputSty} list="favs-lista" value={novo.favorecido}
+                onChange={(e) => {
+                  const f = favs.filter((x) => x.nome === e.target.value)[0];
+                  setNovo({ ...novo, favorecido: e.target.value, favorecido_id: f ? f.id : null });
+                }} />
+              <datalist id="favs-lista">
+                {favs.map((f) => <option key={f.id} value={f.nome}>{f.documento || ""}</option>)}
+              </datalist></label>
             <label className="lg:col-span-2"><Rotulo>Descrição</Rotulo>
               <input className={inputCls} style={inputSty} value={novo.descricao} onChange={(e) => setNovo({ ...novo, descricao: e.target.value })} /></label>
             <label><Rotulo req>Valor</Rotulo>
@@ -9241,6 +9351,7 @@ function FinContas({ comp }) {
                   </div>
                   <div className="mt-0.5 text-[12px]" style={{ color: vencido ? C.laranja : C.mute, fontWeight: vencido ? 700 : 400 }}>
                     {venc ? `vence ${diaBR(venc)}${vencido ? " · vencido" : ""}` : "sem vencimento"}
+                    {l.parcelas > 1 && <span style={{ color: C.mute, fontWeight: 400 }}> · {l.parcela}/{l.parcelas}</span>}
                   </div>
                 </div>
                 <div className="text-right">
@@ -9258,13 +9369,45 @@ function FinContas({ comp }) {
                   <button onClick={() => setBaixando(l.id)} className="rounded-lg px-3.5 py-2 font-semibold" style={{ background: C.roxo, color: "#fff" }}>
                     {pagar ? "Paguei" : "Recebi"}
                   </button>
-                  <button onClick={() => cancelar(l)} style={{ color: C.mute }}>cancelar título</button>
+                  {!l.parcelas && <button onClick={() => setRepetindo(repetindo === l.id ? null : l.id)} style={{ color: C.roxo, fontWeight: 600 }}>repetir</button>}
+                  <button onClick={() => cancelar(l)} className="ml-auto" style={{ color: C.mute }}>cancelar título</button>
                 </div>
               )}
+              {repetindo === l.id && <Repetir l={l} aoFechar={() => setRepetindo(null)} aoRepetir={repetir} />}
             </div>
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Repetir: parcelamento e conta fixa são o mesmo gesto.
+ *
+ * "Dividir o valor" é a compra em 12×; sem dividir é o aluguel dos
+ * próximos 12 meses. Gera tudo de uma vez porque não há tarefa
+ * agendada aqui — e a fila mostrando o ano inteiro é melhor que uma
+ * regra invisível que alguém precisa lembrar de rodar.
+ */
+function Repetir({ l, aoFechar, aoRepetir }) {
+  const [vezes, setVezes] = useState(11);
+  const [dividir, setDividir] = useState(false);
+  const total = (Number(l.debito) || 0) + (Number(l.credito) || 0);
+  const cada = dividir ? total / (vezes + 1) : total;
+  return (
+    <div className="mt-2 flex flex-wrap items-end gap-2 rounded-lg p-2.5" style={{ background: C.bg }}>
+      <label><Rotulo>Mais quantas vezes</Rotulo>
+        <input className="w-20 rounded-lg border px-2 py-1.5 text-right text-[13px] outline-none" style={{ ...inputSty, fontFamily: F.mono }}
+          inputMode="numeric" value={vezes} onChange={(e) => setVezes(Math.max(1, Math.min(59, Number(e.target.value) || 1)))} /></label>
+      <label className="flex items-center gap-1.5 pb-2 text-[13px]">
+        <input type="checkbox" checked={dividir} onChange={(e) => setDividir(e.target.checked)} /> dividir o valor
+      </label>
+      <span className="pb-2 text-[12px]" style={{ color: C.mute }}>
+        {vezes + 1} títulos de <b style={{ color: C.ink }}>{rs2(cada)}</b>, um por mês
+      </span>
+      <BotaoPrimario onClick={() => aoRepetir(l, vezes, dividir)}>Gerar</BotaoPrimario>
+      <button onClick={aoFechar} className="pb-2 text-[13px]" style={{ color: C.mute }}>cancelar</button>
     </div>
   );
 }
