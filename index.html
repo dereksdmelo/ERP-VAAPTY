@@ -3286,7 +3286,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
             </Bloco>
 
             <Bloco titulo="Escutar a conversa" sub="É aqui que ele conta por que está vendendo. O cliente precisa autorizar antes — é a condição do parecer.">
-              <EscutaPainel escuta={escuta} f={f} set={set} />
+              <EscutaPainel escuta={escuta} f={f} set={set} atendimentoId={aid} />
             </Bloco>
           </>
         )}
@@ -3529,7 +3529,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
             </Bloco>
 
             <Bloco titulo="Escutar a conversa" sub="Transcreve o que for dito e destaca os ganchos. O cliente precisa autorizar antes — é a condição do parecer.">
-              <EscutaPainel escuta={escuta} f={f} set={set} />
+              <EscutaPainel escuta={escuta} f={f} set={set} atendimentoId={aid} />
             </Bloco>
           </>
         )}
@@ -3712,7 +3712,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
             )}
 
             <Bloco titulo="Escutar a conversa" sub="Os ganchos do que ele falar aqui são o argumento da próxima rodada.">
-              <EscutaPainel escuta={escuta} f={f} set={set} />
+              <EscutaPainel escuta={escuta} f={f} set={set} atendimentoId={aid} taticas />
             </Bloco>
 
             <Bloco titulo="Objeção principal" sub="O que travou a conversa.">
@@ -4491,8 +4491,218 @@ function BarraEscuta({ escuta }) {
   );
 }
 
+/* ==================================================================
+ * TÁTICAS DE NEGOCIAÇÃO
+ *
+ * O Derek trouxe o compêndio de 100 táticas da Profa. Maria Regina
+ * Xausa. **A folha traz "Reprodução Proibida. Direitos Reservados" em
+ * todas as páginas**, então o texto dela não entra no sistema: o que
+ * está aqui é escrito com as palavras da casa, sobre as manobras que
+ * de fato aparecem quando uma pessoa vende o próprio carro. Os nomes
+ * das táticas são termos correntes da literatura de negociação — o que
+ * seria cópia é a redação das quatro colunas dela.
+ *
+ * Se a casa quiser o compêndio dela dentro do sistema, o caminho é
+ * pedir autorização por escrito à autora; aí é trocar o conteúdo desta
+ * lista, e nada mais.
+ *
+ * A detecção tem duas camadas. A de baixo é busca por expressão, como
+ * os SINAIS — funciona agora, de graça, e não erra por não tentar
+ * entender. A de cima é o LLM, que lê a conversa inteira e diz o que
+ * está acontecendo; ela só liga quando a chave existe no servidor.
+ * ================================================================== */
+
+const TATICAS = [
+  {
+    id: "ancoragem", nome: "Ancoragem alta", quem: "cliente",
+    sinal: "Ele abriu com um número muito acima da tabela, antes de você falar.",
+    porque: "Fincar um valor de partida para que todo o resto da conversa gire em torno dele.",
+    faca: "Não contra-ofereça a partir do número dele. Traga a referência de fora — FIPE, anúncios, o extrato — e recomece a conta do zero.",
+    termos: ["quero", "nao aceito menos", "meu preco e", "abaixo disso nao", "vale muito mais"],
+  },
+  {
+    id: "outra_proposta", nome: "Proposta concorrente", quem: "cliente",
+    sinal: "Diz que outra loja ofereceu mais.",
+    porque: "Criar leilão e puxar seu número para cima sem se comprometer com nada.",
+    faca: "Peça o concreto: qual loja, quanto, por escrito, e até quando vale. Proposta que não se escreve costuma não existir. Se existir, compare o líquido, não o bruto.",
+    termos: ["outra proposta", "me ofereceram", "outra loja", "outro lugar", "la eles pagam", "a concorrencia"],
+  },
+  {
+    id: "autoridade_limitada", nome: "Autoridade limitada", quem: "cliente",
+    sinal: "Precisa consultar alguém que não está na mesa.",
+    porque: "Ganhar tempo e voltar pedindo mais, sem ter dito não.",
+    faca: "Descubra antes de avançar: essa pessoa decide junto ou só opina? Se decide, chame agora — por telefone. Não faça a melhor oferta para quem não pode fechar.",
+    termos: ["minha esposa", "meu marido", "meu socio", "vou falar com", "preciso conversar com", "nao decido sozinho", "meu pai", "minha mae"],
+  },
+  {
+    id: "ultimato", nome: "Ultimato / prazo artificial", quem: "cliente",
+    sinal: "Põe um prazo curto para você decidir.",
+    porque: "Fazer você aceitar sem pensar, pela pressa.",
+    faca: "Aceite o prazo com naturalidade e mostre o custo dele: o que muda no valor se for hoje e se for na semana que vem. Prazo que não muda nada é prazo de mentira.",
+    termos: ["ou e agora", "so hoje", "tem que ser hoje", "senao eu vou", "ate amanha", "me da uma resposta agora"],
+  },
+  {
+    id: "silencio", nome: "Silêncio", quem: "cliente",
+    sinal: "Você fez a oferta e ele ficou calado.",
+    porque: "Fazer você melhorar a própria proposta sozinho, sem que ele peça nada.",
+    faca: "Fique calado também. Quem fala primeiro depois de uma oferta costuma pagar por isso. Se precisar quebrar, pergunte — não ofereça.",
+    termos: [],
+  },
+  {
+    id: "sentimental", nome: "Valor sentimental", quem: "cliente",
+    sinal: "Fala do cuidado, do histórico, de quem andou no carro.",
+    porque: "Transformar apego em preço.",
+    faca: "Reconheça de verdade — o carro cuidado vale mais mesmo — e leve o reconhecimento para onde ele cabe: estado dos pneus, revisões, manual e chave. Sentimento não entra na tabela; conservação entra.",
+    termos: ["sempre cuidei", "nunca bati", "so eu dirigi", "de garagem", "revisao em dia", "e da familia", "meu pai comprou"],
+  },
+  {
+    id: "vitimizacao", nome: "Vitimização", quem: "cliente",
+    sinal: "Conta uma dificuldade para pedir mais.",
+    porque: "Trocar preço por empatia.",
+    faca: "Trate a pessoa bem e o número com firmeza. O que dá para melhorar de verdade é a velocidade e a burocracia — ofereça isso, não o valor.",
+    termos: ["to precisando", "to apertado", "desempregado", "problema de saude", "preciso muito", "conta pra pagar"],
+  },
+  {
+    id: "recuo", nome: "Recuo tático", quem: "cliente",
+    sinal: "Vai pensar, volta depois, dá uma olhada.",
+    porque: "Sair sem dizer não, e voltar (ou não) com mais poder.",
+    faca: "Não deixe sair sem número. Pergunte o que falta para fechar hoje, e o que ele faria se o valor fosse X. Marque o retorno com data e hora antes de ele levantar.",
+    termos: ["vou pensar", "depois eu volto", "dar uma olhada", "outro dia", "te aviso", "vou ver com"],
+  },
+  {
+    id: "salame", nome: "Concessão fatiada", quem: "cliente",
+    sinal: "Fechou o preço e começou a pedir extras — tanque cheio, transferência, um mês de garantia.",
+    porque: "Somar pequenas vitórias depois do acordo, quando você já não quer perder o negócio.",
+    faca: "Feche o pacote inteiro de uma vez e diga isso em voz alta. Pedido novo depois do acordo reabre o preço, não só o item.",
+    termos: ["e se junto", "ja que", "so mais uma coisa", "voces cobrem", "inclui", "de brinde"],
+  },
+  {
+    id: "desqualificacao", nome: "Desqualificação da oferta", quem: "cliente",
+    sinal: "Diz que o valor é ofensa, que é roubo, que não vale a conversa.",
+    porque: "Fazer você recuar pelo constrangimento.",
+    faca: "Não defenda o número — explique como ele foi montado, item por item, com o extrato na mesa. Quem mostra a conta não precisa discutir o sentimento.",
+    termos: ["e um roubo", "ta de brincadeira", "isso e ofensa", "absurdo", "muito pouco", "nem vale a pena"],
+  },
+  {
+    id: "informacao_retida", nome: "Informação retida", quem: "cliente",
+    sinal: "Some ou hesita sobre débito, financiamento, sinistro, multa.",
+    porque: "Segurar o problema para depois do aperto de mão.",
+    faca: "Pergunte direto e escreva a resposta na ficha. Diga que a cautelar e o Detran vão mostrar de qualquer jeito — e que descoberto depois muda o valor, descoberto agora não.",
+    termos: ["acho que nao", "nao lembro", "acho que tem", "talvez tenha", "depois eu vejo", "nao sei dizer"],
+  },
+  {
+    id: "balao", nome: "Balão de ensaio", quem: "cliente",
+    sinal: "Pergunta hipotética: \"e se eu trouxesse...\", \"e se fosse à vista...\".",
+    porque: "Medir sua reação sem se comprometer.",
+    faca: "Responda com condição, não com número solto: \"nesse cenário, sim, e vale até tal hora\". Hipótese respondida com valor firme vira âncora contra você.",
+    termos: ["e se eu", "e se fosse", "supondo que", "imagina que", "vamos supor"],
+  },
+];
+
+// A leitura por expressão: mesma ideia dos SINAIS, e as mesmas
+// limitações — não entende ironia, contexto nem negação. Serve para
+// acender a luz, não para decidir.
+const taticasDe = (texto) => {
+  const t = semAcento(texto).toLowerCase();
+  return TATICAS.filter((x) => x.termos.length && x.termos.some((termo) => t.indexOf(termo) >= 0));
+};
+
+async function lerTaticaIA(atendimentoId, texto) {
+  const r = await fetchAut("/api/atendimento?recurso=tatica", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ atendimento_id: atendimentoId, texto }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui analisar.");
+  return d;
+}
+
+/**
+ * O painel de táticas, ao lado da transcrição.
+ *
+ * A luz acende sozinha pela busca de expressão. A leitura da IA é um
+ * botão, não automática: ela custa dinheiro por chamada e o negociador
+ * é quem sabe quando a conversa virou.
+ */
+function PainelTaticas({ escuta, atendimentoId }) {
+  const [ia, setIa] = useState(null);
+  const [indo, setIndo] = useState(false);
+  const [erro, setErro] = useState("");
+  const [aberta, setAberta] = useState("");
+
+  const texto = (escuta.texto || "") + " " + (escuta.parcial || "");
+  const achadas = taticasDe(texto);
+
+  const analisar = async () => {
+    setIndo(true); setErro(""); setIa(null);
+    try { setIa(await lerTaticaIA(atendimentoId, texto.slice(-6000))); }
+    catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+
+  const cartao = (t, destaque) => (
+    <div key={t.id} className="rounded-lg p-2.5" style={{ background: "#fff", border: `1px solid ${destaque ? C.roxo : C.line}` }}>
+      <button onClick={() => setAberta(aberta === t.id ? "" : t.id)} className="flex w-full items-baseline justify-between gap-2 text-left">
+        <span className="text-[13px] font-semibold">{t.nome}</span>
+        <span className="text-[11px]" style={{ color: C.mute }}>{aberta === t.id ? "fechar" : "o que fazer"}</span>
+      </button>
+      <p className="mt-0.5 text-[12px]" style={{ color: C.mute }}>{t.sinal}</p>
+      {aberta === t.id && (
+        <div className="mt-1.5 space-y-1 border-t pt-1.5" style={{ borderColor: C.line }}>
+          <p className="text-[12px]"><b style={{ color: C.mute }}>Por que ele faz:</b> {t.porque}</p>
+          <p className="text-[12px]" style={{ color: C.ink }}><b style={{ color: C.verde }}>Faça:</b> {t.faca}</p>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="rounded-xl p-3" style={{ background: C.bg, border: `1px solid ${C.line}` }}>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="text-[12px] font-semibold uppercase tracking-[0.06em]" style={{ color: C.mute }}>
+          O que está acontecendo na mesa
+        </span>
+        <button onClick={analisar} disabled={indo || texto.trim().length < 40}
+          className="text-[12px] font-semibold" style={{ color: texto.trim().length < 40 ? C.mute : C.roxo }}>
+          {indo ? "lendo a conversa…" : "ler com IA"}
+        </button>
+      </div>
+
+      {erro && <p className="mt-1 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+
+      {ia && (
+        <div className="mt-2 rounded-lg p-2.5" style={{ background: C.roxoFraco, border: `1px solid ${C.roxo}` }}>
+          <div className="text-[11px] uppercase tracking-[0.08em]" style={{ color: C.roxo, fontWeight: 700 }}>Leitura da conversa</div>
+          {ia.tatica && <div className="mt-1 text-[13px] font-semibold">{ia.tatica}</div>}
+          {ia.leitura && <p className="mt-0.5 text-[12px]">{ia.leitura}</p>}
+          {ia.faca && <p className="mt-1 text-[12px]"><b style={{ color: C.verde }}>Faça:</b> {ia.faca}</p>}
+          {ia.frase && <p className="mt-1 rounded px-2 py-1 text-[12px]" style={{ background: "#fff" }}>“{ia.frase}”</p>}
+          <p className="mt-1.5 text-[10px]" style={{ color: C.mute }}>Sugestão de máquina lendo uma transcrição imperfeita. Quem decide é você.</p>
+        </div>
+      )}
+
+      {!!achadas.length && (
+        <div className="mt-2 space-y-1.5">
+          {achadas.map((t) => cartao(t, true))}
+        </div>
+      )}
+
+      {!achadas.length && !ia && (
+        <p className="mt-1 text-[12px]" style={{ color: C.mute }}>
+          Nada reconhecido ainda. As táticas aparecem sozinhas quando a fala do cliente encosta numa delas; “ler com IA” funciona a qualquer momento.
+        </p>
+      )}
+
+      <details className="mt-2">
+        <summary className="cursor-pointer text-[12px]" style={{ color: C.roxo }}>ver as {TATICAS.length} táticas</summary>
+        <div className="mt-1.5 space-y-1.5">{TATICAS.map((t) => cartao(t, false))}</div>
+      </details>
+    </div>
+  );
+}
+
 /** O que a escuta achou. Aparece nas etapas onde ajuda a conversar. */
-function EscutaPainel({ escuta, f, set }) {
+function EscutaPainel({ escuta, f, set, atendimentoId, taticas }) {
   const { ouvindo, parcial, erro } = escuta;
   const achados = sinaisDe((f.transcricao || "") + " " + parcial);
 
@@ -4518,6 +4728,14 @@ function EscutaPainel({ escuta, f, set }) {
             <span key={s.id} className="rounded-full px-2.5 py-1 text-[11px] font-semibold"
               style={{ background: s.cor + "1A", color: s.cor }}>{s.rotulo}</span>
           ))}
+        </div>
+      )}
+
+      {/* As táticas só na Negociação: na Pesquisa o cliente ainda está
+          contando a história do carro, e sugerir manobra ali é ruído. */}
+      {taticas && (
+        <div className="mt-3">
+          <PainelTaticas escuta={{ texto: f.transcricao, parcial }} atendimentoId={atendimentoId} />
         </div>
       )}
 

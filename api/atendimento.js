@@ -200,6 +200,94 @@ const EMBUTIDO = "*,veiculo(id,placa,marca_modelo,ano_fabricacao,ano_modelo,km_a
 
 const STATUS_INDICACAO = ["novo", "em_contato", "agendado", "virou_atendimento", "sem_interesse"];
 
+/**
+ * A leitura da conversa por IA.
+ *
+ * O que a busca por expressão não faz: entender ironia, negação e
+ * contexto. "Não tenho outra proposta" acende o mesmo sinal que "tenho
+ * outra proposta" numa busca de termo — aqui não.
+ *
+ * A chave é `ANTHROPIC_API_KEY`, e ela **só existe no ambiente**: não
+ * está no repositório, não vai ao navegador, não aparece em log. Sem
+ * ela, o endpoint diz isso em vez de falhar em silêncio — descobrir
+ * que a variável não subiu no meio de uma negociação seria pior.
+ *
+ * Só o texto da conversa é enviado. Nome, telefone e CPF do cliente
+ * não vão junto: a transcrição já é dado sensível, e mandar o cadastro
+ * junto seria ampliar o vazamento sem ganhar nada na leitura.
+ */
+const IA_CHAVE = process.env.ANTHROPIC_API_KEY || "";
+
+const INSTRUCAO_TATICA = [
+  "Você ajuda um negociador da Vaapty, que COMPRA carros de pessoas físicas para revender a lojistas.",
+  "Você recebe a transcrição imperfeita de uma conversa ao vivo, feita por reconhecimento de voz do navegador:",
+  "há palavras trocadas, pontuação faltando e trechos sem sentido. Leia com essa margem.",
+  "",
+  "Diga qual manobra o CLIENTE está usando agora, se alguma, e o que o negociador deve fazer.",
+  "Use estes nomes quando couber: ancoragem alta, proposta concorrente, autoridade limitada, ultimato,",
+  "silêncio, valor sentimental, vitimização, recuo tático, concessão fatiada, desqualificação da oferta,",
+  "informação retida, balão de ensaio. Se nada se encaixar, descreva em poucas palavras.",
+  "",
+  "Responda SÓ com um objeto JSON, sem cercas de código, com estas chaves:",
+  '  "tatica"  nome curto da manobra, ou "" se não houver nenhuma clara',
+  '  "leitura" uma frase sobre o que está acontecendo na mesa',
+  '  "faca"    uma frase com a ação concreta do negociador agora',
+  '  "frase"   uma frase pronta para ele falar em voz alta, em português do Brasil, respeitosa e direta',
+  "",
+  "Se a transcrição for curta ou confusa demais para uma leitura honesta, devolva tatica vazia e diga isso em leitura.",
+].join("\n");
+
+async function tatica(req, res, tok) {
+  if (req.method !== "POST") { res.setHeader("Allow", "POST"); return res.status(405).json({ erro: "Use POST." }); }
+  if (!IA_CHAVE) {
+    return res.status(501).json({
+      erro: "A leitura por IA não está ligada. Falta a variável ANTHROPIC_API_KEY nas configurações da Vercel — as táticas por expressão continuam funcionando.",
+    });
+  }
+  const c = await lerCorpo(req);
+  const texto = String((c && c.texto) || "").trim();
+  if (texto.length < 40) return res.status(400).json({ erro: "Conversa curta demais para ler." });
+
+  let r;
+  try {
+    r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": IA_CHAVE, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-5",
+        max_tokens: 400,
+        system: INSTRUCAO_TATICA,
+        messages: [{ role: "user", content: texto.slice(-6000) }],
+      }),
+    });
+  } catch (e) {
+    return res.status(502).json({ erro: "Não consegui falar com a IA." });
+  }
+  const corpo = await r.text();
+  if (!r.ok) {
+    // A mensagem da API pode conter a chave em eco; nada dela volta ao
+    // cliente por isso.
+    return res.status(502).json({ erro: r.status === 401 ? "A chave da IA foi recusada." : "A IA não respondeu." });
+  }
+  let saida = "";
+  try {
+    const d = JSON.parse(corpo);
+    saida = ((d.content || []).filter((x) => x.type === "text")[0] || {}).text || "";
+  } catch (e) {}
+  // O modelo às vezes embrulha o JSON em cerca de código, mesmo pedindo
+  // que não. Pegar do primeiro { ao último } é mais barato que insistir.
+  const i = saida.indexOf("{"), j = saida.lastIndexOf("}");
+  let obj = null;
+  if (i >= 0 && j > i) { try { obj = JSON.parse(saida.slice(i, j + 1)); } catch (e) {} }
+  if (!obj) return res.status(502).json({ erro: "A IA respondeu fora do formato. Tente de novo." });
+
+  return res.status(200).json({
+    tatica: texto0(obj.tatica), leitura: texto0(obj.leitura),
+    faca: texto0(obj.faca), frase: texto0(obj.frase),
+  });
+}
+const texto0 = (v) => String(v == null ? "" : v).trim().slice(0, 600);
+
 const LEAD_STATUS = ["novo", "em_contato", "agendado", "confirmado", "compareceu", "nao_compareceu", "perdido"];
 const CAMPOS_LEAD = "*,negociador(id,nome)";
 
@@ -434,7 +522,12 @@ module.exports = async function handler(req, res) {
   if (!tok) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
 
   try {
-    if (String(req.query.recurso || "") === "lead") {
+    if (String(req.query.recurso || "") === "tatica") {
+    try { return await tatica(req, res, tok); }
+    catch (e) { return res.status(502).json({ erro: "Não consegui analisar." }); }
+  }
+
+  if (String(req.query.recurso || "") === "lead") {
     try { return await leads(req, res, tok); }
     catch (e) { return res.status(e.status || 502).json({ erro: limpar(e.message) }); }
   }

@@ -66,6 +66,7 @@ e um `.env` local para o `vercel dev`):
 | `SUPABASE_URL` | todas as funções de dados |
 | `SUPABASE_ANON_KEY` | `api/config.js` e as chamadas ao banco |
 | `SUPABASE_SERVICE_KEY` | só `api/foto.js`, e só para o Storage |
+| `ANTHROPIC_API_KEY` | `api/atendimento.js?recurso=tatica` — opcional; sem ela a leitura por IA fica desligada e as táticas por expressão seguem |
 
 **Nenhuma delas, fora a anônima, pode chegar ao navegador** — é essa a razão de as
 funções em `api/` existirem em vez de o `index.html` chamar os serviços
@@ -1504,3 +1505,43 @@ para cobrança — e juntá-los num link só foi erro meu, corrigido em
 guarda essa credencial**: o link abre o portal e a pessoa entra com a
 senha dela. Guardar senha de terceiro aqui transformaria um vazamento
 nosso num vazamento lá.
+
+
+### 31. Táticas de negociação: o motor é nosso, o conteúdo também
+
+O Derek trouxe o *Compêndio 100 Táticas de Negociação* da Profa. Maria
+Regina Xausa. **Todas as páginas dizem "Reprodução Proibida. Direitos
+Reservados"**, com o e-mail da autora no rodapé. Transcrever as quatro
+colunas dela para dentro do sistema seria reproduzir a obra, então
+não foi feito.
+
+**O que está no código é escrito com as palavras da casa**, sobre as
+manobras que aparecem quando uma pessoa vende o próprio carro — doze,
+não cem: `Jogo de planilhas` e `Leilão` são táticas de compra
+corporativa e não acontecem nessa mesa. Os NOMES das táticas
+(ancoragem, autoridade limitada, ultimato, silêncio) são termos
+correntes da literatura; o que seria cópia é a redação dela.
+
+**Se a casa quiser o compêndio dentro do sistema, o caminho é pedir
+autorização por escrito à autora** — e aí trocar o conteúdo de
+`TATICAS`, e nada mais. O motor não muda.
+
+**Duas camadas de leitura, e a de baixo é a que sempre funciona.** A
+busca por expressão acende sozinha, de graça, e não erra por não
+tentar entender. A leitura por IA é um **botão**, não automática: custa
+por chamada, e é o negociador que sabe quando a conversa virou.
+
+**A camada de IA existe porque a de expressão tem um limite honesto:**
+"não tenho outra proposta" acende o mesmo sinal que "tenho outra
+proposta" numa busca de termo. Negação, ironia e contexto pedem
+modelo.
+
+**A chave `ANTHROPIC_API_KEY` só existe no ambiente** e, sem ela, o
+endpoint diz isso em vez de falhar calado — descobrir que a variável
+não subiu no meio de uma negociação seria pior que o botão não existir.
+**Só o texto da conversa é enviado**: nome, telefone e CPF não vão
+junto. A transcrição já é dado sensível; mandar o cadastro junto
+ampliaria o vazamento sem melhorar a leitura.
+
+**As táticas só aparecem na Negociação.** Na Pesquisa o cliente ainda
+está contando a história do carro, e sugerir manobra ali é ruído.
