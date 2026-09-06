@@ -1473,9 +1473,34 @@ fonte, e a tela a recebe do servidor — assim as duas não divergem.
 token, e `adm`/`gerencia` só de quem é administrativo ou gerente. A
 tela desabilitar o botão é conveniência; a recusa é no servidor.
 
+**O papel é anexado antes, e conferido na tela.** Cada item que é um
+documento tem os seus arquivos, guardados na tabela `anexo` que já
+existe com o rótulo `doc:<código>` — bucket novo significaria política
+nova de Storage e mais um lugar para o arquivo se perder. O visor abre
+o PDF ou a imagem **dentro da página**, com setas para percorrer todos
+os anexos do item: a conferência acontece no celular, e obrigar a
+baixar cada PDF seria voltar para o papel. O link "abrir" fica ao lado
+porque o Safari do iPhone às vezes se recusa a desenhar PDF embutido,
+e a tela precisa dizer o que fazer em vez de mostrar um retângulo
+branco.
+
+**"Visto e sem anexo" é um aviso no topo.** O administrativo anexa
+antes; a conferência olha o que está lá. Sem esse aviso, "sim" vira
+palavra sem lastro. Os itens que são pergunta de sim/não — *Trocar de
+placa?*, *Tem financiamento?* — não pedem anexo, e cobrar deles seria
+ruído; o quinto campo de `ITENS_DOC` faz essa separação.
+
+**Quem aprovou aparece escrito, não em tooltip.** Nome e dia embaixo
+do par Sim/Não. Aprovação anônima não responde a pergunta que importa
+quando algo dá errado.
+
 **Consulta de órgão é link, não raspagem** — mesmo raciocínio dos
 canais de preço na avaliação. Detran-PR, PGFN e PRF abrem em aba nova
-direto da linha do item. **O ConsultCenter pede login, e o sistema não
+direto da linha do item, e um item pode ter mais de uma consulta.
+**Dossiê do Detran e extrato de dívida ativa são coisas diferentes** —
+o dossiê é o histórico do veículo, a dívida ativa é o que está inscrito
+para cobrança — e juntá-los num link só foi erro meu, corrigido em
+05/09/2026. **O ConsultCenter pede login, e o sistema não
 guarda essa credencial**: o link abre o portal e a pessoa entra com a
 senha dela. Guardar senha de terceiro aqui transformaria um vazamento
 nosso num vazamento lá.

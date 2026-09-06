@@ -345,7 +345,11 @@ async function anexos(req, res, tok) {
         body: JSON.stringify({
           atendimento_id: aid, caminho, tipo, bytes: buf.length,
           nome: String(corpo.nome || "").slice(0, 200) || null,
-          rotulo: ROTULOS.indexOf(String(corpo.rotulo || "")) >= 0 ? corpo.rotulo : "Outro",
+          // "doc:<item>" é o anexo de um item do check list de
+          // documentações (0027): o rótulo é o código do item, e a lista
+          // deles vive no api/checklist.js, não aqui.
+          rotulo: /^doc:[a-z_]{2,40}$/.test(String(corpo.rotulo || "")) ? corpo.rotulo
+            : ROTULOS.indexOf(String(corpo.rotulo || "")) >= 0 ? corpo.rotulo : "Outro",
         }),
       });
       linha = Array.isArray(r) ? r[0] : r;

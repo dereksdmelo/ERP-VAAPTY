@@ -9683,6 +9683,47 @@ function FinFolha({ comp }) {
 }
 
 /**
+ * O visor: analisar o que foi anexado sem baixar nada.
+ *
+ * A conferência acontece no celular, com o envelope na mão. Obrigar a
+ * baixar cada PDF para olhar seria o mesmo que voltar para o papel.
+ * Imagem vai em `<img>`; PDF vai em `<iframe>` com a URL assinada — e
+ * o link "abrir" fica ao lado porque o Safari do iPhone às vezes se
+ * recusa a desenhar PDF embutido, e a tela precisa dizer o que fazer
+ * quando isso acontece em vez de mostrar um retângulo branco.
+ */
+function VisorAnexos({ anexos, inicio, aoFechar }) {
+  const [i, setI] = useState(inicio || 0);
+  const a = anexos[i];
+  useEffect(() => {
+    const t = (e) => { if (e.key === "Escape") aoFechar(); if (e.key === "ArrowRight") setI((x) => Math.min(anexos.length - 1, x + 1)); if (e.key === "ArrowLeft") setI((x) => Math.max(0, x - 1)); };
+    window.addEventListener("keydown", t);
+    return () => window.removeEventListener("keydown", t);
+  }, [anexos.length]);
+  if (!a) return null;
+  const ePdf = /pdf/i.test(a.tipo || "") || /\.pdf$/i.test(a.nome || "");
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: "rgba(24,18,33,0.92)" }} onClick={aoFechar}>
+      <div className="flex items-center gap-3 px-4 py-2.5 text-[13px]" style={{ color: "#fff" }} onClick={(e) => e.stopPropagation()}>
+        <span className="min-w-0 flex-1 truncate">{a.nome || "documento"}</span>
+        <span style={{ opacity: 0.7 }}>{i + 1} de {anexos.length}</span>
+        <button onClick={() => setI(Math.max(0, i - 1))} disabled={!i} className="px-2 text-[18px]" style={{ opacity: i ? 1 : 0.3 }}>‹</button>
+        <button onClick={() => setI(Math.min(anexos.length - 1, i + 1))} disabled={i >= anexos.length - 1} className="px-2 text-[18px]" style={{ opacity: i < anexos.length - 1 ? 1 : 0.3 }}>›</button>
+        <a href={a.url} target="_blank" rel="noreferrer" className="font-semibold" style={{ color: "#fff", textDecoration: "underline" }}>abrir</a>
+        <button onClick={aoFechar} className="font-semibold">fechar</button>
+      </div>
+      <div className="flex-1 overflow-auto px-2 pb-2" onClick={(e) => e.stopPropagation()}>
+        {ePdf ? (
+          <iframe src={a.url} title={a.nome || "documento"} className="h-full w-full rounded-lg" style={{ background: "#fff", border: "none", minHeight: "70vh" }} />
+        ) : (
+          <img src={a.url} alt={a.nome || "documento"} className="mx-auto max-h-full rounded-lg" style={{ background: "#fff" }} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
  * O check list de documentações: a folha que fica no envelope.
  *
  * Trinta e seis itens, três vistos cada — administrativo, gerência e
@@ -9696,12 +9737,21 @@ function FinFolha({ comp }) {
  * pessoa, com a senha dela. Guardar credencial de terceiro no sistema
  * seria transformar um vazamento aqui num vazamento lá.
  */
+// Cada item pode ter mais de uma consulta. Dossiê do Detran e extrato
+// de dívida ativa são coisas diferentes — o dossiê é o histórico do
+// veículo, a dívida ativa é o que está inscrito para cobrança — e
+// juntá-los num link só foi erro meu.
+const CONSULTCENTER = ["ConsultCenter", "https://sistema.consultcenter.com.br/portal/painel_juridico?q=escolha"];
 const LINKS_DOC = {
-  dossie_detran: ["Extrato Detran-PR", "https://www.detran.pr.gov.br/Pagina/Extrato-de-divida-ativa"],
-  divida_ativa: ["Lista de devedores PGFN", "https://www.listadevedores.pgfn.gov.br/"],
-  prf: ["Multas PRF", "https://cpag.prf.gov.br/multas"],
-  serasa: ["ConsultCenter", "https://sistema.consultcenter.com.br/portal/painel_juridico?q=escolha"],
-  multas_duplicacao: ["Multas PRF", "https://cpag.prf.gov.br/multas"],
+  dossie_detran: [CONSULTCENTER],
+  divida_ativa: [
+    ["Dívida ativa Detran-PR", "https://www.detran.pr.gov.br/Pagina/Extrato-de-divida-ativa"],
+    ["Devedores PGFN", "https://www.listadevedores.pgfn.gov.br/"],
+  ],
+  prf: [["Multas PRF", "https://cpag.prf.gov.br/multas"]],
+  multas_duplicacao: [["Multas PRF", "https://cpag.prf.gov.br/multas"]],
+  serasa: [CONSULTCENTER],
+  tem_debitos: [["Dívida ativa Detran-PR", "https://www.detran.pr.gov.br/Pagina/Extrato-de-divida-ativa"]],
 };
 const GRUPOS_DOC = [
   ["pf", "Pessoa física"],
@@ -9730,12 +9780,35 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
   const [d, setD] = useState(null);
   const [erro, setErro] = useState("");
   const [so, setSo] = useState("pendentes");
+  const [anexos, setAnexos] = useState([]);
+  const [subindo, setSubindo] = useState("");
+  const [visor, setVisor] = useState(null);
   const podeVisto = !!(perfil && (perfil.administrativo || perfil.papel === "gerente"));
 
+  const carregarAnexos = () =>
+    listarAnexos(atendimentoId).then(setAnexos).catch(() => {});
   const carregar = () => {
     lerChecklistDoc(atendimentoId).then(setD).catch((e) => setErro(e.message));
+    carregarAnexos();
   };
   useEffect(() => { carregar(); }, [atendimentoId]);
+
+  // Os anexos do item vivem na tabela `anexo` que já existe, com o
+  // rótulo "doc:<código>". Bucket novo significaria política nova de
+  // Storage e mais um lugar para o arquivo se perder.
+  const doItem = (cod) => anexos.filter((a) => a.rotulo === `doc:${cod}`);
+  const anexar = async (cod, arquivo) => {
+    if (!arquivo) return;
+    setSubindo(cod); setErro("");
+    try { await enviarAnexo(atendimentoId, arquivo, `doc:${cod}`); await carregarAnexos(); }
+    catch (e) { setErro(e.message); }
+    setSubindo("");
+  };
+  const tirar = async (a) => {
+    if (!window.confirm(`Tirar "${a.nome || "o arquivo"}" do check list?`)) return;
+    try { await apagarAnexo(a.id); await carregarAnexos(); }
+    catch (e) { setErro(e.message); }
+  };
 
   const marcar = async (item, visto, valor) => {
     setErro("");
@@ -9762,6 +9835,12 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
   };
   const total = d.itens.length;
   const faltam = d.itens.filter(pendente).length;
+  // Visto dado num papel que ninguém anexou: o administrativo anexa
+  // antes, e a conferência olha o que está lá. Sem esse aviso, "sim"
+  // vira palavra sem lastro.
+  const semAnexo = d.itens.filter((it) => it[4] && marcaDe(it[0]).adm === true && !doItem(it[0]).length).length;
+  const anexados = d.itens.filter((it) => it[4] && doItem(it[0]).length).length;
+  const pedemDoc = d.itens.filter((it) => it[4]).length;
 
   const caixa = (it, visto) => {
     const m = marcaDe(it[0]);
@@ -9778,9 +9857,17 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
           cursor: trava ? "not-allowed" : "pointer",
         }}>{rot}</button>
     );
+    const quem = m[`${visto}_nome`];
     return (
-      <span className="flex shrink-0 gap-1" title={m[`${visto}_em`] ? `por ${m[`${visto}_por`] === (perfil && perfil.id) ? "você" : "alguém"} em ${diaBR(m[`${visto}_em`])}` : ""}>
-        {bt(true, "Sim", C.verde)}{bt(false, "Não", C.laranja)}
+      <span className="flex shrink-0 flex-col items-center gap-0.5">
+        <span className="flex gap-1">{bt(true, "Sim", C.verde)}{bt(false, "Não", C.laranja)}</span>
+        {/* Quem aprovou, escrito — não em tooltip. Aprovação anônima
+            não responde a pergunta que importa quando algo dá errado. */}
+        {v != null && quem && (
+          <span className="max-w-[92px] truncate text-[9px]" style={{ color: C.mute }} title={`${quem} · ${diaBR(m[`${visto}_em`])}`}>
+            {String(quem).split(" ")[0]} · {diaBR(m[`${visto}_em`])}
+          </span>
+        )}
       </span>
     );
   };
@@ -9798,6 +9885,15 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
               style={{ background: so === v ? C.roxoFraco : "transparent", color: so === v ? C.roxo : C.mute }}>{r}</button>
           ))}
         </div>
+        <span className="text-[13px]">
+          <b style={{ color: anexados === pedemDoc ? C.verde : C.mute }}>{anexados}</b>
+          <span style={{ color: C.mute }}> de {pedemDoc} papéis anexados</span>
+        </span>
+        {!!semAnexo && (
+          <span className="rounded-lg px-2.5 py-1 text-[12px] font-semibold" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
+            {semAnexo} com visto e sem anexo
+          </span>
+        )}
         {!podeVisto && <span className="text-[11px]" style={{ color: C.mute }}>Você marca só a coluna do financeiro — adm e gerência são do administrativo.</span>}
       </div>
 
@@ -9821,15 +9917,17 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
             </div>
             {itens.map((it) => {
               const link = LINKS_DOC[it[0]];
+              const arqs = doItem(it[0]);
               return (
-                <div key={it[0]} className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-3 py-2" style={{ borderBottom: `1px solid ${C.line}` }}>
+                <div key={it[0]} className="px-3 py-2" style={{ borderBottom: `1px solid ${C.line}` }}>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
                   <span className="min-w-[180px] flex-1 text-[13px]">
                     {it[1]}
-                    {link && (
-                      <a href={link[1]} target="_blank" rel="noreferrer" className="ml-2 text-[11px] font-semibold" style={{ color: C.roxo }}>
-                        {link[0]} ↗
+                    {(link || []).map((k) => (
+                      <a key={k[1]} href={k[1]} target="_blank" rel="noreferrer" className="ml-2 text-[11px] font-semibold" style={{ color: C.roxo }}>
+                        {k[0]} ↗
                       </a>
-                    )}
+                    ))}
                   </span>
                   <span className="flex gap-6">
                     {(tres ? VISTOS_DOC : ["adm"]).map((v) => (
@@ -9840,11 +9938,33 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
                     ))}
                   </span>
                 </div>
+
+                {/* Os papéis do item, para olhar sem baixar. */}
+                {it[4] && (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                    {arqs.map((a, k) => (
+                      <span key={a.id} className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px]" style={{ background: C.bg }}>
+                        <button onClick={() => setVisor({ lista: arqs, i: k })} style={{ color: C.roxo, fontWeight: 600 }}>
+                          {/pdf/i.test(a.tipo || "") ? "PDF" : "IMG"} · {String(a.nome || "arquivo").slice(0, 22)}
+                        </button>
+                        <button onClick={() => tirar(a)} style={{ color: C.mute }} title="tirar">×</button>
+                      </span>
+                    ))}
+                    <label className="cursor-pointer text-[11px] font-semibold" style={{ color: arqs.length ? C.mute : C.laranja }}>
+                      {subindo === it[0] ? "enviando…" : arqs.length ? "+ anexar outro" : "anexar o documento"}
+                      <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden"
+                        onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; anexar(it[0], f); }} />
+                    </label>
+                  </div>
+                )}
+                </div>
               );
             })}
           </div>
         );
       })}
+
+      {visor && <VisorAnexos anexos={visor.lista} inicio={visor.i} aoFechar={() => setVisor(null)} />}
 
       {so === "pendentes" && !faltam && (
         <div className="rounded-xl px-4 py-8 text-center" style={{ background: "#E8F3EE", border: `1px solid ${C.line}` }}>

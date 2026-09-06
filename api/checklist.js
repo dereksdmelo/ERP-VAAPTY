@@ -120,47 +120,49 @@ async function banco(url, opcoes) {
 
 const VISTOS = ["adm", "gerencia", "financeiro"];
 
+// codigo, rótulo, grupo, vistos ("tres" = adm+gerência+financeiro, "um" = só
+// adm), pedeDoc (o item é um papel que precisa estar anexado; os outros
+// são perguntas de sim/não, e cobrar anexo neles seria ruído)
 const ITENS_DOC = [
-  // codigo, rótulo, grupo, quem dá visto ("tres" = adm+gerência+financeiro, "um" = só adm)
-  ["fechamento", "Check List Fechamento", "pf", "tres"],
-  ["resumo_negociacao", "Resumo Negociação Sances", "pf", "tres"],
-  ["procuracao", "Procuração", "pf", "tres"],
-  ["crv_dut", "CRV/DUT", "pf", "tres"],
-  ["crlv", "CRLV", "pf", "tres"],
-  ["dossie_detran", "Dossiê Detran", "pf", "tres"],
-  ["prf", "PRF", "pf", "tres"],
-  ["divida_ativa", "Dívida Ativa", "pf", "tres"],
-  ["cnh_contratante", "CNH Contratante", "pf", "tres"],
-  ["cnh_proprietario", "CNH Proprietário", "pf", "tres"],
-  ["comprovante_residencia", "Comprovante de Residência", "pf", "tres"],
-  ["serasa", "Consulta Serasa", "pf", "tres"],
-  ["contrato", "Contrato", "pf", "tres"],
-  ["cautelar", "Cautelar veículo", "pf", "tres"],
-  ["manual", "Manual", "pf", "tres"],
-  ["chave_reserva", "Chave Reserva", "pf", "tres"],
-  ["gnv_selo", "GNV, Selo Atualizado?", "pf", "tres"],
-  ["placa_mercosul", "Tem placa Mercosul?", "pf", "tres"],
-  ["trocar_placa", "Trocar de Placa?", "pf", "tres"],
-  ["tem_financiamento", "Tem Financiamento?", "pf", "tres"],
-  ["financiamento_incluso", "Financiamento está Incluso?", "pf", "tres"],
-  ["financiamento_quitado", "Financiamento está Quitado?", "pf", "tres"],
-  ["tem_debitos", "Tem Débitos?", "pf", "tres"],
-  ["debitos_cobrados", "Foi cobrado os Débitos?", "pf", "tres"],
-  ["debitos_pagos", "Vai ser pago os Débitos?", "pf", "tres"],
+  ["fechamento", "Check List Fechamento", "pf", "tres", true],
+  ["resumo_negociacao", "Resumo Negociação Sances", "pf", "tres", true],
+  ["procuracao", "Procuração", "pf", "tres", true],
+  ["crv_dut", "CRV/DUT", "pf", "tres", true],
+  ["crlv", "CRLV", "pf", "tres", true],
+  ["dossie_detran", "Dossiê Detran", "pf", "tres", true],
+  ["prf", "PRF", "pf", "tres", true],
+  ["divida_ativa", "Dívida Ativa", "pf", "tres", true],
+  ["cnh_contratante", "CNH Contratante", "pf", "tres", true],
+  ["cnh_proprietario", "CNH Proprietário", "pf", "tres", true],
+  ["comprovante_residencia", "Comprovante de Residência", "pf", "tres", true],
+  ["serasa", "Consulta Serasa", "pf", "tres", true],
+  ["contrato", "Contrato", "pf", "tres", true],
+  ["cautelar", "Cautelar veículo", "pf", "tres", true],
+  ["manual", "Manual", "pf", "tres", false],
+  ["chave_reserva", "Chave Reserva", "pf", "tres", false],
+  ["gnv_selo", "GNV, Selo Atualizado?", "pf", "tres", false],
+  ["placa_mercosul", "Tem placa Mercosul?", "pf", "tres", false],
+  ["trocar_placa", "Trocar de Placa?", "pf", "tres", false],
+  ["tem_financiamento", "Tem Financiamento?", "pf", "tres", false],
+  ["financiamento_incluso", "Financiamento está Incluso?", "pf", "tres", false],
+  ["financiamento_quitado", "Financiamento está Quitado?", "pf", "tres", false],
+  ["tem_debitos", "Tem Débitos?", "pf", "tres", false],
+  ["debitos_cobrados", "Foi cobrado os Débitos?", "pf", "tres", false],
+  ["debitos_pagos", "Vai ser pago os Débitos?", "pf", "tres", false],
 
-  ["cartao_cnpj", "Cartão CNPJ", "pj", "tres"],
-  ["contrato_social", "Contrato Social", "pj", "tres"],
-  ["documentos_socios", "Documentos Sócios", "pj", "tres"],
-  ["multas_duplicacao", "Multas (Duplicação)", "pj", "tres"],
+  ["cartao_cnpj", "Cartão CNPJ", "pj", "tres", true],
+  ["contrato_social", "Contrato Social", "pj", "tres", true],
+  ["documentos_socios", "Documentos Sócios", "pj", "tres", true],
+  ["multas_duplicacao", "Multas (Duplicação)", "pj", "tres", true],
 
-  ["arq_comprovante_cliente", "Comprovante Cliente", "arquivamento", "um"],
-  ["arq_comprovante_lojista", "Comprovante Lojista", "arquivamento", "um"],
-  ["arq_contrato_lojista", "Contrato Lojista", "arquivamento", "um"],
-  ["arq_protocolo_retirada", "Protocolo de Retirada", "arquivamento", "um"],
+  ["arq_comprovante_cliente", "Comprovante Cliente", "arquivamento", "um", true],
+  ["arq_comprovante_lojista", "Comprovante Lojista", "arquivamento", "um", true],
+  ["arq_contrato_lojista", "Contrato Lojista", "arquivamento", "um", true],
+  ["arq_protocolo_retirada", "Protocolo de Retirada", "arquivamento", "um", true],
 
-  ["transf_dut_atpv", "Cópia DUT ou ATPV Reconhecida", "transferencia", "um"],
-  ["transf_procuracao", "Cópia Procuração", "transferencia", "um"],
-  ["transf_comunicado_venda", "Comunicado Venda", "transferencia", "um"],
+  ["transf_dut_atpv", "Cópia DUT ou ATPV Reconhecida", "transferencia", "um", true],
+  ["transf_procuracao", "Cópia Procuração", "transferencia", "um", true],
+  ["transf_comunicado_venda", "Comunicado Venda", "transferencia", "um", true],
 ];
 const CODIGOS_DOC = ITENS_DOC.map((x) => x[0]);
 
@@ -170,8 +172,23 @@ async function documentos(req, res, tok) {
   if (req.method === "GET") {
     const aid = String(req.query.atendimento_id || "");
     if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
-    const linhas = await banco(`${RESTD}?select=*&atendimento_id=eq.${aid}`, { headers: cabecalhos(tok) });
-    return res.status(200).json({ itens: ITENS_DOC, marcas: linhas || [] });
+    // Os nomes vêm numa consulta à parte: são três chaves estrangeiras
+    // para `perfil` na mesma tabela, e o embed do PostgREST precisaria
+    // do nome exato de cada constraint — que muda se a migração for
+    // reescrita. Um select a mais é mais barato que esse acoplamento.
+    const [linhas, gente] = await Promise.all([
+      banco(`${RESTD}?select=*&atendimento_id=eq.${aid}`, { headers: cabecalhos(tok) }),
+      banco(`${URL_BASE}/rest/v1/perfil?select=id,nome`, { headers: cabecalhos(tok) }),
+    ]);
+    const nomes = {};
+    (gente || []).forEach((p) => { nomes[p.id] = p.nome; });
+    const marcas = (linhas || []).map((m) => ({
+      ...m,
+      adm_nome: nomes[m.adm_por] || null,
+      gerencia_nome: nomes[m.gerencia_por] || null,
+      financeiro_nome: nomes[m.financeiro_por] || null,
+    }));
+    return res.status(200).json({ itens: ITENS_DOC, marcas });
   }
 
   if (req.method === "PUT") {
