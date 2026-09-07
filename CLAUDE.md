@@ -1558,3 +1558,62 @@ chamada precisa ver o que o clique custou, não descobrir na fatura.
 
 **As táticas só aparecem na Negociação.** Na Pesquisa o cliente ainda
 está contando a história do carro, e sugerir manobra ali é ruído.
+
+### 32. Fechamento: a planilha de orçamento e provisão, previsto × realizado
+
+O Derek mandou em 04/09/2026 o `Controle_Financeiro_Completo`. São
+sete abas, e a que manda é a aritmética entre três delas: **ORÇAMENTO
+E PROVISÃO** (o previsto), **FLUXO DE CAIXA** (o realizado) e **SALDO
+FINAL**, que fechava as duas numa coluna DIFERENÇA. É um DRE gerencial
+de franquia:
+
+```
+receita operacional bruta
+− despesas VARIÁVEIS      andam com a venda
+= MARGEM DE CONTRIBUIÇÃO
+− despesas FIXAS          existem mesmo sem vender
+= resultado
+```
+
+**Variável contra fixa não é enfeite contábil.** É o que responde
+quanto sobra por carro e quanto a loja custa parada — duas perguntas
+que o DRE por categoria (decisão 26) não responde, porque lá tudo é
+uma lista só. Por isso a categoria ganhou `tipo_custo` (0028): o
+`no_dre` dizia se entra, não **onde** entra. A migração classifica as
+sete que a planilha trata como variáveis (cartório, cautelar,
+comissão, consultas, correio, despachante, motoboy); o resto cai em
+fixa, que é o padrão, e o gerente corrige na própria tela.
+
+**Faturamento aqui é a margem dos carros, não o preço deles.** Na
+planilha, 69 carros deram ticket médio de R$ 4.676 — é o que a loja
+ganha por carro, não o que o carro custa. Quem trocar isso pelo valor
+de venda infla a receita vinte vezes e faz toda despesa parecer
+irrelevante. E é a margem **bruta**, não a líquida: cautelar e
+comissão externa aparecem logo abaixo como despesa variável, e a
+líquida já as desconta — entrariam duas vezes.
+
+**O previsto é digitado; o realizado nunca.** `fin_orcamento` guarda
+uma linha por categoria por competência, mais as duas premissas que
+não são categoria (`veiculos` e `ticket`, em `linha`) — sem elas o
+faturamento previsto não tem de onde sair. O realizado passa pelo
+mesmo `partesDe()` do DRE, então rateio conta igual nos dois lugares.
+**Quem mudar um precisa mudar o outro.**
+
+**Sem `on_conflict`:** os dois índices de unicidade são parciais (um
+para categoria, outro para linha) e o Postgres não infere índice
+parcial no ON CONFLICT — o mesmo tropeço do `fin_favorecido_doc`. O
+`PUT` procura e decide, como o `api/veiculo.js`.
+
+**Copiar o mês anterior existe porque orçar do zero é o que faz o
+orçamento morrer no terceiro mês.** Ele apaga a competência de destino
+antes de copiar, para que repetir o botão convirja em vez de duplicar.
+
+**A diferença é pintada pelo lado certo.** Em receita, mais é bom; em
+custo, menos é bom. Uma cor só faria economia de despesa parecer
+prejuízo — e é justamente a economia que o fechamento existe para
+mostrar.
+
+**A célula de previsto é componente de topo, não declarado dentro do
+`FinFechamento`.** Componente criado dentro de outro vira tipo novo a
+cada render: o React remonta o campo e o foco se perde a cada tecla —
+o mesmo que já derrubou o formulário do cliente (decisão 7).

@@ -8740,11 +8740,11 @@ const TIPOS_NEG_ROT = { pagto_cliente: "Pagto cliente", quitacao: "Quitação", 
 
 function TelaFinanceiro({ perfil, comp, mes }) {
   const [aba, setAba] = useState("lancamentos");
-  const ABAS = [["lancamentos", "Lançamentos"], ["contas", "A pagar / receber"], ["dre", "DRE"], ["carros", "Carros"], ["folha", "Folha"]];
+  const ABAS = [["lancamentos", "Lançamentos"], ["contas", "A pagar / receber"], ["fechamento", "Fechamento"], ["dre", "DRE"], ["carros", "Carros"], ["folha", "Folha"]];
   return (
     <div>
       <Cabecalho titulo="Financeiro" mes={mes}
-        sub="Área restrita: extrato conciliado, DRE, conferência dos carros e folha." />
+        sub="Área restrita: extrato conciliado, fechamento previsto × realizado, DRE, carros e folha." />
       <div className="mb-4 flex flex-wrap gap-1.5">
         {ABAS.map(([v, r]) => (
           <button key={v} onClick={() => setAba(v)} className="rounded-full px-3.5 py-1.5 text-[13px] font-semibold"
@@ -8753,6 +8753,7 @@ function TelaFinanceiro({ perfil, comp, mes }) {
       </div>
       {aba === "lancamentos" && <FinLancamentos comp={comp} />}
       {aba === "contas" && <FinContas comp={comp} />}
+      {aba === "fechamento" && <FinFechamento comp={comp} />}
       {aba === "dre" && <FinDRE comp={comp} />}
       {aba === "carros" && <FinCarros comp={comp} />}
       {aba === "folha" && <FinFolha comp={comp} />}
@@ -9779,6 +9780,217 @@ function FinDRE({ comp }) {
         <p className="mt-3 text-[11px] leading-snug" style={{ color: C.mute }}>Como na planilha: despesa é crédito − débito por categoria, e a rentabilidade líquida dos carros vendidos no mês entra como receita. Negociação, retirada e transferência ficam fora.</p>
       </div>
     </div>
+    </div>
+  );
+}
+
+/* ---------------- fechamento: previsto x realizado ---------------- */
+
+const numBR = (v) => Number(String(v == null ? "" : v).replace(/\./g, "").replace(",", ".")) || 0;
+const pctDe = (a, b) => (b ? (a / b) * 100 : 0);
+const fmtF = (v, inteiro) => (inteiro ? String(Math.round(v)) : rs2(v));
+
+/**
+ * A célula de previsto. **Declarada aqui fora, não dentro do
+ * FinFechamento**: componente criado dentro de outro vira tipo novo a
+ * cada render, o React remonta o campo e o foco se perde a cada tecla
+ * — o mesmo que já derrubou o formulário do cliente.
+ *
+ * Grava ao sair do campo: orçamento é digitado em rajada, e um botão
+ * salvar por linha daria trinta e cinco cliques.
+ */
+function FechPrev({ alvo, valor, inteiro, salvando, gravar }) {
+  const chave = alvo.categoria_id || alvo.linha;
+  const mostrar = () => (inteiro ? (valor ? String(Math.round(valor)) : "") : (valor ? rs2(valor) : ""));
+  const [t, setT] = useState(mostrar);
+  useEffect(() => { setT(mostrar()); }, [valor]);
+  return (
+    <input value={t} onChange={(e) => setT(e.target.value)} inputMode="decimal"
+      onBlur={() => { const v = numBR(t); if (Math.round(v * 100) !== Math.round((valor || 0) * 100)) gravar(alvo, v); }}
+      className="w-full rounded px-1.5 py-0.5 text-right text-[12px]"
+      style={{ fontVariantNumeric: "tabular-nums", background: salvando === chave ? C.roxoFraco : "transparent",
+               border: `1px solid ${C.line}`, color: C.ink }} />
+  );
+}
+
+// Em receita, mais é bom; em custo, menos é bom. Pintar as duas do
+// mesmo jeito faria economia parecer prejuízo.
+function FechDif({ p, r, bom, inteiro }) {
+  const dif = r - p;
+  if (!p && !r) return <span style={{ color: C.mute }}>—</span>;
+  const ok = bom === "mais" ? dif >= 0 : dif <= 0;
+  return (
+    <span style={{ fontVariantNumeric: "tabular-nums", color: Math.abs(dif) < 0.005 ? C.mute : (ok ? C.verde : C.laranja) }}>
+      {dif > 0 ? "+" : ""}{fmtF(dif, inteiro)}
+      {p ? <span className="ml-1 text-[11px]" style={{ color: C.mute }}>({Math.round(pctDe(r, p))}%)</span> : null}
+    </span>
+  );
+}
+
+function FechLinha({ rot, p, r, bom, alvo, inteiro, forte, fundo, nota, salvando, gravar }) {
+  return (
+    <tr style={{ borderBottom: `1px solid ${C.line}`, background: fundo || "transparent" }}>
+      <td className="px-3 py-1.5 text-[13px]" style={{ fontWeight: forte ? 700 : 400 }}>
+        {rot}{nota ? <span className="ml-2 text-[11px]" style={{ color: C.mute }}>{nota}</span> : null}
+      </td>
+      <td className="px-2 py-1 text-right text-[12px]" style={{ fontVariantNumeric: "tabular-nums", fontWeight: forte ? 700 : 400, width: 130 }}>
+        {alvo ? <FechPrev alvo={alvo} valor={p} inteiro={inteiro} salvando={salvando} gravar={gravar} /> : fmtF(p, inteiro)}
+      </td>
+      <td className="px-3 py-1 text-right text-[12px]" style={{ fontVariantNumeric: "tabular-nums", fontWeight: forte ? 700 : 400, width: 120 }}>{fmtF(r, inteiro)}</td>
+      <td className="px-3 py-1 text-right text-[12px]" style={{ width: 140 }}><FechDif p={p} r={r} bom={bom} inteiro={inteiro} /></td>
+    </tr>
+  );
+}
+
+function FechFaixa({ rot }) {
+  return <tr><td colSpan={4} className="px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-[0.08em]" style={{ color: C.mute }}>{rot}</td></tr>;
+}
+
+/**
+ * O fechamento: o previsto contra o realizado, mês a mês.
+ *
+ * É a planilha "Controle Financeiro Completo" do Derek — ORÇAMENTO E
+ * PROVISÃO contra FLUXO DE CAIXA, que a aba SALDO FINAL fechava numa
+ * coluna DIFERENÇA. A estrutura é de DRE gerencial de franquia, e ela
+ * responde o que o DRE por categoria não responde: quanto sobra por
+ * carro (margem de contribuição) e quanto a loja custa parada
+ * (despesas fixas).
+ *
+ * **Faturamento aqui é a margem dos carros, não o preço deles.** Na
+ * planilha, 69 carros deram ticket de R$ 4.676 — é o que a loja ganha
+ * por carro. Quem trocar isso pelo valor de venda infla a receita
+ * vinte vezes e faz toda despesa parecer irrelevante.
+ */
+function FinFechamento({ comp }) {
+  const [d, setD] = useState(null);
+  const [erro, setErro] = useState("");
+  const [aviso, setAviso] = useState("");
+  const [salvando, setSalvando] = useState("");
+  const [classificar, setClassificar] = useState(false);
+
+  const carregar = () => fin("orcamento", { competencia: comp }).then(setD).catch((e) => setErro(e.message));
+  useEffect(() => { setD(null); setErro(""); setAviso(""); carregar(); }, [comp]);
+
+  const gravar = async (alvo, valor) => {
+    setSalvando(alvo.categoria_id || alvo.linha); setErro("");
+    try { await fin("orcamento", { competencia: comp }, finJson("PUT", { ...alvo, valor })); await carregar(); }
+    catch (e) { setErro(e.message); }
+    setSalvando("");
+  };
+  const copiar = async () => {
+    setErro(""); setAviso("");
+    try {
+      const r = await fin("orcamento", { competencia: comp, acao: "copiar" }, finJson("POST", {}));
+      await carregar(); setAviso(`${r.copiadas} linhas copiadas de ${rotuloMes(r.de)}.`);
+    } catch (e) { setErro(e.message); }
+  };
+  const mudarTipo = async (id, tipo) => {
+    setSalvando(id); setErro("");
+    try { await fin("categoria", { id }, finJson("PATCH", { tipo_custo: tipo })); await carregar(); }
+    catch (e) { setErro(e.message); }
+    setSalvando("");
+  };
+
+  if (erro && !d) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
+  if (!d) return <p className="text-[13px]" style={{ color: C.mute }}>Montando o fechamento…</p>;
+
+  const L = (props) => <FechLinha {...props} salvando={salvando} gravar={gravar} />;
+
+  const csv = () => baixarCSV(`fechamento-${String(comp).slice(0, 7)}.csv`,
+    ["Linha", "Previsto", "Realizado", "Diferença"],
+    [["Qtd veículos vendidos", d.veiculos.previsto, d.veiculos.realizado, d.veiculos.realizado - d.veiculos.previsto],
+     ["Ticket médio", d.ticket.previsto, d.ticket.realizado, d.ticket.realizado - d.ticket.previsto],
+     ["Faturamento bruto", d.faturamento.previsto, d.faturamento.realizado, d.faturamento.realizado - d.faturamento.previsto]]
+      .concat(d.outras_linhas.map((l) => [l.nome, l.previsto, l.realizado, l.realizado - l.previsto]))
+      .concat([["RECEITA OPERACIONAL BRUTA", d.receita.previsto, d.receita.realizado, d.receita.realizado - d.receita.previsto]])
+      .concat(d.variaveis.map((l) => [l.nome, l.previsto, l.realizado, l.realizado - l.previsto]))
+      .concat([["DESPESAS VARIÁVEIS", d.total_variaveis.previsto, d.total_variaveis.realizado, d.total_variaveis.realizado - d.total_variaveis.previsto],
+               ["MARGEM DE CONTRIBUIÇÃO", d.margem.previsto, d.margem.realizado, d.margem.realizado - d.margem.previsto]])
+      .concat(d.fixas.map((l) => [l.nome, l.previsto, l.realizado, l.realizado - l.previsto]))
+      .concat([["DESPESAS FIXAS", d.total_fixas.previsto, d.total_fixas.realizado, d.total_fixas.realizado - d.total_fixas.previsto],
+               ["RESULTADO", d.resultado.previsto, d.resultado.realizado, d.resultado.realizado - d.resultado.previsto]]));
+
+  return (
+    <div>
+      <div className="mb-3 flex flex-wrap items-center gap-3 text-[13px]">
+        <button onClick={copiar} className="rounded-full px-3 py-1 font-semibold" style={{ background: C.roxoFraco, color: C.roxo }}>
+          copiar orçamento do mês anterior
+        </button>
+        <button onClick={() => setClassificar((v) => !v)} className="font-semibold" style={{ color: C.mute }}>
+          {classificar ? "fechar" : "classificar categorias"}
+        </button>
+        <button onClick={csv} className="ml-auto font-semibold" style={{ color: C.mute }}>CSV</button>
+      </div>
+      {!!erro && <p className="mb-3 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+      {!!aviso && <p className="mb-3 text-[12px]" style={{ color: C.verde }}>{aviso}</p>}
+
+      {classificar && (
+        <div className="mb-4 rounded-xl p-3" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+          <p className="mb-2 text-[12px] leading-snug" style={{ color: C.mute }}>
+            Variável anda com a venda (cautelar, cartório, despachante, comissão). Fixa existe mesmo sem vender
+            (aluguel, salário). É essa divisão que produz a margem de contribuição.
+          </p>
+          <div className="grid gap-1 sm:grid-cols-2">
+            {d.categorias.map((c) => (
+              <div key={c.id} className="flex items-center justify-between gap-2 py-0.5">
+                <span className="truncate text-[13px]">{c.nome}</span>
+                <div className="flex shrink-0 gap-1">
+                  {[["variavel", "variável"], ["fixa", "fixa"], ["receita", "receita"]].map(([v, r]) => (
+                    <button key={v} onClick={() => mudarTipo(c.id, v)} className="rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                      style={{ background: c.tipo_custo === v ? C.roxo : "transparent", color: c.tipo_custo === v ? "#fff" : C.mute,
+                               border: `1px solid ${c.tipo_custo === v ? C.roxo : C.line}` }}>{r}</button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="rolar overflow-x-auto rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 620 }}>
+          <thead>
+            <tr>
+              <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.06em]" style={{ color: C.mute, borderBottom: `1px solid ${C.line}` }}>{rotuloMes(comp)}</th>
+              <th className="px-2 py-2 text-right text-[11px] font-semibold uppercase" style={{ color: C.mute, borderBottom: `1px solid ${C.line}` }}>Previsto</th>
+              <th className="px-3 py-2 text-right text-[11px] font-semibold uppercase" style={{ color: C.mute, borderBottom: `1px solid ${C.line}` }}>Realizado</th>
+              <th className="px-3 py-2 text-right text-[11px] font-semibold uppercase" style={{ color: C.mute, borderBottom: `1px solid ${C.line}` }}>Diferença</th>
+            </tr>
+          </thead>
+          <tbody>
+            <L rot="Qtd. de veículos vendidos" p={d.veiculos.previsto} r={d.veiculos.realizado} bom="mais" inteiro alvo={{ linha: "veiculos" }} />
+            <L rot="Ticket médio" nota="margem por carro" p={d.ticket.previsto} r={d.ticket.realizado} bom="mais" alvo={{ linha: "ticket" }} />
+            <L rot="Faturamento bruto" nota="qtd × ticket" p={d.faturamento.previsto} r={d.faturamento.realizado} bom="mais" forte />
+            {d.outras_linhas.map((l) => <L key={l.id} rot={l.nome} p={l.previsto} r={l.realizado} bom="mais" alvo={{ categoria_id: l.id }} />)}
+            <L rot="RECEITA OPERACIONAL BRUTA" p={d.receita.previsto} r={d.receita.realizado} bom="mais" forte fundo={C.bg} />
+
+            <FechFaixa rot="Despesas variáveis" />
+            {d.variaveis.map((l) => <L key={l.id} rot={l.nome} p={l.previsto} r={l.realizado} bom="menos" alvo={{ categoria_id: l.id }} />)}
+            {!d.variaveis.length && <tr><td colSpan={4} className="px-3 py-2 text-[12px]" style={{ color: C.mute }}>Nenhuma categoria marcada como variável — use “classificar categorias”.</td></tr>}
+            <L rot="DESPESAS VARIÁVEIS" p={d.total_variaveis.previsto} r={d.total_variaveis.realizado} bom="menos" forte fundo={C.bg}
+              nota={d.faturamento.realizado ? `${Math.round(pctDe(d.total_variaveis.realizado, d.faturamento.realizado))}% do faturamento` : null} />
+            <L rot="MARGEM DE CONTRIBUIÇÃO" p={d.margem.previsto} r={d.margem.realizado} bom="mais" forte fundo={C.roxoFraco}
+              nota={d.receita.realizado ? `${Math.round(pctDe(d.margem.realizado, d.receita.realizado))}%` : null} />
+
+            <FechFaixa rot="Despesas fixas" />
+            {d.fixas.map((l) => <L key={l.id} rot={l.nome} p={l.previsto} r={l.realizado} bom="menos" alvo={{ categoria_id: l.id }} />)}
+            {!d.fixas.length && <tr><td colSpan={4} className="px-3 py-2 text-[12px]" style={{ color: C.mute }}>Nenhuma despesa fixa neste mês.</td></tr>}
+            <L rot="DESPESAS FIXAS" p={d.total_fixas.previsto} r={d.total_fixas.realizado} bom="menos" forte fundo={C.bg} />
+            <L rot="RESULTADO" p={d.resultado.previsto} r={d.resultado.realizado} bom="mais" forte fundo="#F3F7F4" />
+          </tbody>
+        </table>
+      </div>
+      {!!d.sem_categoria && (
+        <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>
+          {rs2(-d.sem_categoria)} em lançamentos sem categoria ficaram fora deste fechamento. Classifique-os em Lançamentos.
+        </p>
+      )}
+      <p className="mt-3 text-[11px] leading-snug" style={{ color: C.mute }}>
+        O previsto é digitado aqui e fica gravado por mês. O realizado sai dos lançamentos efetivados desta competência —
+        o mesmo cálculo do DRE, somando as partes de cada rateio. Faturamento é a margem bruta dos carros vendidos no mês
+        (venda − compra − custos do carro); cautelar e comissão externa aparecem abaixo, como despesa variável, para não
+        serem descontadas duas vezes.
+      </p>
     </div>
   );
 }

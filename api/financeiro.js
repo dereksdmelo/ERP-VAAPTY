@@ -155,9 +155,11 @@ const favorecido = cadastro("fin_favorecido",
 const conta = cadastro("fin_conta",
   [["nome", texto], ["banco", texto], ["empresa", texto], ["saldo_inicial", (v) => decimal(v) || 0],
    ["saldo_inicial_em", dataISO], ["ativa", bool]], "nome.asc");
+const TIPOS_CUSTO = ["receita", "variavel", "fixa", "fora"];
+const tipoCusto = (v) => (TIPOS_CUSTO.indexOf(String(v)) >= 0 ? String(v) : "fixa");
 const categoria = cadastro("fin_categoria",
   [["nome", texto], ["grupo", grupo], ["no_dre", bool], ["ordem", inteiro], ["ativa", bool],
-   ["pede_funcionario", bool]], "ordem.asc,nome.asc");
+   ["pede_funcionario", bool], ["tipo_custo", tipoCusto]], "ordem.asc,nome.asc");
 const funcionario = cadastro("fin_funcionario",
   [["nome", texto], ["salario_base", (v) => decimal(v) || 0], ["negociador_id", idOuNulo], ["ativo", bool]], "nome.asc");
 
@@ -1140,13 +1142,156 @@ async function folha(req, res, tok) {
 
 // Os carros do estoque, só placa e modelo, para o vínculo manual de um
 // lançamento — quando a descrição não trouxe a placa.
+/* ------------------ fechamento do mês: previsto x realizado ------------------ */
+
+// A planilha "Controle Financeiro Completo" é um DRE gerencial de
+// franquia. A estrutura dela responde duas perguntas que o DRE por
+// categoria não responde: quanto sobra por carro, e quanto a loja
+// custa parada.
+//
+//   receita operacional bruta
+//   − despesas VARIÁVEIS   (andam com a venda)
+//   = MARGEM DE CONTRIBUIÇÃO
+//   − despesas FIXAS       (existem mesmo sem vender)
+//   = resultado
+//
+// **Faturamento aqui é a margem BRUTA dos carros, não o valor de
+// venda.** Na planilha o ticket de janeiro deu R$ 4.676 com 69 carros:
+// é o que a loja ganha por carro. Somar o preço do carro inflaria a
+// receita em vinte vezes e faria toda despesa parecer irrelevante.
+//
+// E é a margem BRUTA, não a líquida, porque cautelar e comissão
+// externa aparecem logo abaixo como despesa variável — a líquida já as
+// desconta, e entrariam duas vezes.
+
+// Só as duas premissas. "Outras receitas" não vira linha livre: ela
+// já tem categoria própria, e ter os dois caminhos somaria duas vezes.
+const LINHAS_LIVRES = ["veiculos", "ticket"];
+const mesAnterior = (comp) => {
+  const [a, m] = comp.split("-").map(Number);
+  const d = new Date(Date.UTC(a, m - 2, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-01`;
+};
+
+async function orcamentoDoMes(tok, comp) {
+  const lista = await supa(`${base("fin_orcamento")}?select=categoria_id,linha,valor&competencia=eq.${comp}&limit=2000`,
+    { headers: cab(tok) });
+  const porCat = {}; const livres = {};
+  (lista || []).forEach((o) => {
+    if (o.categoria_id) porCat[o.categoria_id] = Number(o.valor) || 0;
+    else if (o.linha) livres[o.linha] = Number(o.valor) || 0;
+  });
+  return { porCat, livres };
+}
+
+async function orcamento(req, res, tok) {
+  const comp = competenciaDe(req.query.competencia) || competenciaDe(hojeAqui());
+
+  if (req.method === "PUT") {
+    const c = await corpoDe(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    const catId = idOuNulo(c.categoria_id);
+    const linha = LINHAS_LIVRES.indexOf(String(c.linha || "")) >= 0 ? String(c.linha) : null;
+    if (!catId && !linha) return res.status(400).json({ erro: "Diga a categoria ou a linha." });
+    const valor = decimal(c.valor) || 0;
+    // Sem on_conflict: os dois índices de unicidade são PARCIAIS (um
+    // para categoria, outro para linha) e o Postgres não infere índice
+    // parcial no ON CONFLICT. Procura e decide, como o api/veiculo.js.
+    const filtro = catId ? `categoria_id=eq.${catId}` : `linha=eq.${linha}`;
+    const ja = await supa(`${base("fin_orcamento")}?select=id&competencia=eq.${comp}&${filtro}`, { headers: cab(tok) });
+    const achou = um(ja);
+    const corpo = { competencia: comp, categoria_id: catId, linha, valor, atualizado_em: new Date().toISOString() };
+    const r = achou
+      ? await supa(`${base("fin_orcamento")}?id=eq.${achou.id}`, { method: "PATCH", headers: cab(tok, REP), body: JSON.stringify({ valor, atualizado_em: corpo.atualizado_em }) })
+      : await supa(base("fin_orcamento"), { method: "POST", headers: cab(tok, REP), body: JSON.stringify(corpo) });
+    if (!um(r)) return recusado(res);
+    return res.status(200).json({ ok: true, item: um(r) });
+  }
+
+  if (req.method === "POST" && String(req.query.acao || "") === "copiar") {
+    // Orçar do zero todo mês é o que faz o orçamento parar de existir
+    // no terceiro mês. Copia o anterior e a pessoa ajusta o que mudou.
+    const de = competenciaDe(req.query.de) || mesAnterior(comp);
+    const origem = await supa(`${base("fin_orcamento")}?select=categoria_id,linha,valor&competencia=eq.${de}&limit=2000`,
+      { headers: cab(tok) });
+    if (!(origem || []).length) return res.status(400).json({ erro: `Não há orçamento em ${de} para copiar.` });
+    await supa(`${base("fin_orcamento")}?competencia=eq.${comp}`, { method: "DELETE", headers: cab(tok) });
+    const novas = origem.map((o) => ({ competencia: comp, categoria_id: o.categoria_id, linha: o.linha, valor: o.valor }));
+    const r = await supa(base("fin_orcamento"), { method: "POST", headers: cab(tok, REP), body: JSON.stringify(novas) });
+    if (!Array.isArray(r)) return recusado(res);
+    return res.status(200).json({ ok: true, copiadas: r.length, de });
+  }
+
+  if (req.method !== "GET") { res.setHeader("Allow", "GET, PUT, POST"); return res.status(405).json({ erro: "Use GET, PUT ou POST." }); }
+
+  const [lanc, cats, orc, vendidos] = await Promise.all([
+    supa(`${base("fin_lancamento")}?select=debito,credito,situacao,categoria_id,estoque_id,tipo_negociacao,funcionario_id,` +
+      `fin_rateio(valor,categoria_id,estoque_id,tipo_negociacao,funcionario_id)&situacao=eq.efetivado&competencia=eq.${comp}&limit=10000`,
+      { headers: cab(tok) }),
+    supa(`${base("fin_categoria")}?select=id,nome,grupo,no_dre,ordem,tipo_custo&ativa=eq.true&order=ordem.asc,nome.asc`, { headers: cab(tok) }),
+    orcamentoDoMes(tok, comp),
+    vendidosNoMes(tok, comp),
+  ]);
+
+  const catPorId = {};
+  (cats || []).forEach((c) => { catPorId[c.id] = c; });
+  const real = {};
+  let semCategoria = 0;
+  (lanc || []).forEach((l) => {
+    partesDe(l).forEach((p) => {
+      const c = p.categoria_id ? catPorId[p.categoria_id] : null;
+      if (!c) { semCategoria += p.valor; return; }
+      if (c.tipo_custo === "fora" || !c.no_dre) return;
+      real[c.id] = (real[c.id] || 0) + p.valor;
+    });
+  });
+
+  const rent = vendidos.reduce((t, e) => t + rentabilidadeDe(e).bruta, 0);
+  const prev = orc.livres;
+  const vPrev = prev.veiculos || 0;
+  const tPrev = prev.ticket || 0;
+
+  // Despesa vem negativa de partesDe(); aqui ela é custo, e custo se
+  // lê positivo. O sinal volta na hora de somar o resultado.
+  const monta = (tipo) => (cats || []).filter((c) => c.tipo_custo === tipo && c.no_dre)
+    .map((c) => ({ id: c.id, nome: c.nome, grupo: c.grupo, ordem: c.ordem,
+                   previsto: orc.porCat[c.id] || 0, realizado: -(real[c.id] || 0) }))
+    .filter((x) => x.previsto || x.realizado);
+
+  const variaveis = monta("variavel");
+  const fixas = monta("fixa");
+  const receitas = (cats || []).filter((c) => c.tipo_custo === "receita")
+    .map((c) => ({ id: c.id, nome: c.nome, previsto: orc.porCat[c.id] || 0, realizado: real[c.id] || 0 }))
+    .filter((x) => x.previsto || x.realizado);
+
+  const soma = (a) => a.reduce((t, x) => ({ previsto: t.previsto + x.previsto, realizado: t.realizado + x.realizado }), { previsto: 0, realizado: 0 });
+  const totVar = soma(variaveis), totFix = soma(fixas), totOut = soma(receitas);
+
+  const faturamento = { previsto: vPrev * tPrev, realizado: rent };
+  const receita = { previsto: faturamento.previsto + totOut.previsto, realizado: faturamento.realizado + totOut.realizado };
+  const margem = { previsto: receita.previsto - totVar.previsto, realizado: receita.realizado - totVar.realizado };
+  const resultado = { previsto: margem.previsto - totFix.previsto, realizado: margem.realizado - totFix.realizado };
+
+  return res.status(200).json({
+    competencia: comp,
+    veiculos: { previsto: vPrev, realizado: vendidos.length },
+    ticket: { previsto: tPrev, realizado: vendidos.length ? rent / vendidos.length : 0 },
+    faturamento, outras_receitas: totOut, outras_linhas: receitas, receita,
+    variaveis, total_variaveis: totVar, margem,
+    fixas, total_fixas: totFix, resultado,
+    sem_categoria: semCategoria,
+    categorias: (cats || []).filter((c) => c.no_dre && c.tipo_custo !== "fora")
+      .map((c) => ({ id: c.id, nome: c.nome, tipo_custo: c.tipo_custo, ordem: c.ordem })),
+  });
+}
+
 async function estoqueLista(req, res, tok) {
   const lista = await supa(`${base("estoque")}?select=id,situacao,veiculo(placa,marca_modelo)&order=entrou_em.desc&limit=400`, { headers: cab(tok) });
   return res.status(200).json({ estoque: (lista || []).map((e) => ({ id: e.id, situacao: e.situacao, placa: e.veiculo && e.veiculo.placa, carro: e.veiculo && e.veiculo.marca_modelo })) });
 }
 
 const RECURSOS = { conta, categoria, funcionario, favorecido, lancamento, importar, dre, carros, vale, folha,
-                   fechamento, rateio, negociacao, titulo, fluxo, log, estoque: estoqueLista };
+                   fechamento, orcamento, rateio, negociacao, titulo, fluxo, log, estoque: estoqueLista };
 
 module.exports = async function handler(req, res) {
   if (!URL_BASE || !ANON) return res.status(500).json({ erro: "SUPABASE_URL ou SUPABASE_ANON_KEY não configurados." });
