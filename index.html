@@ -9982,7 +9982,8 @@ function FinFechamento({ comp }) {
       </div>
       {!!d.sem_categoria && (
         <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>
-          {rs2(-d.sem_categoria)} em lançamentos sem categoria ficaram fora deste fechamento. Classifique-os em Lançamentos.
+          {rs2(Math.abs(d.sem_categoria))} em {d.sem_categoria > 0 ? "entradas" : "saídas"} sem categoria ficaram fora deste
+          fechamento — sem categoria não há como saber se é receita, custo variável ou fixo. Classifique em Lançamentos.
         </p>
       )}
       <p className="mt-3 text-[11px] leading-snug" style={{ color: C.mute }}>
