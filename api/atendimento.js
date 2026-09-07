@@ -217,6 +217,13 @@ const STATUS_INDICACAO = ["novo", "em_contato", "agendado", "virou_atendimento",
  * junto seria ampliar o vazamento sem ganhar nada na leitura.
  */
 const IA_CHAVE = process.env.ANTHROPIC_API_KEY || "";
+// Haiku é o mais barato da família e sobra para esta tarefa: ler
+// meia página de transcrição e dizer qual manobra é. Trocar o modelo
+// não precisa de deploy — basta a variável IA_MODELO no ambiente.
+const IA_MODELO = process.env.IA_MODELO || "claude-haiku-4-5-20251001";
+// Só o fim da conversa importa, e cada caractere a mais é dinheiro.
+// 2.500 caracteres são uns cinco minutos de fala.
+const IA_JANELA = Math.max(500, Math.min(20000, Number(process.env.IA_JANELA) || 2500));
 
 const INSTRUCAO_TATICA = [
   "Você ajuda um negociador da Vaapty, que COMPRA carros de pessoas físicas para revender a lojistas.",
@@ -254,10 +261,10 @@ async function tatica(req, res, tok) {
       method: "POST",
       headers: { "x-api-key": IA_CHAVE, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "claude-sonnet-5",
-        max_tokens: 400,
+        model: IA_MODELO,
+        max_tokens: 300,
         system: INSTRUCAO_TATICA,
-        messages: [{ role: "user", content: texto.slice(-6000) }],
+        messages: [{ role: "user", content: texto.slice(-IA_JANELA) }],
       }),
     });
   } catch (e) {
@@ -281,9 +288,14 @@ async function tatica(req, res, tok) {
   if (i >= 0 && j > i) { try { obj = JSON.parse(saida.slice(i, j + 1)); } catch (e) {} }
   if (!obj) return res.status(502).json({ erro: "A IA respondeu fora do formato. Tente de novo." });
 
+  // O consumo volta junto: quem paga por chamada precisa ver o que
+  // cada clique custou, não descobrir na fatura.
+  let uso = null;
+  try { const d = JSON.parse(corpo); uso = d.usage || null; } catch (e) {}
   return res.status(200).json({
     tatica: texto0(obj.tatica), leitura: texto0(obj.leitura),
     faca: texto0(obj.faca), frase: texto0(obj.frase),
+    modelo: IA_MODELO, uso,
   });
 }
 const texto0 = (v) => String(v == null ? "" : v).trim().slice(0, 600);

@@ -4635,7 +4635,9 @@ function PainelTaticas({ escuta, atendimentoId }) {
 
   const analisar = async () => {
     setIndo(true); setErro(""); setIa(null);
-    try { setIa(await lerTaticaIA(atendimentoId, texto.slice(-6000))); }
+    // O recorte de verdade é no servidor, que é quem paga a conta; aqui
+    // é só para não trafegar a conversa inteira à toa.
+    try { setIa(await lerTaticaIA(atendimentoId, texto.slice(-8000))); }
     catch (e) { setErro(e.message); }
     setIndo(false);
   };
@@ -4677,7 +4679,10 @@ function PainelTaticas({ escuta, atendimentoId }) {
           {ia.leitura && <p className="mt-0.5 text-[12px]">{ia.leitura}</p>}
           {ia.faca && <p className="mt-1 text-[12px]"><b style={{ color: C.verde }}>Faça:</b> {ia.faca}</p>}
           {ia.frase && <p className="mt-1 rounded px-2 py-1 text-[12px]" style={{ background: "#fff" }}>“{ia.frase}”</p>}
-          <p className="mt-1.5 text-[10px]" style={{ color: C.mute }}>Sugestão de máquina lendo uma transcrição imperfeita. Quem decide é você.</p>
+          <p className="mt-1.5 text-[10px]" style={{ color: C.mute }}>
+            Sugestão de máquina lendo uma transcrição imperfeita. Quem decide é você.
+            {ia.uso && <span> · {ia.uso.input_tokens + ia.uso.output_tokens} fichas nesta leitura</span>}
+          </p>
         </div>
       )}
 
