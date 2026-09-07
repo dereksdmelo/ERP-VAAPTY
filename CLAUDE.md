@@ -67,6 +67,8 @@ e um `.env` local para o `vercel dev`):
 | `SUPABASE_ANON_KEY` | `api/config.js` e as chamadas ao banco |
 | `SUPABASE_SERVICE_KEY` | só `api/foto.js`, e só para o Storage |
 | `ANTHROPIC_API_KEY` | `api/atendimento.js?recurso=tatica` — opcional; sem ela a leitura por IA fica desligada e as táticas por expressão seguem |
+| `IA_MODELO` | opcional; padrão `claude-haiku-4-5-20251001`. Trocar de modelo não precisa de deploy |
+| `IA_JANELA` | opcional; padrão 2500 caracteres do fim da conversa. É o que se paga por leitura |
 
 **Nenhuma delas, fora a anônima, pode chegar ao navegador** — é essa a razão de as
 funções em `api/` existirem em vez de o `index.html` chamar os serviços
@@ -1542,6 +1544,17 @@ não subiu no meio de uma negociação seria pior que o botão não existir.
 **Só o texto da conversa é enviado**: nome, telefone e CPF não vão
 junto. A transcrição já é dado sensível; mandar o cadastro junto
 ampliaria o vazamento sem melhorar a leitura.
+
+**O modelo é o mais barato da família, e isso é decisão.** Ler meia
+página de transcrição e dizer qual manobra é não pede o modelo grande;
+Haiku custa uma fração e acerta essa tarefa. `IA_MODELO` e `IA_JANELA`
+são variáveis de ambiente justamente para o Derek subir ou descer o
+gasto **sem deploy**. A janela de 2.500 caracteres é o fim da conversa
+— uns cinco minutos de fala — porque é o trecho que importa e cada
+caractere a mais é dinheiro.
+
+**O consumo volta na resposta e aparece na tela.** Quem paga por
+chamada precisa ver o que o clique custou, não descobrir na fatura.
 
 **As táticas só aparecem na Negociação.** Na Pesquisa o cliente ainda
 está contando a história do carro, e sugerir manobra ali é ruído.
