@@ -10427,28 +10427,90 @@ function FinFolha({ comp }) {
  * recusa a desenhar PDF embutido, e a tela precisa dizer o que fazer
  * quando isso acontece em vez de mostrar um retângulo branco.
  */
+/**
+ * O visor: um papel de cada vez, com setas, dentro da página.
+ *
+ * Nasceu para os anexos e passou a servir também aos documentos que o
+ * sistema emitiu. Antes eles abriam em aba nova — o que quebra a
+ * conferência no celular, onde cada aba nova é um gesto a mais para
+ * voltar. É a mesma ideia da apresentação do negócio: virar a página
+ * sem sair do sistema.
+ *
+ * O item pode ser um arquivo (`url`) ou um documento gerado
+ * (`docId`), e neste caso o HTML é buscado **quando a página é
+ * mostrada**, não antes: são ~9 KB cada, e um negócio com treze
+ * documentos baixaria tudo para o administrativo olhar um.
+ */
 function VisorAnexos({ anexos, inicio, aoFechar }) {
   const [i, setI] = useState(inicio || 0);
+  const [htmls, setHtmls] = useState({});
+  const quadro = useRef(null);
   const a = anexos[i];
+
   useEffect(() => {
     const t = (e) => { if (e.key === "Escape") aoFechar(); if (e.key === "ArrowRight") setI((x) => Math.min(anexos.length - 1, x + 1)); if (e.key === "ArrowLeft") setI((x) => Math.max(0, x - 1)); };
     window.addEventListener("keydown", t);
     return () => window.removeEventListener("keydown", t);
   }, [anexos.length]);
+
+  const doc = a && a.docId;
+  useEffect(() => {
+    if (!doc || htmls[doc] !== undefined) return;
+    let vivo = true;
+    lerDocumento(doc)
+      .then((d) => { if (vivo) setHtmls((h) => ({ ...h, [doc]: d.conteudo || "ERRO:Registrado sem o conteúdo — saiu antes de a ficha ir ao banco." })); })
+      .catch((e) => { if (vivo) setHtmls((h) => ({ ...h, [doc]: `ERRO:${e.message}` })); });
+    return () => { vivo = false; };
+  }, [doc]);
+
   if (!a) return null;
   const ePdf = /pdf/i.test(a.tipo || "") || /\.pdf$/i.test(a.nome || "");
+  const html = doc ? htmls[doc] : null;
+  const erroDoc = typeof html === "string" && html.slice(0, 5) === "ERRO:" ? html.slice(5) : null;
+
+  // Imprimir de dentro do visor: o iframe é do mesmo domínio, então dá
+  // para chamar a impressão dele sem abrir aba nenhuma.
+  const imprimir = () => {
+    const j = quadro.current && quadro.current.contentWindow;
+    if (!j) return;
+    j.focus(); j.print();
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col" style={{ background: "rgba(24,18,33,0.92)" }} onClick={aoFechar}>
       <div className="flex items-center gap-3 px-4 py-2.5 text-[13px]" style={{ color: "#fff" }} onClick={(e) => e.stopPropagation()}>
         <span className="min-w-0 flex-1 truncate">{a.nome || "documento"}</span>
         <span style={{ opacity: 0.7 }}>{i + 1} de {anexos.length}</span>
-        <button onClick={() => setI(Math.max(0, i - 1))} disabled={!i} className="px-2 text-[18px]" style={{ opacity: i ? 1 : 0.3 }}>‹</button>
-        <button onClick={() => setI(Math.min(anexos.length - 1, i + 1))} disabled={i >= anexos.length - 1} className="px-2 text-[18px]" style={{ opacity: i < anexos.length - 1 ? 1 : 0.3 }}>›</button>
-        <a href={a.url} target="_blank" rel="noreferrer" className="font-semibold" style={{ color: "#fff", textDecoration: "underline" }}>abrir</a>
+        {doc
+          ? <button onClick={imprimir} disabled={!html || !!erroDoc} className="font-semibold" style={{ color: "#fff", textDecoration: "underline", opacity: html && !erroDoc ? 1 : 0.4 }}>imprimir</button>
+          : <a href={a.url} target="_blank" rel="noreferrer" className="font-semibold" style={{ color: "#fff", textDecoration: "underline" }}>abrir</a>}
         <button onClick={aoFechar} className="font-semibold">fechar</button>
       </div>
-      <div className="flex-1 overflow-auto px-2 pb-2" onClick={(e) => e.stopPropagation()}>
-        {ePdf ? (
+
+      {/* As setas também na tela, e grandes: no celular ninguém tem
+          teclado, e o cabeçalho fica longe do polegar. */}
+      <div className="relative flex-1 overflow-auto px-2 pb-2" onClick={(e) => e.stopPropagation()}>
+        {anexos.length > 1 && (
+          <>
+            <button onClick={() => setI(Math.max(0, i - 1))} disabled={!i}
+              className="fixed left-1 top-1/2 z-10 h-12 w-12 -translate-y-1/2 rounded-full text-[24px]"
+              style={{ background: "rgba(24,18,33,0.6)", color: "#fff", opacity: i ? 1 : 0.25 }}>‹</button>
+            <button onClick={() => setI(Math.min(anexos.length - 1, i + 1))} disabled={i >= anexos.length - 1}
+              className="fixed right-1 top-1/2 z-10 h-12 w-12 -translate-y-1/2 rounded-full text-[24px]"
+              style={{ background: "rgba(24,18,33,0.6)", color: "#fff", opacity: i < anexos.length - 1 ? 1 : 0.25 }}>›</button>
+          </>
+        )}
+
+        {doc ? (
+          erroDoc ? (
+            <p className="mx-auto mt-10 max-w-md rounded-lg px-4 py-3 text-center text-[13px]" style={{ background: "#fff", color: C.laranja }}>{erroDoc}</p>
+          ) : html == null ? (
+            <p className="mt-10 text-center text-[13px]" style={{ color: "#fff", opacity: 0.8 }}>Abrindo o documento…</p>
+          ) : (
+            <iframe ref={quadro} srcDoc={html} title={a.nome || "documento"} className="h-full w-full rounded-lg"
+              style={{ background: "#fff", border: "none", minHeight: "70vh" }} />
+          )
+        ) : ePdf ? (
           <iframe src={a.url} title={a.nome || "documento"} className="h-full w-full rounded-lg" style={{ background: "#fff", border: "none", minHeight: "70vh" }} />
         ) : (
           <img src={a.url} alt={a.nome || "documento"} className="mx-auto max-h-full rounded-lg" style={{ background: "#fff" }} />
@@ -10530,21 +10592,6 @@ async function removerItemDoc(atendimentoId, item) {
   return true;
 }
 
-/**
- * Abre um documento guardado só para olhar — sem chamar a impressão.
- *
- * `abrirDocumento` dispara `print()` porque nasceu para o papel que vai
- * à mesa. Na conferência o gesto é outro: ler a folha que já foi
- * emitida. Chamar a impressão aqui faria o administrativo fechar uma
- * caixa de diálogo a cada documento que abre.
- */
-function verDocumento(html) {
-  const j = window.open("", "_blank");
-  if (!j) return { ok: false, erro: "O navegador bloqueou a janela. Libere pop-ups para este site." };
-  j.document.write(html);
-  j.document.close();
-  return { ok: true };
-}
 
 /**
  * O papel que o negociador anexou é o papel do item.
@@ -10638,23 +10685,19 @@ function PapeisDoNegocio({ atendimentoId, veiculoId }) {
     return () => { vivo = false; };
   }, [atendimentoId, veiculoId]);
 
-  const abrirGerado = async (x) => {
-    setErro("");
-    try {
-      const doc = await lerDocumento(x.id);
-      if (!doc.conteudo) { setErro("Este documento foi registrado sem o conteúdo — saiu antes de a ficha ir ao banco."); return; }
-      const r = verDocumento(doc.conteudo);
-      if (!r.ok) setErro(r.erro);
-    } catch (e) { setErro(e.message); }
-  };
-
-  // As fotos entram no visor como qualquer outro papel: mesma navegação
-  // por setas, mesma tela cheia.
+  // Documento gerado, arquivo anexado e foto entram todos na MESMA
+  // lista, na ordem em que aparecem na tela. É o que faz o visor ir de
+  // um ao outro com a seta, como virar página — em vez de fechar,
+  // clicar no próximo e esperar carregar de novo.
+  const comoDoc = docs.map((x) => ({
+    id: `d${x.id}`, docId: x.id, tipo: "documento",
+    nome: `${ROT_DOC[x.tipo] || x.tipo} · ${diaBR(x.gerado_em)}${x.protocolo ? ` · ${x.protocolo}` : ""}`,
+  }));
   const comoAnexo = fotos.map((ft, i) => ({
     id: ft.id, url: ft.url, nome: `Foto ${i + 1} do carro`, tipo: "image/jpeg",
   }));
-  const todos = anexos.concat(comoAnexo);
-  const nada = !todos.length && !docs.length;
+  const todos = comoDoc.concat(anexos, comoAnexo);
+  const nada = !todos.length;
 
   return (
     <div className="rounded-lg p-4" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
@@ -10681,8 +10724,8 @@ function PapeisDoNegocio({ atendimentoId, veiculoId }) {
             <div>
               <div className="text-[10px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>Emitidos pelo sistema</div>
               <div className="mt-1 flex flex-wrap gap-1.5">
-                {docs.map((x) => (
-                  <button key={x.id} onClick={() => abrirGerado(x)}
+                {docs.map((x, k) => (
+                  <button key={x.id} onClick={() => setVisor({ lista: todos, i: k })}
                     className="rounded-lg px-2 py-1 text-[11px] font-semibold"
                     style={{ background: C.roxoFraco, color: C.roxo }}>
                     {ROT_DOC[x.tipo] || x.tipo} · {diaBR(x.gerado_em)}
@@ -10697,7 +10740,7 @@ function PapeisDoNegocio({ atendimentoId, veiculoId }) {
               <div className="text-[10px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>Anexados</div>
               <div className="mt-1 flex flex-wrap gap-1.5">
                 {anexos.map((a, k) => (
-                  <button key={a.id} onClick={() => setVisor({ lista: todos, i: k })}
+                  <button key={a.id} onClick={() => setVisor({ lista: todos, i: comoDoc.length + k })}
                     className="rounded-lg px-2 py-1 text-[11px]"
                     style={{ background: C.bg, color: C.roxo, fontWeight: 600 }}>
                     {/pdf/i.test(a.tipo || "") ? "PDF" : "IMG"} · {/^doc:/.test(a.rotulo || "") ? String(a.rotulo).slice(4) : a.rotulo}
@@ -10714,7 +10757,7 @@ function PapeisDoNegocio({ atendimentoId, veiculoId }) {
               </div>
               <div className="mt-1 flex flex-wrap gap-1.5">
                 {comoAnexo.map((ft, k) => (
-                  <button key={ft.id} onClick={() => setVisor({ lista: todos, i: anexos.length + k })}
+                  <button key={ft.id} onClick={() => setVisor({ lista: todos, i: comoDoc.length + anexos.length + k })}
                     className="overflow-hidden rounded-md"
                     style={{ width: 52, height: 40, border: `1px solid ${C.line}`, background: C.bg }}>
                     {ft.url && <img src={ft.url} alt={ft.nome} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
@@ -11127,15 +11170,13 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
     return () => { vivo = false; };
   }, [atendimentoId]);
 
-  const abrirGerado = async (x) => {
-    setErro("");
-    try {
-      const doc = await lerDocumento(x.id);
-      if (!doc.conteudo) { setErro("Este documento foi registrado sem o conteúdo — foi gerado antes de a ficha ir ao banco."); return; }
-      const r = verDocumento(doc.conteudo);
-      if (!r.ok) setErro(r.erro);
-    } catch (e) { setErro(e.message); }
-  };
+  // O documento gerado abre no mesmo visor dos anexos. Aba nova quebra
+  // a conferência no celular: cada papel custa um gesto a mais para
+  // voltar, e são 37 itens.
+  const comoItem = (x) => ({
+    id: `d${x.id}`, docId: x.id, tipo: "documento",
+    nome: `${ROT_DOC[x.tipo] || x.tipo} · ${diaBR(x.gerado_em)}${x.protocolo ? ` · ${x.protocolo}` : ""}`,
+  });
 
   const criarItem = async () => {
     const rot = novoItem.trim();
@@ -11315,8 +11356,9 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
                   <div className="mt-1.5 flex flex-wrap items-center gap-2">
                     {/* O que o próprio sistema emitiu. Vale como papel do
                         item: o contrato existe, só não é arquivo anexado. */}
-                    {geradosDoItem(it[0]).map((x) => (
-                      <button key={x.id} onClick={() => abrirGerado(x)}
+                    {geradosDoItem(it[0]).map((x, gk) => (
+                      <button key={x.id}
+                        onClick={() => setVisor({ lista: geradosDoItem(it[0]).map(comoItem).concat(arqs), i: gk })}
                         className="rounded-lg px-2 py-1 text-[11px] font-semibold"
                         style={{ background: C.roxoFraco, color: C.roxo }}>
                         {ROT_DOC[x.tipo] || x.tipo} · {diaBR(x.gerado_em)}{x.protocolo ? ` · ${x.protocolo}` : ""}
@@ -11324,7 +11366,7 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
                     ))}
                     {arqs.map((a, k) => (
                       <span key={a.id} className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px]" style={{ background: C.bg }}>
-                        <button onClick={() => setVisor({ lista: arqs, i: k })} style={{ color: C.roxo, fontWeight: 600 }}>
+                        <button onClick={() => setVisor({ lista: geradosDoItem(it[0]).map(comoItem).concat(arqs), i: geradosDoItem(it[0]).length + k })} style={{ color: C.roxo, fontWeight: 600 }}>
                           {/pdf/i.test(a.tipo || "") ? "PDF" : "IMG"} · {String(a.nome || "arquivo").slice(0, 22)}
                           {/^doc:/.test(a.rotulo || "") ? "" : " · da negociação"}
                         </button>
@@ -11362,14 +11404,15 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
               Também no negócio
             </div>
             <div className="flex flex-wrap gap-2 px-3 py-2.5">
-              {gerSoltos.map((x) => (
-                <button key={x.id} onClick={() => abrirGerado(x)} className="rounded-lg px-2 py-1 text-[11px] font-semibold"
+              {gerSoltos.map((x, gk) => (
+                <button key={x.id} onClick={() => setVisor({ lista: gerSoltos.map(comoItem).concat(soltos), i: gk })}
+                  className="rounded-lg px-2 py-1 text-[11px] font-semibold"
                   style={{ background: C.roxoFraco, color: C.roxo }}>
                   {ROT_DOC[x.tipo] || x.tipo} · {diaBR(x.gerado_em)}
                 </button>
               ))}
               {soltos.map((a, k) => (
-                <button key={a.id} onClick={() => setVisor({ lista: soltos, i: k })} className="rounded-lg px-2 py-1 text-[11px]"
+                <button key={a.id} onClick={() => setVisor({ lista: gerSoltos.map(comoItem).concat(soltos), i: gerSoltos.length + k })} className="rounded-lg px-2 py-1 text-[11px]"
                   style={{ background: C.bg, color: C.roxo, fontWeight: 600 }}>
                   {a.rotulo} · {String(a.nome || "arquivo").slice(0, 20)}
                 </button>
