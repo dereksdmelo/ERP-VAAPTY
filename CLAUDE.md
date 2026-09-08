@@ -1617,3 +1617,97 @@ mostrar.
 `FinFechamento`.** Componente criado dentro de outro vira tipo novo a
 cada render: o React remonta o campo e o foco se perde a cada tecla —
 o mesmo que já derrubou o formulário do cliente (decisão 7).
+
+### 33. A conta do negócio virou composta
+
+Três coisas que o número solto escondia, e que apareceram no uso em
+08/09/2026.
+
+**"Débitos" era um número.** Na mesa se diz "R$ 1.200 de débitos"; no
+envelope, três meses depois, ninguém sabe se era IPVA, licenciamento
+ou multa — e é essa lista que o cliente contesta. `debitos_itens`
+(0029) guarda o detalhe, e **o detalhe manda**: havendo item,
+`valor_debitos` é a soma dele, na tela, no contrato e no check list
+impresso. A primeira linha de detalhe **herda o total que já estava
+digitado** — detalhar diz do que o número é feito, não zera o que foi
+combinado.
+
+**Nem todo negócio desconta as mesmas linhas.** `modo_conta` tem dois
+valores: `com_comissao` (saem cautelar, débitos, quitação e a comissão)
+e `limpo` (a comissão não sai — o valor combinado já é o que o cliente
+leva). Descontar comissão num negócio limpo tira dinheiro do cliente
+no papel que ele assina, e o erro só aparece na hora do PIX. No modo
+limpo o campo continua na tela, riscado, e o valor continua guardado:
+trocar de modo e voltar não pode apagar número digitado. E a linha
+**não imprime** — desconto no papel é dinheiro a menos.
+
+**"Entre outros".** Despachante, guincho, segunda via de chave:
+`descontos_extras` é a lista do que não tem linha fixa.
+
+**A soma vive em `descontosDe()`, e só ali.** Foi o primeiro defeito
+do dia: o campo mostrava a soma dos itens enquanto o líquido usava o
+total antigo. Duas contas na mesma tela é pior que uma só errada.
+
+**Na entrada do estoque, cada débito detalhado vira uma linha de
+custo.** É o mesmo "previsto contra realizado, linha a linha" da
+decisão 23 — uma linha só de "Débitos do veículo" esconderia o
+desconto que se consegue numa multa e não na outra. A comissão nunca
+entra como custo, pela decisão 23.
+
+### 34. A conferência do administrativo ganhou o resto do negócio
+
+A aba mostrava 36 caixas de visto e mais nada. Faltavam três coisas
+que estavam em outras telas, e a distância era o problema.
+
+**O papel anexado na negociação é o papel do item.** A conferência só
+enxergava anexo com rótulo `doc:<código>`, então a CNH que o
+negociador subiu ficava invisível ali e o administrativo pedia de novo
+o que o sistema já tinha. `ANEXO_DE_ITEM` traduz os rótulos da
+negociação (CNH, comprovante de residência, laudo cautelar, contrato
+assinado, CRLV) para os itens; `DOC_DE_ITEM` faz o mesmo com o que o
+**próprio sistema emitiu** — contrato, pré-contrato, check list,
+autorização de cautelar. O que não cai em item nenhum aparece em
+"Também no negócio", em vez de sumir.
+
+**A folha aceita item que só existe naquele carro.** A lista fixa segue
+no código (0027) porque muda com o processo, não com o carro; o item
+`extra_...` carrega o próprio rótulo na linha (0029). Apagar é do
+administrativo também, não só do gerente: quem criou por engano
+precisa desfazer sem chamar alguém.
+
+**Os gastos aparecem aqui, com a mesma base do estoque.** Não é
+duplicação de tela: quem confere o envelope é quem está com a nota do
+despachante na mão, e mandar essa pessoa para outro menu é como o
+custo real deixa de ser lançado.
+
+**O contrato se corrige e se reemite dali.** O que muda depois de
+assinado é sempre a mesma coisa: um número do negócio, um dado do
+cliente errado na CNH, o renavam que ninguém tinha. Cada emissão é uma
+linha nova em `documento`, com protocolo novo. **As cláusulas não se
+editam** — o texto é o que a casa manda assinar, e duas redações com o
+mesmo nome viram dois contratos diferentes; mudança de cláusula passa
+pelo jurídico e vira código (decisão 7).
+
+### 35. O trilho do fechamento
+
+O Derek olhou a etapa T e disse que estava confusa. Estava: seis blocos
+empilhados numa ordem que só existia na cabeça de quem já sabia.
+
+**A ordem é valor → pré-contrato → cautelar → contrato**, e agora ela
+aparece como trilho no alto, com o passo atual marcado. O bloco do
+pré-contrato subiu para logo abaixo do valor, junto da autorização de
+cautelar — é o papel que segura o negócio, e é assinado antes de a
+conta bancária ser preenchida.
+
+**O contrato aparece sempre.** Antes ele simplesmente não existia até a
+cautelar aprovar, e a pergunta "onde está o contrato?" não tinha
+resposta na tela. Agora o bloco está lá dizendo o que falta para
+abrir. E `contratoLiberado` cobre os dois caminhos: cautelar aprovada,
+ou **reprovada com o novo pré-contrato impresso** — reprovada sem ele
+não libera, porque o papel que segurava o negócio morreu com o laudo.
+
+**O nome do negociador vem do usuário logado.** Perguntar o nome de
+quem acabou de entrar com a própria senha é pedir duas vezes a mesma
+coisa — e era esse campo vazio que deixava o filtro de avaliações por
+colaborador sem ter o que casar. Continua editável, para o caso de
+alguém abrir no aparelho do colega.
