@@ -1628,7 +1628,9 @@ function aceiteProposta(f, cl) {
    * check list ainda não foi salvo, o número vem de lá em vez de sumir. */
   const DEDUCOES = [
     ["Cautelar", c(cl && cl.valor_cautelar)],
-    ["Débitos", c(cl && cl.valor_debitos) || c(f.debitos)],
+    ["Débitos", debitosItensDe(cl).length
+      ? debitosItensDe(cl).reduce((t, x) => t + c(x && x.valor), 0)
+      : c(cl && cl.valor_debitos) || c(f.debitos)],
     ["Quitação do financiamento", c(cl && cl.valor_quitacao) || c(f.quitacao)],
   ]
     // "Entre outros": despachante, guincho, segunda via de chave. Sem
@@ -1963,8 +1965,12 @@ function contaDoNegocio(cl) {
     // No negócio limpo a comissão não é descontada, então não imprime:
     // linha de desconto no papel é dinheiro a menos para o cliente.
     .filter(([k]) => c(cl[k]) > 0 && (k !== "comissao_vaapty" || descontaComissao(cl)))
-    .map(([k, r]) => `<tr><td class="r">− ${r}</td><td class="num">${brlDoc(c(cl[k]))}</td></tr>` +
-      (k === "valor_debitos" ? detalheDebitos : ""))
+    .map(([k, r]) => {
+      const v = k === "valor_debitos" && debitosItensDe(cl).length
+        ? debitosItensDe(cl).reduce((t, x) => t + c(x && x.valor), 0) : c(cl[k]);
+      return `<tr><td class="r">− ${r}</td><td class="num">${brlDoc(v)}</td></tr>` +
+        (k === "valor_debitos" ? detalheDebitos : "");
+    })
     .join("") +
     extrasDe(cl).filter((x) => c(x && x.valor) > 0)
       .map((x) => `<tr><td class="r">− ${x.descricao || "Outro desconto"}</td><td class="num">${brlDoc(c(x.valor))}</td></tr>`)
@@ -4395,8 +4401,14 @@ const debitosItensDe = (cl) => (cl && Array.isArray(cl.debitos_itens) ? cl.debit
 // A soma que vale nos dois lugares: na tela e no papel. Ter duas contas
 // é como o líquido da tela deixa de bater com o do contrato.
 function descontosDe(cl) {
+  // Havendo detalhe, o detalhe manda. É a única forma de a lista bater
+  // com o número — e sem isto o campo mostrava a soma dos itens
+  // enquanto o líquido continuava usando o total antigo, que é a pior
+  // das respostas: duas contas na mesma tela.
+  const itens = debitosItensDe(cl);
   const fixos = CL_DESCONTOS.reduce((t, [k]) => {
     if (k === "comissao_vaapty" && !descontaComissao(cl)) return t;
+    if (k === "valor_debitos" && itens.length) return t + itens.reduce((a, x) => a + numeroBR(x && x.valor), 0);
     return t + numeroBR(cl && cl[k]);
   }, 0);
   return fixos + extrasDe(cl).reduce((t, x) => t + numeroBR(x && x.valor), 0);
@@ -5260,8 +5272,16 @@ function ChecklistDigital({ atendimentoId, ficha, perfil, aoCarregar }) {
     }
     setCl(novo);
   };
-  const somarNaLista = (chave) =>
-    setCl({ ...cl, [chave]: (Array.isArray(cl[chave]) ? cl[chave] : []).concat([{ descricao: "", valor: "" }]) });
+  const somarNaLista = (chave) => {
+    const lista = Array.isArray(cl[chave]) ? cl[chave] : [];
+    // A primeira linha de detalhe herda o total que já estava digitado:
+    // detalhar não pode zerar o número que o negociador combinou com o
+    // cliente — só dizer do que ele é feito.
+    const semente = chave === "debitos_itens" && !lista.length && numeroBR(cl.valor_debitos)
+      ? { descricao: "", valor: String(cl.valor_debitos) }
+      : { descricao: "", valor: "" };
+    setCl({ ...cl, [chave]: lista.concat([semente]) });
+  };
 
   const gravar = async () => {
     setErro(""); setIndo(true);
