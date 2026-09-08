@@ -1477,6 +1477,10 @@ function moldura({ titulo, corpo, protocolo, logo, paisagem }) {
   table.dados.conta tr.liquido td { font-weight: 700; font-size: 11.5pt;
                                     background: #F1FAF3; border-top: 2px solid #15121a; }
   table.col td.destaque { background: #DCEFDC; font-weight: 700; }
+  /* O detalhe dos débitos: menor e recuado, para ler como composição da
+     linha de cima e não como mais um desconto. */
+  table td.sub { font-size: 8pt; color: #4A4453; padding-left: 14px; font-weight: 400; }
+  table td.num.sub { font-size: 8pt; color: #4A4453; padding-left: 4px; }
 </style></head><body>
 ${logo
   ? `<img class="logo" src="${LOGO_VAAPTY}" alt="Vaapty">`
@@ -1626,13 +1630,25 @@ function aceiteProposta(f, cl) {
     ["Cautelar", c(cl && cl.valor_cautelar)],
     ["Débitos", c(cl && cl.valor_debitos) || c(f.debitos)],
     ["Quitação do financiamento", c(cl && cl.valor_quitacao) || c(f.quitacao)],
-    ["Comissão Vaapty", c(cl && cl.comissao_vaapty)],
-  ];
+  ]
+    // "Entre outros": despachante, guincho, segunda via de chave. Sem
+    // linha fixa, mas descontado do cliente do mesmo jeito.
+    .concat(extrasDe(cl).filter((x) => c(x && x.valor) > 0)
+      .map((x) => [String(x.descricao || "Outro desconto"), c(x.valor)]))
+    // A comissão só entra no negócio com comissão. No limpo, o valor
+    // combinado já é o líquido — imprimir a linha tiraria dinheiro do
+    // cliente no papel que ele assina.
+    .concat(descontaComissao(cl) ? [["Comissão Vaapty", c(cl && cl.comissao_vaapty)]] : []);
   const total = DEDUCOES.reduce((soma, [, v]) => soma + v, 0);
   const liquido = bruto - total;
 
+  const detDeb = debitosItensDe(cl).filter((x) => x && (x.descricao || c(x.valor)))
+    .map((x) => `<tr><td class="sub">${String(x.descricao || "Débito").toUpperCase()}</td><td class="num sub">${brlDoc(c(x.valor))}</td></tr>`)
+    .join("");
+
   const linhasDed = DEDUCOES
-    .map(([r, v]) => `<tr><td>${r.toUpperCase()}</td><td class="num">${v ? brlDoc(v) : brlDoc("")}</td></tr>`)
+    .map(([r, v]) => `<tr><td>${r.toUpperCase()}</td><td class="num">${v ? brlDoc(v) : brlDoc("")}</td></tr>` +
+      (r === "Débitos" ? detDeb : ""))
     .join("");
 
   // Com rótulo de verdade: sem check list salvo, a linha sai em branco
@@ -1931,14 +1947,28 @@ qualquer outro, por mais privilegiado que seja.</p>
 function contaDoNegocio(cl) {
   if (!cl) return "";
   const c = (v) => numeroBR(v);
-  const descontos = CL_DESCONTOS.reduce((soma, [k]) => soma + c(cl[k]), 0);
+  const descontos = descontosDe(cl);
   const venda = c(cl.valor_venda);
   const liquido = venda - descontos;
 
-  const linhas = CL_DESCONTOS
-    .filter(([k]) => c(cl[k]) > 0)
-    .map(([k, r]) => `<tr><td class="r">− ${r}</td><td class="num">${brlDoc(c(cl[k]))}</td></tr>`)
+  // O detalhe dos débitos sai embaixo da linha, em corpo menor. É a
+  // lista que o cliente contesta — "que multa é essa?" — e imprimir só
+  // o total joga essa conversa para depois da assinatura.
+  const detalheDebitos = debitosItensDe(cl)
+    .filter((x) => x && (x.descricao || c(x.valor)))
+    .map((x) => `<tr><td class="r sub">${x.descricao || "Débito"}</td><td class="num sub">${brlDoc(c(x.valor))}</td></tr>`)
     .join("");
+
+  const linhas = CL_DESCONTOS
+    // No negócio limpo a comissão não é descontada, então não imprime:
+    // linha de desconto no papel é dinheiro a menos para o cliente.
+    .filter(([k]) => c(cl[k]) > 0 && (k !== "comissao_vaapty" || descontaComissao(cl)))
+    .map(([k, r]) => `<tr><td class="r">− ${r}</td><td class="num">${brlDoc(c(cl[k]))}</td></tr>` +
+      (k === "valor_debitos" ? detalheDebitos : ""))
+    .join("") +
+    extrasDe(cl).filter((x) => c(x && x.valor) > 0)
+      .map((x) => `<tr><td class="r">− ${x.descricao || "Outro desconto"}</td><td class="num">${brlDoc(c(x.valor))}</td></tr>`)
+      .join("");
 
   const banco = CL_BANCO
     .map(([k, r]) => `<tr><td class="r">${r}</td><td>${ou(cl[k], r.toLowerCase())}</td></tr>`)
@@ -2515,6 +2545,51 @@ const extrairProtocolo = (html) => {
   return m ? m[1] : null;
 };
 
+/**
+ * O trilho do fechamento.
+ *
+ * A etapa T tinha seis blocos empilhados e uma ordem que só existia na
+ * cabeça de quem já sabia: valor, pré-contrato, cautelar, contrato. O
+ * Derek olhou e disse que estava confuso — estava. Isto é a mesma
+ * ideia do trilho da Negociação: mostrar em que passo o negócio está,
+ * e por que o próximo ainda não abriu.
+ */
+function TrilhoFechamento({ f, preContratoFeito, contratoLiberado }) {
+  const passos = [
+    ["Valor", !!f.valorFechado, "quanto fechou"],
+    ["Pré-contrato", !!preContratoFeito, "assinado antes da cautelar"],
+    ["Cautelar", !!f.cautelarResultado, f.cautelarResultado
+      ? (f.cautelarResultado === "aprovada" ? "aprovada" : "reprovada")
+      : f.cautelarEnviado ? "aguardando o laudo" : "carro ainda não foi"],
+    ["Contrato", !!f.contratoAssinado, contratoLiberado ? "liberado" : "depois do laudo"],
+  ];
+  // O passo atual é o primeiro que ainda não fechou: é ele que fica
+  // roxo, e não o último que alguém tocou.
+  const atual = passos.findIndex(([, ok]) => !ok);
+  return (
+    <div className="mb-3 rounded-xl px-3 py-2.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+      <div className="flex items-start gap-1">
+        {passos.map(([rot, ok, sub], i) => (
+          <React.Fragment key={rot}>
+            {i > 0 && <span className="mt-3 h-px flex-1" style={{ background: C.line }} />}
+            <span className="flex min-w-0 flex-col items-center" style={{ width: 84 }}>
+              <span className="flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold"
+                style={{ background: ok ? C.verde : i === atual ? C.roxo : C.bg,
+                         color: ok || i === atual ? "#fff" : C.mute,
+                         border: `1px solid ${ok ? C.verde : i === atual ? C.roxo : C.line}` }}>
+                {ok ? "✓" : i + 1}
+              </span>
+              <span className="mt-1 text-center text-[11px] font-semibold leading-tight"
+                style={{ color: ok ? C.verde : i === atual ? C.roxo : C.mute }}>{rot}</span>
+              <span className="text-center text-[9px] leading-tight" style={{ color: C.mute }}>{sub}</span>
+            </span>
+          </React.Fragment>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ===================== app ===================== */
 function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   // Cada atendimento tem o seu canto no aparelho. Sem isto, abrir o
@@ -2602,6 +2677,18 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         const r = await window.storage.get(CH_AT);
         if (r && r.value) { const n = { ...VAZIO, ...JSON.parse(r.value) }; fRef.current = n; setF(n); }
       } catch (e) {}
+
+      // O negociador é quem está logado — perguntar o nome de quem
+      // acabou de entrar com a própria senha é pedir duas vezes a mesma
+      // coisa. E é esse nome que filtra as avaliações do Google pelas
+      // que citam ele: campo vazio deixava o filtro sem ter o que casar.
+      // Continua editável, para o caso de alguém abrir no aparelho do
+      // colega.
+      const meuNome = (atendimento && atendimento.negociador_nome) || (perfil && perfil.nome) || "";
+      if (meuNome) {
+        setF((x) => (x.negociador ? x : { ...x, negociador: meuNome }));
+        if (fRef.current && !fRef.current.negociador) fRef.current = { ...fRef.current, negociador: meuNome };
+      }
 
       let vid = null;
       const vEmbutido = atendimento && (atendimento.veiculo || [])[0];
@@ -2936,6 +3023,17 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
 
 
   const docs = f.documentos || [];
+  // A ordem do fechamento em três verdades, calculadas uma vez.
+  //
+  // O contrato abre depois do laudo — aprovado, ou reprovado **com o
+  // novo pré-contrato impresso**. Antes disso o negócio ainda pode
+  // voltar à mesa, e contrato refeito é contrato que confunde o
+  // cliente. Reprovada sem pré-contrato novo não libera: o papel que
+  // segurava o negócio morreu junto com o laudo.
+  const preContratoFeito = docs.some((x) => x.tipo === "pre_contrato");
+  const preContratoDaRevisao = docs.some((x) => x.tipo === "pre_contrato" && /revis/i.test(x.rotulo || ""));
+  const contratoLiberado = f.cautelarResultado === "aprovada"
+    || (f.cautelarResultado === "reprovada" && preContratoDaRevisao);
   const hhmm = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toTimeString().slice(0, 5); };
   const docsDe = (tipo, rodada) =>
     docs.filter((x) => x.tipo === tipo && (rodada == null || x.rodada === rodada));
@@ -3732,6 +3830,13 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         {/* ---------- T ---------- */}
         {etapa === "T" && (
           <>
+            {/* A etapa tem quatro passos e uma ordem que não é
+                negociável — o contrato é o último porque antes do laudo
+                o negócio ainda pode voltar à mesa. Sem o trilho, essa
+                ordem existia só na cabeça de quem já sabia, e a tela
+                parecia uma pilha de blocos. */}
+            <TrilhoFechamento f={f} preContratoFeito={preContratoFeito} contratoLiberado={contratoLiberado} />
+
             {/* Primeiro de propósito, a pedido do Derek: é aqui que o
                 valor fecha. O pré-contrato e o contrato final saem com
                 esse número, e documento gerado com valor que ainda vai
@@ -3748,11 +3853,6 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                   </select>
                 </Campo>
               </div>
-            </Bloco>
-
-            <Bloco titulo="Check list do negócio" sub="A conta do negócio e os dados bancários. Preenchido aqui, não no papel — o administrativo confere na tela dele depois, e o sistema carimba quem conferiu.">
-              <ChecklistDigital atendimentoId={atendimento ? atendimento.id : null}
-                ficha={f} perfil={perfil} aoCarregar={setChecklist} />
             </Bloco>
 
             <Bloco titulo="Pré-contrato e cautelar"
@@ -3800,16 +3900,21 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                     </div>
                   </div>
                 )}
-                <button disabled={!podeImprimir}
-                  onClick={() => gerarDocumento("check_list", "Check list", checkList(dadosDoc, checklist), null)}
-                  className="w-full rounded-md border py-2 text-[12px] font-semibold"
-                  style={{ borderColor: C.line, color: podeImprimir ? C.roxo : C.mute }}>
-                  Check list do negócio
-                </button>
                 <p className="text-[11px] leading-relaxed" style={{ color: C.mute }}>
                   Os documentos saem com o texto que a casa assina e com os dados do cliente preenchidos. Só os dados bancários ficam em branco: o sistema não guarda conta nem chave PIX.
                 </p>
               </div>
+            </Bloco>
+
+            <Bloco titulo="Check list do negócio" sub="A conta do negócio e os dados bancários. Preenchido aqui, não no papel — o administrativo confere na tela dele depois, e o sistema carimba quem conferiu.">
+              <ChecklistDigital atendimentoId={atendimento ? atendimento.id : null}
+                ficha={f} perfil={perfil} aoCarregar={setChecklist} />
+              <button disabled={!podeImprimir}
+                onClick={() => gerarDocumento("check_list", "Check list", checkList(dadosDoc, checklist), null)}
+                className="mt-3 w-full rounded-md border py-2 text-[12px] font-semibold"
+                style={{ borderColor: C.line, color: podeImprimir ? C.roxo : C.mute }}>
+                Imprimir o check list
+              </button>
             </Bloco>
 
             {/* A cautelar pode reprovar, e aí a negociação reabre.
@@ -3924,7 +4029,29 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 mudar é documento para refazer; e só faz sentido depois
                 do laudo, porque antes disso o negócio ainda pode voltar
                 à mesa. */}
-            {f.cautelarResultado === "aprovada" && (
+            {/* Antes ele simplesmente não existia até a cautelar
+                aprovar, e a pergunta "onde está o contrato?" não tinha
+                resposta na tela. Agora o bloco está sempre lá e diz o
+                que falta para abrir. */}
+            {!contratoLiberado && (
+              <Bloco titulo="Contrato de aceite de proposta"
+                sub="O último papel — e só depois do laudo.">
+                <div className="rounded-md px-3 py-3" style={{ background: AMARELO.fundo, border: `1px solid ${AMARELO.borda}` }}>
+                  <p className="text-[13px] font-semibold" style={{ color: AMARELO.texto }}>
+                    {!f.cautelarResultado
+                      ? (f.cautelarEnviado ? "Aguardando o resultado da cautelar." : "O carro ainda não foi para a cautelar.")
+                      : "Cautelar reprovada: falta imprimir o novo pré-contrato."}
+                  </p>
+                  <p className="mt-1 text-[11px] leading-snug" style={{ color: C.mute }}>
+                    {!f.cautelarResultado
+                      ? "O contrato sai depois do laudo, aprovado ou reprovado — antes disso o negócio ainda pode voltar à mesa, e contrato refeito é contrato que confunde o cliente."
+                      : "O pré-contrato anterior morreu com o laudo. Refaça o valor no bloco acima e imprima o novo pré-contrato; o contrato abre em seguida."}
+                  </p>
+                </div>
+              </Bloco>
+            )}
+
+            {contratoLiberado && (
               <Bloco titulo="Contrato de aceite de proposta"
                 sub="É o cliente que assina — ele vende o carro. Sai com a conta do negócio e os dados bancários que estão acima.">
                 <div className="space-y-2.5">
@@ -4243,6 +4370,37 @@ const CL_DESCONTOS = [
   ["valor_quitacao", "Quitação do financiamento"],
   ["comissao_vaapty", "Comissão Vaapty"],
 ];
+
+/**
+ * O modo da conta.
+ *
+ * Nem todo negócio desconta as mesmas linhas. No negócio com comissão
+ * saem cautelar, débitos, quitação e a comissão; no **limpo** a
+ * comissão não sai — o valor combinado já é o que o cliente leva.
+ * Descontar comissão num negócio limpo tira dinheiro do cliente no
+ * papel que ele assina, e é erro que só aparece na hora do PIX.
+ *
+ * O valor da comissão continua guardado quando o modo é limpo: trocar
+ * de modo e voltar não pode apagar número digitado.
+ */
+const MODOS_CONTA = [
+  ["com_comissao", "Com comissão", "Saem cautelar, débitos, quitação, a comissão Vaapty e o que mais for lançado."],
+  ["limpo", "Limpo", "Sai só o que é do carro — débitos, quitação, cautelar. A comissão não desconta."],
+];
+// Só a comissão muda de lado conforme o modo. As outras são desembolso
+// de verdade e saem nos dois.
+const descontaComissao = (cl) => ((cl && cl.modo_conta) || "com_comissao") === "com_comissao";
+const extrasDe = (cl) => (cl && Array.isArray(cl.descontos_extras) ? cl.descontos_extras : []);
+const debitosItensDe = (cl) => (cl && Array.isArray(cl.debitos_itens) ? cl.debitos_itens : []);
+// A soma que vale nos dois lugares: na tela e no papel. Ter duas contas
+// é como o líquido da tela deixa de bater com o do contrato.
+function descontosDe(cl) {
+  const fixos = CL_DESCONTOS.reduce((t, [k]) => {
+    if (k === "comissao_vaapty" && !descontaComissao(cl)) return t;
+    return t + numeroBR(cl && cl[k]);
+  }, 0);
+  return fixos + extrasDe(cl).reduce((t, x) => t + numeroBR(x && x.valor), 0);
+}
 const CL_BANCO = [
   ["banco_favorecido", "Favorecido", "texto"],
   ["banco_documento", "CPF / CNPJ", "mono"],
@@ -5079,8 +5237,31 @@ function ChecklistDigital({ atendimentoId, ficha, perfil, aoCarregar }) {
 
   // Calculado, não digitado: a fórmula é a do papel e evita erro de
   // conta feita de cabeça com o cliente na frente.
-  const descontos = CL_DESCONTOS.reduce((soma, [k]) => soma + numeroBR(cl[k]), 0);
+  const descontos = descontosDe(cl);
   const liquido = numeroBR(cl.valor_venda) - descontos;
+
+  const itensDeb = debitosItensDe(cl);
+  const extras = extrasDe(cl);
+  // Com detalhe, o total dos débitos é a soma — digitar os dois lados
+  // é como a lista deixa de bater com o número que o cliente assina.
+  const somaDeb = itensDeb.reduce((t, x) => t + numeroBR(x && x.valor), 0);
+  const mexerLista = (chave, i, mud) => {
+    const lista = (Array.isArray(cl[chave]) ? cl[chave] : []).slice();
+    lista[i] = { ...lista[i], ...mud };
+    const novo = { ...cl, [chave]: lista };
+    if (chave === "debitos_itens") novo.valor_debitos = lista.reduce((t, x) => t + numeroBR(x && x.valor), 0);
+    setCl(novo);
+  };
+  const tirarDaLista = (chave, i) => {
+    const lista = (Array.isArray(cl[chave]) ? cl[chave] : []).filter((_, j) => j !== i);
+    const novo = { ...cl, [chave]: lista };
+    if (chave === "debitos_itens") {
+      novo.valor_debitos = lista.length ? lista.reduce((t, x) => t + numeroBR(x && x.valor), 0) : cl.valor_debitos;
+    }
+    setCl(novo);
+  };
+  const somarNaLista = (chave) =>
+    setCl({ ...cl, [chave]: (Array.isArray(cl[chave]) ? cl[chave] : []).concat([{ descricao: "", valor: "" }]) });
 
   const gravar = async () => {
     setErro(""); setIndo(true);
@@ -5113,6 +5294,24 @@ function ChecklistDigital({ atendimentoId, ficha, perfil, aoCarregar }) {
           A conta do negócio
         </div>
 
+        {/* O modo antes dos números: é ele que decide se a comissão sai
+            do que o cliente recebe. Escolher depois de digitar já
+            aconteceu, e o líquido mudou sem ninguém notar. */}
+        <div className="px-3 pt-2">
+          <div className="flex gap-1.5">
+            {MODOS_CONTA.map(([v, r]) => (
+              <button key={v} onClick={() => set("modo_conta", v)}
+                className="rounded-full px-3 py-1 text-[12px] font-semibold"
+                style={{ background: descontaComissao(cl) === (v === "com_comissao") ? C.roxo : "transparent",
+                         color: descontaComissao(cl) === (v === "com_comissao") ? "#fff" : C.mute,
+                         border: `1px solid ${descontaComissao(cl) === (v === "com_comissao") ? C.roxo : C.line}` }}>{r}</button>
+            ))}
+          </div>
+          <p className="mt-1 text-[10px] leading-snug" style={{ color: C.mute }}>
+            {(MODOS_CONTA.filter(([v]) => descontaComissao(cl) === (v === "com_comissao"))[0] || [])[2]}
+          </p>
+        </div>
+
         <div className="flex items-center justify-between gap-3 px-3 py-2.5">
           <span className="text-[13px] font-semibold">Valor de venda</span>
           <input className="w-40 rounded-md border px-2 py-1.5 text-right text-[15px] outline-none"
@@ -5122,16 +5321,72 @@ function ChecklistDigital({ atendimentoId, ficha, perfil, aoCarregar }) {
         </div>
 
         <div style={{ borderTop: `1px solid ${C.line}` }}>
-          {CL_DESCONTOS.map(([k, r]) => (
-            <div key={k} className="flex items-center justify-between gap-3 px-3 py-2"
-              style={{ borderBottom: `1px solid ${C.line}` }}>
-              <span className="text-[12px]" style={{ color: C.mute }}>− {r}</span>
-              <input className="w-40 rounded-md border px-2 py-1.5 text-right text-[13px] outline-none"
-                style={{ ...inputSty, fontFamily: F.mono, color: numeroBR(cl[k]) ? C.laranja : C.ink }}
+          {CL_DESCONTOS.map(([k, r]) => {
+            // A comissão continua visível no modo limpo, e continua
+            // guardada — só não entra na conta. Sumir com o campo
+            // apagaria o número de quem trocou de modo por engano.
+            const fora = k === "comissao_vaapty" && !descontaComissao(cl);
+            const travado = k === "valor_debitos" && itensDeb.length > 0;
+            return (
+              <div key={k} style={{ borderBottom: `1px solid ${C.line}` }}>
+                <div className="flex items-center justify-between gap-3 px-3 py-2">
+                  <span className="text-[12px]" style={{ color: C.mute, textDecoration: fora ? "line-through" : "none" }}>
+                    − {r}
+                    {fora && <span className="ml-2 text-[10px]" style={{ color: AMARELO.texto, textDecoration: "none" }}>não desconta no limpo</span>}
+                    {travado && <span className="ml-2 text-[10px]" style={{ color: C.mute }}>soma do detalhe</span>}
+                  </span>
+                  <input className="w-40 rounded-md border px-2 py-1.5 text-right text-[13px] outline-none"
+                    style={{ ...inputSty, fontFamily: F.mono, background: travado || fora ? C.bg : undefined,
+                             color: fora ? C.mute : numeroBR(cl[k]) ? C.laranja : C.ink }}
+                    inputMode="numeric" placeholder="0,00" readOnly={travado}
+                    value={travado ? brl(somaDeb).replace("R$ ", "") : cl[k] == null ? "" : cl[k]}
+                    onChange={(e) => set(k, e.target.value)} />
+                </div>
+
+                {/* Débito é uma lista, não um número. "Que multa é essa?"
+                    é pergunta que aparece na mesa, e o total sozinho joga
+                    a conversa para depois da assinatura. */}
+                {k === "valor_debitos" && (
+                  <div className="px-3 pb-2">
+                    {itensDeb.map((x, i) => (
+                      <div key={i} className="mb-1 flex items-center gap-1.5">
+                        <input className="min-w-0 flex-1 rounded-md border px-2 py-1 text-[12px] outline-none"
+                          style={inputSty} placeholder="IPVA 2025, multa, licenciamento…"
+                          value={x.descricao || ""} onChange={(e) => mexerLista("debitos_itens", i, { descricao: e.target.value })} />
+                        <input className="w-24 rounded-md border px-2 py-1 text-right text-[12px] outline-none"
+                          style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" placeholder="0,00"
+                          value={x.valor == null ? "" : x.valor} onChange={(e) => mexerLista("debitos_itens", i, { valor: e.target.value })} />
+                        <button onClick={() => tirarDaLista("debitos_itens", i)} className="shrink-0 px-1 text-[13px]" style={{ color: C.mute }} title="tirar">×</button>
+                      </div>
+                    ))}
+                    <button onClick={() => somarNaLista("debitos_itens")} className="text-[11px] font-semibold" style={{ color: C.roxo }}>
+                      + detalhar um débito
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {/* "Entre outros": despachante, guincho, segunda via de chave. */}
+          {extras.map((x, i) => (
+            <div key={`ex${i}`} className="flex items-center gap-1.5 px-3 py-2" style={{ borderBottom: `1px solid ${C.line}` }}>
+              <span className="text-[12px]" style={{ color: C.mute }}>−</span>
+              <input className="min-w-0 flex-1 rounded-md border px-2 py-1 text-[12px] outline-none"
+                style={inputSty} placeholder="Despachante, guincho, chave…"
+                value={x.descricao || ""} onChange={(e) => mexerLista("descontos_extras", i, { descricao: e.target.value })} />
+              <input className="w-28 rounded-md border px-2 py-1.5 text-right text-[13px] outline-none"
+                style={{ ...inputSty, fontFamily: F.mono, color: numeroBR(x.valor) ? C.laranja : C.ink }}
                 inputMode="numeric" placeholder="0,00"
-                value={cl[k] == null ? "" : cl[k]} onChange={(e) => set(k, e.target.value)} />
+                value={x.valor == null ? "" : x.valor} onChange={(e) => mexerLista("descontos_extras", i, { valor: e.target.value })} />
+              <button onClick={() => tirarDaLista("descontos_extras", i)} className="shrink-0 px-1 text-[13px]" style={{ color: C.mute }} title="tirar">×</button>
             </div>
           ))}
+          <div className="px-3 py-2" style={{ borderBottom: `1px solid ${C.line}` }}>
+            <button onClick={() => somarNaLista("descontos_extras")} className="text-[11px] font-semibold" style={{ color: C.roxo }}>
+              + outro desconto
+            </button>
+          </div>
         </div>
 
         <div className="flex items-center justify-between gap-3 px-3 py-3"
@@ -7612,11 +7867,25 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
       // O previsto sai do check list, que é onde esses números já foram
       // digitados uma vez. A comissão não entra: ela é retida do
       // cliente, não paga por nós — somar viraria custo inventado.
+      // O detalhe dos débitos vira uma linha de custo cada — é o mesmo
+      // "previsto contra realizado, linha a linha" do estoque. Uma
+      // linha só de "Débitos do veículo" esconderia justamente o
+      // desconto que se consegue numa multa e não na outra.
+      const itensDeb = debitosItensDe(cl).filter((x) => x && (x.descricao || numeroBR(x.valor)));
       const custos = [
         { tipo: "quitacao", descricao: "Quitação do financiamento", previsto: cl && cl.valor_quitacao },
-        { tipo: "debitos", descricao: "Débitos do veículo", previsto: cl && cl.valor_debitos },
         { tipo: "cautelar", descricao: "Perícia cautelar", previsto: cl && cl.valor_cautelar },
-      ];
+      ].concat(
+        itensDeb.length
+          ? itensDeb.map((x) => ({ tipo: "debitos", descricao: x.descricao || "Débito do veículo", previsto: x.valor }))
+          : [{ tipo: "debitos", descricao: "Débitos do veículo", previsto: cl && cl.valor_debitos }]
+      ).concat(
+        // Os "entre outros" também são desembolso nosso, fora quando
+        // marcados como retenção — comissão é o caso do modo com
+        // comissão, e ela nunca entra como custo.
+        extrasDe(cl).filter((x) => x && x.custo !== false && numeroBR(x.valor))
+          .map((x) => ({ tipo: "outro", descricao: x.descricao || "Outro desconto", previsto: x.valor }))
+      );
       await entrarNoEstoque({
         veiculo_id: v.id,
         atendimento_id: a.id,
@@ -10194,8 +10463,85 @@ const GRUPOS_DOC = [
   ["pj", "Pessoa jurídica"],
   ["arquivamento", "Arquivamento"],
   ["transferencia", "Transferência"],
+  // Os que a casa acrescentou para este carro em particular.
+  ["extra", "Deste carro"],
 ];
 const VISTO_ROT = { adm: "Adm.", gerencia: "Gerência", financeiro: "Financeiro" };
+
+async function estoqueDoAtendimento(atendimentoId) {
+  const r = await fetchAut(`/api/veiculo?recurso=estoque&atendimento_id=${encodeURIComponent(atendimentoId)}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui ver os custos deste carro.");
+  return d.estoque || null;
+}
+async function veiculoDoAtendimento(atendimentoId) {
+  const r = await fetchAut(`/api/veiculo?atendimento_id=${encodeURIComponent(atendimentoId)}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui carregar a ficha do carro.");
+  return d.veiculo || null;
+}
+async function listarDocumentos(veiculoId) {
+  const r = await fetchAut(`/api/documento?veiculo_id=${encodeURIComponent(veiculoId)}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui listar os documentos.");
+  return d.documentos || [];
+}
+async function lerDocumento(id) {
+  const r = await fetchAut(`/api/documento?id=${encodeURIComponent(id)}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui abrir o documento.");
+  return d.documento;
+}
+async function removerItemDoc(atendimentoId, item) {
+  const q = comoQuery({ recurso: "documentos", atendimento_id: atendimentoId, item });
+  const r = await fetchAut(`/api/checklist?${q}`, { method: "DELETE" });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui remover o item.");
+  return true;
+}
+
+/**
+ * Abre um documento guardado só para olhar — sem chamar a impressão.
+ *
+ * `abrirDocumento` dispara `print()` porque nasceu para o papel que vai
+ * à mesa. Na conferência o gesto é outro: ler a folha que já foi
+ * emitida. Chamar a impressão aqui faria o administrativo fechar uma
+ * caixa de diálogo a cada documento que abre.
+ */
+function verDocumento(html) {
+  const j = window.open("", "_blank");
+  if (!j) return { ok: false, erro: "O navegador bloqueou a janela. Libere pop-ups para este site." };
+  j.document.write(html);
+  j.document.close();
+  return { ok: true };
+}
+
+/**
+ * O papel que o negociador anexou é o papel do item.
+ *
+ * Antes desta tradução a conferência só enxergava anexo com rótulo
+ * `doc:<código>`, então a CNH que subiu na Negociação ficava invisível
+ * aqui e o administrativo pedia de novo o que já estava no sistema.
+ */
+const ANEXO_DE_ITEM = {
+  "CNH": "cnh_contratante",
+  "Comprovante de residência": "comprovante_residencia",
+  "Laudo cautelar": "cautelar",
+  "Contrato assinado": "contrato",
+  "CRLV": "crlv",
+};
+// E o documento que o próprio sistema gerou também é papel do item.
+const DOC_DE_ITEM = {
+  contrato_final: "contrato",
+  pre_contrato: "pre_contrato",
+  check_list: "fechamento",
+  autorizacao_cautelar: "cautelar",
+};
+const ROT_DOC = {
+  termo_aceite: "Termo de aceite", autorizacao_cautelar: "Autorização de cautelar",
+  pre_contrato: "Pré-contrato", check_list: "Check list", extrato_ofertas: "Extrato de ofertas",
+  extrato_revisao: "Extrato da revisão", contrato_final: "Contrato",
+};
 
 async function lerChecklistDoc(atendimentoId) {
   const r = await fetchAut(`/api/checklist?recurso=documentos&atendimento_id=${encodeURIComponent(atendimentoId)}`);
@@ -10212,6 +10558,380 @@ async function marcarChecklistDoc(dados) {
   return d.marca;
 }
 
+/**
+ * Os gastos do carro, dentro da conferência do administrativo.
+ *
+ * É a mesma base do Estoque (0019) — a mesma tabela, as mesmas linhas,
+ * o mesmo previsto contra realizado. Repetir a tela aqui não é
+ * duplicação: quem confere o envelope é quem tem a nota do despachante
+ * na mão, e mandar essa pessoa para outro menu para lançar o valor é
+ * como o custo real deixa de ser lançado.
+ */
+function CustosDoNegocio({ atendimentoId, perfil }) {
+  const [e, setE] = useState(null);
+  const [erro, setErro] = useState("");
+  const [novo, setNovo] = useState(null);
+  const [aberto, setAberto] = useState(false);
+  const eGerente = !!(perfil && perfil.papel === "gerente");
+
+  const carregar = () => estoqueDoAtendimento(atendimentoId).then(setE).catch((ex) => setErro(ex.message));
+  useEffect(() => { setE(null); carregar(); }, [atendimentoId]);
+
+  const salvarLinha = async (linha, mud) => {
+    setErro("");
+    try { await atualizarCusto(linha.id, mud); await carregar(); }
+    catch (ex) { setErro(ex.message); }
+  };
+  const anexarComprovante = async (linha, arquivo) => {
+    if (!arquivo) return;
+    setErro("");
+    try {
+      const anexo = await enviarAnexo(atendimentoId, arquivo, `Comprovante · ${linha.descricao}`);
+      await atualizarCusto(linha.id, { anexo_id: anexo.id });
+      await carregar();
+    } catch (ex) { setErro(ex.message); }
+  };
+  const adicionar = async () => {
+    if (!novo || !String(novo.descricao || "").trim()) return;
+    setErro("");
+    try { await criarCusto({ ...novo, estoque_id: e.id }); setNovo(null); await carregar(); }
+    catch (ex) { setErro(ex.message); }
+  };
+
+  if (erro && !e) return <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>;
+  if (!e) {
+    return (
+      <div className="rounded-xl px-3 py-2.5 text-[12px]" style={{ background: C.paper, border: `1px solid ${C.line}`, color: C.mute }}>
+        Este carro ainda não entrou no estoque, então não há custos para conferir. A entrada é um ato — alguém abre o Estoque e
+        confirma —, e é nela que débitos, quitação e cautelar viram linhas de custo com o previsto do check list.
+      </div>
+    );
+  }
+
+  const c = contaDoEstoque(e);
+  const custos = e.estoque_custo || [];
+  const num = (rot, valor, cor, forte) => (
+    <div>
+      <div className="text-[9px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>{rot}</div>
+      <div className="text-[16px] leading-tight" style={{ fontFamily: F.mono, fontWeight: forte ? 700 : 500, color: cor || C.ink }}>{valor}</div>
+    </div>
+  );
+
+  return (
+    <div className="rounded-xl p-3.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+      <div className="flex items-baseline justify-between">
+        <span className="text-[12px] font-semibold uppercase tracking-[0.06em]" style={{ color: C.mute }}>Gastos do carro</span>
+        <button onClick={() => setAberto((v) => !v)} className="text-[12px] font-semibold" style={{ color: C.roxo }}>
+          {aberto ? "fechar" : `ver as ${custos.length} linha${custos.length === 1 ? "" : "s"}`}
+        </button>
+      </div>
+
+      <div className="mt-2 grid grid-cols-3 gap-2">
+        {num("Previsto", brl(c.previsto))}
+        {num("Custo hoje", brl(c.atual), c.desvio > 0 ? C.laranja : c.desvio < 0 ? C.verde : C.ink, true)}
+        {num("Diferença", `${c.desvio > 0 ? "+" : c.desvio < 0 ? "−" : ""}${brl(Math.abs(c.desvio))}`,
+          c.desvio > 0 ? C.laranja : c.desvio < 0 ? C.verde : C.mute)}
+      </div>
+      {!!c.aberto && (
+        <p className="mt-1.5 text-[11px]" style={{ color: AMARELO.texto }}>
+          {c.aberto} conta{c.aberto > 1 ? "s" : ""} sem valor pago — o custo de hoje usa o previsto {c.aberto > 1 ? "delas" : "dela"}.
+        </p>
+      )}
+      {erro && <p className="mt-1.5 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+
+      {aberto && (
+        <div className="mt-2">
+          <div className="flex items-center gap-2 border-b pb-2 text-[13px]" style={{ borderColor: C.line }}>
+            <span className="flex-1 font-semibold">Compra — pago ao cliente</span>
+            <span style={{ fontFamily: F.mono, fontWeight: 700 }}>{brl(c.compra)}</span>
+          </div>
+          {custos.map((l) => (
+            <LinhaCusto key={l.id} l={l} eGerente={eGerente}
+              aoSalvar={(mud) => salvarLinha(l, mud)}
+              aoAnexar={(arq) => anexarComprovante(l, arq)}
+              aoApagar={async () => {
+                setErro("");
+                try { await apagarCusto(l.id); await carregar(); } catch (ex) { setErro(ex.message); }
+              }} />
+          ))}
+          {!custos.length && (
+            <p className="mt-2 text-[12px]" style={{ color: C.mute }}>
+              Nenhum custo além da compra.
+            </p>
+          )}
+
+          {novo ? (
+            <div className="mt-3 space-y-2 rounded-md p-2.5" style={{ background: C.roxoFraco }}>
+              <div className="flex gap-2">
+                <select className="rounded-md border px-2 py-1.5 text-[13px] outline-none" style={inputSty}
+                  value={novo.tipo} onChange={(ev) => setNovo({ ...novo, tipo: ev.target.value })}>
+                  {TIPOS_CUSTO.map(([v2, r]) => <option key={v2} value={v2}>{r}</option>)}
+                </select>
+                <input className="min-w-0 flex-1 rounded-md border px-2 py-1.5 text-[15px] outline-none" style={inputSty}
+                  placeholder="O que é" value={novo.descricao}
+                  onChange={(ev) => setNovo({ ...novo, descricao: ev.target.value })} />
+              </div>
+              <div className="flex gap-2">
+                <label className="flex-1">
+                  <span className="block text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Previsto</span>
+                  <input className="mt-[2px] w-full rounded-md border px-2 py-1.5 text-right text-[15px] outline-none"
+                    style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal" value={novo.previsto}
+                    onChange={(ev) => setNovo({ ...novo, previsto: ev.target.value })} />
+                </label>
+                <label className="flex-1">
+                  <span className="block text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Pago</span>
+                  <input className="mt-[2px] w-full rounded-md border px-2 py-1.5 text-right text-[15px] outline-none"
+                    style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal" value={novo.realizado}
+                    onChange={(ev) => setNovo({ ...novo, realizado: ev.target.value })} />
+                </label>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={adicionar} className="flex-1 rounded-md py-2 text-[13px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>Lançar</button>
+                <button onClick={() => setNovo(null)} className="rounded-md px-3 text-[13px]" style={{ color: C.mute }}>cancelar</button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={() => setNovo({ tipo: "documentacao", descricao: "", previsto: "", realizado: "" })}
+              className="mt-3 w-full rounded-md border py-2 text-[13px] font-semibold"
+              style={{ borderColor: C.roxo, color: C.roxo }}>+ lançar um custo</button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- */
+
+const CAMPOS_CONTRATO_CLIENTE = [
+  ["cliente_nome", "Nome do cliente"], ["cliente_cpf", "CPF"],
+  ["cliente_rg", "RG"], ["cliente_endereco", "Endereço"],
+];
+const CAMPOS_CONTRATO_CARRO = [
+  ["placa", "Placa"], ["renavam", "Renavam"], ["chassi", "Chassi"],
+  ["cor", "Cor"], ["km", "KM"],
+];
+
+/**
+ * Editar e reemitir o contrato, da tela do administrativo.
+ *
+ * O que muda depois de assinado é sempre a mesma coisa: um número do
+ * negócio, um dado do cliente que veio errado da CNH, o renavam que
+ * ninguém tinha. **O texto das cláusulas não se edita aqui** — ele é o
+ * papel que a casa manda assinar, e mexer na redação criaria dois
+ * contratos diferentes com o mesmo nome. Mudança de cláusula passa
+ * pelo jurídico da Vaapty e vira código.
+ *
+ * Cada emissão é uma linha nova em `documento`, com protocolo novo —
+ * é assim que se sabe quantas vias existem circulando, e qual delas o
+ * cliente assinou.
+ */
+function ContratoDoNegocio({ atendimento, checklist, perfil, aoSalvarChecklist }) {
+  const [veic, setVeic] = useState(null);
+  const [cli, setCli] = useState(null);
+  const [cl, setCl] = useState(checklist || null);
+  const [aberto, setAberto] = useState(false);
+  const [erro, setErro] = useState("");
+  const [aviso, setAviso] = useState("");
+  const [indo, setIndo] = useState("");
+  const [zapOk, setZapOk] = useState(null);
+
+  useEffect(() => { setCl(checklist || null); }, [checklist]);
+  useEffect(() => {
+    setCli({
+      cliente_nome: atendimento.cliente_nome || "", cliente_cpf: atendimento.cliente_cpf || "",
+      cliente_rg: atendimento.cliente_rg || "", cliente_endereco: atendimento.cliente_endereco || "",
+      cliente_email: atendimento.cliente_email || "", cliente_telefone: atendimento.telefone || "",
+      valor_fechado: atendimento.valor_fechado || "",
+    });
+    veiculoDoAtendimento(atendimento.id)
+      .then((v) => setVeic(v ? {
+        id: v.id, placa: v.placa || "", renavam: v.renavam || "", chassi: v.chassi || "",
+        cor: v.cor || "", km: v.km_atual || "", modelo: v.marca_modelo || "",
+        ano: v.ano_fabricacao && v.ano_modelo && v.ano_fabricacao !== v.ano_modelo
+          ? `${v.ano_fabricacao}/${v.ano_modelo}` : String(v.ano_modelo || v.ano_fabricacao || ""),
+      } : null))
+      .catch((e) => setErro(e.message));
+    zapsignConfigurado().then(setZapOk).catch(() => setZapOk(null));
+  }, [atendimento.id]);
+
+  if (!cli) return null;
+
+  const setC = (k, v) => setCli({ ...cli, [k]: v });
+  const setV = (k, v) => setVeic({ ...veic, [k]: v });
+  const setL = (k, v) => setCl({ ...(cl || {}), [k]: v });
+
+  // A ficha que as funções de documento esperam. É a mesma tradução do
+  // `fichaDoEstoque`: as funções nasceram para a ficha do atendimento,
+  // que vive no aparelho com nomes próprios.
+  const ficha = {
+    ...(veic || {}),
+    valorFechado: cli.valor_fechado || (cl && cl.valor_venda) || "",
+    negociador: atendimento.negociador_nome || (perfil && perfil.nome) || "",
+    debitos: (cl && cl.valor_debitos) || "", quitacao: (cl && cl.valor_quitacao) || "",
+    ...cli,
+  };
+  const faltando = []
+    .concat(CAMPOS_CONTRATO_CLIENTE.filter(([k]) => k !== "cliente_rg" && k !== "cliente_endereco" && !String(cli[k] || "").trim()).map((x) => x[1]))
+    .concat(!veic ? ["a ficha do carro"] : CAMPOS_CONTRATO_CARRO.filter(([k]) => !String(veic[k] || "").trim()).map((x) => x[1]))
+    .concat(!numeroBR(ficha.valorFechado) ? ["valor fechado"] : []);
+  const pronto = !faltando.length;
+
+  const gravar = async () => {
+    setErro(""); setAviso(""); setIndo("salvando");
+    try {
+      await atualizarAtendimento(atendimento.id, {
+        cliente_nome: cli.cliente_nome, cliente_cpf: cli.cliente_cpf,
+        cliente_rg: cli.cliente_rg, cliente_endereco: cli.cliente_endereco,
+        valor_fechado: cli.valor_fechado,
+      });
+      // A ficha do carro sobe pelo mesmo caminho de sempre: o servidor
+      // acha a linha por (atendimento) e dá PATCH. Só o que esta tela
+      // mandou é gravado — `somenteEnviadas` cuida do resto.
+      if (veic && veic.placa) {
+        await salvarFicha({
+          atendimento_id: atendimento.id, placa: veic.placa, renavam: veic.renavam,
+          chassi: veic.chassi, cor: veic.cor, km: veic.km,
+        });
+      }
+      if (cl) {
+        const d = await salvarChecklist(atendimento.id, cl);
+        setCl(d); if (aoSalvarChecklist) aoSalvarChecklist(d);
+      }
+      setAviso("Dados salvos. O contrato sai com estes números.");
+    } catch (e) { setErro(e.message); }
+    setIndo("");
+  };
+
+  const emitir = async () => {
+    setErro(""); setAviso("");
+    const html = aceiteProposta(ficha, cl);
+    const r = abrirDocumento(html);
+    if (!r.ok) { setErro(r.erro); return; }
+    if (veic && veic.id) {
+      try {
+        await registrarDocumento({
+          veiculo_id: veic.id, tipo: "contrato_final", rodada: null,
+          protocolo: extrairProtocolo(html), conteudo: html, negociador: ficha.negociador,
+        });
+        setAviso("Contrato emitido e registrado. É uma via nova, com protocolo novo.");
+      } catch (e) { setErro(e.message); }
+    }
+  };
+
+  const mandarAssinar = async () => {
+    setErro(""); setAviso(""); setIndo("zap");
+    try {
+      const r = await enviarParaAssinatura(atendimento.id, {
+        nome: `Aceite de proposta — ${(veic && veic.placa) || "sem placa"}`,
+        conteudo: aceiteProposta(ficha, cl),
+        signatarios: [{ nome: cli.cliente_nome, email: cli.cliente_email, telefone: cli.cliente_telefone }],
+      });
+      setAviso(r.assinantes && r.assinantes.length
+        ? `Enviado. Link para ${r.assinantes[0].nome}: ${r.assinantes[0].link}`
+        : "Enviado ao ZapSign.");
+    } catch (e) { setErro(e.message); }
+    setIndo("");
+  };
+
+  const campo = (rot, valor, aoMudar, mono) => (
+    <label key={rot} className="block">
+      <span className="block text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>{rot}</span>
+      <input className="mt-[2px] w-full rounded-md border px-2 py-1.5 text-[13px] outline-none"
+        style={{ ...inputSty, fontFamily: mono ? F.mono : undefined }}
+        value={valor == null ? "" : valor} onChange={(ev) => aoMudar(ev.target.value)} />
+    </label>
+  );
+
+  return (
+    <div className="rounded-xl p-3.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+      <div className="flex items-baseline justify-between">
+        <span className="text-[12px] font-semibold uppercase tracking-[0.06em]" style={{ color: C.mute }}>Contrato</span>
+        <button onClick={() => setAberto((v) => !v)} className="text-[12px] font-semibold" style={{ color: C.roxo }}>
+          {aberto ? "fechar" : "corrigir e reemitir"}
+        </button>
+      </div>
+      <p className="mt-1 text-[11px] leading-snug" style={{ color: C.mute }}>
+        {atendimento.contrato_assinado_em
+          ? `Assinado em ${new Date(atendimento.contrato_assinado_em).toLocaleString("pt-BR")}.`
+          : "Ainda sem assinatura registrada."}
+        {" "}Reemitir cria uma via nova, com protocolo novo — a anterior continua no histórico.
+      </p>
+
+      {aberto && (
+        <div className="mt-3 space-y-3">
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>Cliente</div>
+            <div className="mt-1 grid gap-2 sm:grid-cols-2">
+              {CAMPOS_CONTRATO_CLIENTE.map(([k, r]) => campo(r, cli[k], (v) => setC(k, v), k === "cliente_cpf"))}
+            </div>
+          </div>
+
+          {veic && (
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>
+                Carro · {veic.modelo || "—"} {veic.ano}
+              </div>
+              <div className="mt-1 grid gap-2 sm:grid-cols-3">
+                {CAMPOS_CONTRATO_CARRO.map(([k, r]) => campo(r, veic[k], (v) => setV(k, v), true))}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>A conta que vai no contrato</div>
+            <div className="mt-1 grid gap-2 sm:grid-cols-3">
+              {campo("Valor fechado", cli.valor_fechado, (v) => setC("valor_fechado", v), true)}
+              {CL_DESCONTOS.map(([k, r]) => campo(r, cl && cl[k], (v) => setL(k, v), true))}
+            </div>
+            {cl && !descontaComissao(cl) && (
+              <p className="mt-1 text-[11px]" style={{ color: AMARELO.texto }}>
+                Negócio no modo limpo: a comissão não é descontada e não sai no contrato.
+              </p>
+            )}
+          </div>
+
+          <p className="text-[11px] leading-snug" style={{ color: C.mute }}>
+            As cláusulas não se editam aqui — o texto é o que a casa manda assinar, e duas redações com o mesmo nome viram
+            dois contratos diferentes. O que muda aqui são os dados e os números que entram nele.
+          </p>
+
+          {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+          {aviso && <p className="text-[12px]" style={{ color: C.verde, wordBreak: "break-all" }}>{aviso}</p>}
+          {!pronto && (
+            <p className="text-[11px]" style={{ color: AMARELO.texto }}>Falta {faltando.join(", ")}.</p>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            <button onClick={gravar} disabled={indo === "salvando"}
+              className="rounded-md border px-3 py-2 text-[13px] font-semibold"
+              style={{ borderColor: C.roxo, color: C.roxo }}>
+              {indo === "salvando" ? "Salvando…" : "Salvar as correções"}
+            </button>
+            <button onClick={emitir} disabled={!pronto}
+              className="rounded-md px-3 py-2 text-[13px] font-semibold"
+              style={{ background: pronto ? C.roxo : C.line, color: pronto ? "#fff" : C.mute }}>
+              Reemitir o contrato
+            </button>
+            <button onClick={mandarAssinar}
+              disabled={!pronto || indo === "zap" || !zapOk || (!cli.cliente_email && !cli.cliente_telefone)}
+              className="rounded-md border px-3 py-2 text-[13px] font-semibold"
+              style={{ borderColor: pronto && zapOk ? C.roxo : C.line, color: pronto && zapOk ? C.roxo : C.mute }}>
+              {indo === "zap" ? "Enviando…" : "Enviar para assinar de novo"}
+            </button>
+          </div>
+          {zapOk === false && (
+            <p className="text-[11px]" style={{ color: C.laranja }}>A chave do ZapSign não está configurada — só dá para imprimir.</p>
+          )}
+          {pronto && !cli.cliente_email && !cli.cliente_telefone && (
+            <p className="text-[11px]" style={{ color: C.mute }}>O ZapSign precisa do e-mail ou do telefone do cliente.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ChecklistDocumentos({ atendimentoId, perfil }) {
   const [d, setD] = useState(null);
   const [erro, setErro] = useState("");
@@ -10221,6 +10941,9 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
   const [visor, setVisor] = useState(null);
   const podeVisto = !!(perfil && (perfil.administrativo || perfil.papel === "gerente"));
 
+  const [docs, setDocs] = useState([]);
+  const [novoItem, setNovoItem] = useState("");
+
   const carregarAnexos = () =>
     listarAnexos(atendimentoId).then(setAnexos).catch(() => {});
   const carregar = () => {
@@ -10228,11 +10951,56 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
     carregarAnexos();
   };
   useEffect(() => { carregar(); }, [atendimentoId]);
+  // Os documentos gerados pendem do veículo, não do atendimento — são
+  // duas voltas, e por isso ficam num efeito à parte: a lista do check
+  // list não pode esperar por eles para aparecer.
+  useEffect(() => {
+    let vivo = true;
+    veiculoDoAtendimento(atendimentoId)
+      .then((v) => (v && v.id ? listarDocumentos(v.id) : []))
+      .then((ls) => { if (vivo) setDocs(ls); })
+      .catch(() => {});
+    return () => { vivo = false; };
+  }, [atendimentoId]);
+
+  const abrirGerado = async (x) => {
+    setErro("");
+    try {
+      const doc = await lerDocumento(x.id);
+      if (!doc.conteudo) { setErro("Este documento foi registrado sem o conteúdo — foi gerado antes de a ficha ir ao banco."); return; }
+      const r = verDocumento(doc.conteudo);
+      if (!r.ok) setErro(r.erro);
+    } catch (e) { setErro(e.message); }
+  };
+
+  const criarItem = async () => {
+    const rot = novoItem.trim();
+    if (!rot) return;
+    setErro("");
+    // O código sai do rótulo: item novo tem que se explicar sozinho na
+    // lista, e um "extra_1" não explica nada.
+    const cod = "extra_" + semAcento(rot).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 34)
+      + "_" + Math.random().toString(36).slice(2, 5);
+    try {
+      await marcarChecklistDoc({ atendimento_id: atendimentoId, item: cod, rotulo: rot, grupo: "extra", adm: null });
+      setNovoItem(""); carregar();
+    } catch (e) { setErro(e.message); }
+  };
+  const removerItem = async (cod, rot) => {
+    if (!window.confirm(`Tirar "${rot}" do check list deste carro?`)) return;
+    setErro("");
+    try { await removerItemDoc(atendimentoId, cod); carregar(); }
+    catch (e) { setErro(e.message); }
+  };
 
   // Os anexos do item vivem na tabela `anexo` que já existe, com o
   // rótulo "doc:<código>". Bucket novo significaria política nova de
   // Storage e mais um lugar para o arquivo se perder.
-  const doItem = (cod) => anexos.filter((a) => a.rotulo === `doc:${cod}`);
+  const doItem = (cod) => anexos.filter((a) => a.rotulo === `doc:${cod}` || ANEXO_DE_ITEM[a.rotulo] === cod);
+  const geradosDoItem = (cod) => docs.filter((x) => DOC_DE_ITEM[x.tipo] === cod);
+  // Para o contador de papéis, documento gerado vale como papel: o
+  // contrato existe, ele só não foi anexado como arquivo.
+  const temPapel = (cod) => !!(doItem(cod).length || geradosDoItem(cod).length);
   const anexar = async (cod, arquivo) => {
     if (!arquivo) return;
     setSubindo(cod); setErro("");
@@ -10274,8 +11042,8 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
   // Visto dado num papel que ninguém anexou: o administrativo anexa
   // antes, e a conferência olha o que está lá. Sem esse aviso, "sim"
   // vira palavra sem lastro.
-  const semAnexo = d.itens.filter((it) => it[4] && marcaDe(it[0]).adm === true && !doItem(it[0]).length).length;
-  const anexados = d.itens.filter((it) => it[4] && doItem(it[0]).length).length;
+  const semAnexo = d.itens.filter((it) => it[4] && marcaDe(it[0]).adm === true && !temPapel(it[0])).length;
+  const anexados = d.itens.filter((it) => it[4] && temPapel(it[0])).length;
   const pedemDoc = d.itens.filter((it) => it[4]).length;
 
   const caixa = (it, visto) => {
@@ -10364,6 +11132,9 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
                         {k[0]} ↗
                       </a>
                     ))}
+                    {/^extra/.test(it[0]) && podeVisto && (
+                      <button onClick={() => removerItem(it[0], it[1])} className="ml-2 text-[11px]" style={{ color: C.mute }} title="tirar este item">×</button>
+                    )}
                   </span>
                   <span className="flex gap-6">
                     {(tres ? VISTOS_DOC : ["adm"]).map((v) => (
@@ -10378,10 +11149,20 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
                 {/* Os papéis do item, para olhar sem baixar. */}
                 {it[4] && (
                   <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                    {/* O que o próprio sistema emitiu. Vale como papel do
+                        item: o contrato existe, só não é arquivo anexado. */}
+                    {geradosDoItem(it[0]).map((x) => (
+                      <button key={x.id} onClick={() => abrirGerado(x)}
+                        className="rounded-lg px-2 py-1 text-[11px] font-semibold"
+                        style={{ background: C.roxoFraco, color: C.roxo }}>
+                        {ROT_DOC[x.tipo] || x.tipo} · {diaBR(x.gerado_em)}{x.protocolo ? ` · ${x.protocolo}` : ""}
+                      </button>
+                    ))}
                     {arqs.map((a, k) => (
                       <span key={a.id} className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px]" style={{ background: C.bg }}>
                         <button onClick={() => setVisor({ lista: arqs, i: k })} style={{ color: C.roxo, fontWeight: 600 }}>
                           {/pdf/i.test(a.tipo || "") ? "PDF" : "IMG"} · {String(a.nome || "arquivo").slice(0, 22)}
+                          {/^doc:/.test(a.rotulo || "") ? "" : " · da negociação"}
                         </button>
                         <button onClick={() => tirar(a)} style={{ color: C.mute }} title="tirar">×</button>
                       </span>
@@ -10400,12 +11181,64 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
         );
       })}
 
+      {/* O que veio da negociação e não é de nenhum item: comprovante de
+          pagamento, extrato, termo de aceite. Some da conferência se não
+          aparecer em lugar nenhum, e é papel do mesmo negócio. */}
+      {(() => {
+        const usados = {};
+        d.itens.forEach((it) => { doItem(it[0]).forEach((a) => { usados[a.id] = 1; }); });
+        const soltos = anexos.filter((a) => !usados[a.id]);
+        const gerUsados = {};
+        d.itens.forEach((it) => { geradosDoItem(it[0]).forEach((x) => { gerUsados[x.id] = 1; }); });
+        const gerSoltos = docs.filter((x) => !gerUsados[x.id]);
+        if (!soltos.length && !gerSoltos.length) return null;
+        return (
+          <div className="rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+            <div className="px-3 py-2 text-[12px] font-semibold uppercase tracking-[0.06em]" style={{ color: C.mute, borderBottom: `1px solid ${C.line}` }}>
+              Também no negócio
+            </div>
+            <div className="flex flex-wrap gap-2 px-3 py-2.5">
+              {gerSoltos.map((x) => (
+                <button key={x.id} onClick={() => abrirGerado(x)} className="rounded-lg px-2 py-1 text-[11px] font-semibold"
+                  style={{ background: C.roxoFraco, color: C.roxo }}>
+                  {ROT_DOC[x.tipo] || x.tipo} · {diaBR(x.gerado_em)}
+                </button>
+              ))}
+              {soltos.map((a, k) => (
+                <button key={a.id} onClick={() => setVisor({ lista: soltos, i: k })} className="rounded-lg px-2 py-1 text-[11px]"
+                  style={{ background: C.bg, color: C.roxo, fontWeight: 600 }}>
+                  {a.rotulo} · {String(a.nome || "arquivo").slice(0, 20)}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Item que só existe neste carro: o laudo que a seguradora pediu,
+          o distrato daquele caso. A lista fixa é o processo da casa e
+          continua no código. */}
+      {podeVisto && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl px-3 py-2.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+          <span className="text-[12px]" style={{ color: C.mute }}>Falta um item nesta folha?</span>
+          <input className="min-w-[180px] flex-1 rounded-md border px-2 py-1 text-[13px] outline-none" style={inputSty}
+            placeholder="Ex.: Laudo do seguro, Distrato" value={novoItem}
+            onChange={(e) => setNovoItem(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") criarItem(); }} />
+          <button onClick={criarItem} disabled={!novoItem.trim()}
+            className="rounded-md px-3 py-1.5 text-[12px] font-semibold"
+            style={{ background: novoItem.trim() ? C.roxo : C.line, color: novoItem.trim() ? "#fff" : C.mute }}>
+            Acrescentar
+          </button>
+        </div>
+      )}
+
       {visor && <VisorAnexos anexos={visor.lista} inicio={visor.i} aoFechar={() => setVisor(null)} />}
 
       {so === "pendentes" && !faltam && (
         <div className="rounded-xl px-4 py-8 text-center" style={{ background: "#E8F3EE", border: `1px solid ${C.line}` }}>
           <p className="text-[15px] font-semibold" style={{ color: C.verde }}>Check list completo.</p>
-          <p className="mt-1 text-[13px]" style={{ color: C.mute }}>Os 36 itens receberam os vistos. O envelope pode ser arquivado.</p>
+          <p className="mt-1 text-[13px]" style={{ color: C.mute }}>Os {total} itens receberam os vistos. O envelope pode ser arquivado.</p>
         </div>
       )}
     </div>
@@ -10632,7 +11465,13 @@ function TelaADM({ perfil }) {
           ))}
         </div>
 
-        {aba === "documentos" && <ChecklistDocumentos atendimentoId={foco.id} perfil={perfil} />}
+        {aba === "documentos" && (
+          <div className="space-y-3">
+            <CustosDoNegocio atendimentoId={foco.id} perfil={perfil} />
+            <ContratoDoNegocio atendimento={foco} checklist={cl} perfil={perfil} aoSalvarChecklist={setCl} />
+            <ChecklistDocumentos atendimentoId={foco.id} perfil={perfil} />
+          </div>
+        )}
 
         <div className="space-y-3" style={{ display: aba === "negocio" ? "block" : "none" }}>
           {!cl && !erro && <p className="text-[12px]" style={{ color: C.mute }}>Carregando o check list…</p>}

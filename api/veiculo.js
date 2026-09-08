@@ -388,6 +388,20 @@ async function estoque(req, res, tok) {
       const linha = await supa(`${base("estoque")}?select=${CAMPOS_ESTOQUE}&id=eq.${id}`, { headers: cab });
       return res.status(200).json({ estoque: (linha || [])[0] || null });
     }
+    // Pelo atendimento: é assim que a tela do administrativo acha o
+    // carro deste negócio. O `estoque` aponta para o veículo, não para
+    // o atendimento, então são duas voltas — e nenhuma delas é a lista
+    // inteira, que traz 300 linhas.
+    const aid = String(req.query.atendimento_id || "");
+    if (aid && RX_ID.test(aid)) {
+      const veics = await supa(`${base("veiculo")}?select=id&atendimento_id=eq.${aid}`, { headers: cab });
+      const ids = (veics || []).map((v) => v.id);
+      if (!ids.length) return res.status(200).json({ estoque: null });
+      const linha = await supa(
+        `${base("estoque")}?select=${CAMPOS_ESTOQUE}&veiculo_id=in.(${ids.join(",")})&order=entrou_em.desc&limit=1`,
+        { headers: cab });
+      return res.status(200).json({ estoque: (linha || [])[0] || null, veiculo_id: ids[0] });
+    }
     const sit = SITUACOES.indexOf(String(req.query.situacao || "")) >= 0
       ? `&situacao=eq.${req.query.situacao}` : "";
     const lista = await supa(
@@ -690,6 +704,17 @@ module.exports = async function handler(req, res) {
 
   try {
     if (req.method === "GET") {
+      // A ficha inteira de um atendimento. É o que a tela do
+      // administrativo precisa para reemitir o contrato: os dados do
+      // carro moram aqui, e o contrato sai em branco sem eles.
+      const aid = String(req.query.atendimento_id || "");
+      if (aid && RX_ID.test(aid)) {
+        const linha = await supa(
+          `${REST()}?select=*&atendimento_id=eq.${aid}&order=criado_em.desc&limit=1`,
+          { headers: cabecalhos(tok) }
+        );
+        return res.status(200).json({ veiculo: (linha || [])[0] || null });
+      }
       const campos = "placa,marca_modelo,valor_por,status,criado_em";
       const lista = await supa(
         `${REST()}?select=${campos}&order=criado_em.desc&limit=20`,

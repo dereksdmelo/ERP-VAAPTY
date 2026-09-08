@@ -276,6 +276,18 @@ module.exports = async function handler(req, res) {
 
   try {
     if (req.method === "GET") {
+      // Um documento com o conteúdo. A lista não traz o HTML de
+      // propósito — são ~9 KB por folha, e a tela do administrativo
+      // pede uma de cada vez, quando alguém clica para ver.
+      const id = String(req.query.id || "");
+      if (id) {
+        if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido." });
+        const r = await banco(`${REST("documento")}?select=*&id=eq.${id}&limit=1`, { headers: cabecalhos(tok) });
+        const linha = Array.isArray(r) ? r[0] : null;
+        if (!linha) return res.status(404).json({ erro: "Documento não encontrado." });
+        return res.status(200).json({ documento: linha });
+      }
+
       const vid = String(req.query.veiculo_id || "");
       if (!RX_UUID.test(vid)) return res.status(400).json({ erro: "veiculo_id inválido." });
 

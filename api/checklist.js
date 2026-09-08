@@ -62,6 +62,22 @@ const decimal = (v) => {
   return Number.isFinite(n) ? n : null;
 };
 
+const MODOS_CONTA = ["com_comissao", "limpo"];
+
+/**
+ * Uma lista de {descrição, valor} vinda da tela, saneada.
+ *
+ * O teto de 40 não é medo de abuso: é que uma lista de débitos maior
+ * que isso quer dizer que alguém colou a consulta inteira do Detran no
+ * lugar de escolher o que vai ser descontado.
+ */
+function itensDeValor(v) {
+  if (!Array.isArray(v)) return [];
+  return v.slice(0, 40)
+    .map((x) => ({ descricao: texto(x && x.descricao) || "", valor: decimal(x && x.valor) || 0 }))
+    .filter((x) => x.descricao || x.valor);
+}
+
 const ITENS = [
   "recibo_compra_venda", "segunda_via_dut", "licenciamento_atual", "transferencia",
   "emplacamento_mercosul", "outros_itens", "comprovante_residencia",
@@ -71,7 +87,8 @@ const ADM = ["adm_entrada", "adm_saida", "adm_debitos", "adm_quitacao", "adm_out
 const VALORES = ["valor_venda", "valor_cautelar", "valor_debitos", "valor_quitacao", "comissao_vaapty", "valor_cliente"];
 const BANCO = ["banco_favorecido", "banco_documento", "banco_nome", "banco_agencia", "banco_conta", "banco_tipo", "banco_pix"];
 
-const CAMPOS = ["id", "atendimento_id"].concat(ITENS, ADM, VALORES, BANCO,
+const CONTA = ["debitos_itens", "descontos_extras", "modo_conta"];
+const CAMPOS = ["id", "atendimento_id"].concat(ITENS, ADM, VALORES, BANCO, CONTA,
   ["adm_conferido_por", "adm_conferido_em", "observacoes", "atualizado_em"]).join(",");
 
 /**
@@ -136,6 +153,7 @@ const ITENS_DOC = [
   ["cnh_proprietario", "CNH Proprietário", "pf", "tres", true],
   ["comprovante_residencia", "Comprovante de Residência", "pf", "tres", true],
   ["serasa", "Consulta Serasa", "pf", "tres", true],
+  ["pre_contrato", "Pré-contrato", "pf", "tres", true],
   ["contrato", "Contrato", "pf", "tres", true],
   ["cautelar", "Cautelar veículo", "pf", "tres", true],
   ["manual", "Manual", "pf", "tres", false],
@@ -188,7 +206,14 @@ async function documentos(req, res, tok) {
       gerencia_nome: nomes[m.gerencia_por] || null,
       financeiro_nome: nomes[m.financeiro_por] || null,
     }));
-    return res.status(200).json({ itens: ITENS_DOC, marcas });
+    // A lista fixa vem do código (muda com o processo, não com o
+    // carro); os extras vêm das próprias linhas, que carregam o rótulo.
+    // Assim as duas chegam à tela num formato só, e a tela não precisa
+    // saber que existem duas origens.
+    const extras = (linhas || [])
+      .filter((m) => /^extra/.test(m.item) && m.rotulo)
+      .map((m) => [m.item, m.rotulo, m.grupo || "extra", "tres", m.pede_doc !== false]);
+    return res.status(200).json({ itens: ITENS_DOC.concat(extras), marcas });
   }
 
   if (req.method === "PUT") {
@@ -197,7 +222,8 @@ async function documentos(req, res, tok) {
     const aid = String(corpo.atendimento_id || "");
     if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
     const item = String(corpo.item || "");
-    if (CODIGOS_DOC.indexOf(item) < 0) return res.status(400).json({ erro: "Item desconhecido." });
+    const eExtra = /^extra_[a-z0-9_]{1,40}$/.test(item);
+    if (CODIGOS_DOC.indexOf(item) < 0 && !eExtra) return res.status(400).json({ erro: "Item desconhecido." });
 
     const eu = donoDoToken(tok);
     const adm = await eAdministrativo(tok);
@@ -213,6 +239,17 @@ async function documentos(req, res, tok) {
       linha[`${v}_em`] = corpo[v] === null ? null : new Date().toISOString();
     });
     if (corpo.observacao !== undefined) linha.observacao = texto(corpo.observacao);
+
+    // Item extra nasce com o rótulo na própria linha: sem ele a linha
+    // existiria sem dizer o que é, e sumiria da tela.
+    if (eExtra) {
+      const rot = texto(corpo.rotulo);
+      if (rot) {
+        linha.rotulo = rot;
+        linha.grupo = texto(corpo.grupo) || "extra";
+        linha.pede_doc = corpo.pede_doc !== false;
+      }
+    }
     if (Object.keys(linha).length <= 3) return res.status(400).json({ erro: "Nada para marcar." });
 
     // O visto do administrativo e o da gerência são permissão, não
@@ -231,8 +268,19 @@ async function documentos(req, res, tok) {
     return res.status(200).json({ ok: true, marca: salvo });
   }
 
-  res.setHeader("Allow", "GET, PUT");
-  return res.status(405).json({ erro: "Use GET ou PUT." });
+  if (req.method === "DELETE") {
+    const aid = String(req.query.atendimento_id || "");
+    const item = String(req.query.item || "");
+    if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
+    // Só o item extra se apaga. Os 36 da folha são o processo da casa —
+    // sumir com um deles esconderia justamente o que falta conferir.
+    if (!/^extra_[a-z0-9_]{1,40}$/.test(item)) return res.status(400).json({ erro: "Só item extra pode ser removido." });
+    await banco(`${RESTD}?atendimento_id=eq.${aid}&item=eq.${item}`, { method: "DELETE", headers: cabecalhos(tok) });
+    return res.status(200).json({ ok: true });
+  }
+
+  res.setHeader("Allow", "GET, PUT, DELETE");
+  return res.status(405).json({ erro: "Use GET, PUT ou DELETE." });
 }
 
 module.exports = async function handler(req, res) {
@@ -270,6 +318,24 @@ module.exports = async function handler(req, res) {
       ITENS.concat(ADM).forEach((k) => { if (c[k] !== undefined) linha[k] = !!c[k]; });
       VALORES.forEach((k) => { if (c[k] !== undefined) linha[k] = decimal(c[k]); });
       BANCO.forEach((k) => { if (c[k] !== undefined) linha[k] = texto(c[k]); });
+
+      // O detalhe dos débitos manda no total. Deixar os dois entrarem
+      // soltos criaria a pior das respostas: uma lista que não bate com
+      // o número que o cliente assinou.
+      if (c.debitos_itens !== undefined) {
+        const itens = itensDeValor(c.debitos_itens);
+        linha.debitos_itens = itens;
+        if (itens.length) linha.valor_debitos = itens.reduce((t, x) => t + x.valor, 0);
+      }
+      if (c.descontos_extras !== undefined) {
+        linha.descontos_extras = itensDeValor(c.descontos_extras).map((x, i) => ({
+          ...x, custo: Array.isArray(c.descontos_extras) && c.descontos_extras[i]
+            ? c.descontos_extras[i].custo !== false : true,
+        }));
+      }
+      if (c.modo_conta !== undefined) {
+        linha.modo_conta = MODOS_CONTA.indexOf(String(c.modo_conta)) >= 0 ? String(c.modo_conta) : "com_comissao";
+      }
       if (c.observacoes !== undefined) linha.observacoes = texto(c.observacoes);
 
       // O carimbo da conferência é do servidor, não do cliente.
