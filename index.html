@@ -4246,6 +4246,16 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
 
             <Bloco titulo={`Indicações — ${f.indicacoes.length} de 10`} sub="Quem ele conhece que tem carro. A lista vai para a pré-venda com a promessa do brinde.">
               <div className="space-y-2">
+                {/* A pergunta que abre a lista, escrita para ser lida em
+                    voz alta. Sem ela o negociador improvisa "conhece
+                    alguém querendo vender?", que é pedido de favor —
+                    e pedido de favor rende um nome, não dez. */}
+                <div className="rounded-md px-3 py-2.5" style={{ background: C.roxoFraco, border: `1px solid ${C.roxo}` }}>
+                  <div className="text-[10px] uppercase tracking-[0.13em]" style={{ color: C.roxo }}>Pergunte ao cliente</div>
+                  <p className="mt-1 text-[14px] font-semibold leading-snug" style={{ color: C.ink }}>
+                    “Você gostaria de ganhar 100 reais garantido e ter a chance de ganhar até mais 2000 reais?”
+                  </p>
+                </div>
                 {f.indicacoes.map((p, i) => (
                   <div key={i} className="flex items-center justify-between rounded-md px-3 py-2" style={{ background: "#FBFAFC", border: `1px solid ${C.line}` }}>
                     <span className="text-[13px]">{p.nome}<span className="ml-2 text-[11px]" style={{ color: C.mute, fontFamily: F.mono }}>{p.fone}</span>
@@ -10587,6 +10597,127 @@ async function marcarChecklistDoc(dados) {
  * na mão, e mandar essa pessoa para outro menu para lançar o valor é
  * como o custo real deixa de ser lançado.
  */
+/**
+ * Tudo o que o negócio produziu, num lugar só.
+ *
+ * O administrativo abre "O negócio" para conferir a entrega, e a
+ * pergunta que ele faz em seguida é sempre a mesma: cadê a CNH, cadê o
+ * comprovante, cadê o laudo. Estavam no atendimento, na etapa em que
+ * cada um foi anexado — o que na prática quer dizer que ele pedia de
+ * novo o que o sistema já tinha.
+ *
+ * São três origens e uma lista só: os anexos do atendimento, os
+ * documentos que o próprio sistema emitiu e as fotos do carro. Abre
+ * no visor, **sem baixar nada** — a conferência acontece no celular.
+ */
+function PapeisDoNegocio({ atendimentoId, veiculoId }) {
+  const [anexos, setAnexos] = useState([]);
+  const [docs, setDocs] = useState([]);
+  const [fotos, setFotos] = useState([]);
+  const [erro, setErro] = useState("");
+  const [visor, setVisor] = useState(null);
+
+  useEffect(() => {
+    let vivo = true;
+    listarAnexos(atendimentoId).then((ls) => { if (vivo) setAnexos(ls); }).catch(() => {});
+    // O documento e a foto pendem do VEÍCULO, não do atendimento. Sem
+    // veículo salvo não há nem um nem outro, e isso é normal: é carro
+    // que fechou antes de a ficha existir.
+    (veiculoId ? Promise.resolve(veiculoId) : veiculoDoAtendimento(atendimentoId).then((v) => v && v.id))
+      .then((vid) => {
+        if (!vid || !vivo) return;
+        listarDocumentos(vid).then((ls) => { if (vivo) setDocs(ls); }).catch(() => {});
+        listarFotos(vid).then((ls) => { if (vivo) setFotos(ls); }).catch(() => {});
+      })
+      .catch(() => {});
+    return () => { vivo = false; };
+  }, [atendimentoId, veiculoId]);
+
+  const abrirGerado = async (x) => {
+    setErro("");
+    try {
+      const doc = await lerDocumento(x.id);
+      if (!doc.conteudo) { setErro("Este documento foi registrado sem o conteúdo — saiu antes de a ficha ir ao banco."); return; }
+      const r = verDocumento(doc.conteudo);
+      if (!r.ok) setErro(r.erro);
+    } catch (e) { setErro(e.message); }
+  };
+
+  // As fotos entram no visor como qualquer outro papel: mesma navegação
+  // por setas, mesma tela cheia.
+  const comoAnexo = fotos.map((ft, i) => ({
+    id: ft.id, url: ft.url, nome: `Foto ${i + 1} do carro`, tipo: "image/jpeg",
+  }));
+  const todos = anexos.concat(comoAnexo);
+  const nada = !todos.length && !docs.length;
+
+  return (
+    <div className="rounded-lg p-4" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
+      <div className="text-[10px] uppercase tracking-[0.13em]" style={{ color: C.roxo }}>
+        Papéis e fotos da negociação
+      </div>
+      {erro && <p className="mt-1 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+
+      {nada ? (
+        <p className="mt-2 text-[12px]" style={{ color: C.mute }}>
+          Nada anexado neste atendimento. Documento, foto e laudo sobem na negociação e aparecem aqui.
+        </p>
+      ) : (
+        <div className="mt-2 space-y-2">
+          {!!docs.length && (
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>Emitidos pelo sistema</div>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {docs.map((x) => (
+                  <button key={x.id} onClick={() => abrirGerado(x)}
+                    className="rounded-lg px-2 py-1 text-[11px] font-semibold"
+                    style={{ background: C.roxoFraco, color: C.roxo }}>
+                    {ROT_DOC[x.tipo] || x.tipo} · {diaBR(x.gerado_em)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {!!anexos.length && (
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>Anexados</div>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {anexos.map((a, k) => (
+                  <button key={a.id} onClick={() => setVisor({ lista: todos, i: k })}
+                    className="rounded-lg px-2 py-1 text-[11px]"
+                    style={{ background: C.bg, color: C.roxo, fontWeight: 600 }}>
+                    {/pdf/i.test(a.tipo || "") ? "PDF" : "IMG"} · {/^doc:/.test(a.rotulo || "") ? String(a.rotulo).slice(4) : a.rotulo}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {!!comoAnexo.length && (
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>
+                Fotos do carro · {comoAnexo.length}
+              </div>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {comoAnexo.map((ft, k) => (
+                  <button key={ft.id} onClick={() => setVisor({ lista: todos, i: anexos.length + k })}
+                    className="overflow-hidden rounded-md"
+                    style={{ width: 52, height: 40, border: `1px solid ${C.line}`, background: C.bg }}>
+                    {ft.url && <img src={ft.url} alt={ft.nome} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {visor && <VisorAnexos anexos={visor.lista} inicio={visor.i} aoFechar={() => setVisor(null)} />}
+    </div>
+  );
+}
+
 function CustosDoNegocio({ atendimentoId, perfil }) {
   const [e, setE] = useState(null);
   const [erro, setErro] = useState("");
@@ -11525,6 +11656,9 @@ function TelaADM({ perfil }) {
                   </div>
                 )}
               </div>
+
+              <PapeisDoNegocio atendimentoId={foco.id}
+                veiculoId={((foco.veiculo || [])[0] || {}).id || null} />
 
               <div className="rounded-lg p-4" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
                 <div className="text-[10px] uppercase tracking-[0.13em]" style={{ color: C.roxo }}>
