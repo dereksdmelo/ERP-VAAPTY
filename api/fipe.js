@@ -17,14 +17,35 @@
  * exatamente esse caminho.
  *
  * O ano da FIPE carrega o combustível junto ("2010-1"). Como o
- * negociador escolhe só o ano, consulto os três combustíveis e junto as
- * listas, marcando cada modelo com o seu — assim a consulta de valor
+ * negociador escolhe só o ano, consulto TODOS os combustíveis e junto
+ * as listas, marcando cada modelo com o seu — assim a consulta de valor
  * depois sai com o parâmetro certo.
  */
 
 const FIPE = "https://veiculos.fipe.org.br/api/veiculos";
 const CARRO = 1;                       // codigoTipoVeiculo
-const COMBUSTIVEIS = [1, 2, 3];        // gasolina, álcool, diesel
+/**
+ * Os códigos de combustível da FIPE — **todos os seis**.
+ *
+ * Havia só 1, 2 e 3 aqui, e isso escondia a maior parte da tabela: em
+ * GM/2013 são 6 modelos a gasolina, 12 a diesel e **49 flex**. O
+ * negociador procurava o Onix, não achava, e concluía que a FIPE
+ * oficial não tinha o carro dele.
+ *
+ * Conferido contra a FIPE em 09/09/2026, varrendo os códigos 1 a 12 em
+ * marcas e anos diferentes: só de 1 a 6 devolvem lista. O 2 (álcool)
+ * ainda existe — GM/1985 tem quatro A-10 — e por isso continua aqui.
+ */
+const COMBUSTIVEIS = [
+  [1, "Gasolina"],
+  [2, "Álcool"],
+  [3, "Diesel"],
+  [4, "Elétrico"],
+  [5, "Flex"],
+  [6, "Híbrido"],
+];
+const NOME_COMB = {};
+COMBUSTIVEIS.forEach(([c, n]) => { NOME_COMB[c] = n; });
 const ANON = process.env.SUPABASE_ANON_KEY || "";
 
 const tokenDe = (req) => {
@@ -135,30 +156,63 @@ module.exports = async function handler(req, res) {
       const ano = inteiro(req.query.ano);
       if (!marca || !ano) return res.status(400).json({ erro: "Informe marca e ano." });
 
-      // Os três combustíveis, juntados. "nadaencontrado" é como a FIPE
-      // diz que não há nada — não é erro.
-      const vistos = {};
-      const modelos = [];
-      for (const comb of COMBUSTIVEIS) {
-        let lista;
+      // Os seis combustíveis, ao mesmo tempo. Em sequência eram seis
+      // idas à FIPE uma atrás da outra; juntas levam o tempo de uma.
+      // Medido contra a FIPE: 0,2 s para as seis, sem bloqueio.
+      // "nadaencontrado" é como a FIPE diz que não há nada — não é erro.
+      const respostas = await Promise.all(COMBUSTIVEIS.map(async ([comb]) => {
         try {
-          lista = await chamar("ConsultarModelosAtravesDoAno", {
+          const lista = await chamar("ConsultarModelosAtravesDoAno", {
             codigoTabelaReferencia: ref.codigo, codigoTipoVeiculo: CARRO,
             codigoMarca: marca, ano: `${ano}-${comb}`,
             codigoTipoCombustivel: comb, anoModelo: ano,
           });
-        } catch (e) { continue; }
-        if (!Array.isArray(lista)) continue;
+          return { comb, lista: Array.isArray(lista) ? lista : [] };
+        } catch (e) { return { comb, lista: [], falhou: true }; }
+      }));
+
+      const vistos = {};
+      const modelos = [];
+      respostas.forEach(({ comb, lista }) => {
         lista.forEach((m) => {
           const chave = `${m.Value}-${comb}`;
           if (vistos[chave]) return;
           vistos[chave] = true;
           modelos.push({ codigo: m.Value, nome: m.Label, combustivel: comb });
         });
-      }
+      });
 
-      res.setHeader("Cache-Control", "public, max-age=0, s-maxage=86400");
-      return res.status(200).json({ mes: ref.mes, modelos });
+      // Nome repetido em mais de um combustível ganha o sufixo, e só
+      // ele. O mesmo carro vendido a gasolina e flex apareceria duas
+      // vezes com o nome idêntico, e não haveria como escolher — os
+      // valores são diferentes. Pôr o sufixo em todos seria ruído: a
+      // maioria dos nomes da FIPE já diz "Flex" ou "Diesel".
+      const combsPorNome = {};
+      modelos.forEach((m) => {
+        combsPorNome[m.nome] = combsPorNome[m.nome] || {};
+        combsPorNome[m.nome][m.combustivel] = true;
+      });
+      modelos.forEach((m) => {
+        const repetido = Object.keys(combsPorNome[m.nome]).length > 1;
+        m.rotulo = repetido ? `${m.nome} · ${NOME_COMB[m.combustivel]}` : m.nome;
+      });
+      // Em ordem alfabética: agrupado por combustível, procurar o Onix
+      // significava percorrer a lista inteira três vezes.
+      modelos.sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR") || a.combustivel - b.combustivel);
+
+      // Falha de um combustível não pode sumir calada: a lista voltaria
+      // curta e ninguém saberia que faltou justamente o flex.
+      const faltaram = respostas.filter((x) => x.falhou).map((x) => NOME_COMB[x.comb]);
+
+      // Lista curta NÃO pode ficar 24 h na borda: o próximo negociador
+      // receberia o mesmo resultado incompleto sem nem ter havido falha.
+      res.setHeader("Cache-Control", faltaram.length
+        ? "no-store"
+        : "public, max-age=0, s-maxage=86400");
+      return res.status(200).json({
+        mes: ref.mes, modelos,
+        ...(faltaram.length ? { incompleto: faltaram } : {}),
+      });
     }
 
     if (acao === "valor") {

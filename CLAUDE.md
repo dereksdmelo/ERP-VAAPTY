@@ -676,9 +676,40 @@ conferência da FIPE para de funcionar** — e o erro vai parecer bloqueio
 de robô, que foi o diagnóstico errado que me custou uma volta inteira.
 
 **O ano da FIPE carrega o combustível junto** (`"2010-1"`). Como o
-negociador escolhe só o ano, `api/fipe.js` consulta os três
-combustíveis e junta as listas, marcando cada modelo com o seu.
+negociador escolhe só o ano, `api/fipe.js` consulta **os seis
+combustíveis** e junta as listas, marcando cada modelo com o seu.
 `"nadaencontrado"` é como a FIPE diz que não há nada; não é erro.
+
+**Eram três, e isso escondia a maior parte da tabela.** O código
+consultava 1 (gasolina), 2 (álcool) e 3 (diesel) — e a frota
+brasileira é **flex, que é o código 5**. Em GM/2013 apareciam 18
+modelos de 67; a BYD, que só vende elétrico (4) e híbrido (6), não
+tinha modelo nenhum. O negociador procurava o Onix na tabela oficial,
+não achava, e concluía que a FIPE não tinha o carro. Varri os códigos
+1 a 12 contra a FIPE em 09/09/2026, em marcas e anos diferentes: só de
+1 a 6 devolvem lista, e os seis estão em `COMBUSTIVEIS`. **Quem
+acrescentar código novo confere assim, não por memória.**
+
+**As seis consultas vão em paralelo** — medido, 0,2 s para as seis
+contra a FIPE, sem bloqueio. Em sequência seriam seis idas uma atrás
+da outra.
+
+**Falha de um combustível aparece na tela**, em `incompleto`, e a
+resposta parcial vai com `no-store`. O `catch { continue }` antigo
+sumia com um combustível inteiro em silêncio — a lista voltava curta e
+ninguém sabia que faltou justamente o flex. E resposta curta cacheada
+24 h na borda entregaria o mesmo erro ao próximo negociador, sem nem
+ter havido falha.
+
+**O nome ganha o sufixo do combustível só quando se repete.** O mesmo
+carro vendido a gasolina e flex apareceria duas vezes com nome
+idêntico e valores diferentes. Pôr o sufixo em todos seria ruído: a
+maioria dos nomes da FIPE já diz "Flex" ou "Diesel".
+
+**A conferência grava o combustível na ficha.** Não há campo para ele
+na tela — quem preenchia era a consulta de placa, que *adivinha* a
+versão e erra o combustível junto quando erra a versão. O valor da
+tabela oficial é o que sai no descritivo e nos documentos.
 
 **Enquanto não conferir, aparece o aviso amarelo.** `fipeConferida`
 começa falso e só vira verdadeiro quando o negociador usa o valor da

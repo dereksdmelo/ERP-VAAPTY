@@ -949,6 +949,10 @@ function ConferirFipe({ f, set }) {
       .then((d) => {
         setModelos(d.modelos || []);
         if (!(d.modelos || []).length) setErro("A FIPE não tem modelos dessa marca nesse ano.");
+        // Lista curta por falha de um combustível precisa dizer isso: o
+        // negociador procuraria o carro na lista, não acharia, e
+        // concluiria que a FIPE não tem o modelo.
+        else if (d.incompleto) setErro(`A FIPE não devolveu a lista de ${d.incompleto.join(" e ")}. A lista abaixo está incompleta — tente de novo.`);
       })
       .catch((e) => setErro(e.message))
       .then(() => setIndo(""));
@@ -969,6 +973,12 @@ function ConferirFipe({ f, set }) {
     set({
       fipe: String(res.valor),
       fipeCodigo: res.codigo_fipe || f.fipeCodigo,
+      // O combustível também vem da fonte. A ficha não tem campo para
+      // ele — quem preenchia era a consulta de placa, que ADIVINHA a
+      // versão; se ela errou a versão, errou o combustível junto. Aqui
+      // o negociador acabou de confirmar o modelo na tabela oficial, e
+      // é esse o valor que sai no descritivo e nos documentos.
+      combustivel: res.combustivel || f.combustivel,
       fipeConferida: true,
       fipeOficialCodigo: res.codigo_fipe || "",
       fipeOficialMes: res.mes_referencia || "",
@@ -1023,7 +1033,7 @@ function ConferirFipe({ f, set }) {
               {indo === "modelos" ? "carregando…" : !marca || !ano ? "escolha marca e ano antes" : "escolha"}
             </option>
             {modelos.map((m) => (
-              <option key={`${m.codigo}-${m.combustivel}`} value={`${m.codigo}|${m.combustivel}`}>{m.nome}</option>
+              <option key={`${m.codigo}-${m.combustivel}`} value={`${m.codigo}|${m.combustivel}`}>{m.rotulo || m.nome}</option>
             ))}
           </select>
         </Campo>
