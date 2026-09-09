@@ -69,6 +69,8 @@ e um `.env` local para o `vercel dev`):
 | `ANTHROPIC_API_KEY` | `api/atendimento.js?recurso=tatica` — opcional; sem ela a leitura por IA fica desligada e as táticas por expressão seguem |
 | `IA_MODELO` | opcional; padrão `claude-haiku-4-5-20251001`. Trocar de modelo não precisa de deploy |
 | `IA_JANELA` | opcional; padrão 2500 caracteres do fim da conversa. É o que se paga por leitura |
+| `SHINKAI_API_KEY` | `api/foto.js?recurso=shinkai` — sem ela o envio ao Shinkai fica desligado e a tela cai no JSON copiado |
+| `SHINKAI_ORIGEM` | opcional; padrão `vaapty-joinville` |
 
 **Nenhuma delas, fora a anônima, pode chegar ao navegador** — é essa a razão de as
 funções em `api/` existirem em vez de o `index.html` chamar os serviços
@@ -1711,3 +1713,50 @@ quem acabou de entrar com a própria senha é pedir duas vezes a mesma
 coisa — e era esse campo vazio que deixava o filtro de avaliações por
 colaborador sem ter o que casar. Continua editável, para o caso de
 alguém abrir no aparelho do colega.
+
+### 36. Shinkai por API: o envio mora onde a chave de serviço já está
+
+Até 08/09/2026 "levar para o Shinkai" era copiar um JSON e colar no
+painel. O Mateus entregou o endpoint (`POST /api/public/veiculo`, com
+`x-api-key`), e agora o carro vai por botão.
+
+**Por que isto mora em `api/foto.js` e não em `api/veiculo.js`**, que é
+onde o estoque vive: o Shinkai pede as fotos como URLs que ele consiga
+baixar, o bucket é privado, e assinar link é a única coisa no sistema
+que usa a `SUPABASE_SERVICE_KEY` — que a decisão 9 confina a esse
+arquivo. Levar o envio para outro lugar significaria espalhar a chave,
+que é exatamente o que aquela decisão evita. **Quem mudar de ideia
+sobre isso está mudando a decisão 9 junto.**
+
+**O link assinado de 1 h basta** porque eles baixam e guardam cópia no
+momento do POST. O que precisa estar de pé é a chamada, não o dia
+seguinte.
+
+**`SHINKAI_API_KEY` só existe em variável de ambiente**, como o
+ZapSign. O `GET ?recurso=shinkai` responde apenas se ela existe, nunca
+o valor — sem esse teste, descobrir que a variável não subiu seria
+errar com o carro já no pátio. Sem a chave, a tela cai no caminho
+antigo (copiar o JSON) **e diz isso**, em vez de falhar calada.
+
+**Reenviar a mesma placa atualiza lá, não duplica**, então o botão pode
+ser apertado a cada edição — e campo que não vai no corpo não apaga o
+que já estava. Por isso o que se guarda na 0030 é o último resultado
+(`shinkai_id`, `shinkai_status`, `shinkai_em`), não uma fila de
+eventos. Sem gravar nada, saber se o carro já está lá viraria
+adivinhação.
+
+**`marca_modelo` vai inteiro.** A nossa coluna é uma string só e a
+documentação diz que eles separam; chutar a marca pelo primeiro token
+erraria em Land Rover e Alfa Romeo — o mesmo tropeço dos canais de
+preço (decisão 8).
+
+**`valor_investimento` leva o `valor_compra`**, seguindo a definição
+deles ("o que a loja pagou … é o alvo da negociação"). O `preco_pedido`
+é o outro candidato e mudaria o que o lojista vê; **está anotado como
+pergunta em aberto para o Derek**, não escolhido por conta própria.
+
+**Os `avisos` aparecem na linha do carro.** Eles não impedem a
+gravação — dizem por que o carro entrou em *avaliação* em vez de
+*disponível* (falta foto, falta valor alvo), e é isso que alguém
+precisa ler para resolver. O 422 mostra a lista de campos recusados;
+engoli-la obrigaria a abrir o log da Vercel com o cliente esperando.
