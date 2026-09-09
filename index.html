@@ -5566,10 +5566,15 @@ function NovoAtendimento({ perfil, aoCriar, aoCancelar }) {
   const criar = async () => {
     setErro(""); setIndo(true);
     try {
+      // O id é o do negociador ESCOLHIDO no campo, não o de quem está
+      // logado. Gravava o de quem abriu a tela, então um atendimento
+      // aberto pelo gerente para o André ficava com o nome do André e o
+      // id do gerente — e os dois discordavam em toda consulta.
+      const escolhido = equipe.filter((n) => n.nome === d.negociador_nome)[0];
       const novo = await criarAtendimento({
         ...d,
         status: "cliente_na_loja",
-        negociador_id: perfil ? perfil.id : null,
+        negociador_id: (escolhido && escolhido.id) || (perfil ? perfil.id : null),
         negociador_nome: d.negociador_nome || (perfil ? perfil.nome : null),
         data: new Date().toISOString().slice(0, 10),
       });
@@ -7273,6 +7278,9 @@ function CRM({ perfil, aoAbrir, mes }) {
   const [status, setStatus] = useState("");
   const [busca, setBusca] = useState("");
   const [novo, setNovo] = useState(false);
+  const [neg, setNeg] = useState("");
+  const [equipe, setEquipe] = useState([]);
+  useEffect(() => { listarNegociadores().then(setEquipe).catch(() => {}); }, []);
 
   const carregar = async (filtros) => {
     setCarregando(true); setErro("");
@@ -7282,7 +7290,7 @@ function CRM({ perfil, aoAbrir, mes }) {
   };
 
   const filtrosAtuais = (extra) => {
-    const f = { status, ...(extra || {}) };
+    const f = { status, negociador_nome: neg || undefined, ...(extra || {}) };
     if (comp) {
       const { de, ate } = faixaDoMes(comp);
       f.de = de; f.ate = ate;
@@ -7290,7 +7298,7 @@ function CRM({ perfil, aoAbrir, mes }) {
     return f;
   };
 
-  useEffect(() => { carregar(filtrosAtuais({ q: busca })); }, [status, comp]);
+  useEffect(() => { carregar(filtrosAtuais({ q: busca })); }, [status, comp, neg]);
 
   const buscar = (ev) => { if (ev) ev.preventDefault(); carregar(filtrosAtuais({ q: busca })); };
 
@@ -7300,10 +7308,28 @@ function CRM({ perfil, aoAbrir, mes }) {
     return c;
   }, [lista]);
 
+  /**
+   * Os nomes do filtro: o cadastro MAIS quem aparece na lista sem
+   * estar nele.
+   *
+   * Só o cadastro esconderia os atendimentos importados da planilha,
+   * cujo negociador é texto solto — e são a maior parte da história.
+   * É a mesma regra do "sem meta" na régua do mês (decisão 22):
+   * esconder a linha para manter a lista bonita esconde atendimento.
+   */
+  const nomesNeg = useMemo(() => {
+    const vistos = {};
+    equipe.filter((n) => n.ativo && (n.papel === "negociador" || n.papel === "gerente"))
+      .forEach((n) => { vistos[n.nome] = true; });
+    lista.forEach((a) => { if (a.negociador_nome) vistos[a.negociador_nome] = true; });
+    return Object.keys(vistos).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  }, [equipe, lista]);
+
   return (
     <div>
       <Cabecalho titulo="Atendimentos"
-        sub={`${contas.total} na lista · ${contas.fechado || 0} fechados · ${contas.aguardando_propostas || 0} esperando proposta`}
+        sub={`${contas.total} na lista · ${contas.fechado || 0} fechados · ${contas.aguardando_propostas || 0} esperando proposta`
+          + (neg ? ` · ${neg === "__sem__" ? "sem negociador" : neg}` : "")}
         mes={mes}
         acao={!novo && <BotaoPrimario onClick={() => setNovo(true)}>Novo atendimento</BotaoPrimario>} />
 
@@ -7321,6 +7347,24 @@ function CRM({ perfil, aoAbrir, mes }) {
           <button type="submit" className="shrink-0 rounded-lg border px-4 text-[14px] font-semibold"
             style={{ borderColor: C.line, color: C.roxo }}>Buscar</button>
         </form>
+
+        {/* O negociador ao lado da busca, não escondido num "mais
+            filtros": "como foi o mês do André" é pergunta de toda
+            segunda-feira. */}
+        <div className="mt-2 flex items-center gap-2">
+          <span className="shrink-0 text-[12px]" style={{ color: C.mute }}>Negociador</span>
+          <select className="min-w-0 flex-1 rounded-lg border px-2 py-1.5 text-[13px] outline-none"
+            style={inputSty} value={neg} onChange={(e) => setNeg(e.target.value)}>
+            <option value="">Todos</option>
+            {nomesNeg.map((n) => <option key={n} value={n}>{n}</option>)}
+            <option value="__sem__">— sem negociador —</option>
+          </select>
+          {neg && (
+            <button onClick={() => setNeg("")} className="shrink-0 text-[12px] font-semibold" style={{ color: C.roxo }}>
+              limpar
+            </button>
+          )}
+        </div>
         {/* No celular a fila rola; no desktop cabe em duas linhas e
             rolar seria esconder metade dos status. */}
         <div className="rolar -mx-3 mt-3 flex gap-1.5 overflow-x-auto px-3 lg:mx-0 lg:flex-wrap lg:overflow-visible lg:px-0">

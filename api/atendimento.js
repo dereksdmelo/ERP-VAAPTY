@@ -6,7 +6,8 @@
  * POST                     abre um atendimento
  * PATCH ?id=               atualiza
  *
- * Filtros do GET de lista: status, origem, negociador_id, de, ate, q
+ * Filtros do GET de lista: status, origem, negociador_id,
+ * negociador_nome (ou `__sem__`), de, ate, q
  * (q busca em cliente, carro e placa), limite.
  *
  * ?recurso=indicacoes      GET lista · POST cria · PATCH ?id= atualiza
@@ -565,6 +566,12 @@ module.exports = async function handler(req, res) {
       const de = data(req.query.de);
       const ate = data(req.query.ate);
       const neg = String(req.query.negociador_id || "");
+      // Pelo NOME, e não só pelo id, porque é o nome que existe: dos
+      // 267 atendimentos, 4 têm negociador_id. O resto veio da planilha
+      // do CRM, onde o negociador é texto — filtrar só por id deixaria
+      // o filtro sem nada para achar. Os parênteses e a vírgula saem
+      // pelo mesmo motivo do `q`: quebram a sintaxe do PostgREST.
+      const negNome = String(req.query.negociador_nome || "").replace(/[(),*]/g, " ").trim();
       const q = String(req.query.q || "").trim();
 
       if (status) f.push(`status=eq.${status}`);
@@ -572,6 +579,11 @@ module.exports = async function handler(req, res) {
       if (de) f.push(`data=gte.${de}`);
       if (ate) f.push(`data=lte.${ate}`);
       if (RX_UUID.test(neg)) f.push(`negociador_id=eq.${neg}`);
+      // `__sem__` é o "sem negociador" da tela. Sem ele, os 263 sem
+      // dono ficariam invisíveis em qualquer filtro — e são justamente
+      // os que precisam de alguém para reivindicá-los.
+      if (negNome === "__sem__") f.push("negociador_nome=is.null");
+      else if (negNome) f.push(`negociador_nome=ilike.${encodeURIComponent(negNome)}`);
       if (q) {
         // Vírgula e parêntese quebram a sintaxe do or= do PostgREST.
         const t = q.replace(/[(),*]/g, " ").trim();
