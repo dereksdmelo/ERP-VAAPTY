@@ -163,6 +163,148 @@ const ROTULOS = [
   "Laudo cautelar", "Comprovante de pagamento", "Contrato assinado", "Outro",
 ];
 
+/**
+ * O envio do carro para o Shinkai.
+ *
+ * **Por que isto mora no api/foto.js e não no api/veiculo.js**, que é
+ * onde o estoque vive: o Shinkai pede as fotos como URLs que ele possa
+ * baixar, e o bucket é privado. Assinar link é a única coisa que usa a
+ * `SUPABASE_SERVICE_KEY`, e a decisão 9 confina essa chave a este
+ * arquivo. Levar o envio para outro lugar significaria espalhar a
+ * chave — que é exatamente o que aquela decisão evita.
+ *
+ * O link assinado vale 1 h. É de sobra: o Shinkai **baixa e guarda
+ * cópia** na hora do POST, então o que precisa estar de pé é o momento
+ * da chamada, não o dia seguinte.
+ *
+ * A chave da conta (`SHINKAI_API_KEY`) só existe em variável de
+ * ambiente. Não está no repositório, não vai ao navegador, não aparece
+ * em log — mesma regra do ZapSign. O GET responde apenas se ela
+ * existe, nunca o valor: sem esse teste, descobrir que a variável não
+ * subiu seria errar com o carro já no pátio.
+ */
+const SHINKAI_URL = "https://www.shinkai.com.br/api/public/veiculo";
+const SHINKAI_KEY = process.env.SHINKAI_API_KEY || "";
+const SHINKAI_ORIGEM = process.env.SHINKAI_ORIGEM || "vaapty-joinville";
+
+const numeroOuNulo = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+};
+
+async function shinkai(req, res, tok) {
+  if (req.method === "GET") return res.status(200).json({ configurado: !!SHINKAI_KEY });
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "GET, POST");
+    return res.status(405).json({ erro: "Use GET ou POST." });
+  }
+  if (!SHINKAI_KEY) {
+    return res.status(503).json({
+      erro: "A chave do Shinkai não está configurada. Ela vai em SHINKAI_API_KEY, nas variáveis de ambiente da Vercel.",
+    });
+  }
+
+  const eid = String(req.query.estoque_id || "");
+  if (!RX_UUID.test(eid)) return res.status(400).json({ erro: "estoque_id inválido." });
+
+  // A leitura vai pelo TOKEN DO USUÁRIO: é a RLS que decide se esta
+  // pessoa enxerga este carro. A chave de serviço entra depois, e só
+  // para assinar os links das fotos.
+  const achado = await banco(
+    `${REST("estoque")}?select=id,valor_compra,preco_pedido,veiculo(id,placa,chassi,marca_modelo,` +
+    `ano_fabricacao,ano_modelo,cor,combustivel,cambio,km_atual,fipe_codigo,fipe_valor,leilao_sinistro,gnv)` +
+    `&id=eq.${eid}&limit=1`,
+    { headers: cabecalhos(tok) }
+  );
+  const e = Array.isArray(achado) ? achado[0] : null;
+  if (!e || !e.veiculo) return res.status(404).json({ erro: "Carro não encontrado no estoque." });
+  const v = e.veiculo;
+  if (!v.placa) return res.status(400).json({ erro: "O carro precisa de placa para ir ao Shinkai." });
+
+  const fotos = await banco(
+    `${REST("foto")}?select=caminho,ordem&veiculo_id=eq.${v.id}&order=ordem.asc`,
+    { headers: cabecalhos(tok) }
+  ) || [];
+  const links = await assinar(fotos.map((f) => f.caminho));
+  const urls = fotos.map((f) => links[f.caminho]).filter(Boolean);
+
+  // O ano vai como "2009/2010" quando os dois diferem — é o formato que
+  // eles leem e devolvem separado.
+  const ano = v.ano_fabricacao && v.ano_modelo && v.ano_fabricacao !== v.ano_modelo
+    ? `${v.ano_fabricacao}/${v.ano_modelo}`
+    : String(v.ano_modelo || v.ano_fabricacao || "");
+
+  const corpo = {
+    origem: SHINKAI_ORIGEM,
+    veiculo: {
+      placa: v.placa,
+      chassi: v.chassi || undefined,
+      // `marca_modelo` inteiro: a nossa coluna é uma string só, e a
+      // documentação diz que eles separam. Mandar um "marca" chutado a
+      // partir do primeiro token erraria em Land Rover e Alfa Romeo —
+      // o mesmo tropeço dos canais de preço.
+      marca_modelo: v.marca_modelo || undefined,
+      ano_modelo: ano || undefined,
+      cor: v.cor || undefined,
+      combustivel: v.combustivel || undefined,
+      cambio: v.cambio || undefined,
+      km_atual: numeroOuNulo(v.km_atual) || undefined,
+      fipe_codigo: v.fipe_codigo || undefined,
+      fipe_valor: numeroOuNulo(v.fipe_valor) || undefined,
+      // "o que a loja pagou … é o alvo da negociação", pela
+      // documentação deles. É o nosso `valor_compra`.
+      valor_investimento: numeroOuNulo(e.valor_compra) || undefined,
+      leilao_sinistro: !!v.leilao_sinistro,
+      gnv: !!v.gnv,
+      fotos: urls.length ? urls : undefined,
+    },
+  };
+
+  let r;
+  try {
+    r = await fetch(SHINKAI_URL, {
+      method: "POST",
+      headers: { "x-api-key": SHINKAI_KEY, "content-type": "application/json" },
+      body: JSON.stringify(corpo),
+    });
+  } catch (err) {
+    return res.status(502).json({ erro: "Não consegui falar com o Shinkai." });
+  }
+  const texto = await r.text();
+  let d = null;
+  try { d = texto ? JSON.parse(texto) : null; } catch (err) {}
+
+  if (!r.ok) {
+    // Os erros de campo vêm em `erros`, e é isso que resolve o problema
+    // de quem está com o carro na frente. Engolir a lista e dizer só
+    // "falhou" obrigaria a abrir o log da Vercel.
+    const detalhe = d && Array.isArray(d.erros) ? d.erros.join(" · ") : "";
+    const msg = r.status === 401 ? "O Shinkai recusou a chave (401). Confira SHINKAI_API_KEY."
+      : r.status === 422 ? `O Shinkai não aceitou os dados: ${detalhe || "sem detalhe"}`
+      : `O Shinkai respondeu ${r.status}.${detalhe ? ` ${detalhe}` : ""}`;
+    return res.status(502).json({ erro: limpar(msg), erros: (d && d.erros) || null });
+  }
+
+  // O que voltou fica gravado: sem isso ninguém sabe se o carro já
+  // está lá, e reenviar vira adivinhação.
+  await banco(`${REST("estoque")}?id=eq.${eid}`, {
+    method: "PATCH",
+    headers: json(tok),
+    body: JSON.stringify({
+      shinkai_id: (d && d.id) || null,
+      shinkai_status: (d && d.status) || null,
+      shinkai_em: new Date().toISOString(),
+    }),
+  }).catch(() => {});
+
+  return res.status(200).json({
+    ok: true,
+    id: d && d.id, acao: d && d.acao, status: d && d.status,
+    fotos: d && d.fotos, avisos: (d && d.avisos) || [],
+    fotos_enviadas: urls.length,
+  });
+}
+
 const ZAPSIGN = "https://api.zapsign.com.br/api/v1";
 const ZAP_TOKEN = process.env.ZAPSIGN_TOKEN || "";
 
@@ -394,6 +536,11 @@ module.exports = async function handler(req, res) {
 
   const tok = tokenDe(req);
   if (!tok) return res.status(401).json(SEM_LOGIN);
+
+  if (String(req.query.recurso || "") === "shinkai") {
+    try { return await shinkai(req, res, tok); }
+    catch (e) { return res.status(e.status || 500).json({ erro: limpar(e.message) || "Falha no envio ao Shinkai." }); }
+  }
 
   if (String(req.query.recurso || "") === "anexo") {
     try { return await anexos(req, res, tok); }

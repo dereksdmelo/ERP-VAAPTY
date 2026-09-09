@@ -489,6 +489,21 @@ async function atualizarNegociador(id, dados) {
 // Os três recursos moram sob /api/veiculo pelo teto de 12 funções da
 // Vercel. É o mesmo truque das indicações em /api/atendimento e da
 // meta da loja em /api/perfil.
+/* ----------- Shinkai (0030) ----------- */
+// Mora sob /api/foto porque é lá que a chave de serviço vive, e o
+// Shinkai precisa das fotos como link que ele consiga baixar.
+async function shinkaiConfigurado() {
+  const r = await fetchAut("/api/foto?recurso=shinkai");
+  const d = await r.json().catch(() => ({}));
+  return !!d.configurado;
+}
+async function enviarAoShinkai(estoqueId) {
+  const r = await fetchAut(`/api/foto?recurso=shinkai&estoque_id=${encodeURIComponent(estoqueId)}`, { method: "POST" });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui enviar ao Shinkai.");
+  return d;
+}
+
 async function listarEstoque(situacao) {
   const q = comoQuery({ recurso: "estoque", situacao });
   const r = await fetchAut(`/api/veiculo?${q}`);
@@ -8836,12 +8851,35 @@ function TelaVendaLojistas({ perfil }) {
   const [compradores, setCompradores] = useState([]);
   const [vendendo, setVendendo] = useState(null);
   const [ordem, setOrdem] = useState("patio");
+  const [zap, setZap] = useState(null);          // chave do Shinkai configurada?
+  const [indoShinkai, setIndoShinkai] = useState("");
+  const [respShinkai, setRespShinkai] = useState({});
 
   const carregar = () => {
     setErro("");
     listarEstoque("em_estoque").then(setLista).catch((e) => setErro(e.message));
   };
-  useEffect(() => { carregar(); listarCompradores().then(setCompradores).catch(() => {}); }, []);
+  useEffect(() => {
+    carregar();
+    listarCompradores().then(setCompradores).catch(() => {});
+    // Saber ANTES se a chave existe: descobrir que ela não subiu no
+    // meio do envio seria errar com o carro já no pátio.
+    shinkaiConfigurado().then(setZap).catch(() => setZap(false));
+  }, []);
+
+  const mandarShinkai = async (e) => {
+    setIndoShinkai(e.id);
+    setRespShinkai((x) => ({ ...x, [e.id]: null }));
+    try {
+      const d = await enviarAoShinkai(e.id);
+      setRespShinkai((x) => ({ ...x, [e.id]: d }));
+      if (!e.anunciado_em) await atualizarEstoque(e.id, { anunciado_em: true });
+      await carregar();
+    } catch (ex) {
+      setRespShinkai((x) => ({ ...x, [e.id]: { erro: ex.message } }));
+    }
+    setIndoShinkai("");
+  };
 
   const mexer = async (e, mud) => {
     setLista((ls) => ls.map((x) => (x.id === e.id ? { ...x, ...mud } : x)));
@@ -8947,14 +8985,29 @@ function TelaVendaLojistas({ perfil }) {
                   className="rounded-lg px-3 py-2 font-semibold" style={{ border: `1px solid ${C.verde}`, color: C.verde }}>
                   {copiado === `d${e.id}` ? "descritivo copiado" : "Copiar descritivo"}
                 </button>
-                <button onClick={async () => {
-                    await copiar(JSON.stringify(payloadShinkai(f, fotos), null, 2), `s${e.id}`);
-                    window.open(SHINKAI_PAINEL, "_blank", "noopener");
-                    if (!e.anunciado_em) mexer(e, { anunciado_em: true });
-                  }}
-                  className="rounded-lg px-3 py-2 font-semibold" style={{ background: C.roxo, color: "#fff" }}>
-                  {copiado === `s${e.id}` ? "JSON copiado · Shinkai aberto" : "Levar para o Shinkai"}
-                </button>
+                {/* Com a chave configurada o carro vai por API: um POST
+                    por carro, e reenviar a mesma placa atualiza lá em vez
+                    de duplicar. Sem a chave, sobra o caminho antigo —
+                    copiar o JSON e colar no painel —, e o botão diz isso
+                    em vez de falhar em silêncio. */}
+                {zap === false ? (
+                  <button onClick={async () => {
+                      await copiar(JSON.stringify(payloadShinkai(f, fotos), null, 2), `s${e.id}`);
+                      window.open(SHINKAI_PAINEL, "_blank", "noopener");
+                      if (!e.anunciado_em) mexer(e, { anunciado_em: true });
+                    }}
+                    className="rounded-lg px-3 py-2 font-semibold" style={{ background: C.roxo, color: "#fff" }}>
+                    {copiado === `s${e.id}` ? "JSON copiado · Shinkai aberto" : "Copiar JSON do Shinkai"}
+                  </button>
+                ) : (
+                  <button onClick={() => mandarShinkai(e)} disabled={indoShinkai === e.id || zap === null}
+                    className="rounded-lg px-3 py-2 font-semibold"
+                    style={{ background: indoShinkai === e.id || zap === null ? C.line : C.roxo, color: "#fff" }}>
+                    {indoShinkai === e.id ? "Enviando…"
+                      : zap === null ? "Conferindo a chave…"
+                      : e.shinkai_em ? "Reenviar ao Shinkai" : "Enviar ao Shinkai"}
+                  </button>
+                )}
                 <button onClick={() => setEnviando(enviando === e.id ? null : e.id)} style={{ color: C.roxo, fontWeight: 600 }}>
                   mandar para um lojista
                 </button>
@@ -8963,11 +9016,41 @@ function TelaVendaLojistas({ perfil }) {
                 ) : (
                   <span className="text-[12px]" style={{ color: C.laranja, fontWeight: 600 }}>ainda não anunciado</span>
                 )}
+                {e.shinkai_em && (
+                  <span className="text-[12px]" style={{ color: e.shinkai_status === "disponivel" ? C.verde : AMARELO.texto }}>
+                    no Shinkai {diaBR(e.shinkai_em)}{e.shinkai_status ? ` · ${e.shinkai_status}` : ""}
+                  </span>
+                )}
                 <button onClick={() => setVendendo(vendendo === e.id ? null : e.id)}
                   className="ml-auto rounded-lg px-4 py-2 font-semibold" style={{ background: C.verde, color: "#fff" }}>
                   Vender
                 </button>
               </div>
+
+              {/* A resposta do Shinkai, na própria linha do carro. Os
+                  `avisos` não impedem a gravação — dizem por que o carro
+                  entrou em avaliação em vez de disponível, e é isso que
+                  alguém precisa ler para resolver. */}
+              {respShinkai[e.id] && (
+                <div className="mt-2 rounded-lg px-3 py-2 text-[12px]"
+                  style={{ background: respShinkai[e.id].erro ? "#FDEDE6" : C.bg,
+                           border: `1px solid ${respShinkai[e.id].erro ? C.laranja : C.line}` }}>
+                  {respShinkai[e.id].erro ? (
+                    <span style={{ color: C.laranja }}>{respShinkai[e.id].erro}</span>
+                  ) : (
+                    <>
+                      <span style={{ color: respShinkai[e.id].status === "disponivel" ? C.verde : AMARELO.texto, fontWeight: 600 }}>
+                        {respShinkai[e.id].acao === "criado" ? "Criado" : "Atualizado"} no Shinkai
+                        {respShinkai[e.id].status ? ` · ${respShinkai[e.id].status}` : ""}
+                        {` · ${respShinkai[e.id].fotos_enviadas} foto${respShinkai[e.id].fotos_enviadas === 1 ? "" : "s"} enviada${respShinkai[e.id].fotos_enviadas === 1 ? "" : "s"}`}
+                      </span>
+                      {(respShinkai[e.id].avisos || []).map((av, k) => (
+                        <span key={k} className="mt-0.5 block" style={{ color: AMARELO.texto }}>{av}</span>
+                      ))}
+                    </>
+                  )}
+                </div>
+              )}
 
               {/* ---- mandar para um lojista do cadastro ---- */}
               {enviando === e.id && (
