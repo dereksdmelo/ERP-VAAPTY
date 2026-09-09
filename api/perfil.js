@@ -14,7 +14,13 @@
  * /api/perfil?recurso=negociadores
  *
  *   GET            lista o cadastro de negociadores e prospecção
- *   POST           cadastra { nome, papel, meta_valor, meta_volume }
+ *   POST           cadastra { nome, papel } e a meta da cadeia do papel:
+ *                  negociador  → meta_atendimentos, meta_conversao, meta_ticket
+ *                  prospeccao  → meta_prospeccoes, meta_conv_agendamento,
+ *                                meta_conv_comparecimento
+ *                  Os resultados (meta_valor, meta_volume,
+ *                  meta_agendamentos, meta_comparecimentos) são
+ *                  DERIVADOS aqui e nunca aceitos do cliente.
  *   PATCH ?id=     edita
  *
  * Mora aqui, e não em arquivo próprio, porque o plano Hobby da Vercel
@@ -69,6 +75,7 @@ const numero = (v) => {
 };
 
 const CAMPOS_META = ["meta_atendimentos", "meta_conversao", "meta_ticket"];
+const CAMPOS_META_PRE = ["meta_prospeccoes", "meta_conv_agendamento", "meta_conv_comparecimento"];
 
 /**
  * O faturamento é consequência, não entrada (0018).
@@ -90,6 +97,28 @@ function derivarMeta(atendimentos, conversao, ticket) {
   const t = Math.max(0, Number(ticket) || 0);
   const volume = Math.round((a * c) / 100);
   return { meta_volume: volume, meta_valor: Math.round(volume * t * 100) / 100 };
+}
+
+/**
+ * A pré-venda tem outra cadeia (0031).
+ *
+ *     prospecções × conv. agendamento = agendamentos
+ *     agendamentos × conv. comparecimento = clientes na loja
+ *
+ * Quem prospecta não vende carro, traz gente — e por isso os três
+ * campos do negociador davam "R$ 0 · 30 carros" no cartão dela, que
+ * não é meta de ninguém.
+ *
+ * O agendamento é arredondado ANTES de virar comparecimento, pela
+ * mesma razão da 0018: é o número que a pessoa persegue no dia, e a
+ * conta na tela tem que fechar com ele.
+ */
+function derivarMetaPre(prospeccoes, convAgenda, convCompar) {
+  const p = Math.max(0, Math.trunc(Number(prospeccoes) || 0));
+  const a = Math.max(0, Number(convAgenda) || 0);
+  const c = Math.max(0, Number(convCompar) || 0);
+  const agendamentos = Math.round((p * a) / 100);
+  return { meta_agendamentos: agendamentos, meta_comparecimentos: Math.round((agendamentos * c) / 100) };
 }
 
 async function lerCorpo(req) {
@@ -121,7 +150,8 @@ async function negociadores(req, res, tok) {
 
   if (req.method === "GET") {
     const r = await fetch(`${base}?select=id,nome,papel,ativo,meta_valor,meta_volume,` +
-      `${CAMPOS_META.join(",")}&order=papel.asc,nome.asc`, { headers: cab });
+      `meta_agendamentos,meta_comparecimentos,` +
+      `${CAMPOS_META.concat(CAMPOS_META_PRE).join(",")}&order=papel.asc,nome.asc`, { headers: cab });
     const d = await responder(r);
     if (d === undefined || res.writableEnded) return;
     return res.status(200).json({ negociadores: d || [] });
@@ -142,6 +172,12 @@ async function negociadores(req, res, tok) {
       linha.meta_ticket = numero(c.meta_ticket) || 0;
       Object.assign(linha, derivarMeta(linha.meta_atendimentos, linha.meta_conversao, linha.meta_ticket));
     }
+    if (CAMPOS_META_PRE.some((k) => c[k] !== undefined)) {
+      linha.meta_prospeccoes = Math.trunc(numero(c.meta_prospeccoes) || 0);
+      linha.meta_conv_agendamento = numero(c.meta_conv_agendamento) || 0;
+      linha.meta_conv_comparecimento = numero(c.meta_conv_comparecimento) || 0;
+      Object.assign(linha, derivarMetaPre(linha.meta_prospeccoes, linha.meta_conv_agendamento, linha.meta_conv_comparecimento));
+    }
     const r = await fetch(base, { method: "POST", headers: { ...cabJson, Prefer: "return=representation" }, body: JSON.stringify(linha) });
     const d = await responder(r);
     if (d === undefined || res.writableEnded) return;
@@ -161,15 +197,26 @@ async function negociadores(req, res, tok) {
     // Só recalcula quando um dos três chega. Sem esta guarda, um
     // "desativar" — que manda apenas `ativo` — zeraria a meta de quem
     // ainda está com os R$ 70.000 herdados do padrão antigo.
-    if (CAMPOS_META.some((k) => c[k] !== undefined)) {
-      const atual = await fetch(`${base}?id=eq.${id}&select=${CAMPOS_META.join(",")}`, { headers: cab });
+    // Uma ida ao banco só, mesmo quando as duas cadeias mudam: são dois
+    // grupos de campo na mesma linha.
+    const mexeuNeg = CAMPOS_META.some((k) => c[k] !== undefined);
+    const mexeuPre = CAMPOS_META_PRE.some((k) => c[k] !== undefined);
+    if (mexeuNeg || mexeuPre) {
+      const quero = (mexeuNeg ? CAMPOS_META : []).concat(mexeuPre ? CAMPOS_META_PRE : []);
+      const atual = await fetch(`${base}?id=eq.${id}&select=${quero.join(",")}`, { headers: cab });
       const linhas = atual.ok ? await atual.json().catch(() => []) : [];
       const antes = (Array.isArray(linhas) ? linhas[0] : null) || {};
-      CAMPOS_META.forEach((k) => {
+      quero.forEach((k) => {
         mud[k] = c[k] !== undefined ? (numero(c[k]) || 0) : (Number(antes[k]) || 0);
       });
-      mud.meta_atendimentos = Math.trunc(mud.meta_atendimentos);
-      Object.assign(mud, derivarMeta(mud.meta_atendimentos, mud.meta_conversao, mud.meta_ticket));
+      if (mexeuNeg) {
+        mud.meta_atendimentos = Math.trunc(mud.meta_atendimentos);
+        Object.assign(mud, derivarMeta(mud.meta_atendimentos, mud.meta_conversao, mud.meta_ticket));
+      }
+      if (mexeuPre) {
+        mud.meta_prospeccoes = Math.trunc(mud.meta_prospeccoes);
+        Object.assign(mud, derivarMetaPre(mud.meta_prospeccoes, mud.meta_conv_agendamento, mud.meta_conv_comparecimento));
+      }
     }
     if (!Object.keys(mud).length) return res.status(400).json({ erro: "Nada para atualizar." });
     const r = await fetch(`${base}?id=eq.${id}`, { method: "PATCH", headers: { ...cabJson, Prefer: "return=representation" }, body: JSON.stringify(mud) });

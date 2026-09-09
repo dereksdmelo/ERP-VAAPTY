@@ -7144,8 +7144,13 @@ function CadastroNegociadores({ perfil, competencia, aoMudarMetaLoja }) {
               style={{ background: n.ativo ? "#fff" : "#FBFAFC", border: `1px solid ${C.line}`, opacity: n.ativo ? 1 : 0.55 }}>
               <div className="flex items-center gap-2">
               <span className="flex-1 text-[13px] font-medium">{n.nome}</span>
+              {/* O resultado do papel: o negociador fatura, a pré-venda
+                  traz gente. Mostrar "R$ 0 · 30 carros" para quem
+                  prospecta era o defeito — não é meta de ninguém. */}
               <span className="text-[11px]" style={{ color: C.mute, fontFamily: F.mono }}>
-                {brl(n.meta_valor)} · {n.meta_volume} carros
+                {papel === "prospeccao"
+                  ? `${n.meta_comparecimentos || 0} na loja · ${n.meta_agendamentos || 0} agend.`
+                  : `${brl(n.meta_valor)} · ${n.meta_volume} carros`}
               </span>
               {eGerente && (
                 <button onClick={() => mexer(n.id, { ativo: !n.ativo })} className="text-[11px]"
@@ -7162,19 +7167,44 @@ function CadastroNegociadores({ perfil, competencia, aoMudarMetaLoja }) {
               {eGerente && (
                 <>
                   {/* O resultado não se repete aqui: ele já está no
-                      cabeçalho da linha, e é o que o servidor gravou. */}
-                  <div className="mt-2 flex items-end gap-1.5">
-                    {campoMeta(n, "meta_atendimentos", "Atend.", 64)}
-                    <span className="pb-1.5 text-[11px]" style={{ color: C.mute }}>×</span>
-                    {campoMeta(n, "meta_conversao", "Conv. %", 64)}
-                    <span className="pb-1.5 text-[11px]" style={{ color: C.mute }}>×</span>
-                    {campoMeta(n, "meta_ticket", "Ticket R$", 92)}
+                      cabeçalho da linha, e é o que o servidor gravou.
+
+                      Duas cadeias, uma por papel. A da pré-venda é
+                      prospecções × conv. agendamento × conv.
+                      comparecimento = cliente na loja: quem prospecta
+                      não vende carro, traz gente. */}
+                  <div className="mt-2 flex flex-wrap items-end gap-1.5">
+                    {papel === "prospeccao" ? (
+                      <>
+                        {campoMeta(n, "meta_prospeccoes", "Prospec.", 72)}
+                        <span className="pb-1.5 text-[11px]" style={{ color: C.mute }}>×</span>
+                        {campoMeta(n, "meta_conv_agendamento", "→ agend. %", 78)}
+                        <span className="pb-1.5 text-[11px]" style={{ color: C.mute }}>×</span>
+                        {campoMeta(n, "meta_conv_comparecimento", "→ veio %", 72)}
+                      </>
+                    ) : (
+                      <>
+                        {campoMeta(n, "meta_atendimentos", "Atend.", 64)}
+                        <span className="pb-1.5 text-[11px]" style={{ color: C.mute }}>×</span>
+                        {campoMeta(n, "meta_conversao", "Conv. %", 64)}
+                        <span className="pb-1.5 text-[11px]" style={{ color: C.mute }}>×</span>
+                        {campoMeta(n, "meta_ticket", "Ticket R$", 92)}
+                      </>
+                    )}
                   </div>
-                  {!Number(n.meta_atendimentos) && Number(n.meta_valor) > 0 && (
-                    <p className="mt-1 text-[10px] leading-snug" style={{ color: C.laranja }}>
-                      Os {brl(n.meta_valor)} vieram do cadastro antigo. Preencha os três campos para a meta
-                      passar a sair deles.
+                  {papel === "prospeccao" ? (
+                    <p className="mt-1 text-[10px] leading-snug" style={{ color: C.mute }}>
+                      {Number(n.meta_prospeccoes)
+                        ? `${n.meta_prospeccoes} prospecções viram ${n.meta_agendamentos || 0} agendamentos e ${n.meta_comparecimentos || 0} clientes na loja.`
+                        : "Quantas prospecções por mês, quanto disso vira agendamento, e quanto do agendamento vem à loja."}
                     </p>
+                  ) : (
+                    !Number(n.meta_atendimentos) && Number(n.meta_valor) > 0 && (
+                      <p className="mt-1 text-[10px] leading-snug" style={{ color: C.laranja }}>
+                        Os {brl(n.meta_valor)} vieram do cadastro antigo. Preencha os três campos para a meta
+                        passar a sair deles.
+                      </p>
+                    )
                   )}
                 </>
               )}
@@ -7242,7 +7272,7 @@ function CadastroNegociadores({ perfil, competencia, aoMudarMetaLoja }) {
       </div>
 
       {grupo("negociador", "Negociadores")}
-      {grupo("prospeccao", "Prospecção")}
+      {grupo("prospeccao", "Pré-vendas · prospecção")}
 
       {eGerente && (
         <div className="mt-3 space-y-2">
@@ -7252,7 +7282,7 @@ function CadastroNegociadores({ perfil, competencia, aoMudarMetaLoja }) {
             <select className={inputCls} style={inputSty} value={novo.papel}
               onChange={(e) => setNovo({ ...novo, papel: e.target.value })}>
               <option value="negociador">Negociador</option>
-              <option value="prospeccao">Prospecção</option>
+              <option value="prospeccao">Pré-vendas</option>
             </select>
           </div>
           <button onClick={cadastrar} disabled={indo || !novo.nome.trim()}
