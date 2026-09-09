@@ -1791,3 +1791,43 @@ gravação — dizem por que o carro entrou em *avaliação* em vez de
 *disponível* (falta foto, falta valor alvo), e é isso que alguém
 precisa ler para resolver. O 422 mostra a lista de campos recusados;
 engoli-la obrigaria a abrir o log da Vercel com o cliente esperando.
+
+### 37. A meta da pré-venda é outra cadeia
+
+O cadastro dava a todo mundo os três campos do negociador, e na
+pré-venda isso produzia **"R$ 0 · 30 carros"** — que não é meta de
+ninguém. Quem prospecta não vende carro: traz gente para a loja.
+
+```
+prospecções × conv. agendamento × conv. comparecimento
+    = clientes trazidos à loja
+```
+
+Mesma ideia da 0018: digita-se o que a pessoa controla, e o resultado
+é **derivado no servidor** (`derivarMetaPre`). `meta_agendamentos` fica
+no meio porque é o número que a pré-venda persegue no dia;
+`meta_comparecimentos` é a meta de verdade. Quem escrever direto neles
+cria duas verdades para a mesma meta.
+
+**O agendamento é arredondado antes de virar comparecimento**, pelo
+mesmo motivo da 0018: é o número que a pessoa persegue, e a conta na
+tela tem que fechar com ele.
+
+**O papel decide quais campos aparecem**, e o cartão mostra o resultado
+do papel — "18 na loja · 30 agend." em vez de faturamento. As duas
+cadeias convivem na mesma linha da tabela `negociador`, e o PATCH
+recalcula só a que foi tocada, numa ida ao banco só.
+
+**A meta da loja continua somando só negociador** (decisão 22):
+prospecção não vende, e somá-la inflaria o alvo.
+
+**O que ficou de fora:** o realizado. A meta é só alvo hoje. Os números
+existem em `lead` (0022) — prospecção feita, agendamento marcado,
+"chegou" —, então o previsto × realizado da pré-venda no Painel do mês
+é o passo seguinte, e não foi feito porque o pedido era a meta.
+
+**Pergunta em aberto:** encadear as quatro grandezas foi leitura minha.
+O Derek listou clientes na loja, as duas conversões, e *"além disso"* a
+quantidade de prospecções — se prospecções for meta paralela de
+esforço, e o cliente na loja vier também de lead que chega sozinho, são
+duas metas separadas e uma não deriva da outra.
