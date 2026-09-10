@@ -147,9 +147,16 @@ module.exports = async function handler(req, res) {
    */
   let carros = [];
   try {
-    const urlE = `${URL_BASE}/rest/v1/estoque?select=valor_compra,valor_venda,vendido_em,negociador_nome,` +
-                 `estoque_custo(tipo,previsto,realizado)` +
-                 `&situacao=eq.vendido&vendido_em=gte.${de}&vendido_em=lte.${ate}&limit=${TETO}`;
+    // O mesmo `or=` do `vendidosNoMes()` no api/financeiro.js, e não é
+    // capricho: a planilha de rentabilidade só sabe a SEMANA da venda,
+    // então o carro importado fica com `vendido_em` nulo (decisão 25).
+    // Filtrar só por `vendido_em` perdia justamente os carros que vieram
+    // da planilha — que são os únicos que existem hoje. Nesse caso cai
+    // em `entrou_em`, como o DRE já faz.
+    const urlE = `${URL_BASE}/rest/v1/estoque?select=valor_compra,valor_venda,vendido_em,entrou_em,negociador_nome,` +
+                 `estoque_custo(tipo,previsto,realizado)&situacao=eq.vendido&limit=${TETO}` +
+                 `&or=(and(vendido_em.gte.${de},vendido_em.lte.${ate}),` +
+                 `and(vendido_em.is.null,entrou_em.gte.${de},entrou_em.lte.${ate}))`;
     const r = await fetch(urlE, { headers: { apikey: ANON, Authorization: tok } });
     if (r.ok) carros = JSON.parse((await r.text()) || "[]");
   } catch (e) { carros = []; }
@@ -165,7 +172,7 @@ module.exports = async function handler(req, res) {
 
     // Venda sem data não entra em semana nenhuma: somar tudo na semana
     // 1 daria uma meta semanal mentirosa.
-    const d = Number(String(e.vendido_em || "").slice(8, 10));
+    const d = Number(String(e.vendido_em || e.entrou_em || "").slice(8, 10));
     if (d >= 1 && d <= 31) {
       const semana = Math.min(3, Math.floor((d - 1) / 7));
       if (n) n.semanas[semana] += valor;
