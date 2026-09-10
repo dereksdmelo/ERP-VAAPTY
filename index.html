@@ -11790,7 +11790,7 @@ function VenderCarro({ e, aoVender, aoFechar }) {
   );
 }
 
-function TelaADM({ perfil }) {
+function TelaADM({ perfil, comp, mes }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
   const [foco, setFoco] = useState(null);      // atendimento aberto
@@ -11805,8 +11805,13 @@ function TelaADM({ perfil }) {
     return linha ? linha.adm_conferido_em : null;
   };
 
+  // A fila obedece ao mês do cabeçalho, como o CRM. Sem isso ela
+  // mostrava os 54 fechados de agosto que vieram da planilha e que
+  // ninguém vai conferir — e os de setembro, que são o trabalho de
+  // verdade, ficavam embaixo deles. "Todos os meses" traz de volta:
+  // esconder não é apagar.
   const carregar = () =>
-    listarAtendimentos({ status: "fechado", limite: 200 })
+    listarAtendimentos({ status: "fechado", limite: 200, ...(comp ? faixaDoMes(comp) : {}) })
       .then((ls) => setLista(ls.slice().sort((a, b) => {
         const ca = conferidoEm(a) ? 1 : 0, cb = conferidoEm(b) ? 1 : 0;
         if (ca !== cb) return ca - cb;                    // pendente primeiro
@@ -11814,7 +11819,7 @@ function TelaADM({ perfil }) {
       })))
       .catch((e) => setErro(e.message));
 
-  useEffect(() => { carregar(); }, []);
+  useEffect(() => { carregar(); }, [comp]);
 
   const abrir = async (a) => {
     setFoco(a); setCl(null); setErro(""); setSalvo(false);
@@ -11929,7 +11934,7 @@ function TelaADM({ perfil }) {
 
   return (
     <div>
-      <Cabecalho titulo="Administrativo"
+      <Cabecalho titulo="Administrativo" mes={mes}
         sub={lista ? `${lista.length} fechados · ${pendentes} esperando conferência` : "Carregando…"} />
 
       <div className="space-y-2">
@@ -12344,7 +12349,7 @@ function App() {
       {tela === "rentabilidade" && podeGestao && <TelaEstoque perfil={perfil} comp={compOuAtual} mes={mes} modo="rentabilidade" />}
       {tela === "painel" && <Funil perfil={perfil} comp={compOuAtual} mes={mes} />}
       {tela === "leads" && <LeadsIndicacao />}
-      {tela === "adm" && <TelaADM perfil={perfil} />}
+      {tela === "adm" && <TelaADM perfil={perfil} comp={compOuAtual} mes={mes} />}
       {tela === "gestao" && <TelaGestao perfil={perfil} comp={compOuAtual} />}
       {tela === "financeiro" && <TelaFinanceiro perfil={perfil} comp={compOuAtual} mes={mes} />}
       {tela === "lojistas" && podeGestao && <TelaVendaLojistas perfil={perfil} />}
