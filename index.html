@@ -5831,8 +5831,20 @@ function lerPlanilha(texto) {
 
     const origemBruta = semAcentoMaiusc(pega(l, col.origem));
     const statusBruto = semAcentoMaiusc(pega(l, col.status));
-    if (origemBruta && !DE_ORIGEM[origemBruta]) fora.push(`origem "${pega(l, col.origem)}"`);
-    if (statusBruto && !DE_STATUS[statusBruto]) fora.push(`status "${pega(l, col.status)}"`);
+    // Origem e status fora da lista caem em "outro" e "aberto" — e o
+    // texto original ia junto para o lixo. "JÁ É CLIENTE" e "FACHADA DA
+    // LOJA" são categorias reais da casa que o enum não tem: virando
+    // "outro" em silêncio, some a informação e não há como remapear
+    // depois sem reimportar a planilha inteira. Vai para a observação,
+    // como o motivo e o "quem conseguiu" já vão.
+    if (origemBruta && !DE_ORIGEM[origemBruta]) {
+      fora.push(`origem "${pega(l, col.origem)}"`);
+      recados.push(`Origem na planilha: ${pega(l, col.origem)}`);
+    }
+    if (statusBruto && !DE_STATUS[statusBruto]) {
+      fora.push(`status "${pega(l, col.status)}"`);
+      recados.push(`Status na planilha: ${pega(l, col.status)}`);
+    }
 
     prontas.push({
       data: pega(l, col.data),
