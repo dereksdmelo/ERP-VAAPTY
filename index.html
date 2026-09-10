@@ -6070,7 +6070,13 @@ function Funil({ perfil, comp, mes }) {
             <Num rot="Vendas" v={d.total.vendas} cor={C.verde}
               sub={d.total.conversao != null ? `${d.total.conversao}% do fluxo` : null} />
             <Num rot="FIPE médio" v={d.fipe_medio ? brl(d.fipe_medio) : "—"} />
-            <Num rot="Venda média" v={d.venda_media ? brl(d.venda_media) : "—"} />
+            {/* Margem, não preço: é o que a régua soma, e vem dos carros
+                REVENDIDOS no mês — não dos fechamentos. Um carro é
+                comprado num mês e revendido em outro, então os dois
+                números não se somam, e a tela precisa dizer de onde
+                cada um vem. */}
+            <Num rot="Margem por carro" v={d.venda_media ? brl(d.venda_media) : "—"}
+              sub={d.total.carros_vendidos ? `${d.total.carros_vendidos} revendido${d.total.carros_vendidos === 1 ? "" : "s"}` : "nenhum revendido"} />
           </div>
 
           {!!d.por_origem.length && (
@@ -6796,6 +6802,15 @@ function ReguaDoMes({ d, equipe, metaLoja }) {
               de {brl(meta)} · {(pctMeta * 100).toFixed(1).replace(".", ",")}%
             </span>
           </div>
+          {/* De onde vem o número. Ele conta a MARGEM dos carros
+              revendidos no mês, não os fechamentos — o carro é comprado
+              num mês e sai para o lojista em outro. Sem esta linha,
+              "12 vendas e R$ 0 de faturamento" parece defeito. */}
+          <p className="mt-0.5 text-[10px]" style={{ color: C.mute }}>
+            {realizado
+              ? "Margem dos carros revendidos no mês, pela planilha de rentabilidade."
+              : "Nenhum carro revendido neste mês ainda — a margem entra quando o carro sai para o lojista, não quando o negócio fecha."}
+          </p>
           {porSoma && (
             <p className="mt-1 text-[10px]" style={{ color: C.mute }}>
               Alvo pela soma das metas individuais — a meta da loja ainda não foi definida
