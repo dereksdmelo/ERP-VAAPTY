@@ -324,6 +324,8 @@ function paraLead(c) {
   if (c.status !== undefined && LEAD_STATUS.indexOf(String(c.status)) >= 0) l.status = c.status;
   if (c.negociador_id !== undefined) l.negociador_id = RX_UUID.test(String(c.negociador_id || "")) ? c.negociador_id : null;
   if (c.negociador_nome !== undefined) l.negociador_nome = texto(c.negociador_nome);
+  // "Vai voltar" sem data é promessa que ninguém cobra (0036).
+  if (c.volta_em !== undefined) l.volta_em = data(c.volta_em);
   if (c.prospector_nome !== undefined) l.prospector_nome = texto(c.prospector_nome);
   if (c.proximo_contato !== undefined) l.proximo_contato = data(c.proximo_contato);
   if (c.observacoes !== undefined) l.observacoes = texto(c.observacoes);
@@ -564,6 +566,12 @@ async function viva(req, res, tok) {
       const t = String(c.transcricao || "");
       linha.transcricao = t.length > 120000 ? t.slice(t.length - 120000) : t;
     }
+    // O resultado de `etapaConcluida()`, não a regra: quem decide se a
+    // etapa fechou é a tela do negociador, e reescrever isso aqui faria
+    // o painel cobrar coisa que a tela não pede.
+    if (Array.isArray(c.etapas_ok)) {
+      linha.etapas_ok = c.etapas_ok.filter((x) => typeof x === "string").slice(0, 12);
+    }
     if (Array.isArray(c.rodadas)) {
       linha.rodadas = c.rodadas.slice(0, 20).map((r) => ({
         impresso: decimal(r && r.impresso),
@@ -632,6 +640,111 @@ async function viva(req, res, tok) {
 
   res.setHeader("Allow", "GET, PUT");
   return res.status(405).json({ erro: "Use GET ou PUT." });
+}
+
+/**
+ * A revisão do gestor.
+ *
+ * GET  ?de=&ate=          a fila: atendimentos do período, com a
+ *                         revisão quando existe. Sem linha = pendente.
+ * PUT  { atendimento_id, feedback }   grava o retorno.
+ * PATCH ?atendimento_id=  o negociador marca como lido.
+ *
+ * A fila é toda a lista do período, e não só os fechados: **acompanhar
+ * ao vivo ajuda um atendimento, revisar depois ensina o próximo** — e
+ * o que mais ensina costuma ser o que não fechou.
+ */
+/**
+ * Quem prometeu voltar, e quando.
+ *
+ * É o status mais comum depois de "baixar expectativa", e o único que
+ * deixa um compromisso em aberto. A lista vem ordenada pela data, com
+ * o que já venceu primeiro — o vencido é o que custa dinheiro.
+ */
+async function voltas(req, res, tok) {
+  const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+  const linhas = await banco(
+    `${REST("atendimento")}?select=id,cliente_nome,cliente_telefone,carro_descricao,volta_em,status,negociador_nome,` +
+    `veiculo(placa,marca_modelo)&status=eq.vai_voltar&order=volta_em.asc.nullslast&limit=200`,
+    { headers: cabecalhos(tok) }) || [];
+  return res.status(200).json({
+    hoje,
+    voltas: linhas.map((a) => ({
+      ...a,
+      // `sem_data` é o caso que mais importa: alguém marcou "vai
+      // voltar" e não combinou quando. Some da cobrança e some do
+      // funil junto.
+      sem_data: !a.volta_em,
+      atrasada: !!a.volta_em && a.volta_em < hoje,
+    })),
+  });
+}
+
+async function revisao(req, res, tok) {
+  const REST_R = REST("revisao");
+
+  if (req.method === "PUT") {
+    const c = await lerCorpo(req);
+    const aid = String((c && c.atendimento_id) || "");
+    if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
+    const fb = texto(c && c.feedback);
+    if (!fb) return res.status(400).json({ erro: "Escreva o retorno." });
+    const eu = donoDoToken(tok);
+
+    const r = await banco(`${REST_R}?on_conflict=atendimento_id`, {
+      method: "POST",
+      headers: json(tok, { Prefer: "resolution=merge-duplicates,return=representation" }),
+      body: JSON.stringify({
+        atendimento_id: aid, feedback: fb.slice(0, 4000),
+        revisado_por: eu, revisado_em: new Date().toISOString(),
+        // Reescrever o retorno zera o "ele leu": é outro texto, e o
+        // negociador precisa ver o novo.
+        lida_em: null,
+      }),
+    });
+    const salvo = Array.isArray(r) ? r[0] : r;
+    if (!salvo) return res.status(403).json({ erro: "Só o gerente escreve a revisão." });
+    return res.status(200).json({ ok: true, revisao: salvo });
+  }
+
+  if (req.method === "PATCH") {
+    const aid = String(req.query.atendimento_id || "");
+    if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
+    await banco(`${URL_BASE}/rest/v1/rpc/marcar_feedback_lido`, {
+      method: "POST", headers: json(tok), body: JSON.stringify({ alvo: aid }),
+    }).catch(() => {});
+    return res.status(200).json({ ok: true });
+  }
+
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET, PUT, PATCH");
+    return res.status(405).json({ erro: "Use GET, PUT ou PATCH." });
+  }
+
+  const de = data(req.query.de);
+  const ate = data(req.query.ate);
+  const filtro = [de ? `data=gte.${de}` : "", ate ? `data=lte.${ate}` : ""].filter(Boolean).join("&");
+  const ats = await banco(
+    `${REST("atendimento")}?select=id,cliente_nome,carro_descricao,status,negociador_nome,data,valor_fechado,` +
+    `veiculo(placa,marca_modelo,fipe_valor)&order=data.desc&limit=300${filtro ? `&${filtro}` : ""}`,
+    { headers: cabecalhos(tok) }) || [];
+  if (!ats.length) return res.status(200).json({ fila: [] });
+
+  const ids = ats.map((a) => a.id);
+  const [revs, vivas] = await Promise.all([
+    banco(`${REST_R}?select=*&atendimento_id=in.(${ids.join(",")})`, { headers: cabecalhos(tok) }),
+    banco(`${URL_BASE}/rest/v1/negociacao_viva?select=*&atendimento_id=in.(${ids.join(",")})`, { headers: cabecalhos(tok) }),
+  ]);
+  const porRev = {}; (revs || []).forEach((r) => { porRev[r.atendimento_id] = r; });
+  const porViva = {}; (vivas || []).forEach((v) => { porViva[v.atendimento_id] = v; });
+
+  return res.status(200).json({
+    fila: ats.map((a) => ({
+      atendimento: a,
+      revisao: porRev[a.id] || null,
+      viva: porViva[a.id] || null,
+    })),
+  });
 }
 
 /**
@@ -710,6 +823,16 @@ module.exports = async function handler(req, res) {
 
   if (String(req.query.recurso || "") === "viva") {
     try { return await viva(req, res, tok); }
+    catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Falhou." }); }
+  }
+
+  if (String(req.query.recurso || "") === "voltas") {
+    try { return await voltas(req, res, tok); }
+    catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Falhou." }); }
+  }
+
+  if (String(req.query.recurso || "") === "revisao") {
+    try { return await revisao(req, res, tok); }
     catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Falhou." }); }
   }
 

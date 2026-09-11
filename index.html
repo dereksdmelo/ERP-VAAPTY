@@ -861,6 +861,34 @@ async function listarNegociacoesVivas(dias) {
   if (!r.ok) throw new Error(d.erro || "Não consegui carregar o painel.");
   return d.negociacoes || [];
 }
+async function lerVoltas() {
+  const r = await fetchAut("/api/atendimento?recurso=voltas");
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui carregar os retornos.");
+  return d.voltas || [];
+}
+
+async function lerFilaRevisao(de, ate) {
+  const q = comoQuery({ recurso: "revisao", de, ate });
+  const r = await fetchAut(`/api/atendimento?${q}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui carregar a fila de revisão.");
+  return d.fila || [];
+}
+async function salvarRevisao(atendimentoId, feedback) {
+  const r = await fetchAut("/api/atendimento?recurso=revisao", {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ atendimento_id: atendimentoId, feedback }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui salvar a revisão.");
+  return d.revisao;
+}
+async function marcarFeedbackLido(atendimentoId) {
+  await fetchAut(`/api/atendimento?recurso=revisao&atendimento_id=${encodeURIComponent(atendimentoId)}`, { method: "PATCH" })
+    .catch(() => {});
+}
+
 async function lerMensagens(atendimentoId) {
   const r = await fetchAut(`/api/atendimento?recurso=mensagem&atendimento_id=${encodeURIComponent(atendimentoId)}`);
   const d = await r.json().catch(() => ({}));
@@ -3072,6 +3100,18 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
    * Escolha à mão vale sempre; a automática só empurra para frente e só
    * enquanto ninguém escolheu um status que o sistema não sabe deduzir.
    */
+  // "Vai voltar" é o único status que carrega um compromisso, e sem a
+  // data ninguém cobra — o atendimento morre de morte natural na
+  // lista (0036). Escolher o status abre o campo, logo ali.
+  const [voltaEm, setVoltaEm] = useState((atendimento && atendimento.volta_em) || "");
+  const [pedeVolta, setPedeVolta] = useState(false);
+  const gravarVolta = async (d) => {
+    setVoltaEm(d); setErroStatus("");
+    if (!atendimento) return;
+    try { await atualizarAtendimento(atendimento.id, { volta_em: d || null }); setPedeVolta(false); }
+    catch (e) { setErroStatus(e.message); }
+  };
+
   const mudarStatus = async (novo, manual) => {
     if (!atendimento || novo === statusAtual) return;
     if (!manual) {
@@ -3080,7 +3120,11 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     }
     const antes = statusAtual;
     setStatusAtual(novo); setErroStatus("");
-    try { await atualizarAtendimento(atendimento.id, { status: novo }); }
+    try {
+      await atualizarAtendimento(atendimento.id, { status: novo });
+      if (novo === "vai_voltar" && !voltaEm) setPedeVolta(true);
+      if (novo !== "vai_voltar") setPedeVolta(false);
+    }
     catch (e) { setStatusAtual(antes); setErroStatus(e.message); }
   };
 
@@ -3249,6 +3293,9 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
       const corpo = {
         atendimento_id: atendimento.id,
         etapa: etapaRef.current,
+        // O RESULTADO de `etapaConcluida()`, calculado pela mesma
+        // função que o trilho usa. O servidor não repete a regra.
+        etapas_ok: ETAPAS.filter((e) => etapaConcluida(e.id, x, fotosRef.current || [])).map((e) => e.id),
         rodadas: (x.rodadas || []).map((r) => ({ impresso: r.impresso, contra: r.contra, em: r.em })),
         valor_fechado: x.valorFechado || null,
         objecao: x.objecao || null,
@@ -3342,8 +3389,37 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
       </header>
 
       {atendimento && (
-        <StatusAtendimento valor={statusAtual} erro={erroStatus}
-          aoMudar={(novo) => mudarStatus(novo, true)} />
+        <>
+          <StatusAtendimento valor={statusAtual} erro={erroStatus}
+            aoMudar={(novo) => mudarStatus(novo, true)} />
+
+          {(statusAtual === "vai_voltar" || pedeVolta) && (
+            <div className="mx-4 mt-2 flex flex-wrap items-center gap-2 rounded-lg px-3 py-2"
+              style={{ background: voltaEm ? "#F0F8F4" : AMARELO.fundo,
+                       border: `1px solid ${voltaEm ? C.verde : AMARELO.borda}` }}>
+              <span className="text-[12px] font-semibold" style={{ color: voltaEm ? C.verde : AMARELO.texto }}>
+                {voltaEm ? "Volta em" : "Quando ele volta?"}
+              </span>
+              <input type="date" className="rounded-md border px-2 py-1 text-[13px] outline-none"
+                style={{ ...inputSty, fontFamily: F.mono }}
+                value={voltaEm || ""} onChange={(e) => gravarVolta(e.target.value)} />
+              {/* Os dois atalhos que cobrem quase todo caso real. */}
+              {!voltaEm && [["amanhã", 1], ["em 3 dias", 3], ["em 7 dias", 7]].map(([rot, n]) => (
+                <button key={rot} onClick={() => {
+                    const d = new Date(Date.parse(hojeEmSP() + "T12:00:00") + n * 86400000);
+                    gravarVolta(d.toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }));
+                  }}
+                  className="rounded-full px-2.5 py-1 text-[11px] font-semibold"
+                  style={{ background: "#fff", color: C.roxo, border: `1px solid ${C.line}` }}>{rot}</button>
+              ))}
+              {!voltaEm && (
+                <span className="text-[11px]" style={{ color: C.mute }}>
+                  Sem data, o gestor não tem o que cobrar.
+                </span>
+              )}
+            </div>
+          )}
+        </>
       )}
 
       {/* trilho */}
@@ -12780,6 +12856,162 @@ function ChatAtendimento({ atendimentoId, compacto }) {
 }
 
 /**
+ * O resumo que o gestor lê no lugar da transcrição.
+ *
+ * O Derek pediu isto depois de ver a transcrição crua no painel: ler
+ * meia hora de conversa não diz se o processo foi seguido. O que diz é
+ * a conta do negócio e a lista de etapas — e **as duas o sistema já
+ * sabe**, sem IA e sem custo por clique.
+ *
+ * A transcrição continua guardada e abre num clique: ela é a prova
+ * quando o resumo levanta uma dúvida, não a leitura de todo dia.
+ */
+function ResumoDoNegocio({ viva, atendimento }) {
+  const [verTexto, setVerTexto] = useState(false);
+  const a = atendimento || {};
+  const v = (a.veiculo || [])[0] || {};
+  const rodadas = Array.isArray(viva && viva.rodadas) ? viva.rodadas : [];
+  const feitas = Array.isArray(viva && viva.etapas_ok) ? viva.etapas_ok : [];
+  const faltam = ETAPAS.filter((e) => feitas.indexOf(e.id) < 0);
+
+  const linha = (rot, valor, cor) => (
+    <div className="flex items-baseline justify-between gap-3 py-0.5">
+      <span className="text-[12px]" style={{ color: C.mute }}>{rot}</span>
+      <span className="text-[12px]" style={{ fontFamily: F.mono, fontWeight: 600, color: cor || C.ink }}>{valor}</span>
+    </div>
+  );
+
+  // A queda entre o que a mesa ofereceu e o que o cliente devolveu é a
+  // leitura que o gestor faz de relance.
+  const primeira = rodadas[0];
+  const ultima = rodadas[rodadas.length - 1];
+
+  return (
+    <div className="rounded-xl p-3.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+      <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>O negócio</div>
+      <div className="mt-1.5">
+        {linha("FIPE", v.fipe_valor ? brl(v.fipe_valor) : "—")}
+        {linha("Rodadas", rodadas.length || "nenhuma")}
+        {primeira && linha("1ª oferta", brl(primeira.impresso))}
+        {ultima && ultima.contra ? linha("Última contraproposta", brl(ultima.contra), C.laranja) : null}
+        {viva && viva.valor_fechado
+          ? linha("Fechou", brl(viva.valor_fechado), C.verde)
+          : linha("Fechamento", "ainda não", C.mute)}
+        {viva && viva.objecao ? linha("Objeção", viva.objecao) : null}
+      </div>
+
+      <div className="mt-3 text-[10px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>
+        O processo — {feitas.length} de {ETAPAS.length} etapas
+      </div>
+      <div className="mt-1.5 flex flex-wrap gap-1">
+        {ETAPAS.map((e) => {
+          const ok = feitas.indexOf(e.id) >= 0;
+          return (
+            <span key={e.id} className="rounded-lg px-2 py-0.5 text-[11px]"
+              style={{ background: ok ? "#E8F3EE" : C.bg, color: ok ? C.verde : C.mute,
+                       fontWeight: ok ? 600 : 400, textDecoration: "none" }}>
+              {ok ? "✓ " : "○ "}{e.curto}
+            </span>
+          );
+        })}
+      </div>
+      {!!faltam.length && (
+        <p className="mt-1.5 text-[11px] leading-snug" style={{ color: AMARELO.texto }}>
+          Ficou sem fechar: {faltam.map((e) => e.curto).join(", ")}.
+        </p>
+      )}
+      {!faltam.length && (
+        <p className="mt-1.5 text-[11px]" style={{ color: C.verde }}>O processo foi seguido inteiro.</p>
+      )}
+
+      {/* A escuta e a transcrição: uma linha, e o texto sob demanda. */}
+      <div className="mt-3 border-t pt-2" style={{ borderColor: C.line }}>
+        {viva && viva.escuta_ok ? (
+          <>
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-[11px]" style={{ color: C.verde, fontWeight: 600 }}>
+                Escuta autorizada{viva.escuta_em ? ` ${horaCurta(viva.escuta_em)}` : ""}
+              </span>
+              {viva.transcricao && (
+                <button onClick={() => setVerTexto((x) => !x)} className="text-[11px] font-semibold" style={{ color: C.roxo }}>
+                  {verTexto ? "esconder" : "ver a transcrição"}
+                </button>
+              )}
+            </div>
+            {viva.transcricao && verTexto && (
+              <div className="mt-2 max-h-[300px] overflow-y-auto rounded-lg p-2.5 text-[12px] leading-relaxed"
+                style={{ background: C.bg, whiteSpace: "pre-wrap" }}>
+                {viva.transcricao}
+              </div>
+            )}
+            {!viva.transcricao && (
+              <p className="mt-1 text-[11px]" style={{ color: C.mute }}>Nada transcrito ainda.</p>
+            )}
+          </>
+        ) : (
+          <p className="text-[11px]" style={{ color: C.mute }}>A escuta não foi ligada neste atendimento.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * O retorno do gestor sobre um atendimento.
+ *
+ * Mora em tabela própria e não em coluna do `atendimento` porque a
+ * política da 0004 deixa o negociador editar o atendimento dele — e
+ * feedback que a pessoa avaliada pode reescrever não é feedback.
+ */
+function FeedbackDoGestor({ atendimentoId, revisao, aoSalvar }) {
+  const [txt, setTxt] = useState((revisao && revisao.feedback) || "");
+  const [indo, setIndo] = useState(false);
+  const [erro, setErro] = useState("");
+  const [ok, setOk] = useState(false);
+  useEffect(() => { setTxt((revisao && revisao.feedback) || ""); setOk(false); }, [atendimentoId, revisao && revisao.revisado_em]);
+
+  const salvar = async () => {
+    if (!txt.trim()) return;
+    setIndo(true); setErro(""); setOk(false);
+    try { await salvarRevisao(atendimentoId, txt.trim()); setOk(true); if (aoSalvar) await aoSalvar(); }
+    catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+
+  return (
+    <div className="rounded-xl p-3.5" style={{ background: C.paper, border: `1px solid ${revisao ? C.verde : C.laranja}` }}>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-[10px] uppercase tracking-[0.12em]" style={{ color: revisao ? C.verde : C.laranja }}>
+          {revisao ? "Revisado" : "Falta revisar"}
+        </span>
+        {revisao && (
+          <span className="text-[10px]" style={{ color: C.mute }}>
+            {horaCurta(revisao.revisado_em)}{revisao.lida_em ? " · lido" : " · não lido"}
+          </span>
+        )}
+      </div>
+      <textarea rows={4} className="mt-2 w-full rounded-lg border px-2.5 py-2 text-[13px] outline-none"
+        style={inputSty} placeholder="O que funcionou, o que faltou, o que fazer no próximo."
+        value={txt} onChange={(e) => setTxt(e.target.value)} />
+      <div className="mt-2 flex items-center gap-3">
+        <button onClick={salvar} disabled={!txt.trim() || indo}
+          className="rounded-lg px-4 py-2 text-[13px] font-semibold"
+          style={{ background: txt.trim() && !indo ? C.roxo : C.line, color: "#fff" }}>
+          {indo ? "Salvando…" : revisao ? "Atualizar o retorno" : "Salvar o retorno"}
+        </button>
+        {ok && <span className="text-[12px]" style={{ color: C.verde }}>Salvo. O negociador vê no atendimento.</span>}
+        {erro && <span className="text-[12px]" style={{ color: C.laranja }}>{erro}</span>}
+      </div>
+      {revisao && !revisao.lida_em && (
+        <p className="mt-1.5 text-[11px]" style={{ color: C.mute }}>
+          Reescrever o retorno zera o "lido": é outro texto, e ele precisa ver o novo.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
  * O painel do gestor.
  *
  * O que ele responde, e que nenhuma outra tela respondia: **o que está
@@ -12792,51 +13024,103 @@ function ChatAtendimento({ atendimentoId, compacto }) {
  * decide. Para quem não é gerente, a consulta volta com a própria
  * negociação e mais nada.
  */
-function PainelGestor({ perfil }) {
+function PainelGestor({ perfil, comp }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
   const [dias, setDias] = useState(2);
   const [foco, setFoco] = useState(null);      // atendimento_id aberto
+  const [aba, setAba] = useState("agora");     // agora | voltas | revisar
+  const [fila, setFila] = useState(null);
+  const [voltas, setVoltas] = useState(null);
 
   const carregar = () => listarNegociacoesVivas(dias).then(setLista).catch((e) => setErro(e.message));
+  const carregarFila = () => {
+    const { de, ate } = faixaDoMes(comp || competenciaDe(hojeEmSP()));
+    return lerFilaRevisao(de, ate).then(setFila).catch((e) => setErro(e.message));
+  };
+
   useEffect(() => {
+    if (aba !== "agora") return;
     setLista(null); carregar();
     // A tela do gestor fica aberta na mesa dele o dia inteiro: 20 s dá
     // a sensação de acompanhar sem transformar isso num custo.
     const t = setInterval(carregar, 20000);
     return () => clearInterval(t);
-  }, [dias]);
+  }, [dias, aba]);
 
-  const aberto = lista && lista.filter((n) => n.atendimento_id === foco)[0];
+  useEffect(() => { if (aba === "revisar") { setFila(null); carregarFila(); } }, [aba, comp]);
+  useEffect(() => {
+    // A lista de retornos é carregada sempre: o número dela vai na
+    // aba, e o gestor precisa ver o atraso sem ter que procurar.
+    lerVoltas().then(setVoltas).catch(() => {});
+  }, [aba]);
+  const atrasadas = (voltas || []).filter((v) => v.atrasada || v.sem_data).length;
+
+  // Negócio já fechado não está "em andamento" — foi a primeira coisa
+  // que o Derek viu no painel. Ele sai daqui e aparece na fila de
+  // revisão, que é onde ele passa a importar.
+  const emAndamento = (lista || []).filter((n) => ((n.atendimento || {}).status || "") !== "fechado");
+
+  const aberto = aba === "agora"
+    ? emAndamento.filter((n) => n.atendimento_id === foco)[0]
+    : (fila || []).filter((x) => x.atendimento.id === foco)[0];
+  const pendentes = (fila || []).filter((x) => !x.revisao).length;
 
   return (
     <div>
       <Cabecalho titulo="Painel do gestor"
-        sub="O que está acontecendo agora na mesa — etapa, rodadas e a conversa." />
+        sub={aba === "agora"
+          ? "O que está acontecendo agora na mesa — etapa, rodadas e a conversa."
+          : `Todo atendimento passa por aqui: o gestor revisa e devolve um retorno. ${rotuloMes(comp || competenciaDe(hojeEmSP()))}.`} />
 
-      <div className="mb-3 flex flex-wrap items-center gap-2 text-[13px]">
-        {[[1, "Hoje"], [2, "2 dias"], [7, "7 dias"], [30, "30 dias"]].map(([n, r]) => (
-          <button key={n} onClick={() => setDias(n)} className="rounded-full px-3 py-1 font-semibold"
-            style={{ background: dias === n ? C.roxoFraco : "transparent", color: dias === n ? C.roxo : C.mute }}>{r}</button>
+      <div className="mb-3 flex flex-wrap items-center gap-1.5">
+        {[["agora", "Em andamento"], ["voltas", "Prometeram voltar"], ["revisar", "Para revisar"]].map(([v, r]) => (
+          <button key={v} onClick={() => { setAba(v); setFoco(null); }}
+            className="rounded-full px-3.5 py-1.5 text-[13px] font-semibold"
+            style={{ background: aba === v ? C.roxo : C.paper, color: aba === v ? "#fff" : C.ink,
+                     border: `1px solid ${aba === v ? C.roxo : C.line}` }}>
+            {r}
+            {v === "revisar" && !!pendentes && (
+              <span className="ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold"
+                style={{ background: aba === v ? "rgba(255,255,255,0.25)" : C.laranja, color: "#fff" }}>{pendentes}</span>
+            )}
+            {v === "voltas" && !!atrasadas && (
+              <span className="ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold"
+                style={{ background: aba === v ? "rgba(255,255,255,0.25)" : C.laranja, color: "#fff" }}>{atrasadas}</span>
+            )}
+          </button>
         ))}
-        {lista && <span className="ml-auto text-[12px]" style={{ color: C.mute }}>{lista.length} em andamento</span>}
+        {aba === "agora" && (
+          <span className="ml-2 flex gap-1.5 text-[13px]">
+            {[[1, "Hoje"], [2, "2 dias"], [7, "7 dias"], [30, "30 dias"]].map(([n, r]) => (
+              <button key={n} onClick={() => setDias(n)} className="rounded-full px-3 py-1 font-semibold"
+                style={{ background: dias === n ? C.roxoFraco : "transparent", color: dias === n ? C.roxo : C.mute }}>{r}</button>
+            ))}
+          </span>
+        )}
+        <span className="ml-auto text-[12px]" style={{ color: C.mute }}>
+          {aba === "agora"
+            ? (lista ? `${emAndamento.length} em andamento` : "")
+            : (fila ? `${pendentes} sem retorno de ${fila.length}` : "")}
+        </span>
       </div>
 
       {erro && <p className="mb-2 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
-      {lista === null && <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>}
-      {lista && !lista.length && (
+      {aba === "agora" && lista === null && <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>}
+      {aba === "revisar" && fila === null && <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>}
+      {aba === "agora" && lista && !emAndamento.length && (
         <div className="rounded-xl px-4 py-8 text-center" style={{ background: C.paper, border: `1px dashed ${C.line}` }}>
           <p className="text-[15px] font-semibold">Nenhuma negociação em andamento</p>
           <p className="mt-1 text-[13px]" style={{ color: C.mute }}>
             A linha aparece aqui assim que um negociador abre um atendimento no celular. Só entra o que foi tocado
-            nos últimos {dias === 1 ? "dia" : `${dias} dias`}.
+            nos últimos {dias === 1 ? "dia" : `${dias} dias`} e ainda não fechou — o que fechou vai para <b>Para revisar</b>.
           </p>
         </div>
       )}
 
       <div className="grid gap-3 lg:grid-cols-[1fr_360px]">
         <div className="space-y-2">
-          {(lista || []).map((n) => {
+          {aba === "agora" && emAndamento.map((n) => {
             const a = n.atendimento || {};
             const v = (a.veiculo || [])[0] || {};
             const rodadas = Array.isArray(n.rodadas) ? n.rodadas : [];
@@ -12897,49 +13181,133 @@ function PainelGestor({ perfil }) {
               </button>
             );
           })}
-        </div>
 
-        {/* ---- a coluna do lado: conversa e transcrição ---- */}
-        {aberto && (
-          <div className="space-y-3 lg:sticky lg:top-4 lg:self-start">
-            <div className="rounded-xl p-3.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-              <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.roxo }}>
-                Recado para {String((aberto.atendimento || {}).negociador_nome || "o negociador").split(" ")[0]}
-              </div>
-              <ChatAtendimento atendimentoId={aberto.atendimento_id} compacto />
-            </div>
-
-            <div className="rounded-xl p-3.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-              <div className="flex items-baseline justify-between">
-                <span className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>Transcrição</span>
-                {aberto.escuta_em && (
-                  <span className="text-[10px]" style={{ color: C.mute }}>
-                    autorizada {horaCurta(aberto.escuta_em)}
+          {/* ---- a fila de revisão ---- */}
+          {aba === "revisar" && (fila || []).map((x) => {
+            const a = x.atendimento;
+            const v = (a.veiculo || [])[0] || {};
+            const feitas = Array.isArray(x.viva && x.viva.etapas_ok) ? x.viva.etapas_ok : [];
+            const emFoco = a.id === foco;
+            const revisado = !!x.revisao;
+            return (
+              <button key={a.id} onClick={() => setFoco(emFoco ? null : a.id)}
+                className="w-full rounded-xl px-3.5 py-3 text-left"
+                style={{ background: C.paper,
+                         border: `1px solid ${emFoco ? C.roxo : revisado ? C.line : C.laranja}` }}>
+                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                  <span className="text-[15px] font-semibold">{a.cliente_nome || "Sem nome"}</span>
+                  <span className="text-[12px]" style={{ color: C.mute }}>
+                    {v.marca_modelo || a.carro_descricao || "—"}{v.placa ? ` · ${v.placa}` : ""}
                   </span>
+                  <span className="ml-auto text-[11px] font-semibold"
+                    style={{ color: revisado ? C.verde : C.laranja }}>
+                    {revisado ? (x.revisao.lida_em ? "revisado · lido" : "revisado") : "sem retorno"}
+                  </span>
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]" style={{ color: C.mute }}>
+                  <span>{a.negociador_nome || "sem negociador"}</span>
+                  <span style={{ fontFamily: F.mono }}>{diaBR(a.data)}</span>
+                  <span className="rounded-full px-2 py-0.5 text-[11px]" style={{ background: C.bg }}>
+                    {rotuloStatus(a.status)}
+                  </span>
+                  {/* O processo em um número: é o que faz a fila valer
+                      a pena percorrer de cima para baixo. */}
+                  {!!x.viva && (
+                    <span style={{ color: feitas.length === ETAPAS.length ? C.verde : AMARELO.texto, fontWeight: 600 }}>
+                      {feitas.length}/{ETAPAS.length} etapas
+                    </span>
+                  )}
+                  {!x.viva && <span style={{ color: C.mute }}>sem registro do processo</span>}
+                  {a.valor_fechado ? (
+                    <span style={{ fontFamily: F.mono, color: C.verde }}>{brl(a.valor_fechado)}</span>
+                  ) : null}
+                </div>
+                {revisado && (
+                  <p className="mt-1.5 line-clamp-2 text-[12px] leading-snug" style={{ color: C.ink }}>
+                    “{x.revisao.feedback}”
+                  </p>
+                )}
+              </button>
+            );
+          })}
+
+          {/* ---- quem prometeu voltar ---- */}
+          {aba === "voltas" && (voltas || []).map((v) => {
+            const veic = (v.veiculo || [])[0] || {};
+            const alerta = v.atrasada || v.sem_data;
+            return (
+              <div key={v.id} className="rounded-xl px-3.5 py-3"
+                style={{ background: C.paper, border: `1px solid ${alerta ? C.laranja : C.line}` }}>
+                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                  <span className="text-[15px] font-semibold">{v.cliente_nome || "Sem nome"}</span>
+                  <span className="text-[12px]" style={{ color: C.mute }}>
+                    {veic.marca_modelo || v.carro_descricao || "—"}{veic.placa ? ` · ${veic.placa}` : ""}
+                  </span>
+                  <span className="ml-auto text-[12px] font-semibold"
+                    style={{ color: alerta ? C.laranja : C.verde, fontFamily: F.mono }}>
+                    {v.sem_data ? "sem data" : v.atrasada ? `passou · ${diaBR(v.volta_em)}` : diaBR(v.volta_em)}
+                  </span>
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]" style={{ color: C.mute }}>
+                  <span>{v.negociador_nome || "sem negociador"}</span>
+                  {v.cliente_telefone && (
+                    <a href={zap(v.cliente_telefone, `Oi ${String(v.cliente_nome || "").split(" ")[0]}, tudo bem? Aqui é da Vaapty.`)}
+                      target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
+                      className="font-semibold" style={{ color: C.verde }}>WhatsApp</a>
+                  )}
+                </div>
+                {v.sem_data && (
+                  <p className="mt-1 text-[11px]" style={{ color: C.laranja }}>
+                    Marcado como "vai voltar" e ninguém combinou quando — peça a data ao negociador.
+                  </p>
                 )}
               </div>
-              {aberto.transcricao ? (
-                <>
-                  {/* O fim primeiro: quem acompanha quer o que está
-                      sendo dito agora, não o começo da conversa. */}
-                  <div className="mt-2 max-h-[320px] overflow-y-auto rounded-lg p-2.5 text-[12px] leading-relaxed"
-                    style={{ background: C.bg, whiteSpace: "pre-wrap" }}>
-                    {aberto.transcricao}
-                  </div>
-                  <p className="mt-1.5 text-[10px] leading-snug" style={{ color: C.mute }}>
-                    Chega com até 15 segundos de atraso. O cliente autorizou a transcrição no início do atendimento.
-                  </p>
-                </>
-              ) : (
-                <p className="mt-2 text-[12px] leading-snug" style={{ color: C.mute }}>
-                  {aberto.escuta_ok
-                    ? "Escuta autorizada, mas nada transcrito ainda."
-                    : "A escuta não foi ligada neste atendimento."}
-                </p>
-              )}
+            );
+          })}
+
+          {aba === "voltas" && voltas && !voltas.length && (
+            <div className="rounded-xl px-4 py-8 text-center" style={{ background: C.paper, border: `1px dashed ${C.line}` }}>
+              <p className="text-[15px] font-semibold">Ninguém com retorno marcado</p>
+              <p className="mt-1 text-[13px]" style={{ color: C.mute }}>
+                Aparece aqui quem está com o status "Vai voltar".
+              </p>
             </div>
+          )}
+
+          {aba === "revisar" && fila && !fila.length && (
+            <div className="rounded-xl px-4 py-8 text-center" style={{ background: C.paper, border: `1px dashed ${C.line}` }}>
+              <p className="text-[15px] font-semibold">Nenhum atendimento neste mês</p>
+              <p className="mt-1 text-[13px]" style={{ color: C.mute }}>Troque o mês no cabeçalho.</p>
+            </div>
+          )}
+        </div>
+
+        {/* ---- a coluna do lado ---- */}
+        {aberto && (() => {
+          // As duas abas trazem a linha com formatos diferentes; daqui
+          // para baixo é tudo igual, então normaliza uma vez.
+          const at = aba === "agora" ? aberto.atendimento : aberto.atendimento;
+          const aid = aba === "agora" ? aberto.atendimento_id : aberto.atendimento.id;
+          const vivaX = aba === "agora" ? aberto : aberto.viva;
+          const revX = aba === "agora" ? null : aberto.revisao;
+          return (
+          <div className="space-y-3 lg:sticky lg:top-4 lg:self-start">
+            <ResumoDoNegocio viva={vivaX} atendimento={at} />
+
+            {aba === "revisar" && (
+              <FeedbackDoGestor atendimentoId={aid} revisao={revX} aoSalvar={carregarFila} />
+            )}
+
+            <div className="rounded-xl p-3.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+              <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.roxo }}>
+                Recado para {String((at || {}).negociador_nome || "o negociador").split(" ")[0]}
+              </div>
+              <ChatAtendimento atendimentoId={aid} compacto />
+            </div>
+
           </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );
@@ -13068,7 +13436,7 @@ function App() {
       {tela === "rentabilidade" && podeGestao && <TelaEstoque perfil={perfil} comp={compOuAtual} mes={mes} modo="rentabilidade" />}
       {tela === "painel" && <Funil perfil={perfil} comp={compOuAtual} mes={mes} />}
       {tela === "leads" && <LeadsIndicacao />}
-      {tela === "gestor" && <PainelGestor perfil={perfil} />}
+      {tela === "gestor" && <PainelGestor perfil={perfil} comp={compOuAtual} />}
       {tela === "adm" && <TelaADM perfil={perfil} comp={compOuAtual} mes={mes} />}
       {tela === "gestao" && <TelaGestao perfil={perfil} comp={compOuAtual} />}
       {tela === "financeiro" && <TelaFinanceiro perfil={perfil} comp={compOuAtual} mes={mes} />}
