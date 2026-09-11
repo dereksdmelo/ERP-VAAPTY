@@ -1520,39 +1520,56 @@ const Pendente = ({ children }) => (
 );
 
 /* ===================== saídas ===================== */
-const mascararPlaca = (p) => (!p || p.length < 2 ? "—" : `${p[0]}-${p[p.length - 1]}`);
-function resumoPneus(a) {
-  const c = {};
-  a.forEach((p) => p && (c[p] = (c[p] || 0) + 1));
-  return Object.entries(c).map(([k, v]) => `${v} ${k.toUpperCase()}`).join(" / ") || "—";
-}
+/**
+ * O descritivo que vai ao grupo dos lojistas.
+ *
+ * **O molde é o do Shinkai, não o nosso.** O Derek mandou em
+ * 11/09/2026 o texto que a plataforma gera ("assim que sai um
+ * descritivo") e pediu que o nosso saísse igual. Faz sentido: os
+ * lojistas leem esse formato todo dia, e duas folhas diferentes para
+ * o mesmo carro fazem o leitor procurar o que mudou em vez de ler o
+ * carro.
+ *
+ * **A placa saiu.** Eles não a imprimem, e mascarada ela nunca serviu
+ * para nada do lado de lá — o que identifica o carro é o link.
+ *
+ * **O link é a linha que importa.** É por ele que o lojista abre as
+ * fotos e manda proposta. Sem ele o descritivo é um anúncio sem
+ * telefone, e é por isso que o bloco inteiro só aparece depois de o
+ * carro estar na rede.
+ *
+ * **Leilão/sinistro e GNV ficaram, mesmo fora do molde deles.**
+ * Ressalva omitida vira devolução e queima a confiança da rede
+ * (decisão 2) — economizar duas linhas não paga esse risco.
+ */
 function gerarDescritivo(f, n) {
-  const L = ["🏦 VAAPTY / JOINVILLE 🏦", "", `🚗 Modelo: ${f.modelo}`, ""];
+  const brlC = (v) => {
+    const x = Number(String(v == null ? "" : v).replace(/\./g, "").replace(",", "."));
+    return Number.isFinite(x) && x ? x.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : "—";
+  };
+  const ROT_PNEU = ["DE", "DD", "TE", "TD"];
+  const L = ["🏢 VAAPTY / JOINVILLE 🏢", "", `🚗 Modelo: ${f.modelo}`, ""];
   L.push(`🔢 Ano ou Mod: ${f.ano}`);
-  L.push(`⚙️ Câmbio: ${(f.cambio || "").toUpperCase()}.`);
-  L.push(`⭕ Km: ${Number(f.km).toLocaleString("pt-BR")}${f.kmEntrada ? ` (Pegou c/${Math.round(f.kmEntrada / 1000)}k)` : ""}`);
-  L.push(`🗺 Placa: ${mascararPlaca(f.placa)}`);
-  L.push(`🍩 Pneus: ${resumoPneus(f.pneus)}`);
-  L.push(`💵 FIPE: ${brl(f.fipe)}`);
-  L.push(`💵 POR: ${brl(f.por)}`, "");
-  L.push(`🛠 GASTOS: ${(f.gastos || "").toUpperCase()}`, "");
-  L.push(`❎ OPCIONAIS: ${f.opcionais.join(" / ").toUpperCase()}`);
-  if (f.leilao) L.push("", "⚠️ LEILÃO / SINISTRO");
-  if (f.gnv) L.push("⛽ GNV");
-  if ((f.ressalvas || "").trim()) {
-    L.push("", "📌 RESSALVAS:");
-    f.ressalvas.split("\n").filter(Boolean).forEach((r) => L.push(`• ${r}`));
-  }
-  L.push("", `📷 ${n} fotos`);
-  // O link é o que o lojista abre para ver as fotos. Ele vem do
-  // Shinkai; enquanto eles não devolverem endereço no POST, a linha
-  // simplesmente não sai — descritivo com link quebrado é pior que
-  // descritivo sem link.
-  if (f.shinkaiUrl) L.push("", `🔗 Fotos e ficha: ${f.shinkaiUrl}`);
-  L.push("", "💥💥💥💥💥💥💥💥💥💥", "");
-  L.push("💼 NEGOCIADOR", `📲 ${f.negociador || "—"}`, "");
-  L.push("☑️ Gerente: THIAGO", "📲 Whats/ligação: (21) 96467-3445", "");
-  L.push("☑️ Gerente: WEBERT", "📲 Whats/ligação: (47) 9213-2434");
+  L.push(`⚙️ Câmbio: ${(f.cambio || "").toUpperCase()}`);
+  L.push(`🌑 Km: ${Number(f.km).toLocaleString("pt-BR")}${f.kmEntrada ? ` (Pegou c/${Math.round(f.kmEntrada / 1000)}k)` : ""}`);
+  L.push(`🛞 Pneus: ${(f.pneus || []).map((p, i) => `${ROT_PNEU[i]}: ${p || "—"}`).join(" | ")}`);
+  L.push(`💰 FIPE: ${brlC(f.fipe)}`);
+  L.push(`💵 POR: ${brlC(f.por)}`, "");
+  L.push(`⚡ GASTOS: ${(f.gastos || "").toUpperCase()}`, "");
+
+  // Positivos e ressalvas numa linha só, como eles fazem. São as duas
+  // camadas que PODEM sair da loja; `internas` não entra aqui em
+  // hipótese nenhuma (decisão 2).
+  const notas = [...(f.positivos || "").split("\n"), ...(f.ressalvas || "").split("\n")]
+    .map((x) => x.trim()).filter(Boolean);
+  if (notas.length) L.push(`📌 PONTOS FORTES E RESSALVAS: ${notas.join(" / ").toUpperCase()}`, "");
+
+  L.push(`✅ OPCIONAIS: ${(f.opcionais || []).join(" / ").toUpperCase()}`, "");
+  if (f.leilao) L.push("⚠️ LEILÃO / SINISTRO", "");
+  if (f.gnv) L.push("⛽ GNV", "");
+  if (f.shinkaiUrl) L.push(`📸 FOTOS E PROPOSTA: ${f.shinkaiUrl}`, "");
+  L.push("💥💥💥💥💥💥💥💥💥", "");
+  L.push("📇 NEGOCIADOR", `📲 ${f.negociador || "—"}`);
   return L.join("\n");
 }
 // Só o que tem coluna em supabase/migrations/0001_veiculo.sql. O

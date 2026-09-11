@@ -186,6 +186,11 @@ const ROTULOS = [
 const SHINKAI_URL = "https://www.shinkai.com.br/api/public/veiculo";
 const SHINKAI_KEY = process.env.SHINKAI_API_KEY || "";
 const SHINKAI_ORIGEM = process.env.SHINKAI_ORIGEM || "vaapty-joinville";
+// O link público do carro no app dos lojistas. A franquia no caminho
+// é "joinville", enquanto a origem é "vaapty-joinville" — daí o corte
+// do prefixo, e a variável própria para quem abrir outra praça.
+const SHINKAI_APP = "https://www.shinkai.com.br/pwa/entrar";
+const SHINKAI_FRANQUIA = process.env.SHINKAI_FRANQUIA || SHINKAI_ORIGEM.replace(/^vaapty-/, "");
 
 const numeroOuNulo = (v) => {
   const n = Number(v);
@@ -356,11 +361,24 @@ async function shinkai(req, res, tok) {
   // nulo e o descritivo diz que o link ainda não existe.
   const endereco = (() => {
     if (!d) return null;
+    // Se um dia eles devolverem o endereço pronto, ele manda.
     for (const k of ["url", "link", "permalink", "oferta_url", "veiculo_url", "url_publica"]) {
       const u = d[k];
       if (typeof u === "string" && /^https?:\/\//i.test(u)) return u.slice(0, 500);
     }
-    return null;
+    // Hoje não devolvem, e o link é o que faz o descritivo valer: é
+    // por ele que o lojista abre as fotos e manda proposta.
+    //
+    // **O formato foi conferido, não deduzido.** Em 11/09/2026 o botão
+    // "Link do app" do painel deles foi acionado em três carros e o que
+    // saiu foi sempre `…/pwa/entrar/<franquia>?c=<uuid>`; o `c` do
+    // Polo QJP1C41 bateu com o `shinkai_id` que este endpoint tinha
+    // gravado no envio. É o mesmo id, não um parecido.
+    //
+    // Se o formato mudar, o link quebra em silêncio — e é por isso que
+    // o de cima existe: no dia em que a resposta trouxer endereço, ele
+    // passa a valer sozinho.
+    return d.id ? `${SHINKAI_APP}/${SHINKAI_FRANQUIA}?c=${encodeURIComponent(d.id)}` : null;
   })();
 
   const marca = {

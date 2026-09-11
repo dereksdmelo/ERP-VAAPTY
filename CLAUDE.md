@@ -1841,14 +1841,40 @@ Travar o atendimento por causa de uma variável de ambiente que não
 subiu seria transformar um problema de configuração em cliente parado
 na mesa.
 
-**O link das fotos não vem na resposta deles.** O 200 documentado traz
-`id`, `placa`, `acao`, `status`, `fotos` (a contagem) e `avisos`, e
-mais nada. `shinkai_url` (0040) nasce vazia e o servidor a preenche com
-o primeiro campo de endereço que a resposta trouxer — `url`, `link`,
-`permalink`, `oferta_url`. **Montar a URL a partir do `id` seria chutar
-o formato do site deles**, e link quebrado no grupo dos lojistas é pior
-que link nenhum. Enquanto nada vier, a linha simplesmente não sai do
-descritivo e a tela diz por quê.
+**O link das fotos não vem na resposta deles, e mesmo assim o
+descritivo o leva.** O 200 documentado traz `id`, `placa`, `acao`,
+`status`, `fotos` (a contagem) e `avisos`, e mais nada — nenhum
+endereço.
+
+**O formato foi conferido, não deduzido.** Em 11/09/2026 o botão "Link
+do app" do painel deles foi acionado em três carros, e o que saiu foi
+sempre `https://www.shinkai.com.br/pwa/entrar/<franquia>?c=<uuid>`. O
+`c` do Polo QJP1C41 bateu com o `shinkai_id` que o nosso envio tinha
+gravado: **é o mesmo id que o POST devolve**, não um parecido. A
+franquia no caminho é `joinville` enquanto a origem é
+`vaapty-joinville`, daí o corte do prefixo e a `SHINKAI_FRANQUIA` para
+quem abrir outra praça.
+
+**A resposta ainda manda, se um dia trouxer endereço.** O servidor
+procura `url`, `link`, `permalink` e `oferta_url` antes de montar o
+link, e `shinkai_url` (0040) guarda o que valeu. Se eles mudarem o
+formato do app, o link quebra em silêncio — e é esse caminho de cima
+que faz o conserto ser deles, não nosso.
+
+**O descritivo virou o molde do Shinkai.** O Derek mandou o texto que
+a plataforma gera ("assim que sai um descritivo") e pediu o nosso
+igual. Os lojistas leem esse formato todo dia; duas folhas diferentes
+para o mesmo carro fazem o leitor procurar o que mudou em vez de ler o
+carro. Mudou o que se esperava: **a placa saiu** (eles não a imprimem,
+e mascarada ela nunca serviu do lado de lá — o que identifica o carro é
+o link), os pneus saem um a um em vez de contados, FIPE e POR saem com
+centavos, e positivos e ressalvas viram uma linha só. `mascararPlaca` e
+`resumoPneus` ficaram sem uso e saíram junto. **`internas` continua
+fora**, pela decisão 2.
+
+**Leilão/sinistro e GNV ficaram, mesmo fora do molde deles.** Ressalva
+omitida vira devolução e queima a confiança da rede — economizar duas
+linhas não paga esse risco.
 
 **O carro chegava pelado, e era o nosso corpo que estava curto.** Até
 11/09/2026 o POST mandava identificação, valores e fotos — e deixava de
