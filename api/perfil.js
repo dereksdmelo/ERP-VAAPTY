@@ -39,6 +39,25 @@
 const URL_BASE = (process.env.SUPABASE_URL || "").replace(/\/+$/, "");
 const ANON = process.env.SUPABASE_ANON_KEY || "";
 
+/**
+ * A chave de serviço, e **por que ela aparece num segundo arquivo**.
+ *
+ * A decisão 9 a confinou ao `api/foto.js`, porque ela passa por cima
+ * do RLS: quem a tem lê e escreve a tabela inteira. Trocar a senha de
+ * outra pessoa é a única operação do sistema que o token do próprio
+ * usuário não alcança — a API de administração do Supabase exige esta
+ * chave, e não há RLS que a substitua.
+ *
+ * O que protege aqui é a MESMA coisa que protege o Storage lá: a
+ * ordem. O gerente é conferido primeiro, lendo o perfil dele **com o
+ * token dele**, pelo RLS. Só depois a chave entra, e só para uma
+ * chamada — trocar a senha de um id que já foi autorizado. Ela não
+ * toca em nenhuma tabela, não volta em resposta e não vai para log.
+ *
+ * Sem ela, o recurso simplesmente não liga, e a tela diz isso.
+ */
+const CHAVE = process.env.SUPABASE_SERVICE_KEY || "";
+
 const tokenDe = (req) => {
   const h = String((req.headers && req.headers.authorization) || "");
   return /^Bearer\s+\S+/.test(h) ? h : null;
@@ -248,12 +267,89 @@ const PAPEIS_PERFIL = ["pre_venda", "negociador", "gerente", "prep"];
  * Quem pode escrever é a RLS da 0004 (`perfil_gerente_escreve`), não
  * código daqui. PATCH que volta vazio é ela recusando.
  */
+/**
+ * Uma senha aleatória que dá para ditar no telefone.
+ *
+ * Sem O/0 e sem I/1/l: a senha vai por WhatsApp ou de boca, e um zero
+ * lido como letra devolve a pessoa para a fila do suporte. Três grupos
+ * de quatro porque bloco curto se lê sem perder o lugar.
+ */
+function senhaAleatoria() {
+  const alfabeto = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const bytes = new Uint8Array(12);
+  globalThis.crypto.getRandomValues(bytes);
+  const chars = Array.from(bytes, (b) => alfabeto[b % alfabeto.length]);
+  return `${chars.slice(0, 4).join("")}-${chars.slice(4, 8).join("")}-${chars.slice(8, 12).join("")}`;
+}
+
+/**
+ * O gerente gera uma senha nova para alguém.
+ *
+ * É a rede que não depende de e-mail. O "esqueci minha senha" da tela
+ * de entrada resolve sozinho quando a mensagem chega; quando não chega
+ * — e não chegou hoje, com dois funcionários —, é por aqui.
+ *
+ * A senha volta UMA vez, na resposta, e não é gravada em lugar nenhum.
+ * Guardá-la seria guardar senha em claro, que é o que nenhum sistema
+ * deve fazer; mostrá-la de novo depois exigiria exatamente isso.
+ */
+async function senha(req, res, tok) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ erro: "Use POST." });
+  }
+  if (!CHAVE) {
+    return res.status(503).json({
+      erro: "Gerar senha precisa da SUPABASE_SERVICE_KEY nas variáveis de ambiente da Vercel.",
+    });
+  }
+  const c = await lerCorpo(req);
+  const alvo = String((c && c.id) || "");
+  if (!RX_UUID.test(alvo)) return res.status(400).json({ erro: "id inválido." });
+
+  // 1. Quem pede é gerente? A pergunta vai ao banco COM O TOKEN DELE, e
+  //    é o RLS que responde. A chave de serviço não participa disto —
+  //    se participasse, a autorização seria decoração.
+  const meuId = donoDoToken(tok);
+  if (!meuId) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
+  const r0 = await fetch(`${URL_BASE}/rest/v1/perfil?select=papel&id=eq.${meuId}`,
+    { headers: { apikey: ANON, Authorization: tok } });
+  const meu = r0.ok ? (await r0.json().catch(() => []))[0] : null;
+  if (!meu || meu.papel !== "gerente") {
+    return res.status(403).json({ erro: "Só o gerente gera senha para outra pessoa." });
+  }
+
+  // 2. Agora sim a chave, para uma chamada só.
+  const nova = senhaAleatoria();
+  const r = await fetch(`${URL_BASE}/auth/v1/admin/users/${alvo}`, {
+    method: "PUT",
+    headers: { apikey: CHAVE, Authorization: `Bearer ${CHAVE}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ password: nova }),
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    let d = null; try { d = t ? JSON.parse(t) : null; } catch (e) {}
+    // A chave nunca viaja na mensagem de erro.
+    return res.status(502).json({ erro: (d && (d.msg || d.message)) || "O Supabase recusou a troca de senha." });
+  }
+
+  // 3. A marca de provisória, pelo token do gerente — é escrita em
+  //    `perfil`, e o RLS dela já é dele.
+  await fetch(`${URL_BASE}/rest/v1/perfil?id=eq.${alvo}`, {
+    method: "PATCH",
+    headers: { apikey: ANON, Authorization: tok, "Content-Type": "application/json" },
+    body: JSON.stringify({ senha_provisoria: true }),
+  }).catch(() => {});
+
+  return res.status(200).json({ ok: true, senha: nova });
+}
+
 async function acessos(req, res, tok) {
   const base = `${URL_BASE}/rest/v1/perfil`;
   const cab = { apikey: ANON, Authorization: tok };
 
   if (req.method === "GET") {
-    const r = await fetch(`${base}?select=id,nome,papel,ativo,administrativo,financeiro,criado_em&order=ativo.asc,nome.asc`, { headers: cab });
+    const r = await fetch(`${base}?select=id,nome,papel,ativo,administrativo,financeiro,senha_provisoria,criado_em&order=ativo.asc,nome.asc`, { headers: cab });
     if (!r.ok) return res.status(r.status === 401 ? 401 : 502).json({ erro: "Não consegui ler os acessos." });
     const d = await r.json().catch(() => []);
     return res.status(200).json({ acessos: Array.isArray(d) ? d : [] });
@@ -452,6 +548,11 @@ module.exports = async function handler(req, res) {
   const tok = tokenDe(req);
   if (!tok) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
 
+  if (String(req.query.recurso || "") === "senha") {
+    try { return await senha(req, res, tok); }
+    catch (e) { return res.status(500).json({ erro: "Falha ao gerar a senha." }); }
+  }
+
   if (String(req.query.recurso || "") === "acessos") {
     try { return await acessos(req, res, tok); }
     catch (e) { return res.status(502).json({ erro: "Não consegui falar com o banco." }); }
@@ -479,7 +580,9 @@ module.exports = async function handler(req, res) {
 
   let r, corpo;
   try {
-    r = await fetch(`${URL_BASE}/rest/v1/perfil?select=id,nome,papel,ativo,administrativo,financeiro&order=nome.asc`, {
+    // `senha_provisoria` vem junto: é o App que decide, na abertura, se
+    // a tela da senha vem antes de tudo.
+    r = await fetch(`${URL_BASE}/rest/v1/perfil?select=id,nome,papel,ativo,administrativo,financeiro,senha_provisoria&order=nome.asc`, {
       headers: { apikey: ANON, Authorization: tok },
     });
     corpo = await r.text();

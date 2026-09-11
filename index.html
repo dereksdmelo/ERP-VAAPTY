@@ -234,6 +234,108 @@ async function criarConta(nome, email, senha) {
   return d;
 }
 
+/**
+ * "Esqueci minha senha": o Supabase manda o e-mail com o link.
+ *
+ * **Depende do e-mail chegar**, e é essa a fragilidade: o SMTP
+ * compartilhado do plano gratuito entrega mal — dois funcionários
+ * ficaram de fora hoje por isso. Por isso existe o outro caminho, o
+ * gerente gerar uma senha, que não depende de ninguém.
+ *
+ * `redirect_to` aponta para a própria página. O Supabase devolve a
+ * sessão no fragmento da URL, e o App a reconhece na abertura.
+ */
+async function pedirRecuperacao(email) {
+  const cfg = await carregarConfig();
+  const r = await fetch(`${cfg.url}/auth/v1/recover`, {
+    method: "POST",
+    headers: { apikey: cfg.anon, "Content-Type": "application/json" },
+    body: JSON.stringify({ email: String(email).trim(), redirect_to: window.location.origin }),
+  });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    const m = String(d.error_description || d.msg || d.error || "");
+    if (/rate limit|too many|seconds/i.test(m)) throw new Error("O Supabase limita o envio. Espere um minuto e tente de novo.");
+    throw new Error(m || "Não consegui pedir a troca de senha.");
+  }
+  // Sucesso não confirma que o e-mail existe, de propósito: dizer
+  // "não existe conta com esse e-mail" entregaria a lista de quem
+  // trabalha aqui a quem tentasse adivinhar.
+  return true;
+}
+
+/**
+ * Trocar a própria senha, com o token da própria sessão.
+ *
+ * Não usa a chave de serviço: o Supabase deixa cada um mudar a sua.
+ * A chave de serviço só aparece quando é o GERENTE mudando a de
+ * OUTRA pessoa (`/api/perfil?recurso=senha`).
+ */
+async function definirMinhaSenha(nova) {
+  const cfg = await carregarConfig();
+  const r = await fetch(`${cfg.url}/auth/v1/user`, {
+    method: "PUT",
+    headers: { apikey: cfg.anon, Authorization: `Bearer ${AUTH.sessao.access_token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ password: nova }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const m = String(d.error_description || d.msg || d.error || "");
+    if (/should be different|same/i.test(m)) throw new Error("A senha nova precisa ser diferente da atual.");
+    if (/at least|length|short/i.test(m)) throw new Error("A senha precisa de pelo menos 6 caracteres.");
+    throw new Error(m || "Não consegui trocar a senha.");
+  }
+  // A marca de provisória sai por função estreita (0032): a escrita em
+  // `perfil` é do gerente, e abrir a linha para o dono abriria `papel`
+  // e `ativo` junto.
+  await fetchAut2(`${cfg.url}/rest/v1/rpc/limpar_senha_provisoria`, { method: "POST" }).catch(() => {});
+  return true;
+}
+
+// PostgREST direto, com a sessão atual. Só a RPC usa isto — o resto do
+// sistema passa por /api/, onde o token é repassado ao banco.
+async function fetchAut2(url, opcoes) {
+  const cfg = await carregarConfig();
+  return fetch(url, {
+    ...opcoes,
+    headers: { apikey: cfg.anon, Authorization: `Bearer ${AUTH.sessao.access_token}`,
+               "Content-Type": "application/json", ...((opcoes || {}).headers || {}) },
+  });
+}
+
+/** O gerente gera uma senha aleatória para alguém. Volta uma vez só. */
+async function gerarSenhaPara(id) {
+  const r = await fetchAut("/api/perfil?recurso=senha", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui gerar a senha.");
+  return d.senha;
+}
+
+/**
+ * A sessão que vem no fragmento da URL, depois do link de recuperação.
+ *
+ * O Supabase devolve `#access_token=…&type=recovery`. O fragmento é
+ * limpo em seguida: token em barra de endereço vira token em
+ * histórico, em print e no que a pessoa colar para pedir ajuda.
+ */
+function sessaoDoLink() {
+  const h = String(window.location.hash || "").replace(/^#/, "");
+  if (!h) return null;
+  const p = new URLSearchParams(h);
+  const token = p.get("access_token");
+  if (!token) return null;
+  const s = {
+    access_token: token,
+    refresh_token: p.get("refresh_token") || "",
+    expires_in: Number(p.get("expires_in")) || 3600,
+    tipo: p.get("type") || "",
+  };
+  try { window.history.replaceState(null, "", window.location.pathname + window.location.search); } catch (e) {}
+  return s;
+}
+
 async function renovarSessao() {
   const cfg = await carregarConfig();
   const atual = AUTH.sessao;
@@ -7564,6 +7666,79 @@ function CRM({ perfil, aoAbrir, mes }) {
 
 /* ===================== entrada ===================== */
 
+/**
+ * Definir a senha — obrigatória ou voluntária.
+ *
+ * Aparece em dois momentos: quando o gerente gerou uma senha
+ * provisória (e aí **não há como passar por cima**, senão a senha que
+ * circulou no WhatsApp ficaria valendo para sempre), e quando a pessoa
+ * chega pelo link do "esqueci minha senha".
+ *
+ * Pede duas vezes porque não há como conferir depois: errou e saiu,
+ * está trancada de novo.
+ */
+function TrocarSenha({ obrigatoria, aoPronto, aoCancelar }) {
+  const [a, setA] = useState("");
+  const [b, setB] = useState("");
+  const [indo, setIndo] = useState(false);
+  const [erro, setErro] = useState("");
+
+  const curta = a.length > 0 && a.length < 6;
+  const diferem = !!b && a !== b;
+  const pode = a.length >= 6 && a === b && !indo;
+
+  const salvar = async (ev) => {
+    if (ev) ev.preventDefault();
+    if (!pode) return;
+    setErro(""); setIndo(true);
+    try { await definirMinhaSenha(a); await aoPronto(); }
+    catch (e) { setErro(e.message); setIndo(false); }
+  };
+
+  return (
+    <div className="flex min-h-screen flex-col justify-center px-6" style={{ background: C.bg, fontFamily: F.body, color: C.ink }}>
+      <div className="mx-auto w-full" style={{ maxWidth: 380 }}>
+        <div className="text-[11px] uppercase tracking-[0.22em]" style={{ color: C.mute }}>Vaapty Joinville</div>
+        <h1 className="mt-1 text-[24px] leading-tight" style={{ fontFamily: F.disp, fontWeight: 800, color: C.roxo }}>
+          {obrigatoria ? "Escolha a sua senha" : "Trocar a senha"}
+        </h1>
+        {obrigatoria && (
+          <p className="mt-2 text-[13px] leading-relaxed" style={{ color: C.mute }}>
+            A senha que você usou para entrar foi gerada pelo gerente e passou por WhatsApp. Escolha uma que só você saiba —
+            o sistema não abre antes disso.
+          </p>
+        )}
+
+        <form onSubmit={salvar} className="mt-5 space-y-3">
+          <Campo label="Senha nova">
+            <input type="password" autoComplete="new-password" className={inputCls} style={inputSty}
+              value={a} onChange={(e) => setA(e.target.value)} />
+          </Campo>
+          <Campo label="Repita a senha nova">
+            <input type="password" autoComplete="new-password" className={inputCls} style={inputSty}
+              value={b} onChange={(e) => setB(e.target.value)} />
+          </Campo>
+          {curta && <p className="text-[11px]" style={{ color: AMARELO.texto }}>Pelo menos 6 caracteres.</p>}
+          {diferem && <p className="text-[11px]" style={{ color: AMARELO.texto }}>As duas não estão iguais.</p>}
+          <button type="submit" disabled={!pode}
+            className="w-full rounded-lg py-3 text-[14px] font-semibold"
+            style={{ background: pode ? C.roxo : C.line, color: "#fff" }}>
+            {indo ? "Salvando…" : "Salvar e entrar"}
+          </button>
+          {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+        </form>
+
+        {!obrigatoria && aoCancelar && (
+          <button onClick={aoCancelar} className="mt-4 w-full text-[13px]" style={{ color: C.mute }}>Cancelar</button>
+        )}
+        {obrigatoria && (
+          <button onClick={sair} className="mt-4 w-full text-[13px]" style={{ color: C.mute }}>Sair</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Login({ aoEntrar }) {
   const [modo, setModo] = useState("entrar");
   const [nome, setNome] = useState("");
@@ -7572,7 +7747,17 @@ function Login({ aoEntrar }) {
   const [indo, setIndo] = useState(false);
   const [erro, setErro] = useState("");
   const [criada, setCriada] = useState(false);
+  const [enviado, setEnviado] = useState(false);
   const criando = modo === "criar";
+  const esquecido = modo === "esqueci";
+
+  const pedirTroca = async () => {
+    if (!email.trim()) { setErro("Escreva o e-mail primeiro."); return; }
+    setErro(""); setIndo(true);
+    try { await pedirRecuperacao(email); setEnviado(true); }
+    catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
 
   const enviar = async (ev) => {
     if (ev) ev.preventDefault();
@@ -7589,6 +7774,16 @@ function Login({ aoEntrar }) {
     } catch (e) { setErro(e.message); setIndo(false); }
   };
 
+  if (enviado) {
+    return (
+      <Aviso titulo="Link enviado"
+        acao={<button onClick={() => { setEnviado(false); setModo("entrar"); }} className="mt-4 text-[13px] underline" style={{ color: C.roxo }}>Voltar para entrar</button>}>
+        Se existe conta com <b>{email.trim()}</b>, o link de troca de senha foi enviado. <b>Olhe também o spam.</b> Se
+        não chegar em alguns minutos, peça ao gerente para gerar uma senha — ele consegue, e não depende de e-mail.
+      </Aviso>
+    );
+  }
+
   if (criada) {
     return (
       <Aviso titulo="Conta criada"
@@ -7603,8 +7798,13 @@ function Login({ aoEntrar }) {
       <div className="mx-auto w-full" style={{ maxWidth: 380 }}>
         <div className="text-[11px] uppercase tracking-[0.22em]" style={{ color: C.mute }}>Vaapty Joinville</div>
         <h1 className="mt-1 text-[24px] leading-tight" style={{ fontFamily: F.disp, fontWeight: 800, color: C.roxo }}>
-          Ficha e negociação
+          {esquecido ? "Esqueci minha senha" : "Ficha e negociação"}
         </h1>
+        {esquecido && (
+          <p className="mt-2 text-[13px] leading-relaxed" style={{ color: C.mute }}>
+            Escreva o e-mail da sua conta e o sistema manda um link para você escolher outra senha.
+          </p>
+        )}
 
         <form onSubmit={enviar} className="mt-6 space-y-3">
           {criando && (
@@ -7617,21 +7817,40 @@ function Login({ aoEntrar }) {
             <input type="email" autoComplete="username" inputMode="email" className={inputCls} style={inputSty}
               value={email} onChange={(e) => setEmail(e.target.value)} />
           </Campo>
-          <Campo label="Senha">
-            <input type="password" autoComplete={criando ? "new-password" : "current-password"} className={inputCls} style={inputSty}
-              value={senha} onChange={(e) => setSenha(e.target.value)} />
-          </Campo>
-          <button type="submit" disabled={indo || !email.trim() || !senha || (criando && !nome.trim())}
-            className="w-full rounded-lg py-3 text-[14px] font-semibold"
-            style={{ background: indo || !email.trim() || !senha || (criando && !nome.trim()) ? C.line : C.roxo, color: "#fff" }}>
-            {indo ? (criando ? "Criando…" : "Entrando…") : criando ? "Criar conta" : "Entrar"}
-          </button>
+          {!esquecido && (
+            <Campo label="Senha">
+              <input type="password" autoComplete={criando ? "new-password" : "current-password"} className={inputCls} style={inputSty}
+                value={senha} onChange={(e) => setSenha(e.target.value)} />
+            </Campo>
+          )}
+          {esquecido ? (
+            <button type="button" onClick={pedirTroca} disabled={indo || !email.trim()}
+              className="w-full rounded-lg py-3 text-[14px] font-semibold"
+              style={{ background: indo || !email.trim() ? C.line : C.roxo, color: "#fff" }}>
+              {indo ? "Enviando…" : "Enviar link de troca"}
+            </button>
+          ) : (
+            <button type="submit" disabled={indo || !email.trim() || !senha || (criando && !nome.trim())}
+              className="w-full rounded-lg py-3 text-[14px] font-semibold"
+              style={{ background: indo || !email.trim() || !senha || (criando && !nome.trim()) ? C.line : C.roxo, color: "#fff" }}>
+              {indo ? (criando ? "Criando…" : "Entrando…") : criando ? "Criar conta" : "Entrar"}
+            </button>
+          )}
           {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
         </form>
 
-        <button onClick={() => { setModo(criando ? "entrar" : "criar"); setErro(""); }}
+        {/* "Esqueci" fica junto do Entrar, não escondido embaixo do
+            "criar conta": quem esqueceu a senha já tem conta. */}
+        {modo === "entrar" && (
+          <button onClick={() => { setModo("esqueci"); setErro(""); }}
+            className="mt-3 w-full text-[13px]" style={{ color: C.mute }}>
+            Esqueci minha senha
+          </button>
+        )}
+
+        <button onClick={() => { setModo(criando || esquecido ? "entrar" : "criar"); setErro(""); }}
           className="mt-4 w-full text-[13px] font-semibold" style={{ color: C.roxo }}>
-          {criando ? "Já tenho conta — entrar" : "Primeira vez aqui? Criar conta"}
+          {criando ? "Já tenho conta — entrar" : esquecido ? "Voltar para entrar" : "Primeira vez aqui? Criar conta"}
         </button>
 
         <p className="mt-5 text-[11px] leading-relaxed" style={{ color: C.mute }}>
@@ -12232,6 +12451,21 @@ function Acessos({ perfil }) {
     </label>
   );
 
+  // A senha aparece UMA vez. Não é guardada em lugar nenhum — mostrar
+  // de novo depois exigiria guardar senha em claro.
+  const [nova, setNova] = useState(null);     // { id, nome, senha }
+  const [gerando, setGerando] = useState("");
+  const gerar = async (a) => {
+    if (!window.confirm(`Gerar uma senha nova para ${a.nome}? A senha atual dele para de valer na hora.`)) return;
+    setGerando(a.id); setErro(""); setNova(null);
+    try {
+      const senha = await gerarSenhaPara(a.id);
+      setNova({ id: a.id, nome: a.nome, senha });
+      carregar();
+    } catch (e) { setErro(e.message); }
+    setGerando("");
+  };
+
   if (erro && !lista) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
   if (!lista) return <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>;
   const esperando = lista.filter((a) => !a.ativo);
@@ -12260,11 +12494,41 @@ function Acessos({ perfil }) {
             {marca(a, "ativo", "entra")}
             {marca(a, "administrativo", "administrativo")}
             {marca(a, "financeiro", "financeiro")}
+            {a.id !== (perfil && perfil.id) && (
+              <button onClick={() => gerar(a)} disabled={gerando === a.id}
+                className="text-[12px] font-semibold" style={{ color: gerando === a.id ? C.mute : C.roxo }}>
+                {gerando === a.id ? "gerando…" : "gerar senha"}
+              </button>
+            )}
+            {a.senha_provisoria && (
+              <span className="rounded-lg px-2 py-0.5 text-[11px] font-semibold" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
+                senha provisória
+              </span>
+            )}
+
+            {nova && nova.id === a.id && (
+              <div className="w-full rounded-lg px-3 py-2.5" style={{ background: "#F0F8F4", border: `1px solid ${C.verde}` }}>
+                <div className="text-[11px] uppercase tracking-[0.12em]" style={{ color: C.verde }}>
+                  Senha de {nova.nome} — aparece uma vez só
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-3">
+                  <span className="text-[20px]" style={{ fontFamily: F.mono, fontWeight: 700, letterSpacing: "0.06em" }}>{nova.senha}</span>
+                  <button onClick={() => { navigator.clipboard.writeText(nova.senha).catch(() => {}); }}
+                    className="text-[12px] font-semibold" style={{ color: C.roxo }}>copiar</button>
+                  <button onClick={() => setNova(null)} className="text-[12px]" style={{ color: C.mute }}>fechar</button>
+                </div>
+                <p className="mt-1 text-[11px] leading-snug" style={{ color: C.mute }}>
+                  Passe para {String(nova.nome).split(" ")[0]} e feche. Na primeira entrada o sistema obriga a trocar —
+                  senha que circulou no WhatsApp não fica valendo.
+                </p>
+              </div>
+            )}
           </div>
         ))}
       </div>
       <p className="mt-2 text-[11px] leading-snug" style={{ color: C.mute }}>
         A pessoa cria a conta sozinha na tela de entrada e aparece aqui desativada. Gerente enxerga tudo; <b>administrativo</b> abre a conferência; <b>financeiro</b> abre o Financeiro.
+        Quem esqueceu a senha resolve sozinho pelo <b>Esqueci minha senha</b> da tela de entrada — se o e-mail não chegar, use o <b>gerar senha</b> aqui.
       </p>
     </div>
   );
@@ -12306,6 +12570,9 @@ function App() {
   const [tela, setTela] = useState("atendimentos");
   const [comp, setComp] = useState(() => competenciaDe(hojeEmSP()));
   const MESES = useMemo(() => mesesRecentes(18), []);
+  // Chegou pelo link do "esqueci minha senha": a sessão vem no
+  // fragmento da URL e a única tela que faz sentido é a da senha.
+  const [recuperando, setRecuperando] = useState(false);
 
   const verQuemSou = async () => {
     try {
@@ -12322,6 +12589,14 @@ function App() {
     AUTH.aoSair = () => { setPerfil(null); setEstado("fora"); };
     (async () => {
       try { await carregarConfig(); } catch (e) { setErro(e.message); setEstado("erro"); return; }
+      // O link de recuperação vem antes da sessão guardada: quem clicou
+      // nele quer trocar a senha, não voltar para onde estava.
+      const doLink = sessaoDoLink();
+      if (doLink && doLink.tipo === "recovery") {
+        guardarSessao(doLink);
+        setRecuperando(true); setEstado("dentro");
+        return;
+      }
       await restaurarSessao();
       if (!AUTH.sessao) { setEstado("fora"); return; }
       await verQuemSou();
@@ -12331,6 +12606,15 @@ function App() {
 
   if (estado === "carregando") return <Aviso titulo="Carregando…">Um instante.</Aviso>;
   if (estado === "fora") return <Login aoEntrar={verQuemSou} />;
+
+  // Vindo do link de recuperação, ou com senha que o gerente gerou:
+  // nos dois casos a tela da senha vem antes de tudo. No segundo não
+  // há como passar por cima — senha que circulou no WhatsApp não pode
+  // ficar valendo para sempre.
+  if (recuperando || (perfil && perfil.senha_provisoria)) {
+    return <TrocarSenha obrigatoria
+      aoPronto={async () => { setRecuperando(false); setEstado("carregando"); await verQuemSou(); }} />;
+  }
 
   if (estado === "esperando") return (
     <Aviso titulo="Acesso ainda não liberado"
