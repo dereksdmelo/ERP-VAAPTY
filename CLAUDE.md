@@ -1868,6 +1868,24 @@ não derruba o envio: o carro entra sem responsável e a resposta traz um
 aviso com os nomes válidos, que a tela mostra. É assim que se descobre
 um erro de grafia na hora, em vez de descobrir pelo carro sem dono.
 
+**E o nome daqui não é o nome de lá — a tradução é cadastro (0044).**
+O primeiro envio voltou com o aviso: "TIAGO" não está na equipe. Não
+está mesmo; lá ele é **Tiago Tisott**. São três listas de nomes para as
+mesmas pessoas — `negociador` ("TIAGO", "DIMAS"), `perfil` ("Thiago
+Santos de Souza", "Pablo Soares") e a equipe deles ("Tiago Tisott",
+"Dimas Campos", "André Bruno").
+
+**Casar pelo primeiro nome seria errado, não incompleto.** A equipe
+deles tem "Tiago Tisott" **e** "Thiago Santos de Souza" — um negociador
+e um gerente, duas pessoas. A aproximação acertaria Dimas, erraria
+Tiago, e o erro seria **silencioso**: o carro entra com o responsável
+trocado e ninguém vê. Mesmo raciocínio da decisão 23, onde o comprador
+virou cadastro em vez de texto solto.
+
+Então `negociador.shinkai_nome` é escrito uma vez por pessoa, em Equipe
+e metas. Vazio, vai o nome daqui — e o aviso volta listando os nomes
+válidos, que é justamente como se descobre o que escrever ali.
+
 **Pneus e opcionais: o chute estava certo.** `pneus` como objeto por
 posição e `opcionais` como texto livre são exatamente o que a API
 espera; os nossos quatro estados são traduzidos do lado deles

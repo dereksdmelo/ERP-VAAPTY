@@ -168,7 +168,7 @@ async function negociadores(req, res, tok) {
   };
 
   if (req.method === "GET") {
-    const r = await fetch(`${base}?select=id,nome,papel,ativo,meta_valor,meta_volume,` +
+    const r = await fetch(`${base}?select=id,nome,papel,ativo,shinkai_nome,meta_valor,meta_volume,` +
       `meta_agendamentos,meta_comparecimentos,` +
       `${CAMPOS_META.concat(CAMPOS_META_PRE).join(",")}&order=papel.asc,nome.asc`, { headers: cab });
     const d = await responder(r);
@@ -183,6 +183,10 @@ async function negociadores(req, res, tok) {
     if (!nome) return res.status(400).json({ erro: "Informe o nome." });
     const papel = PAPEIS.indexOf(String(c.papel || "")) >= 0 ? c.papel : "negociador";
     const linha = { nome, papel };
+    // O nome desta pessoa na equipe do Shinkai (0044). Vazio é o caso
+    // normal: só precisa de tradução quem o nome daqui não encontra do
+    // lado de lá.
+    if (c.shinkai_nome !== undefined) linha.shinkai_nome = texto(c.shinkai_nome);
     // meta_valor e meta_volume não são aceitos do cliente: são
     // derivados dos três campos abaixo, e só aqui.
     if (CAMPOS_META.some((k) => c[k] !== undefined)) {
@@ -212,6 +216,7 @@ async function negociadores(req, res, tok) {
     if (c.nome !== undefined) mud.nome = texto(c.nome);
     if (c.papel !== undefined && PAPEIS.indexOf(String(c.papel)) >= 0) mud.papel = c.papel;
     if (c.ativo !== undefined) mud.ativo = !!c.ativo;
+    if (c.shinkai_nome !== undefined) mud.shinkai_nome = texto(c.shinkai_nome);
 
     // Só recalcula quando um dos três chega. Sem esta guarda, um
     // "desativar" — que manda apenas `ativo` — zeraria a meta de quem

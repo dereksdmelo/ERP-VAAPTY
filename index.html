@@ -7892,6 +7892,30 @@ function CadastroNegociadores({ perfil, competencia, aoMudarMetaLoja }) {
                       </p>
                     )
                   )}
+
+                  {/* O nome desta pessoa na equipe do Shinkai.
+                      Aqui ela é "TIAGO"; lá é "Tiago Tisott" — e lá
+                      existe também um "Thiago Santos de Souza", que é
+                      outra pessoa. Casar pelo primeiro nome acertaria
+                      uns e erraria outros em silêncio, então se
+                      escreve uma vez e acabou.
+
+                      Fica só para quem vende: prospecção não tem carro
+                      para responder do lado de lá. */}
+                  {papel !== "prospeccao" && (
+                    <label className="mt-2 block">
+                      <span className="block text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>
+                        Nome no Shinkai
+                      </span>
+                      <input className="mt-[2px] w-full rounded-md border px-2 py-1 text-[12px] outline-none"
+                        style={inputSty} defaultValue={n.shinkai_nome || ""}
+                        placeholder={`igual ao da equipe lá — vazio usa "${n.nome}"`}
+                        onBlur={(e) => {
+                          const agora = e.target.value.trim();
+                          if (agora !== (n.shinkai_nome || "")) mexer(n.id, { shinkai_nome: agora });
+                        }} />
+                    </label>
+                  )}
                 </>
               )}
             </div>

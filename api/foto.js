@@ -264,9 +264,31 @@ async function shinkai(req, res, tok) {
   // carro entra sem responsável e a resposta traz um aviso com os
   // nomes válidos, que a tela mostra. É assim que se descobre um erro
   // de grafia na hora, em vez de descobrir pelo carro sem dono.
-  const responsavel = (e && e.negociador_nome)
+  const nomeDaqui = (e && e.negociador_nome)
     || (v.atendimento && v.atendimento.negociador_nome)
     || null;
+
+  // **A tradução é cadastro, não aproximação.** Aqui a pessoa é
+  // "TIAGO"; lá ela é "Tiago Tisott" — e a equipe deles tem também um
+  // "Thiago Santos de Souza", que é outra pessoa. Casar pelo primeiro
+  // nome acertaria Dimas, erraria Tiago, e o erro seria **silencioso**:
+  // o carro entra com o responsável trocado e ninguém vê. Então quem
+  // traduz é `negociador.shinkai_nome` (0044), escrito uma vez.
+  //
+  // Sem tradução cadastrada vai o nome daqui, e o aviso do Shinkai
+  // volta listando os nomes válidos — que é justamente como se
+  // descobre o que escrever no cadastro.
+  let responsavel = nomeDaqui;
+  if (nomeDaqui) {
+    try {
+      const achados = await banco(
+        `${REST("negociador")}?select=shinkai_nome&nome=eq.${encodeURIComponent(nomeDaqui)}&limit=1`,
+        { headers: cabecalhos(tok) },
+      );
+      const t = ((achados || [])[0] || {}).shinkai_nome;
+      if (t) responsavel = t;
+    } catch (err) { /* sem cadastro, segue com o nome daqui */ }
+  }
   if (!v.placa) return res.status(400).json({ erro: "O carro precisa de placa para ir ao Shinkai." });
 
   const fotos = await banco(
