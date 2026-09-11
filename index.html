@@ -190,7 +190,16 @@ async function entrar(email, senha) {
   if (!r.ok) {
     // A mensagem do Supabase vem em inglês e não diz nada ao negociador.
     const m = String(d.error_description || d.msg || d.error || "");
-    throw new Error(/invalid/i.test(m) ? "E-mail ou senha não conferem." : m || "Não consegui entrar.");
+    // "Email not confirmed" é o caso que mais confunde: o gerente já
+    // liberou o acesso na tela dele, então ele jura que está tudo certo
+    // — mas o Supabase barra ANTES, e a pessoa via a frase em inglês.
+    if (/not confirmed|confirm.*email/i.test(m)) {
+      throw new Error("Falta confirmar o e-mail. Procure a mensagem do Supabase na caixa de entrada e no spam. " +
+        "Se não chegou, o gerente confirma pelo painel — liberar o acesso aqui dentro não substitui esse passo.");
+    }
+    if (/invalid/i.test(m)) throw new Error("E-mail ou senha não conferem.");
+    if (/rate limit|too many/i.test(m)) throw new Error("Muitas tentativas seguidas. Espere alguns minutos.");
+    throw new Error(m || "Não consegui entrar.");
   }
   guardarSessao(d);
   return d;
