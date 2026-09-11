@@ -204,21 +204,50 @@ async function shinkai(req, res, tok) {
     });
   }
 
+  // ---------------------------------------------------------------
+  // Dois caminhos, e são dois momentos diferentes da vida do carro.
+  //
+  //   veiculo_id — o LANÇAMENTO: a ficha em avaliação, com o cliente
+  //                na mesa, indo à rede para receber proposta. O carro
+  //                ainda não é nosso, então não há valor de compra —
+  //                e é por isso que o Shinkai o recebe como "em
+  //                avaliação", que é o estado certo para ele.
+  //   estoque_id — a VENDA: o carro já comprado, com valor de compra,
+  //                indo à rede para ser repassado.
+  //
+  // O resultado de cada um fica na sua própria linha (0030 e 0039):
+  // são dois envios com respostas diferentes, e misturá-los faria
+  // "já está lá" responder pela viagem errada.
+  // ---------------------------------------------------------------
   const eid = String(req.query.estoque_id || "");
-  if (!RX_UUID.test(eid)) return res.status(400).json({ erro: "estoque_id inválido." });
+  const vid = String(req.query.veiculo_id || "");
+  if (!RX_UUID.test(eid) && !RX_UUID.test(vid)) {
+    return res.status(400).json({ erro: "Informe estoque_id ou veiculo_id." });
+  }
+
+  const CAMPOS_V = "id,placa,chassi,marca_modelo,ano_fabricacao,ano_modelo,cor,combustivel," +
+    "cambio,km_atual,fipe_codigo,fipe_valor,leilao_sinistro,gnv";
 
   // A leitura vai pelo TOKEN DO USUÁRIO: é a RLS que decide se esta
   // pessoa enxerga este carro. A chave de serviço entra depois, e só
   // para assinar os links das fotos.
-  const achado = await banco(
-    `${REST("estoque")}?select=id,valor_compra,preco_pedido,veiculo(id,placa,chassi,marca_modelo,` +
-    `ano_fabricacao,ano_modelo,cor,combustivel,cambio,km_atual,fipe_codigo,fipe_valor,leilao_sinistro,gnv)` +
-    `&id=eq.${eid}&limit=1`,
-    { headers: cabecalhos(tok) }
-  );
-  const e = Array.isArray(achado) ? achado[0] : null;
-  if (!e || !e.veiculo) return res.status(404).json({ erro: "Carro não encontrado no estoque." });
-  const v = e.veiculo;
+  let e = null, v = null;
+  if (RX_UUID.test(eid)) {
+    const achado = await banco(
+      `${REST("estoque")}?select=id,valor_compra,preco_pedido,veiculo(${CAMPOS_V})&id=eq.${eid}&limit=1`,
+      { headers: cabecalhos(tok) }
+    );
+    e = Array.isArray(achado) ? achado[0] : null;
+    if (!e || !e.veiculo) return res.status(404).json({ erro: "Carro não encontrado no estoque." });
+    v = e.veiculo;
+  } else {
+    const achado = await banco(
+      `${REST("veiculo")}?select=${CAMPOS_V},valor_por&id=eq.${vid}&limit=1`,
+      { headers: cabecalhos(tok) }
+    );
+    v = Array.isArray(achado) ? achado[0] : null;
+    if (!v) return res.status(404).json({ erro: "Ficha não encontrada." });
+  }
   if (!v.placa) return res.status(400).json({ erro: "O carro precisa de placa para ir ao Shinkai." });
 
   const fotos = await banco(
@@ -252,8 +281,12 @@ async function shinkai(req, res, tok) {
       fipe_codigo: v.fipe_codigo || undefined,
       fipe_valor: numeroOuNulo(v.fipe_valor) || undefined,
       // "o que a loja pagou … é o alvo da negociação", pela
-      // documentação deles. É o nosso `valor_compra`.
-      valor_investimento: numeroOuNulo(e.valor_compra) || undefined,
+      // documentação deles. Comprado, é o `valor_compra`; ainda em
+      // avaliação não há o que a loja pagou, e o alvo é o POR — o
+      // número que o negociador quer ver voltar da rede. Sem nenhum
+      // dos dois o Shinkai recebe o carro como "em avaliação", e diz
+      // isso nos avisos.
+      valor_investimento: numeroOuNulo(e ? e.valor_compra : v.valor_por) || undefined,
       leilao_sinistro: !!v.leilao_sinistro,
       gnv: !!v.gnv,
       fotos: urls.length ? urls : undefined,
@@ -287,15 +320,15 @@ async function shinkai(req, res, tok) {
 
   // O que voltou fica gravado: sem isso ninguém sabe se o carro já
   // está lá, e reenviar vira adivinhação.
-  await banco(`${REST("estoque")}?id=eq.${eid}`, {
-    method: "PATCH",
-    headers: json(tok),
-    body: JSON.stringify({
-      shinkai_id: (d && d.id) || null,
-      shinkai_status: (d && d.status) || null,
-      shinkai_em: new Date().toISOString(),
-    }),
-  }).catch(() => {});
+  const marca = {
+    shinkai_id: (d && d.id) || null,
+    shinkai_status: (d && d.status) || null,
+    shinkai_em: new Date().toISOString(),
+  };
+  await banco(
+    e ? `${REST("estoque")}?id=eq.${eid}` : `${REST("veiculo")}?id=eq.${v.id}`,
+    { method: "PATCH", headers: json(tok), body: JSON.stringify(marca) },
+  ).catch(() => {});
 
   return res.status(200).json({
     ok: true,

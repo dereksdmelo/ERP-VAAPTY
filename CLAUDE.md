@@ -1803,6 +1803,30 @@ gravação — dizem por que o carro entrou em *avaliação* em vez de
 precisa ler para resolver. O 422 mostra a lista de campos recusados;
 engoli-la obrigaria a abrir o log da Vercel com o cliente esperando.
 
+**O botão nasceu no lugar errado, e isso demorou a aparecer.** Ele
+ficava só na Venda para lojistas, que é o carro **já comprado**. Mas o
+momento em que o carro precisa chegar à rede é o **Lançamento**, com o
+cliente sentado esperando as propostas voltarem — e lá continuava só o
+"Copiar JSON do Shinkai". O Derek viu em 11/09/2026: *"continua
+aparecendo o copiar JSON do Shinkai, e não enviar para o Shinkai"*.
+
+**São dois envios na vida do carro, não um.** Um na avaliação, para
+receber proposta; outro depois de comprado, para repassar. O endpoint
+aceita `veiculo_id` **ou** `estoque_id`, e o resultado de cada um fica
+na sua própria linha (0030 no `estoque`, 0039 no `veiculo`) — misturar
+os dois faria "já está lá" responder pela viagem errada.
+
+**Na avaliação o `valor_investimento` é o POR, não o valor de compra**
+— a loja ainda não pagou nada, e o alvo é o número que o negociador
+quer ver voltar da rede. Sem nenhum dos dois o Shinkai recebe o carro
+como *em avaliação* e diz isso nos avisos, que é o estado certo para um
+carro que ainda não é nosso. **A documentação deles já prevê isso**;
+não é desvio de uso.
+
+**O envio pede a ficha salva.** É o `veiculo_id` que dá endereço às
+fotos no bucket. Sem ele o botão fica apagado e a tela diz o que
+fazer, em vez de falhar depois de apertado.
+
 ### 37. A meta da pré-venda é outra cadeia
 
 O cadastro dava a todo mundo os três campos do negociador, e na

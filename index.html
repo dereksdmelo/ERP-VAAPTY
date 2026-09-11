@@ -608,6 +608,16 @@ async function shinkaiConfigurado() {
   const d = await r.json().catch(() => ({}));
   return !!d.configurado;
 }
+// O envio a partir do LANÇAMENTO: a ficha em avaliação, antes de o
+// carro ser comprado. A outra função manda o carro já no estoque —
+// são dois momentos, e o resultado de cada um fica na sua linha.
+async function enviarAoShinkai2(veiculoId) {
+  const r = await fetchAut(`/api/foto?recurso=shinkai&veiculo_id=${encodeURIComponent(veiculoId)}`, { method: "POST" });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui enviar ao Shinkai.");
+  return d;
+}
+
 async function enviarAoShinkai(estoqueId) {
   const r = await fetchAut(`/api/foto?recurso=shinkai&estoque_id=${encodeURIComponent(estoqueId)}`, { method: "POST" });
   const d = await r.json().catch(() => ({}));
@@ -2814,6 +2824,13 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   const [fotos, setFotos] = useState([]);
   const [etapa, setEtapa] = useState("A");
   const [copiado, setCopiado] = useState("");
+  // O envio ao Shinkai a partir do Lançamento. `chaveShinkai` nulo é
+  // "ainda não perguntei"; false é "não há chave", e aí a tela cai no
+  // JSON copiado e diz por quê, em vez de oferecer botão que falha.
+  const [chaveShinkai, setChaveShinkai] = useState(null);
+  const [indoShinkai, setIndoShinkai] = useState(false);
+  const [respShinkai, setRespShinkai] = useState(null);
+  useEffect(() => { shinkaiConfigurado().then(setChaveShinkai).catch(() => setChaveShinkai(false)); }, []);
   const [agora, setAgora] = useState(Date.now());
 
   const [placaBusca, setPlacaBusca] = useState("");
@@ -3917,11 +3934,62 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 </button>
               </div>
               <pre className="overflow-x-auto whitespace-pre-wrap px-4 py-3 text-[12px] leading-relaxed" style={{ fontFamily: F.body }}>{descritivo}</pre>
+              {/* O Shinkai. Com chave, o carro vai por botão; sem ela,
+                  o caminho antigo continua ali — e a tela diz qual dos
+                  dois está valendo, em vez de mostrar um botão que
+                  falha na frente do cliente.
+
+                  **O envio pede a ficha salva.** É o `veiculo_id` que
+                  dá endereço às fotos no bucket, e sem foto o carro
+                  entra lá como "em avaliação". */}
               <div className="border-t px-4 py-3" style={{ borderColor: C.line }}>
-                <button disabled={!liberado} onClick={() => copiar(JSON.stringify(payloadShinkai(f, enviadas.length), null, 2), "s")}
-                  className="w-full rounded-md border py-2 text-[12px] font-semibold" style={{ borderColor: C.line, color: C.roxo }}>
-                  {copiado === "s" ? "JSON copiado" : "Copiar JSON do Shinkai"}
-                </button>
+                {chaveShinkai ? (
+                  <>
+                    <button disabled={!liberado || !veiculoId || indoShinkai}
+                      onClick={async () => {
+                        setIndoShinkai(true); setRespShinkai(null);
+                        try { setRespShinkai(await enviarAoShinkai2(veiculoId)); }
+                        catch (ex) { setRespShinkai({ erro: ex.message || "Não consegui enviar." }); }
+                        setIndoShinkai(false);
+                      }}
+                      className="w-full rounded-md py-2.5 text-[13px] font-semibold"
+                      style={{ background: liberado && veiculoId && !indoShinkai ? C.roxo : C.line, color: "#fff" }}>
+                      {indoShinkai ? "Enviando ao Shinkai…" : respShinkai && !respShinkai.erro ? "Enviar de novo ao Shinkai" : "Enviar ao Shinkai"}
+                    </button>
+                    {!veiculoId && (
+                      <p className="mt-1.5 text-[11px]" style={{ color: C.mute }}>
+                        Salve a ficha no banco antes — é ela que leva as fotos junto.
+                      </p>
+                    )}
+                    {respShinkai && respShinkai.erro && (
+                      <p className="mt-2 text-[12px] leading-snug" style={{ color: C.laranja }}>{respShinkai.erro}</p>
+                    )}
+                    {respShinkai && !respShinkai.erro && (
+                      <div className="mt-2 text-[12px] leading-snug" style={{ color: C.verde }}>
+                        No Shinkai{respShinkai.status ? ` como ${respShinkai.status}` : ""}.
+                        {Array.isArray(respShinkai.avisos) && respShinkai.avisos.length ? (
+                          <span style={{ color: AMARELO.texto }}> {respShinkai.avisos.join(" · ")}</span>
+                        ) : null}
+                      </div>
+                    )}
+                    <button disabled={!liberado} onClick={() => copiar(JSON.stringify(payloadShinkai(f, enviadas.length), null, 2), "s")}
+                      className="mt-2 w-full rounded-md border py-2 text-[12px] font-semibold" style={{ borderColor: C.line, color: C.mute }}>
+                      {copiado === "s" ? "JSON copiado" : "Copiar o JSON, em vez disso"}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button disabled={!liberado} onClick={() => copiar(JSON.stringify(payloadShinkai(f, enviadas.length), null, 2), "s")}
+                      className="w-full rounded-md border py-2 text-[12px] font-semibold" style={{ borderColor: C.line, color: C.roxo }}>
+                      {copiado === "s" ? "JSON copiado" : "Copiar JSON do Shinkai"}
+                    </button>
+                    {chaveShinkai === false && (
+                      <p className="mt-1.5 text-[11px] leading-snug" style={{ color: C.mute }}>
+                        O envio direto está desligado: falta a chave do Shinkai nas configurações. Por enquanto, cole o JSON no painel.
+                      </p>
+                    )}
+                  </>
+                )}
               </div>
             </section>
 
