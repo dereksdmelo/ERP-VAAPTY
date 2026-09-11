@@ -12891,15 +12891,29 @@ function ResumoDoNegocio({ viva, atendimento }) {
       <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>O negócio</div>
       <div className="mt-1.5">
         {linha("FIPE", v.fipe_valor ? brl(v.fipe_valor) : "—")}
-        {linha("Rodadas", rodadas.length || "nenhuma")}
+        {linha("Rodadas", viva ? (rodadas.length || "nenhuma") : "sem registro")}
         {primeira && linha("1ª oferta", brl(primeira.impresso))}
         {ultima && ultima.contra ? linha("Última contraproposta", brl(ultima.contra), C.laranja) : null}
         {viva && viva.valor_fechado
           ? linha("Fechou", brl(viva.valor_fechado), C.verde)
-          : linha("Fechamento", "ainda não", C.mute)}
+          : a.valor_fechado
+            ? linha("Fechou", brl(a.valor_fechado), C.verde)
+            : linha("Fechamento", viva ? "ainda não" : "sem registro", C.mute)}
         {viva && viva.objecao ? linha("Objeção", viva.objecao) : null}
       </div>
 
+      {/* Sem espelho, "0 de 8" seria calúnia: o atendimento é anterior
+          ao painel, ou veio da planilha. "Não fez" e "não sabemos" são
+          coisas diferentes, e é o gestor que cobra a diferença. */}
+      {!viva && (
+        <div className="mt-3 rounded-lg px-2.5 py-2 text-[11px] leading-snug"
+          style={{ background: C.bg, color: C.mute }}>
+          <b>Sem registro do processo.</b> Este atendimento é anterior ao painel ou veio da planilha do CRM —
+          o sistema não acompanhou as etapas, então não dá para dizer o que foi ou não foi feito.
+        </div>
+      )}
+
+      {viva && <>
       <div className="mt-3 text-[10px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>
         O processo — {feitas.length} de {ETAPAS.length} etapas
       </div>
@@ -12923,6 +12937,7 @@ function ResumoDoNegocio({ viva, atendimento }) {
       {!faltam.length && (
         <p className="mt-1.5 text-[11px]" style={{ color: C.verde }}>O processo foi seguido inteiro.</p>
       )}
+      </>}
 
       {/* A escuta e a transcrição: uma linha, e o texto sob demanda. */}
       <div className="mt-3 border-t pt-2" style={{ borderColor: C.line }}>
