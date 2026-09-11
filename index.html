@@ -13156,7 +13156,7 @@ function PainelGestor({ perfil, comp }) {
         ))}
         {aba === "agora" && (
           <span className="ml-2 flex gap-1.5 text-[13px]">
-            {[[3, "Agora"], [12, "12 h"], [24, "24 h"]].map(([n, r]) => (
+            {[[3, "Agora"], [6, "6 h"], [12, "12 h"]].map(([n, r]) => (
               <button key={n} onClick={() => setHoras(n)} className="rounded-full px-3 py-1 font-semibold"
                 style={{ background: horas === n ? C.roxoFraco : "transparent", color: horas === n ? C.roxo : C.mute }}>{r}</button>
             ))}

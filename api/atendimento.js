@@ -604,8 +604,10 @@ async function viva(req, res, tok) {
     // dura menos de uma hora — a própria tela combina "cerca de 40
     // minutos" com o cliente —, então a janela é de horas, não de
     // dias. O que passou disso não está mais acontecendo: está na fila
-    // de revisão, que é outra pergunta.
-    const horas = Math.min(48, Math.max(1, Number(req.query.horas) || 3));
+    // de revisão, que é outra pergunta. O teto é 12 h — um dia de loja —
+    // e não é configurável de fora: janela maior transformaria o painel
+    // em lista de arquivo, que é o que ele existe para não ser.
+    const horas = Math.min(12, Math.max(1, Number(req.query.horas) || 3));
     const desde = new Date(Date.now() - horas * 3600000).toISOString();
     const linhas = await banco(
       `${REST_V}?select=*&atualizado_em=gte.${desde}&order=atualizado_em.desc&limit=200`,
