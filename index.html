@@ -12946,7 +12946,13 @@ function ResumoDoNegocio({ viva, atendimento }) {
       {/* ---- 1. a pesquisa ---- */}
       {(() => {
         const q = (viva && viva.pesquisa) || {};
-        const temAlgo = q.motivo || q.pretensao || q.necessidade || q.quitacao || q.debitos;
+        // Sem espelho, o que existe é o que veio da planilha: a
+        // pretensão tem coluna no atendimento e o motivo da venda foi
+        // parar na observação, com rótulo. É pouco, mas é o que há — e
+        // some completamente se a tela só souber ler o espelho.
+        const pretensao = q.pretensao || a.pretensao;
+        const daPlanilha = !q.motivo && a.observacoes ? a.observacoes : "";
+        const temAlgo = q.motivo || pretensao || q.necessidade || q.quitacao || q.debitos || daPlanilha;
         if (!temAlgo) return null;
         return (
           <>
@@ -12961,10 +12967,13 @@ function ResumoDoNegocio({ viva, atendimento }) {
                   <span style={{ color: C.mute }}>Precisa: </span>{q.necessidade}
                 </p>
               ) : null}
-              {q.pretensao ? linha("Pretensão do cliente", brl(q.pretensao)) : null}
+              {pretensao ? linha("Pretensão do cliente", brl(pretensao)) : null}
+              {daPlanilha ? (
+                <p className="py-0.5 text-[12px] leading-snug" style={{ color: C.ink }}>{daPlanilha}</p>
+              ) : null}
               {q.quitacao ? linha("Quitação", brl(q.quitacao), C.laranja) : null}
               {q.debitos ? linha("Débitos", brl(q.debitos), C.laranja) : null}
-              {linha("Decisor na mesa", q.decisor ? "sim" : "não", q.decisor ? C.verde : C.laranja)}
+              {viva ? linha("Decisor na mesa", q.decisor ? "sim" : "não", q.decisor ? C.verde : C.laranja) : null}
               {q.canais ? linha("Canais de preço abertos", q.canais) : null}
             </div>
           </>

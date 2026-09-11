@@ -756,7 +756,11 @@ async function revisao(req, res, tok) {
   const ate = data(req.query.ate);
   const filtro = [de ? `data=gte.${de}` : "", ate ? `data=lte.${ate}` : ""].filter(Boolean).join("&");
   const ats = await banco(
+    // `pretensao` e `observacoes` vêm junto: para o atendimento
+    // importado — que nunca teve espelho — são a única pesquisa que
+    // existe, e é o que o gestor tem para ler.
     `${REST("atendimento")}?select=id,cliente_nome,carro_descricao,status,negociador_nome,data,valor_fechado,` +
+    `pretensao,observacoes,origem,` +
     `veiculo(placa,marca_modelo,fipe_valor)&order=data.desc&limit=300${filtro ? `&${filtro}` : ""}`,
     { headers: cabecalhos(tok) }) || [];
   if (!ats.length) return res.status(200).json({ fila: [] });
