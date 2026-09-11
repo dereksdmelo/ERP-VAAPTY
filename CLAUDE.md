@@ -1831,3 +1831,57 @@ O Derek listou clientes na loja, as duas conversões, e *"além disso"* a
 quantidade de prospecções — se prospecções for meta paralela de
 esforço, e o cliente na loja vier também de lead que chega sozinho, são
 duas metas separadas e uma não deriva da outra.
+
+### 38. Senha: dois caminhos, porque um depende de e-mail
+
+Em 10/09/2026 dois funcionários não conseguiram entrar. O Derek tinha
+liberado o acesso na tela dele, mas o Supabase barra **antes**: as
+contas foram criadas e o e-mail de confirmação não chegou — o SMTP
+compartilhado do plano gratuito entrega mal. A confirmação foi
+desligada (Authentication → Sign In / Providers → Confirm email), e é
+redundante aqui de qualquer forma: ninguém entra sem o gerente ativar
+o perfil, que é a trava que protege o dado do cliente.
+
+**O mesmo buraco vale para "esqueci minha senha".** Por isso são dois
+caminhos, e o segundo existe justamente porque o primeiro pode falhar:
+
+1. **"Esqueci minha senha"**, na tela de entrada. `POST /auth/v1/recover`
+   com `redirect_to` para a própria página. O Supabase devolve a sessão
+   no fragmento da URL; `sessaoDoLink()` a reconhece, **limpa o
+   fragmento** e abre a tela da senha. Token em barra de endereço vira
+   token em histórico, em print e no que a pessoa cola para pedir ajuda.
+   O sucesso não confirma que o e-mail existe — dizer "não há conta com
+   esse e-mail" entregaria a lista de quem trabalha aqui.
+
+2. **O gerente gera uma senha aleatória** em Equipe e metas. Ela
+   **aparece uma vez** e não é gravada em lugar nenhum: mostrar de novo
+   exigiria guardar senha em claro. O alfabeto não tem O/0 nem I/1/l,
+   porque a senha vai por WhatsApp ou ditada no telefone.
+
+**`senha_provisoria` (0032) é uma marca nossa — o Supabase não tem
+"precisa trocar a senha".** Enquanto ela estiver ligada, o App não
+mostra nada além da tela da senha, e não há como pular. Senha que
+circulou no WhatsApp não pode ficar valendo para sempre.
+
+**Limpar a marca é do próprio dono, por função `security definer`.**
+A escrita em `perfil` é do gerente (0004); abrir `update` para o dono
+da linha abriria `papel` e `ativo` junto, porque RLS não separa coluna.
+Mesmo remédio da `marcar_contrato_assinado()` da 0015.
+
+**Isto muda a decisão 9, e de propósito.** A `SUPABASE_SERVICE_KEY`
+passou a existir num segundo arquivo, o `api/perfil.js`. Trocar a senha
+de outra pessoa é a única operação do sistema que o token do próprio
+usuário não alcança: a API de administração exige a chave, e não há RLS
+que a substitua. **O que protege é a mesma coisa que protege o Storage
+no `api/foto.js`: a ordem.** O gerente é conferido primeiro, lendo o
+perfil dele **com o token dele**, pelo RLS; só depois a chave entra, e
+só para uma chamada. Ela não toca em nenhuma tabela, não volta em
+resposta e não vai para log. Sem ela o recurso não liga, e a tela diz
+isso. **Quem acrescentar um terceiro uso dessa chave está mexendo aqui
+e na decisão 9 junto — e o teste é o mesmo: existe caminho pelo token
+do usuário? Então não use a chave.**
+
+**O que ficaria melhor com SMTP próprio.** Resend, Brevo ou o Gmail da
+loja em Authentication → Emails. Hoje a recuperação por e-mail é o
+caminho preferido e o mais frágil; com SMTP de verdade ela passa a
+funcionar, e o "gerar senha" volta a ser exceção em vez de rotina.
