@@ -526,6 +526,174 @@ async function indicacoes(req, res, tok) {
   return res.status(405).json({ erro: "Use GET, POST ou PATCH." });
 }
 
+/* ===================== painel do gestor (0033) ===================== */
+
+/**
+ * O espelho da negociação aberta.
+ *
+ * PUT — o aparelho do negociador manda o estado de agora e sobrescreve.
+ *       Não é histórico: é onde ele está neste momento. O histórico das
+ *       rodadas já existe em `documento`, com protocolo.
+ * GET — sem `atendimento_id`, devolve as negociações vivas para o
+ *       painel; com, devolve uma.
+ *
+ * Quem pode ler o quê é decidido pela RLS da 0033, não aqui: gerente vê
+ * todas, o negociador vê a dele. Repetir a regra neste arquivo criaria
+ * duas versões dela para manter em sincronia.
+ */
+async function viva(req, res, tok) {
+  const REST_V = `${URL_BASE}/rest/v1/negociacao_viva`;
+
+  if (req.method === "PUT") {
+    const c = await lerCorpo(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    const aid = String(c.atendimento_id || "");
+    if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
+
+    const linha = { atendimento_id: aid, atualizado_em: new Date().toISOString() };
+    if (c.etapa !== undefined) linha.etapa = texto(c.etapa);
+    if (c.objecao !== undefined) linha.objecao = texto(c.objecao);
+    if (c.valor_fechado !== undefined) linha.valor_fechado = decimal(c.valor_fechado);
+    if (c.escuta_ok !== undefined) linha.escuta_ok = !!c.escuta_ok;
+    if (c.escuta_em !== undefined) linha.escuta_em = c.escuta_em || null;
+    // A transcrição tem teto. Uma conversa de uma hora dá uns 30 KB; o
+    // teto existe para o caso de o reconhecimento entrar em laço e
+    // encher a coluna — e corta o COMEÇO, porque o fim é o que importa
+    // para quem está acompanhando agora.
+    if (c.transcricao !== undefined) {
+      const t = String(c.transcricao || "");
+      linha.transcricao = t.length > 120000 ? t.slice(t.length - 120000) : t;
+    }
+    if (Array.isArray(c.rodadas)) {
+      linha.rodadas = c.rodadas.slice(0, 20).map((r) => ({
+        impresso: decimal(r && r.impresso),
+        contra: decimal(r && r.contra),
+        em: (r && r.em) || null,
+      }));
+    }
+
+    const r = await banco(`${REST_V}?on_conflict=atendimento_id`, {
+      method: "POST",
+      headers: json(tok, { Prefer: "resolution=merge-duplicates,return=representation" }),
+      body: JSON.stringify(linha),
+    });
+    const salvo = Array.isArray(r) ? r[0] : r;
+    // Vazio é a RLS recusando: quem não conduz o atendimento não
+    // espelha. A tela não mostra isso — o espelho é silencioso de
+    // propósito, para não interromper o atendimento por causa dele.
+    return res.status(200).json({ ok: !!salvo });
+  }
+
+  if (req.method === "GET") {
+    const aid = String(req.query.atendimento_id || "");
+    if (aid) {
+      if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
+      const r = await banco(`${REST_V}?select=*&atendimento_id=eq.${aid}`, { headers: cabecalhos(tok) });
+      return res.status(200).json({ viva: (r || [])[0] || null });
+    }
+
+    // O painel: as negociações de hoje e de ontem. Mais que isso vira
+    // arquivo, e o gestor quer o que está acontecendo.
+    const dias = Math.min(30, Math.max(1, Number(req.query.dias) || 2));
+    const desde = new Date(Date.now() - dias * 86400000).toISOString();
+    const linhas = await banco(
+      `${REST_V}?select=*&atualizado_em=gte.${desde}&order=atualizado_em.desc&limit=200`,
+      { headers: cabecalhos(tok) }) || [];
+
+    if (!linhas.length) return res.status(200).json({ negociacoes: [] });
+
+    // Os dados do atendimento numa consulta só, e as mensagens não
+    // lidas noutra. Duas idas ao banco em vez de duas por linha.
+    const ids = linhas.map((x) => x.atendimento_id);
+    const [ats, recados] = await Promise.all([
+      banco(`${REST("atendimento")}?select=id,cliente_nome,cliente_telefone,carro_descricao,status,negociador_nome,data,` +
+            `veiculo(placa,marca_modelo,fipe_valor,valor_por)&id=in.(${ids.join(",")})`, { headers: cabecalhos(tok) }),
+      banco(`${REST("mensagem")}?select=atendimento_id,de,criado_em,lida_em&atendimento_id=in.(${ids.join(",")})` +
+            `&order=criado_em.desc&limit=500`, { headers: cabecalhos(tok) }),
+    ]);
+    const porId = {};
+    (ats || []).forEach((a) => { porId[a.id] = a; });
+    const naoLidas = {};
+    const ultima = {};
+    (recados || []).forEach((m) => {
+      if (!m.lida_em) naoLidas[m.atendimento_id] = (naoLidas[m.atendimento_id] || 0) + 1;
+      if (!ultima[m.atendimento_id]) ultima[m.atendimento_id] = m.criado_em;
+    });
+
+    return res.status(200).json({
+      negociacoes: linhas.map((v) => ({
+        ...v,
+        atendimento: porId[v.atendimento_id] || null,
+        nao_lidas: naoLidas[v.atendimento_id] || 0,
+        ultima_mensagem: ultima[v.atendimento_id] || null,
+      })),
+    });
+  }
+
+  res.setHeader("Allow", "GET, PUT");
+  return res.status(405).json({ erro: "Use GET ou PUT." });
+}
+
+/**
+ * O recado entre gestor e negociador.
+ *
+ * `de` NÃO vem do corpo: sai do token. Aceitar do cliente permitiria
+ * mandar recado assinado por outra pessoa — e a RLS da 0033 recusaria,
+ * mas a tela mostraria um erro sem sentido em vez de simplesmente não
+ * ter o problema.
+ */
+async function mensagem(req, res, tok) {
+  const REST_M = REST("mensagem");
+  const aid = String(req.query.atendimento_id || "");
+  if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
+
+  if (req.method === "GET") {
+    const linhas = await banco(
+      `${REST_M}?select=*&atendimento_id=eq.${aid}&order=criado_em.asc&limit=300`,
+      { headers: cabecalhos(tok) }) || [];
+    // Os nomes numa consulta à parte: são chaves estrangeiras para
+    // `perfil`, e o embed do PostgREST pediria o nome exato da
+    // constraint — que muda se a migração for reescrita.
+    const gente = await banco(`${URL_BASE}/rest/v1/perfil?select=id,nome`, { headers: cabecalhos(tok) }) || [];
+    const nomes = {};
+    gente.forEach((p) => { nomes[p.id] = p.nome; });
+    return res.status(200).json({
+      mensagens: linhas.map((m) => ({ ...m, de_nome: nomes[m.de] || null })),
+      eu: donoDoToken(tok),
+    });
+  }
+
+  if (req.method === "POST") {
+    const c = await lerCorpo(req);
+    const t = texto(c && c.texto);
+    if (!t) return res.status(400).json({ erro: "Escreva a mensagem." });
+    const eu = donoDoToken(tok);
+    if (!eu) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
+    const r = await banco(REST_M, {
+      method: "POST", headers: json(tok, { Prefer: "return=representation" }),
+      body: JSON.stringify({ atendimento_id: aid, de: eu, texto: t.slice(0, 2000) }),
+    });
+    const salvo = Array.isArray(r) ? r[0] : r;
+    if (!salvo) return res.status(403).json({ erro: "Sem permissão para mandar recado neste atendimento." });
+    return res.status(201).json({ ok: true, mensagem: salvo });
+  }
+
+  // Marcar como lidas as que NÃO são minhas: marcar a própria não diz
+  // nada, e apagaria o "ele ainda não viu" do outro lado.
+  if (req.method === "PATCH") {
+    const eu = donoDoToken(tok);
+    if (!eu) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
+    await banco(`${REST_M}?atendimento_id=eq.${aid}&lida_em=is.null&de=neq.${eu}`, {
+      method: "PATCH", headers: json(tok),
+      body: JSON.stringify({ lida_em: new Date().toISOString() }),
+    });
+    return res.status(200).json({ ok: true });
+  }
+
+  res.setHeader("Allow", "GET, POST, PATCH");
+  return res.status(405).json({ erro: "Use GET, POST ou PATCH." });
+}
+
 module.exports = async function handler(req, res) {
   if (!URL_BASE || !ANON) {
     return res.status(500).json({ erro: "SUPABASE_URL ou SUPABASE_ANON_KEY não configurados." });
@@ -538,6 +706,16 @@ module.exports = async function handler(req, res) {
     if (String(req.query.recurso || "") === "tatica") {
     try { return await tatica(req, res, tok); }
     catch (e) { return res.status(502).json({ erro: "Não consegui analisar." }); }
+  }
+
+  if (String(req.query.recurso || "") === "viva") {
+    try { return await viva(req, res, tok); }
+    catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Falhou." }); }
+  }
+
+  if (String(req.query.recurso || "") === "mensagem") {
+    try { return await mensagem(req, res, tok); }
+    catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Falhou." }); }
   }
 
   if (String(req.query.recurso || "") === "lead") {

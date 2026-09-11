@@ -846,6 +846,40 @@ async function enviarParaAssinatura(atendimentoId, dados) {
   return d;
 }
 
+/* ----------- painel do gestor (0033) ----------- */
+
+/** O espelho do aparelho do negociador. Silencioso de propósito. */
+async function espelharNegociacao(dados) {
+  const r = await fetchAut("/api/atendimento?recurso=viva", {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
+  });
+  return r.ok;
+}
+async function listarNegociacoesVivas(dias) {
+  const r = await fetchAut(`/api/atendimento?recurso=viva${dias ? `&dias=${dias}` : ""}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui carregar o painel.");
+  return d.negociacoes || [];
+}
+async function lerMensagens(atendimentoId) {
+  const r = await fetchAut(`/api/atendimento?recurso=mensagem&atendimento_id=${encodeURIComponent(atendimentoId)}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui carregar a conversa.");
+  return d;
+}
+async function mandarMensagem(atendimentoId, texto) {
+  const r = await fetchAut(`/api/atendimento?recurso=mensagem&atendimento_id=${encodeURIComponent(atendimentoId)}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ texto }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui mandar o recado.");
+  return d.mensagem;
+}
+async function marcarMensagensLidas(atendimentoId) {
+  await fetchAut(`/api/atendimento?recurso=mensagem&atendimento_id=${encodeURIComponent(atendimentoId)}`, { method: "PATCH" })
+    .catch(() => {});
+}
+
 async function consultarFunil(de, ate) {
   const q = comoQuery({ de, ate });
   const r = await fetchAut(`/api/funil${q ? `?${q}` : ""}`);
@@ -2807,6 +2841,10 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   const [pronto, setPronto] = useState(false);
   const fotosRef = useRef([]);
   const fRef = useRef(VAZIO);
+  // A etapa também precisa de referência: o espelho roda dentro de um
+  // `setInterval`, e closure lê estado velho — mandaria "Abordagem"
+  // para sempre, qualquer que fosse o passo real.
+  const etapaRef = useRef("A");
   const [erroDoc, setErroDoc] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [salvo, setSalvo] = useState(null);
@@ -3163,6 +3201,70 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     valorFechado: f.valorFechado || (atendimento && atendimento.valor_fechado) || "",
   };
 
+
+  /**
+   * O espelho para o painel do gestor (0033).
+   *
+   * Manda o estado de agora a cada 15 s, e só quando mudou. Mandar a
+   * cada tecla seria uma requisição por letra digitada na transcrição;
+   * mandar sem comparar gastaria banda no 4G da loja parada.
+   *
+   * **Falha em silêncio de propósito.** Se a RLS recusar, ou a rede
+   * cair, o atendimento continua — o negociador está com o cliente na
+   * frente, e um erro de sincronismo na tela dele não ajuda ninguém.
+   *
+   * Fica no `VaaptyAponte` e não numa etapa: ele é quem sobrevive à
+   * troca de passo, pela mesma razão da escuta (decisão 17).
+   */
+  useEffect(() => { etapaRef.current = etapa; }, [etapa]);
+
+  // O outro lado do painel do gestor: o recado que chega enquanto o
+  // negociador está com o cliente. Só o CONTADOR fica visível até ele
+  // abrir — pop-up de mensagem no meio de uma negociação é a pior hora
+  // possível para roubar a atenção dele.
+  const [chatAberto, setChatAberto] = useState(false);
+  const [recados, setRecados] = useState(0);
+  useEffect(() => {
+    if (!atendimento || !atendimento.id) return;
+    let vivo = true;
+    const olhar = () => {
+      if (chatAberto) return;
+      lerMensagens(atendimento.id)
+        .then((d) => {
+          if (!vivo) return;
+          setRecados((d.mensagens || []).filter((m) => m.de !== d.eu && !m.lida_em).length);
+        })
+        .catch(() => {});
+    };
+    olhar();
+    const t = setInterval(olhar, 20000);
+    return () => { vivo = false; clearInterval(t); };
+  }, [atendimento && atendimento.id, chatAberto]);
+
+  const espelhoRef = useRef("");
+  useEffect(() => {
+    if (!atendimento || !atendimento.id) return;
+    const mandar = () => {
+      const x = fRef.current || {};
+      const corpo = {
+        atendimento_id: atendimento.id,
+        etapa: etapaRef.current,
+        rodadas: (x.rodadas || []).map((r) => ({ impresso: r.impresso, contra: r.contra, em: r.em })),
+        valor_fechado: x.valorFechado || null,
+        objecao: x.objecao || null,
+        escuta_ok: !!x.escutaOk,
+        escuta_em: x.escutaEm || null,
+        transcricao: x.transcricao || "",
+      };
+      const assinatura = JSON.stringify(corpo);
+      if (assinatura === espelhoRef.current) return;
+      espelhoRef.current = assinatura;
+      espelharNegociacao(corpo).catch(() => {});
+    };
+    mandar();
+    const t = setInterval(mandar, 15000);
+    return () => { clearInterval(t); mandar(); };
+  }, [atendimento && atendimento.id]);
 
   const docs = f.documentos || [];
   // A ordem do fechamento em três verdades, calculadas uma vez.
@@ -4450,6 +4552,33 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         )}
       </div>
 
+      {/* O recado do gestor. Botão discreto acima da navegação; abre
+          por cima quando o negociador decide olhar. */}
+      {atendimento && atendimento.id && (
+        <>
+          <button onClick={() => { setChatAberto(true); setRecados(0); }}
+            className="fixed right-4 grid h-12 w-12 place-items-center rounded-full text-[18px]"
+            style={{ bottom: 76, background: recados ? C.laranja : C.paper, color: recados ? "#fff" : C.roxo,
+                     border: `1px solid ${recados ? C.laranja : C.line}`, boxShadow: "0 2px 10px rgba(24,18,33,0.14)", zIndex: 40 }}
+            title="Recados do gestor">
+            {recados ? recados : "\u2709"}
+          </button>
+
+          {chatAberto && (
+            <div className="fixed inset-0 z-50 flex flex-col justify-end" style={{ background: "rgba(24,18,33,0.45)" }}
+              onClick={() => setChatAberto(false)}>
+              <div className="rounded-t-2xl p-4" style={{ background: C.paper }} onClick={(e) => e.stopPropagation()}>
+                <div className="mb-2 flex items-baseline justify-between">
+                  <span className="text-[13px] font-semibold">Recados do gestor</span>
+                  <button onClick={() => setChatAberto(false)} className="text-[12px]" style={{ color: C.mute }}>fechar</button>
+                </div>
+                <ChatAtendimento atendimentoId={atendimento.id} compacto />
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
       {/* navegação */}
       <div className="fixed bottom-0 left-0 right-0 flex gap-2 px-4 py-3" style={{ background: C.paper, borderTop: `1px solid ${C.line}` }}>
         <button onClick={() => idx > 0 && setEtapa(ETAPAS[idx - 1].id)} disabled={idx === 0}
@@ -4744,7 +4873,7 @@ function EscutaControle({ escuta, f, set }) {
       <div className="rounded-md p-3" style={{ background: "#FBF7FD", border: `1px solid ${C.line}` }}>
         <Toggle
           label="O cliente foi avisado e autorizou a escuta"
-          nota="Leia em voz alta: a conversa vai ser transcrita para texto, o áudio não fica gravado, e a transcrição passa pelo serviço de voz do celular (Google ou Apple). Sem esse aceite o microfone não liga."
+          nota="Leia em voz alta: a conversa vai ser transcrita para texto, o áudio não fica gravado, a transcrição passa pelo serviço de voz do celular (Google ou Apple) e fica registrada no sistema da loja. Sem esse aceite o microfone não liga."
           valor={f.escutaOk}
           onChange={(v) => { if (!v) desligar(); set("escutaOk", v); set("escutaEm", v ? new Date().toISOString() : null); }} />
         {f.escutaOk && f.escutaEm && (
@@ -12263,6 +12392,11 @@ function destinosPara(perfil) {
   // no banco.
   const gestao = adm;
   return [
+    // O painel do gestor é o primeiro destino de quem é gerente: é a
+    // tela que ele abre de manhã e deixa aberta. Para os outros nem
+    // existe — e não por cortesia da tela: a RLS da 0033 devolve só a
+    // própria negociação a quem não é gerente.
+    gerente ? { id: "gestor", rot: "Painel do gestor", curto: "Gestor", principal: true } : null,
     { id: "prevendas", rot: "Pré-vendas", curto: "Pré-v.", principal: true },
     { id: "atendimentos", rot: "Atendimentos", curto: "Atend.", principal: true },
     { id: "estoque", rot: "Estoque", curto: "Estoque", principal: true },
@@ -12534,6 +12668,283 @@ function Acessos({ perfil }) {
   );
 }
 
+/* ===================== painel do gestor (0033) ===================== */
+
+const ROT_ETAPA = {};
+ETAPAS.forEach((e) => { ROT_ETAPA[e.id] = e.curto; });
+
+const horaCurta = (iso) => {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const hoje = new Date().toDateString() === d.toDateString();
+  return hoje ? d.toTimeString().slice(0, 5) : `${diaBR(iso)} ${d.toTimeString().slice(0, 5)}`;
+};
+const hamin = (iso) => {
+  const t = Date.parse(iso);
+  if (!t) return "";
+  const min = Math.round((Date.now() - t) / 60000);
+  if (min < 1) return "agora";
+  if (min < 60) return `há ${min} min`;
+  const h = Math.round(min / 60);
+  return h < 24 ? `há ${h} h` : `há ${Math.round(h / 24)} d`;
+};
+
+/**
+ * A conversa entre gestor e negociador, presa a um atendimento.
+ *
+ * Declarada aqui fora e não dentro do painel: componente criado dentro
+ * de outro vira tipo novo a cada render, e o campo de texto perderia o
+ * foco a cada tecla — o mesmo que já derrubou o formulário do cliente
+ * (decisão 7) e a célula do orçamento (decisão 32).
+ */
+function ChatAtendimento({ atendimentoId, compacto }) {
+  const [msgs, setMsgs] = useState(null);
+  const [eu, setEu] = useState(null);
+  const [texto, setTexto] = useState("");
+  const [erro, setErro] = useState("");
+  const [indo, setIndo] = useState(false);
+  const fim = useRef(null);
+
+  const carregar = () =>
+    lerMensagens(atendimentoId)
+      .then((d) => { setMsgs(d.mensagens); setEu(d.eu); })
+      .catch((e) => setErro(e.message));
+
+  useEffect(() => {
+    setMsgs(null); setErro("");
+    carregar();
+    marcarMensagensLidas(atendimentoId);
+    // Recado não é urgência de segundo; 10 s é o suficiente para uma
+    // conversa em que o outro lado está com um cliente na frente.
+    const t = setInterval(() => { carregar(); marcarMensagensLidas(atendimentoId); }, 10000);
+    return () => clearInterval(t);
+  }, [atendimentoId]);
+
+  useEffect(() => { if (fim.current) fim.current.scrollIntoView({ block: "end" }); }, [msgs && msgs.length]);
+
+  const enviar = async (ev) => {
+    if (ev) ev.preventDefault();
+    const t = texto.trim();
+    if (!t || indo) return;
+    setIndo(true); setErro("");
+    try { await mandarMensagem(atendimentoId, t); setTexto(""); await carregar(); }
+    catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+
+  return (
+    <div className="flex flex-col" style={{ height: compacto ? 260 : 420 }}>
+      <div className="flex-1 space-y-2 overflow-y-auto rounded-lg p-2.5" style={{ background: C.bg }}>
+        {msgs === null && <p className="text-[12px]" style={{ color: C.mute }}>Carregando…</p>}
+        {msgs && !msgs.length && (
+          <p className="text-[12px] leading-snug" style={{ color: C.mute }}>
+            Nenhum recado ainda. O que você escrever aqui aparece na tela do negociador, dentro do atendimento.
+          </p>
+        )}
+        {(msgs || []).map((m) => {
+          const meu = m.de === eu;
+          return (
+            <div key={m.id} className="flex" style={{ justifyContent: meu ? "flex-end" : "flex-start" }}>
+              <div className="max-w-[80%] rounded-xl px-3 py-2"
+                style={{ background: meu ? C.roxo : C.paper, color: meu ? "#fff" : C.ink,
+                         border: meu ? "none" : `1px solid ${C.line}` }}>
+                {!meu && (
+                  <div className="text-[10px] font-semibold" style={{ color: C.roxo }}>
+                    {String(m.de_nome || "—").split(" ")[0]}
+                  </div>
+                )}
+                <div className="whitespace-pre-wrap text-[13px] leading-snug">{m.texto}</div>
+                <div className="mt-0.5 text-[9px]" style={{ color: meu ? "rgba(255,255,255,0.7)" : C.mute }}>
+                  {horaCurta(m.criado_em)}{meu && m.lida_em ? " · lido" : ""}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        <div ref={fim} />
+      </div>
+
+      {erro && <p className="mt-1 text-[11px]" style={{ color: C.laranja }}>{erro}</p>}
+
+      <form onSubmit={enviar} className="mt-2 flex gap-2">
+        <input className="min-w-0 flex-1 rounded-lg border px-3 py-2 text-[13px] outline-none" style={inputSty}
+          placeholder="Escreva o recado" value={texto} onChange={(e) => setTexto(e.target.value)} />
+        <button type="submit" disabled={!texto.trim() || indo}
+          className="shrink-0 rounded-lg px-4 text-[13px] font-semibold"
+          style={{ background: texto.trim() && !indo ? C.roxo : C.line, color: "#fff" }}>
+          {indo ? "…" : "Enviar"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+/**
+ * O painel do gestor.
+ *
+ * O que ele responde, e que nenhuma outra tela respondia: **o que está
+ * acontecendo agora**. As outras mostram resultado — status, valor
+ * fechado, documento emitido. Aqui é o meio do caminho: em que etapa o
+ * negociador está, quanto ele imprimiu, o que o cliente contrapôs, e o
+ * que está sendo dito na mesa.
+ *
+ * Só gerente enxerga, e não porque a tela esconde: a RLS da 0033 é que
+ * decide. Para quem não é gerente, a consulta volta com a própria
+ * negociação e mais nada.
+ */
+function PainelGestor({ perfil }) {
+  const [lista, setLista] = useState(null);
+  const [erro, setErro] = useState("");
+  const [dias, setDias] = useState(2);
+  const [foco, setFoco] = useState(null);      // atendimento_id aberto
+
+  const carregar = () => listarNegociacoesVivas(dias).then(setLista).catch((e) => setErro(e.message));
+  useEffect(() => {
+    setLista(null); carregar();
+    // A tela do gestor fica aberta na mesa dele o dia inteiro: 20 s dá
+    // a sensação de acompanhar sem transformar isso num custo.
+    const t = setInterval(carregar, 20000);
+    return () => clearInterval(t);
+  }, [dias]);
+
+  const aberto = lista && lista.filter((n) => n.atendimento_id === foco)[0];
+
+  return (
+    <div>
+      <Cabecalho titulo="Painel do gestor"
+        sub="O que está acontecendo agora na mesa — etapa, rodadas e a conversa." />
+
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-[13px]">
+        {[[1, "Hoje"], [2, "2 dias"], [7, "7 dias"], [30, "30 dias"]].map(([n, r]) => (
+          <button key={n} onClick={() => setDias(n)} className="rounded-full px-3 py-1 font-semibold"
+            style={{ background: dias === n ? C.roxoFraco : "transparent", color: dias === n ? C.roxo : C.mute }}>{r}</button>
+        ))}
+        {lista && <span className="ml-auto text-[12px]" style={{ color: C.mute }}>{lista.length} em andamento</span>}
+      </div>
+
+      {erro && <p className="mb-2 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+      {lista === null && <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>}
+      {lista && !lista.length && (
+        <div className="rounded-xl px-4 py-8 text-center" style={{ background: C.paper, border: `1px dashed ${C.line}` }}>
+          <p className="text-[15px] font-semibold">Nenhuma negociação em andamento</p>
+          <p className="mt-1 text-[13px]" style={{ color: C.mute }}>
+            A linha aparece aqui assim que um negociador abre um atendimento no celular. Só entra o que foi tocado
+            nos últimos {dias === 1 ? "dia" : `${dias} dias`}.
+          </p>
+        </div>
+      )}
+
+      <div className="grid gap-3 lg:grid-cols-[1fr_360px]">
+        <div className="space-y-2">
+          {(lista || []).map((n) => {
+            const a = n.atendimento || {};
+            const v = (a.veiculo || [])[0] || {};
+            const rodadas = Array.isArray(n.rodadas) ? n.rodadas : [];
+            const ultima = rodadas[rodadas.length - 1];
+            const emFoco = n.atendimento_id === foco;
+            return (
+              <button key={n.atendimento_id} onClick={() => setFoco(emFoco ? null : n.atendimento_id)}
+                className="w-full rounded-xl px-3.5 py-3 text-left"
+                style={{ background: C.paper, border: `1px solid ${emFoco ? C.roxo : C.line}` }}>
+                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                  <span className="text-[15px] font-semibold">{a.cliente_nome || "Sem nome"}</span>
+                  <span className="text-[12px]" style={{ color: C.mute }}>
+                    {v.marca_modelo || a.carro_descricao || "—"}{v.placa ? ` · ${v.placa}` : ""}
+                  </span>
+                  <span className="ml-auto rounded-full px-2.5 py-0.5 text-[11px] font-bold"
+                    style={{ background: C.roxoFraco, color: C.roxo }}>
+                    {ROT_ETAPA[n.etapa] || n.etapa || "—"}
+                  </span>
+                  {!!n.nao_lidas && (
+                    <span className="rounded-full px-2 py-0.5 text-[11px] font-bold" style={{ background: C.laranja, color: "#fff" }}>
+                      {n.nao_lidas}
+                    </span>
+                  )}
+                </div>
+
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]" style={{ color: C.mute }}>
+                  <span>{a.negociador_nome || "sem negociador"}</span>
+                  <span style={{ fontFamily: F.mono }}>{hamin(n.atualizado_em)}</span>
+                  {n.escuta_ok && (
+                    <span style={{ color: C.verde, fontWeight: 600 }}>
+                      escuta ligada{n.transcricao ? ` · ${Math.round(String(n.transcricao).length / 5)} palavras` : ""}
+                    </span>
+                  )}
+                  {!!v.fipe_valor && <span style={{ fontFamily: F.mono }}>FIPE {brl(v.fipe_valor)}</span>}
+                </div>
+
+                {/* As rodadas, na linha: é o que o gestor quer ver de
+                    relance — quanto saiu e o que o cliente devolveu. */}
+                {!!rodadas.length && (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    {rodadas.map((r, i) => (
+                      <span key={i} className="rounded-lg px-2 py-0.5 text-[11px]" style={{ background: C.bg, fontFamily: F.mono }}>
+                        {i + 1}ª {brl(r.impresso)}
+                        {r.contra ? <span style={{ color: C.laranja }}> → {brl(r.contra)}</span> : null}
+                      </span>
+                    ))}
+                    {n.valor_fechado ? (
+                      <span className="rounded-lg px-2 py-0.5 text-[11px] font-bold"
+                        style={{ background: "#E8F3EE", color: C.verde, fontFamily: F.mono }}>
+                        fechou {brl(n.valor_fechado)}
+                      </span>
+                    ) : null}
+                  </div>
+                )}
+                {!rodadas.length && ultima === undefined && n.etapa === "N" && (
+                  <p className="mt-1.5 text-[11px]" style={{ color: AMARELO.texto }}>Na negociação e ainda sem extrato impresso.</p>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* ---- a coluna do lado: conversa e transcrição ---- */}
+        {aberto && (
+          <div className="space-y-3 lg:sticky lg:top-4 lg:self-start">
+            <div className="rounded-xl p-3.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+              <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.roxo }}>
+                Recado para {String((aberto.atendimento || {}).negociador_nome || "o negociador").split(" ")[0]}
+              </div>
+              <ChatAtendimento atendimentoId={aberto.atendimento_id} compacto />
+            </div>
+
+            <div className="rounded-xl p-3.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+              <div className="flex items-baseline justify-between">
+                <span className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>Transcrição</span>
+                {aberto.escuta_em && (
+                  <span className="text-[10px]" style={{ color: C.mute }}>
+                    autorizada {horaCurta(aberto.escuta_em)}
+                  </span>
+                )}
+              </div>
+              {aberto.transcricao ? (
+                <>
+                  {/* O fim primeiro: quem acompanha quer o que está
+                      sendo dito agora, não o começo da conversa. */}
+                  <div className="mt-2 max-h-[320px] overflow-y-auto rounded-lg p-2.5 text-[12px] leading-relaxed"
+                    style={{ background: C.bg, whiteSpace: "pre-wrap" }}>
+                    {aberto.transcricao}
+                  </div>
+                  <p className="mt-1.5 text-[10px] leading-snug" style={{ color: C.mute }}>
+                    Chega com até 15 segundos de atraso. O cliente autorizou a transcrição no início do atendimento.
+                  </p>
+                </>
+              ) : (
+                <p className="mt-2 text-[12px] leading-snug" style={{ color: C.mute }}>
+                  {aberto.escuta_ok
+                    ? "Escuta autorizada, mas nada transcrito ainda."
+                    : "A escuta não foi ligada neste atendimento."}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** Equipe, metas e importação — o que era a sanfona da gestão. */
 function TelaGestao({ perfil, comp }) {
   const [importando, setImportando] = useState(false);
@@ -12657,6 +13068,7 @@ function App() {
       {tela === "rentabilidade" && podeGestao && <TelaEstoque perfil={perfil} comp={compOuAtual} mes={mes} modo="rentabilidade" />}
       {tela === "painel" && <Funil perfil={perfil} comp={compOuAtual} mes={mes} />}
       {tela === "leads" && <LeadsIndicacao />}
+      {tela === "gestor" && <PainelGestor perfil={perfil} />}
       {tela === "adm" && <TelaADM perfil={perfil} comp={compOuAtual} mes={mes} />}
       {tela === "gestao" && <TelaGestao perfil={perfil} comp={compOuAtual} />}
       {tela === "financeiro" && <TelaFinanceiro perfil={perfil} comp={compOuAtual} mes={mes} />}
