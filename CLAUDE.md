@@ -1787,10 +1787,24 @@ que já estava. Por isso o que se guarda na 0030 é o último resultado
 eventos. Sem gravar nada, saber se o carro já está lá viraria
 adivinhação.
 
-**`marca_modelo` vai inteiro.** A nossa coluna é uma string só e a
-documentação diz que eles separam; chutar a marca pelo primeiro token
-erraria em Land Rover e Alfa Romeo — o mesmo tropeço dos canais de
-preço (decisão 8).
+**As três partes do nome vão separadas (0041).** A documentação deles
+diz que `marca`, `modelo` e `versao` separados é melhor, e a tela deles
+tem três selects ligados à FIPE em tempo real: com a string única os
+três ficam vazios do lado de lá. Foi o que o Derek viu em 11/09/2026 —
+*"está indo sem os dados do carro"*.
+
+**As partes vêm da fonte, nunca de um corte aqui.** Chutar a marca pelo
+primeiro token erraria em Land Rover e Alfa Romeo — o mesmo tropeço dos
+canais de preço (decisão 8). Quem sabe separar é quem tem os campos: a
+consulta de placa devolve `marca` e `modeloAbreviado`, e a tabela FIPE
+oficial devolve `Marca` e `Modelo`. As duas passaram a gravar nas
+colunas novas; o que faltava era coluna, não informação. **Ficha antiga
+sem as colunas cai na `marca_modelo` inteira**, que é o comportamento
+anterior — nada quebra.
+
+`marca_modelo` continua existindo e continua sendo o que o descritivo
+imprime: é a linha que o lojista lê, e remontá-la de três pedaços a
+cada uso criaria uma segunda verdade sobre o nome do carro.
 
 **`valor_investimento` leva o `valor_compra`**, seguindo a definição
 deles ("o que a loja pagou … é o alvo da negociação"). O `preco_pedido`

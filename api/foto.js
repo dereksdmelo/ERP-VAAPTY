@@ -230,7 +230,7 @@ async function shinkai(req, res, tok) {
     return res.status(400).json({ erro: "Informe estoque_id ou veiculo_id." });
   }
 
-  const CAMPOS_V = "id,placa,chassi,marca_modelo,ano_fabricacao,ano_modelo,cor,combustivel," +
+  const CAMPOS_V = "id,placa,chassi,marca_modelo,marca,modelo,versao,ano_fabricacao,ano_modelo,cor,combustivel," +
     "cambio,km_atual,fipe_codigo,fipe_valor,leilao_sinistro,gnv," +
     // O carro chegava pelado do outro lado: pneu, opcional e ressalva
     // ficavam de fora do corpo, e são justamente os campos que a tela
@@ -277,11 +277,21 @@ async function shinkai(req, res, tok) {
     veiculo: {
       placa: v.placa,
       chassi: v.chassi || undefined,
-      // `marca_modelo` inteiro: a nossa coluna é uma string só, e a
-      // documentação diz que eles separam. Mandar um "marca" chutado a
-      // partir do primeiro token erraria em Land Rover e Alfa Romeo —
-      // o mesmo tropeço dos canais de preço.
-      marca_modelo: v.marca_modelo || undefined,
+      // **As três partes quando existem, a string única quando não.**
+      // A documentação deles diz que marca/modelo/versao separados é
+      // melhor, e a tela deles tem três selects ligados à FIPE: com a
+      // string única os três ficam vazios do lado de lá — foi o que o
+      // Derek viu em 11/09/2026 ("está indo sem os dados do carro").
+      //
+      // As partes vêm da 0041, preenchidas pela fonte: consulta de
+      // placa ou tabela FIPE oficial. **Nunca são derivadas aqui por
+      // corte de token** — Land Rover e Alfa Romeo quebrariam o corte,
+      // e ficha antiga sem as colunas cai na string inteira, que é
+      // exatamente o comportamento anterior.
+      marca: v.marca || undefined,
+      modelo: v.modelo || undefined,
+      versao: v.versao || undefined,
+      marca_modelo: v.marca && v.modelo ? undefined : (v.marca_modelo || undefined),
       ano_modelo: ano || undefined,
       cor: v.cor || undefined,
       combustivel: v.combustivel || undefined,

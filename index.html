@@ -6,6 +6,7 @@
 <meta name="theme-color" content="#6D1B9E">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>Vaapty — Ficha e Negociacao</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2310B981'/%3E%3Cpath d='M16 17h9.6l6.4 21.4L38.4 17H48L36.8 49h-9.6z' fill='%23fff'/%3E%3C/svg%3E">
 <script src="https://cdn.tailwindcss.com"></script>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -1169,6 +1170,17 @@ function ConferirFipe({ f, set }) {
       // o negociador acabou de confirmar o modelo na tabela oficial, e
       // é esse o valor que sai no descritivo e nos documentos.
       combustivel: res.combustivel || f.combustivel,
+      // A tabela oficial devolve marca e modelo em campos próprios, e
+      // é a fonte mais confiável que existe aqui: o negociador acabou
+      // de escolher os dois à mão. O Shinkai pede as partes separadas,
+      // e até 11/09/2026 elas eram jogadas fora junto com a resposta.
+      marca: res.marca || f.marca,
+      modeloCurto: (String(res.modelo || "").split(/\s+/)[0] || f.modeloCurto),
+      versao: (() => {
+        const nome = String(res.modelo || "");
+        const mo = nome.split(/\s+/)[0] || "";
+        return mo ? nome.slice(mo.length).trim() : f.versao;
+      })(),
       fipeConferida: true,
       fipeOficialCodigo: res.codigo_fipe || "",
       fipeOficialMes: res.mes_referencia || "",
@@ -1395,7 +1407,7 @@ const VAZIO = {
   fipe: "", fipeCodigo: "", fipeDesval: "", pedida: "", por: "", gastos: "",
   // conferência na FIPE oficial
   fipeConferida: false, fipeOficialCodigo: "", fipeOficialMes: "", fipeAutenticacao: "",
-  marca: "", modeloCurto: "",
+  marca: "", modeloCurto: "", versao: "",
   chassi: "", cor: "", combustivel: "", renavam: "",
   pneus: ["", "", "", ""], leilao: false, gnv: false, opcionais: [],
   lataria: "", mecanica: "", positivos: "", ressalvas: "", internas: "",
@@ -1576,6 +1588,7 @@ function gerarDescritivo(f, n) {
 // mapeamento nome → coluna mora no servidor, em api/veiculo.js.
 const fichaParaBanco = (f) => ({
   placa: f.placa, chassi: f.chassi, modelo: f.modelo, ano: f.ano,
+  marca: f.marca, modeloCurto: f.modeloCurto, versao: f.versao,
   cor: f.cor, combustivel: f.combustivel, cambio: f.cambio, renavam: f.renavam,
   km: f.km, kmEntrada: f.kmEntrada,
   fipe: f.fipe, fipeCodigo: f.fipeCodigo, por: f.por, gastos: f.gastos,
@@ -3032,6 +3045,16 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
       fipeDesval: v.desvalorizometro || "",
       marca: achado.marca || "",
       modeloCurto: String(achado.modeloAbreviado || "").split(/\s+/)[0] || "",
+      // A versão é o nome da FIPE menos o modelo: "POLO COMFORT. 200
+      // TSI…" com o "POLO" fora. O Shinkai pede os três separados, e
+      // aqui a fonte já sabe onde termina o modelo — no servidor,
+      // depois, só sobraria cortar por espaço, que erra.
+      versao: (() => {
+        const mo = String(achado.modeloAbreviado || "").split(/\s+/)[0] || "";
+        const nome = String(v.nome || "");
+        return mo && nome.toUpperCase().indexOf(mo.toUpperCase()) === 0
+          ? nome.slice(mo.length).trim() : nome;
+      })(),
       chassi: achado.chassiCompleto ? achado.chassi : "",
       cor: achado.cor || "", combustivel: v.combustivel || achado.combustivel || "",
       cambio: cambioBusca || f.cambio,

@@ -98,6 +98,11 @@ function anos(ano) {
 const FONTE = {
   atendimento_id: "atendimento_id",
   placa: "placa", chassi: "chassi", renavam: "renavam", marca_modelo: "modelo",
+  // As três partes do nome (0041). Vêm da fonte já separadas — da
+  // consulta de placa ou da tabela FIPE oficial —, nunca de um corte
+  // de `marca_modelo`: marca de duas palavras (Land Rover, Alfa Romeo)
+  // quebra o corte, e é o mesmo tropeço da decisão 8.
+  marca: "marca", modelo: "modeloCurto", versao: "versao",
   ano_fabricacao: "ano", ano_modelo: "ano", cor: "cor", combustivel: "combustivel",
   cambio: "cambio", km_atual: "km", km_entrada: "kmEntrada",
   fipe_codigo: "fipeCodigo", fipe_valor: "fipe",
@@ -126,6 +131,9 @@ function paraColunas(f) {
     placa: normalizarPlaca(f.placa),
     chassi: texto(f.chassi),
     renavam: texto(f.renavam),
+    marca: texto(f.marca),
+    modelo: texto(f.modeloCurto),
+    versao: texto(f.versao),
     marca_modelo: texto(f.modelo),
     ...anos(f.ano),
     cor: texto(f.cor),
