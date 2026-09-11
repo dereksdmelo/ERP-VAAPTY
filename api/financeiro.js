@@ -1285,13 +1285,120 @@ async function orcamento(req, res, tok) {
   });
 }
 
+/**
+ * ===== o recibo =====
+ *
+ * O financeiro registrava o dinheiro e não emitia o papel — e é o
+ * papel que a outra ponta pede: o cliente que recebeu o PIX da venda,
+ * o despachante que foi pago, o lojista que pagou pelo carro.
+ *
+ * **A direção sai do lançamento, não de quem emite.** Crédito é a
+ * Vaapty quem recebe; débito é a Vaapty quem paga. Deixar essa escolha
+ * na tela é como se assina recibo invertido, e recibo invertido é
+ * prova contra quem o emitiu.
+ *
+ * **Os dados são congelados na emissão.** O recibo prova o que foi
+ * dito NAQUELE dia: corrigir depois o nome do favorecido não pode
+ * mudar a via que está na mão da pessoa. Por isso a 0042 guarda valor,
+ * nome, documento e referência em colunas próprias, em vez de ler o
+ * lançamento na hora de olhar.
+ *
+ * **O número é sequencial por ano, e a rede é o índice único.** Duas
+ * pessoas emitindo no mesmo segundo pegariam o mesmo `max + 1`; o
+ * `unique_violation` faz a segunda tentar de novo.
+ *
+ * O HTML vem da TELA, como todo documento desta casa (decisão 7): o
+ * servidor não desenha papel, só registra o que foi impresso.
+ */
+async function recibo(req, res, tok) {
+  if (req.method === "GET") {
+    const lid = String(req.query.lancamento_id || "");
+    if (!RX_ID.test(lid)) return res.status(400).json({ erro: "lancamento_id inválido." });
+    const lista = await supa(
+      `${base("fin_recibo")}?select=id,numero,ano,valor,direcao,outra_parte,protocolo,emitido_em` +
+      `&lancamento_id=eq.${lid}&order=emitido_em.desc`,
+      { headers: cab(tok) },
+    );
+    return res.status(200).json({ recibos: lista || [] });
+  }
+  if (req.method !== "POST") { res.setHeader("Allow", "GET, POST"); return res.status(405).json({ erro: "Use GET ou POST." }); }
+
+  const c = await corpoDe(req);
+  const lid = String((c && c.lancamento_id) || "");
+  if (!RX_ID.test(lid)) return res.status(400).json({ erro: "lancamento_id inválido." });
+
+  // O lançamento vem do banco pelo token de quem pediu: é a RLS da
+  // 0021 que decide se esta pessoa enxerga o financeiro. Aceitar valor
+  // e nome pelo corpo deixaria emitir recibo de qualquer quantia.
+  const achado = await supa(
+    `${base("fin_lancamento")}?select=id,data,debito,credito,descricao,` +
+    `favorecido:fin_favorecido(nome,documento),funcionario:fin_funcionario(nome)&id=eq.${lid}&limit=1`,
+    { headers: cab(tok) },
+  );
+  const l = (achado || [])[0];
+  if (!l) return res.status(404).json({ erro: "Lançamento não encontrado." });
+
+  const valor = Number(l.credito) > 0 ? Number(l.credito) : Number(l.debito);
+  if (!(valor > 0)) return res.status(400).json({ erro: "Lançamento sem valor." });
+
+  const parte = texto(c && c.outra_parte)
+    || (l.favorecido && l.favorecido.nome)
+    || (l.funcionario && l.funcionario.nome);
+  if (!parte) {
+    return res.status(400).json({
+      erro: "O recibo precisa do nome da outra parte. Preencha o favorecido do lançamento ou digite o nome.",
+    });
+  }
+
+  const linha = {
+    lancamento_id: lid,
+    ano: new Date().getFullYear(),
+    valor,
+    direcao: Number(l.credito) > 0 ? "recebemos" : "pagamos",
+    outra_parte: parte,
+    outra_parte_doc: texto(c && c.outra_parte_doc) || (l.favorecido && l.favorecido.documento) || null,
+    referente: texto(c && c.referente) || texto(l.descricao),
+    emitido_em_data: l.data,
+    // `conteudo` fica nulo, e é decisão: a tela só sabe montar o HTML
+    // DEPOIS de conhecer o número, que nasce aqui. Um segundo PATCH
+    // para guardar o papel pediria política de update numa tabela que
+    // é registro, não rascunho. O que prova o recibo é a linha —
+    // número, valor, partes e data congelados —, e o HTML se remonta
+    // igual a partir dela.
+  };
+
+  // Três tentativas: o número é `max + 1` e o índice único da 0042 é
+  // quem arbitra quando dois emitem junto.
+  for (let i = 0; i < 3; i++) {
+    const n = await supa(`${base("rpc/proximo_recibo")}`, {
+      method: "POST", headers: cab(tok), body: JSON.stringify({ p_ano: linha.ano }),
+    });
+    try {
+      const numero = Number(n) || 1;
+      const gravado = await supa(base("fin_recibo"), {
+        method: "POST", headers: cab(tok, REP),
+        // O protocolo é o próprio número: ele já é único por ano pelo
+        // índice da 0042, e "RECIBO-2026-0007" é legível ao telefone,
+        // o que um hash de timestamp não é.
+        body: JSON.stringify({ ...linha, numero, protocolo: `RECIBO-${linha.ano}-${String(numero).padStart(4, "0")}` }),
+      });
+      const r0 = Array.isArray(gravado) ? gravado[0] : gravado;
+      // Vazio é a RLS recusando: quem não é do financeiro não emite.
+      if (!r0) return res.status(403).json({ erro: "Você não tem acesso ao financeiro." });
+      return res.status(200).json({ recibo: r0 });
+    } catch (e) {
+      if (i === 2) throw e;
+    }
+  }
+}
+
 async function estoqueLista(req, res, tok) {
   const lista = await supa(`${base("estoque")}?select=id,situacao,veiculo(placa,marca_modelo)&order=entrou_em.desc&limit=400`, { headers: cab(tok) });
   return res.status(200).json({ estoque: (lista || []).map((e) => ({ id: e.id, situacao: e.situacao, placa: e.veiculo && e.veiculo.placa, carro: e.veiculo && e.veiculo.marca_modelo })) });
 }
 
 const RECURSOS = { conta, categoria, funcionario, favorecido, lancamento, importar, dre, carros, vale, folha,
-                   fechamento, orcamento, rateio, negociacao, titulo, fluxo, log, estoque: estoqueLista };
+                   fechamento, orcamento, rateio, negociacao, titulo, fluxo, log, recibo, estoque: estoqueLista };
 
 module.exports = async function handler(req, res) {
   if (!URL_BASE || !ANON) return res.status(500).json({ erro: "SUPABASE_URL ou SUPABASE_ANON_KEY não configurados." });

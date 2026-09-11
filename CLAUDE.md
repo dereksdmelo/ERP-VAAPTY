@@ -2050,3 +2050,61 @@ JWT de quem chamou e só sabe escrever essas três colunas. Mesmo
 remédio da `marcar_contrato_assinado()` (0015) e da senha (0032).
 **Falhar ao guardar não perde o resumo** — ele volta para a tela do
 mesmo jeito, só não fica em cache.
+
+
+### 40. Recibo: a direção sai do lançamento, não de quem emite
+
+O financeiro registrava o dinheiro e não emitia o papel — e é o papel
+que a outra ponta pede: o cliente que recebeu o PIX da venda, o
+despachante que foi pago, o lojista que pagou pelo carro. Pedido do
+Derek em 11/09/2026.
+
+**Duas direções, um documento só.** Recebimento (crédito) é a Vaapty
+quem recebe, e a folha sai assinada por ela; pagamento (débito) é a
+Vaapty quem paga, e a folha é a que a outra parte assina. O texto é o
+mesmo com emitente e recebedor trocados de lado.
+
+**E é por isso que a direção NÃO é escolhida na tela.** Ela sai do lado
+em que o valor está no lançamento. Recibo assinado pelo lado errado não
+prova nada — prova contra quem o emitiu —, e é o tipo de erro que só
+aparece quando alguém precisa do documento.
+
+**O valor por extenso é obrigatório, e é onde essas funções erram.**
+Três regras estão conferidas em `valorPorExtenso()`: "cem" é exatamente
+100 e "cento" é todo o resto; 1.000 é "mil", nunca "um mil"; e "um
+milhão **de** reais" só leva a preposição quando fecha sem resto — "um
+milhão e quinhentos mil reais" não leva. A vírgula separa os grupos e o
+"e" entra só antes do último, e mesmo assim apenas quando ele é redondo:
+"dois milhões, quinhentos mil e um", não "dois milhões e quinhentos mil
+e um". **Quem mexer aqui confere contra os casos, não de cabeça.**
+
+**Os dados são congelados na emissão** (0042). O recibo prova o que foi
+dito naquele dia: corrigir depois o nome do favorecido não pode mudar a
+via que está na mão da pessoa. Por isso valor, nome, documento e
+referência têm colunas próprias, em vez de serem lidos do lançamento na
+hora de olhar.
+
+**Cada emissão é uma linha, como na 0003.** Segunda via é evento novo,
+com número novo — é assim que se sabe quantas vias circulam. Sem índice
+único, de propósito.
+
+**O número é sequencial por ano e o índice único é a rede.**
+`max(numero) + 1` na aplicação daria duas vias com o mesmo número se
+duas pessoas emitissem no mesmo segundo; o `unique_violation` faz a
+segunda tentar de novo. Sequência do Postgres não serve porque o número
+zera a cada ano. **O protocolo é o próprio número** —
+`RECIBO-2026-0007` se dita ao telefone, um hash de timestamp não.
+
+**`conteudo` fica nulo, e é decisão.** A tela só sabe montar o HTML
+depois de conhecer o número, que nasce no servidor; um segundo PATCH
+para guardar o papel pediria política de update numa tabela que é
+registro, não rascunho. O que prova é a linha, e o HTML se remonta
+igual a partir dela.
+
+**A `documento` (0003) não servia:** ela exige `veiculo_id not null`, e
+recibo de aluguel não tem veículo nenhum.
+
+**A janela abre antes do `await`**, como em todo documento desta casa
+(decisão 15): pop-up disparado depois de uma espera é bloqueado, e a
+impressão quebraria em silêncio — na frente de quem está esperando o
+papel.

@@ -1788,6 +1788,130 @@ const DUAS_TESTEMUNHAS = `<p style="margin-top:22px;font-size:9.5pt">Testemunhas
 
 const VAAPTY_PJ = "Vaapty Intermediação Veicular LTDA · CNPJ 34.840.903/0001-00 · Rua Anita Garibaldi, 705 — Anita Garibaldi, Joinville/SC";
 
+/* ---------------- 0. recibo ---------------- */
+
+/**
+ * Valor por extenso. Recibo brasileiro sem isso não é recibo — o
+ * extenso é o que impede o algarismo de virar outro depois de
+ * assinado.
+ *
+ * As três regras que a maioria das implementações erra, e que estão
+ * conferidas aqui: "cem" é exatamente 100 e "cento" é o resto;
+ * 1.000 é "mil" e não "um mil"; e "um milhão DE reais" só leva a
+ * preposição quando fecha sem resto — "um milhão e quinhentos mil
+ * reais" não leva.
+ */
+const RB_U = ["", "um", "dois", "três", "quatro", "cinco", "seis", "sete", "oito", "nove",
+  "dez", "onze", "doze", "treze", "quatorze", "quinze", "dezesseis", "dezessete", "dezoito", "dezenove"];
+const RB_D = ["", "", "vinte", "trinta", "quarenta", "cinquenta", "sessenta", "setenta", "oitenta", "noventa"];
+const RB_C = ["", "cento", "duzentos", "trezentos", "quatrocentos", "quinhentos",
+  "seiscentos", "setecentos", "oitocentos", "novecentos"];
+const RB_ESCALA = [["", ""], ["mil", "mil"], ["milhão", "milhões"], ["bilhão", "bilhões"], ["trilhão", "trilhões"]];
+
+function ate999(n) {
+  if (n === 100) return "cem";
+  const c = Math.floor(n / 100), r = n % 100;
+  const p = [];
+  if (c) p.push(RB_C[c]);
+  if (r) p.push(r < 20 ? RB_U[r] : [RB_D[Math.floor(r / 10)], RB_U[r % 10]].filter(Boolean).join(" e "));
+  return p.join(" e ");
+}
+
+function inteiroPorExtenso(n) {
+  if (n === 0) return "zero";
+  const grupos = [];
+  while (n > 0) { grupos.push(n % 1000); n = Math.floor(n / 1000); }
+  const partes = [];
+  for (let i = grupos.length - 1; i >= 0; i--) {
+    const g = grupos[i];
+    if (!g) continue;
+    const corpo = i === 1 && g === 1 ? "" : ate999(g);
+    const [sing, plur] = RB_ESCALA[i];
+    const nome = i === 0 ? "" : (g === 1 ? sing : plur);
+    partes.push({ texto: [corpo, nome].filter(Boolean).join(" "), valor: g });
+  }
+  // Vírgula entre os grupos e "e" só antes do ÚLTIMO, e mesmo assim
+  // apenas quando ele é redondo: "dois milhões, quinhentos mil e um",
+  // não "dois milhões e quinhentos mil e um".
+  let saida = "";
+  partes.forEach((p, i) => {
+    if (!i) { saida = p.texto; return; }
+    const ultimo = i === partes.length - 1;
+    saida += (ultimo && (p.valor < 100 || p.valor % 100 === 0) ? " e " : ", ") + p.texto;
+  });
+  return saida;
+}
+
+function valorPorExtenso(v) {
+  const cent = Math.round(Number(v) * 100);
+  if (!Number.isFinite(cent) || cent < 0) return "";
+  const reais = Math.floor(cent / 100), centavos = cent % 100;
+  const pedeDe = reais >= 1000000 && reais % 1000000 === 0;
+  const p = [];
+  if (reais) p.push(`${inteiroPorExtenso(reais)} ${pedeDe ? "de " : ""}${reais === 1 ? "real" : "reais"}`);
+  if (centavos) p.push(`${inteiroPorExtenso(centavos)} ${centavos === 1 ? "centavo" : "centavos"}`);
+  return p.length ? p.join(" e ") : "zero reais";
+}
+
+const MESES_EXT = ["janeiro", "fevereiro", "março", "abril", "maio", "junho",
+  "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+const dataPorExtenso = (iso) => {
+  const [a, m, d] = String(iso || "").split("-").map(Number);
+  return a && m && d ? `${d} de ${MESES_EXT[m - 1]} de ${a}` : "____ de __________ de ______";
+};
+
+/**
+ * O recibo, nas duas direções.
+ *
+ * **Quem recebe assina.** No RECEBEMOS quem assina é a Vaapty, que
+ * recebeu; no PAGAMOS quem assina é a outra parte. Trocar isso põe a
+ * assinatura errada no papel, e um recibo assinado pelo lado errado
+ * não prova nada — prova contra.
+ *
+ * **A direção nunca é escolhida na tela.** Ela vem do lado em que o
+ * valor está no lançamento: crédito é entrada, débito é saída.
+ */
+function reciboDoc(r) {
+  const recebedor = r.direcao === "recebemos"
+    ? { nome: "Vaapty Intermediação Veicular LTDA", doc: "34.840.903/0001-00" }
+    : { nome: r.outra_parte, doc: r.outra_parte_doc || "" };
+  const pagador = r.direcao === "recebemos"
+    ? { nome: r.outra_parte, doc: r.outra_parte_doc || "" }
+    : { nome: "Vaapty Intermediação Veicular LTDA", doc: "34.840.903/0001-00" };
+
+  const corpo = `
+<div style="text-align:right;font-family:system-ui,sans-serif;font-size:10pt">
+  <b>Recibo n. ${r.numero}/${r.ano}</b>
+</div>
+<div style="border:2px solid #15121a;padding:10px 14px;margin:14px 0 24px;
+            font-family:system-ui,sans-serif;font-size:15pt;font-weight:800;text-align:center">
+  ${brlDoc(r.valor)}
+</div>
+
+<p>Recebi de <b>${pagador.nome}</b>${pagador.doc ? `, inscrito(a) no CPF/CNPJ sob n. ${pagador.doc}` : ""},
+a importância de <b>${brlDoc(r.valor)}</b> (${valorPorExtenso(r.valor)}),
+referente a <b>${r.referente || vazio("descrição")}</b>.</p>
+
+<p>Para clareza firmo o presente recibo, dando plena, geral e irrevogável quitação
+da importância acima, para que produza os seus efeitos legais.</p>
+
+<table class="dados">
+  <tr><td class="r">Quem pagou</td><td>${pagador.nome}${pagador.doc ? ` — ${pagador.doc}` : ""}</td></tr>
+  <tr><td class="r">Quem recebeu</td><td>${recebedor.nome}${recebedor.doc ? ` — ${recebedor.doc}` : ""}</td></tr>
+  <tr><td class="r">Data do pagamento</td><td>${dataPorExtenso(r.emitido_em_data)}</td></tr>
+</table>
+
+<p style="margin-top:26px">Joinville/SC, ${dataPorExtenso(r.emitido_em_data)}.</p>
+
+<div class="assinatura">
+  <div class="linha">${recebedor.nome}${recebedor.doc ? `<br>${recebedor.doc}` : ""}</div>
+</div>
+
+<p style="margin-top:26px;font-size:9pt;color:#6B6478">${VAAPTY_PJ}</p>`;
+
+  return moldura({ titulo: `Recibo ${r.numero}/${r.ano}`, corpo, protocolo: r.protocolo });
+}
+
 /* ---------------- 1. termo de vinculação, ciência e aceite ---------------- */
 
 /**
@@ -10037,6 +10161,40 @@ function FinLancamentos({ comp }) {
   const [carros, setCarros] = useState([]);
   const [funcs, setFuncs] = useState([]);
   const [repartindo, setRepartindo] = useState("");
+  const [reciboIndo, setReciboIndo] = useState("");
+  const [reciboErro, setReciboErro] = useState("");
+
+  /**
+   * Emitir o recibo do lançamento.
+   *
+   * **A janela abre antes do `await`**, e isso não é estilo: pop-up
+   * disparado depois de uma espera é bloqueado pelo navegador, e a
+   * impressão quebraria em silêncio (decisão 15). Quem inverter a
+   * ordem descobre na frente de quem está esperando o papel.
+   *
+   * A direção — recebemos ou pagamos — não é perguntada: ela sai do
+   * lado em que o valor está no lançamento. Recibo assinado pelo lado
+   * errado prova contra quem o emitiu.
+   */
+  const emitirRecibo = async (l) => {
+    setReciboIndo(l.id); setReciboErro("");
+    const j = window.open("", "_blank");
+    try {
+      const r = await fetchAut("/api/financeiro?recurso=recibo", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lancamento_id: l.id }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.erro || "Não consegui emitir o recibo.");
+      if (!j) { setReciboErro("Recibo emitido, mas o navegador bloqueou a janela. Libere pop-ups e emita a segunda via."); return; }
+      j.document.write(reciboDoc(d.recibo));
+      j.document.close();
+      setTimeout(() => j.print(), 400);
+    } catch (e) {
+      if (j) j.close();
+      setReciboErro(e.message || "Não consegui emitir o recibo.");
+    } finally { setReciboIndo(""); }
+  };
   const [historico, setHistorico] = useState("");
 
   useEffect(() => {
@@ -10187,6 +10345,7 @@ function FinLancamentos({ comp }) {
         </div>
       )}
 
+      {reciboErro && <p className="text-[13px]" style={{ color: C.laranja }}>{reciboErro}</p>}
       {!d && !erro && <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>}
       {d && (
         <div className="rolar overflow-x-auto rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
@@ -10274,7 +10433,11 @@ function FinLancamentos({ comp }) {
                     <td className="px-2 py-1 text-right text-[12px]" style={{ fontVariantNumeric: "tabular-nums", color: C.verde }}>{Number(l.credito) ? rs2(l.credito) : ""}</td>
                     <td className="px-2 py-1 text-right text-[12px]" style={{ fontVariantNumeric: "tabular-nums", color: saldo < 0 ? C.laranja : C.ink }}>{filtroCat ? "" : rs2(saldo)}</td>
                     <td className="whitespace-nowrap px-2 py-1 text-right">
-                      <button onClick={() => setRepartindo(repartindo === l.id ? "" : l.id)} className="text-[11px]" style={{ color: C.roxo, fontWeight: 600 }}>repartir</button>
+                      <button onClick={() => emitirRecibo(l)} disabled={reciboIndo === l.id}
+                        className="text-[11px] disabled:opacity-50" style={{ color: C.roxo, fontWeight: 600 }}>
+                        {reciboIndo === l.id ? "emitindo…" : "recibo"}
+                      </button>
+                      <button onClick={() => setRepartindo(repartindo === l.id ? "" : l.id)} className="ml-2 text-[11px]" style={{ color: C.roxo, fontWeight: 600 }}>repartir</button>
                       <button onClick={() => setHistorico(historico === l.id ? "" : l.id)} className="ml-2 text-[11px]" style={{ color: C.mute }}>histórico</button>
                       <button onClick={() => apagar(l)} className="ml-2 text-[11px]" style={{ color: C.mute }}>apagar</button>
                     </td>
