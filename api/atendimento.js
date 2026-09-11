@@ -301,6 +301,142 @@ async function tatica(req, res, tok) {
 }
 const texto0 = (v) => String(v == null ? "" : v).trim().slice(0, 600);
 
+/**
+ * ===== o resumo da conversa =====
+ *
+ * O gestor não lê transcrição. Meia hora de fala vira duas mil
+ * palavras em texto corrido, com o que o reconhecimento de voz errou
+ * no meio — e o painel existe para ele ajudar a tempo, não para
+ * arquivar. O que ele precisa saber cabe em três parágrafos: o que o
+ * cliente quer e por quê, como a negociação andou, e se o negociador
+ * seguiu o processo da casa.
+ *
+ * **A janela aqui é a conversa inteira, não o fim dela.** A tática
+ * (decisão 31) lê os últimos 2.500 caracteres porque a manobra
+ * acontece agora; o resumo precisa do começo, que é onde o cliente
+ * conta o motivo da venda. Por isso `IA_JANELA_RESUMO`, separada — e
+ * quando o texto passa do teto o corte é no MEIO: as pontas são a
+ * pesquisa e o fechamento, e é o miolo que se repete.
+ *
+ * **Uma chamada por pedido, e o resultado fica guardado** (0038).
+ * Sem o cache, abrir a ficha três vezes custaria três chamadas para
+ * ler o mesmo texto.
+ *
+ * Só a transcrição e os números do negócio são enviados. Nome,
+ * telefone e CPF do cliente não vão junto, pela mesma razão da
+ * decisão 31 — e aqui pesa mais, porque o texto enviado é maior.
+ */
+const IA_JANELA_RESUMO = Math.max(1000, Math.min(60000, Number(process.env.IA_JANELA_RESUMO) || 14000));
+
+const INSTRUCAO_RESUMO = [
+  "Você escreve para o GERENTE de uma loja da Vaapty, que COMPRA carros de pessoas físicas para revender a lojistas.",
+  "Ele vai revisar o atendimento e dar um retorno ao negociador. Ele não vai ler a transcrição — você é o resumo dela.",
+  "",
+  "A transcrição é imperfeita: foi feita pelo reconhecimento de voz do navegador, com palavras trocadas,",
+  "sem pontuação e com trechos sem sentido. Leia com essa margem e NÃO invente o que não está lá.",
+  "Quando algo não aparecer na conversa, diga que não apareceu — é exatamente isso que o gerente precisa cobrar.",
+  "",
+  "O processo da casa tem oito etapas: Abordagem (receber, combinar o tempo), Pesquisa (por que vende, quanto quer,",
+  "se o decisor está na mesa, se há dívida), Demonstração (mostrar como a Vaapty trabalha e um depoimento de cliente),",
+  "Lançamento (ficha e descritivo do carro para a rede), Espera (os 15 minutos das propostas),",
+  "Negociação (as rodadas de extrato e contraproposta), Fechamento (aceite e assinatura) e",
+  "Relacionamento (avaliação no Google e indicações).",
+  "",
+  "Responda SÓ com um objeto JSON, sem cercas de código, com estas chaves, todas em português do Brasil:",
+  '  "cliente"    2 a 3 frases: quem é, por que está vendendo, o que precisa, qual a pressa, o que ele quer de valor',
+  '  "negociacao" 2 a 3 frases: como a conversa andou, o que o cliente objetou, como o negociador respondeu, onde parou',
+  '  "processo"   2 a 3 frases: o que o negociador FEZ bem e o que ele PULOU, citando as etapas pelo nome',
+  '  "atencao"    uma frase com o ponto que o gerente deve cobrar, ou "" se não houver nada a cobrar',
+  "",
+  "Frases curtas e diretas, sem elogio vazio e sem repetir os números que já estão na ficha.",
+  "Se a transcrição for curta ou confusa demais para uma leitura honesta, diga isso em cada campo em vez de inventar.",
+].join("\n");
+
+// Conversa longa: o meio é o que se repete. As pontas são a pesquisa
+// (começo) e o fechamento (fim), e são as duas que o resumo precisa.
+function janelaDoResumo(t) {
+  if (t.length <= IA_JANELA_RESUMO) return t;
+  const meio = Math.floor(IA_JANELA_RESUMO / 2);
+  return t.slice(0, meio) + "\n\n[...trecho do meio da conversa omitido...]\n\n" + t.slice(t.length - meio);
+}
+
+async function resumo(req, res, tok) {
+  if (req.method !== "POST") { res.setHeader("Allow", "POST"); return res.status(405).json({ erro: "Use POST." }); }
+  if (!IA_CHAVE) {
+    return res.status(501).json({
+      erro: "O resumo por IA não está ligado. Falta a variável ANTHROPIC_API_KEY nas configurações da Vercel.",
+    });
+  }
+  const c = await lerCorpo(req);
+  const aid = String((c && c.atendimento_id) || "");
+  if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
+
+  // A transcrição vem do BANCO, pelo token de quem pediu: é a RLS da
+  // 0033 que decide se esta pessoa pode ler esta conversa. Aceitar o
+  // texto pelo corpo deixaria qualquer um pagar uma chamada nossa para
+  // resumir o que quisesse.
+  const linhas = await banco(
+    `${URL_BASE}/rest/v1/negociacao_viva?select=transcricao&atendimento_id=eq.${aid}`,
+    { headers: cabecalhos(tok) },
+  );
+  const bruto = String(((linhas || [])[0] || {}).transcricao || "").trim();
+  if (!bruto) return res.status(404).json({ erro: "Não há transcrição gravada neste atendimento." });
+  if (bruto.length < 200) return res.status(400).json({ erro: "Conversa curta demais para resumir." });
+
+  let r;
+  try {
+    r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": IA_CHAVE, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: IA_MODELO,
+        max_tokens: 700,
+        system: INSTRUCAO_RESUMO,
+        messages: [{ role: "user", content: janelaDoResumo(bruto) }],
+      }),
+    });
+  } catch (e) {
+    return res.status(502).json({ erro: "Não consegui falar com a IA." });
+  }
+  const corpo = await r.text();
+  // A mensagem de erro da API pode ecoar a chave; nada dela volta ao cliente.
+  if (!r.ok) return res.status(502).json({ erro: r.status === 401 ? "A chave da IA foi recusada." : "A IA não respondeu." });
+
+  let saida = "";
+  let uso = null;
+  try {
+    const d = JSON.parse(corpo);
+    saida = ((d.content || []).filter((x) => x.type === "text")[0] || {}).text || "";
+    uso = d.usage || null;
+  } catch (e) {}
+  const i = saida.indexOf("{"), j = saida.lastIndexOf("}");
+  let obj = null;
+  if (i >= 0 && j > i) { try { obj = JSON.parse(saida.slice(i, j + 1)); } catch (e) {} }
+  if (!obj) return res.status(502).json({ erro: "A IA respondeu fora do formato. Tente de novo." });
+
+  const feito = {
+    cliente: texto1(obj.cliente), negociacao: texto1(obj.negociacao),
+    processo: texto1(obj.processo), atencao: texto1(obj.atencao),
+  };
+
+  // Guardar é do gerente, e quem confere o papel é a função do banco
+  // (0038): a política de escrita da `negociacao_viva` é do
+  // negociador, e abrir a tabela para o gerente abriria a transcrição
+  // e o valor fechado junto. Falhar aqui não perde o resumo — ele volta
+  // para a tela do mesmo jeito, só não fica guardado.
+  let guardado = false;
+  try {
+    guardado = !!(await banco(`${URL_BASE}/rest/v1/rpc/gravar_resumo_ia`, {
+      method: "POST",
+      headers: json(tok),
+      body: JSON.stringify({ p_atendimento: aid, p_texto: JSON.stringify(feito), p_modelo: IA_MODELO }),
+    }));
+  } catch (e) {}
+
+  return res.status(200).json({ resumo: feito, guardado, em: new Date().toISOString(), modelo: IA_MODELO, uso });
+}
+const texto1 = (v) => String(v == null ? "" : v).trim().slice(0, 900);
+
 const LEAD_STATUS = ["novo", "em_contato", "agendado", "confirmado", "compareceu", "nao_compareceu", "perdido"];
 const CAMPOS_LEAD = "*,negociador(id,nome)";
 
@@ -854,6 +990,11 @@ module.exports = async function handler(req, res) {
     if (String(req.query.recurso || "") === "tatica") {
     try { return await tatica(req, res, tok); }
     catch (e) { return res.status(502).json({ erro: "Não consegui analisar." }); }
+  }
+
+  if (String(req.query.recurso || "") === "resumo") {
+    try { return await resumo(req, res, tok); }
+    catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Não consegui resumir." }); }
   }
 
   if (String(req.query.recurso || "") === "viva") {

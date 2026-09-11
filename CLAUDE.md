@@ -1885,3 +1885,58 @@ do usuário? Então não use a chave.**
 loja em Authentication → Emails. Hoje a recuperação por e-mail é o
 caminho preferido e o mais frágil; com SMTP de verdade ela passa a
 funcionar, e o "gerar senha" volta a ser exceção em vez de rotina.
+
+### 39. O resumo da conversa: o gestor não lê transcrição
+
+O painel entregava ao gerente a transcrição inteira. Meia hora de fala
+vira duas mil palavras em texto corrido, com as palavras que o
+reconhecimento de voz errou no meio — o Derek olhou e disse, em
+11/09/2026: "a transcrição continua vindo inteira, quero um resumo".
+Isso não é leitura de gestor; é arquivo.
+
+**Os "sinais" da decisão 17 não resolvem isto.** Eles são busca por
+expressão, e busca por expressão não resume: ela acende uma luz quando
+uma palavra aparece. Resumir uma conversa pede modelo — e o modelo já
+estava pago e ligado, no `ANTHROPIC_API_KEY` das táticas (decisão 31).
+
+**O resumo responde às três perguntas que o gerente tem**, e nessa
+ordem: quem é o cliente e por que ele está vendendo; como a negociação
+andou e onde parou; e se o negociador seguiu o processo. Mais uma
+quarta linha, `atencao`, que é o que ele deve cobrar — sem ela o
+resumo seria descrição, e o painel existe para virar retorno.
+
+**A instrução diz para NÃO inventar o que não está na conversa.** É a
+diferença entre um resumo e uma acusação: "não perguntou pela dívida"
+tem que significar que não perguntou, não que o reconhecimento de voz
+perdeu o trecho. Pelo mesmo motivo a tela imprime, embaixo do resumo,
+que a palavra final é a transcrição — e o link para ela continua ali.
+
+**A janela é a conversa inteira, não o fim dela.** A tática lê os
+últimos 2.500 caracteres porque a manobra acontece agora; o resumo
+precisa do começo, que é onde o cliente conta o motivo da venda. Daí
+`IA_JANELA_RESUMO` (padrão 14.000), separada — e quando o texto passa
+do teto o corte é **no meio**, porque as pontas são a pesquisa e o
+fechamento e é o miolo que se repete.
+
+**É botão, e fica guardado.** A fila de revisão tem dezenas de
+atendimentos que o gerente nunca vai abrir; resumir todos ao carregar
+a lista seria pagar por texto que ninguém leu. Gerado uma vez, o
+resultado fica na 0038 e volta pronto na próxima abertura. "Refazer"
+existe porque a conversa continua depois de o resumo ser escrito, e a
+tela diz a hora do texto que está na frente dele.
+
+**A transcrição vem do banco, não do corpo da requisição.** É a RLS da
+0033 que decide se aquela pessoa pode ler aquela conversa. Aceitar o
+texto pelo corpo deixaria qualquer conta autenticada pagar uma chamada
+nossa para resumir o que quisesse.
+
+**Quem grava é uma função estreita, pelo mesmo motivo de sempre.** A
+política de escrita da `negociacao_viva` é do NEGOCIADOR (0033) — o
+espelho vem do aparelho dele. Quem pede o resumo é o gerente. Abrir
+`update` da tabela para o gerente abriria a transcrição, as rodadas e
+o valor fechado junto, porque RLS não separa coluna; então
+`gravar_resumo_ia()` é `security definer`, confere `e_gerente()` com o
+JWT de quem chamou e só sabe escrever essas três colunas. Mesmo
+remédio da `marcar_contrato_assinado()` (0015) e da senha (0032).
+**Falhar ao guardar não perde o resumo** — ele volta para a tela do
+mesmo jeito, só não fica em cache.

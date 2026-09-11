@@ -13045,35 +13045,139 @@ function ResumoDoNegocio({ viva, atendimento }) {
       )}
       </>}
 
-      {/* A escuta e a transcrição: uma linha, e o texto sob demanda. */}
+      {/* A conversa: o RESUMO é o que o gestor lê. A transcrição
+          continua acessível, atrás de um link, porque quando o resumo
+          levanta uma dúvida é no texto que ela se resolve. */}
       <div className="mt-3 border-t pt-2" style={{ borderColor: C.line }}>
         {viva && viva.escuta_ok ? (
-          <>
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="text-[11px]" style={{ color: C.verde, fontWeight: 600 }}>
-                Escuta autorizada{viva.escuta_em ? ` ${horaCurta(viva.escuta_em)}` : ""}
-              </span>
-              {viva.transcricao && (
-                <button onClick={() => setVerTexto((x) => !x)} className="text-[11px] font-semibold" style={{ color: C.roxo }}>
-                  {verTexto ? "esconder" : "ver a transcrição"}
-                </button>
-              )}
-            </div>
-            {viva.transcricao && verTexto && (
-              <div className="mt-2 max-h-[300px] overflow-y-auto rounded-lg p-2.5 text-[12px] leading-relaxed"
-                style={{ background: C.bg, whiteSpace: "pre-wrap" }}>
-                {viva.transcricao}
-              </div>
-            )}
-            {!viva.transcricao && (
-              <p className="mt-1 text-[11px]" style={{ color: C.mute }}>Nada transcrito ainda.</p>
-            )}
-          </>
+          <ConversaResumida viva={viva} verTexto={verTexto} setVerTexto={setVerTexto} />
         ) : (
           <p className="text-[11px]" style={{ color: C.mute }}>A escuta não foi ligada neste atendimento.</p>
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * O resumo da conversa, escrito pela IA a pedido.
+ *
+ * **É botão, não automático** — pela mesma razão da leitura de táticas
+ * (decisão 31): cada resumo é uma chamada paga, e a fila de revisão
+ * tem dezenas de atendimentos que o gestor nunca vai abrir. Resumir
+ * todos ao carregar a lista seria pagar por texto que ninguém leu.
+ *
+ * **Uma vez basta.** O resultado fica guardado na 0038 e volta pronto
+ * na próxima abertura. "Refazer" existe porque a conversa continua
+ * depois de o resumo ser escrito — e a tela diz de quando é o texto
+ * que está na frente dele.
+ */
+function ConversaResumida({ viva, verTexto, setVerTexto }) {
+  // O que veio guardado do banco é o ponto de partida; o que foi
+  // gerado agora manda, e é por isso que são dois estados e não um.
+  const guardado = useMemo(() => {
+    if (!viva.resumo_ia) return null;
+    try { return JSON.parse(viva.resumo_ia); } catch (e) { return null; }
+  }, [viva.resumo_ia]);
+
+  const [feito, setFeito] = useState(null);
+  const [quando, setQuando] = useState(null);
+  const [indo, setIndo] = useState(false);
+  const [erro, setErro] = useState("");
+
+  // Trocar de atendimento na lista tem que zerar o que foi gerado aqui,
+  // senão o resumo de um negócio aparece em cima de outro.
+  useEffect(() => { setFeito(null); setQuando(null); setErro(""); }, [viva.atendimento_id]);
+
+  const r = feito || guardado;
+  const em = quando || viva.resumo_ia_em;
+  const temTexto = !!(viva.transcricao || "").trim();
+
+  const gerar = async () => {
+    setIndo(true); setErro("");
+    try {
+      const resp = await fetchAut("/api/atendimento?recurso=resumo", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ atendimento_id: viva.atendimento_id }),
+      });
+      const d = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(d.erro || "Não consegui resumir.");
+      setFeito(d.resumo); setQuando(d.em || new Date().toISOString());
+    } catch (e) {
+      setErro(e.message || "Não consegui resumir.");
+    } finally { setIndo(false); }
+  };
+
+  const paragrafo = (rot, txt) => txt ? (
+    <div className="mt-2">
+      <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>{rot}</div>
+      <p className="mt-0.5 text-[12px] leading-snug" style={{ color: C.ink }}>{txt}</p>
+    </div>
+  ) : null;
+
+  return (
+    <>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-[11px]" style={{ color: C.verde, fontWeight: 600 }}>
+          Escuta autorizada{viva.escuta_em ? ` ${horaCurta(viva.escuta_em)}` : ""}
+        </span>
+        {temTexto && (
+          <button onClick={() => setVerTexto((x) => !x)} className="text-[11px] font-semibold" style={{ color: C.mute }}>
+            {verTexto ? "esconder a transcrição" : "ver a transcrição"}
+          </button>
+        )}
+      </div>
+
+      {!temTexto && <p className="mt-1 text-[11px]" style={{ color: C.mute }}>Nada transcrito ainda.</p>}
+
+      {temTexto && (
+        <div className="mt-2 rounded-lg p-2.5" style={{ background: "#F6F3FA", border: `1px solid ${C.line}` }}>
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.roxo, fontWeight: 700 }}>
+              O que aconteceu na mesa
+            </span>
+            <button onClick={gerar} disabled={indo}
+              className="text-[11px] font-semibold disabled:opacity-50" style={{ color: C.roxo }}>
+              {indo ? "lendo a conversa…" : r ? "refazer" : "resumir a conversa"}
+            </button>
+          </div>
+
+          {!r && !indo && !erro && (
+            <p className="mt-1.5 text-[11px] leading-snug" style={{ color: C.mute }}>
+              A conversa tem {Math.round((viva.transcricao || "").length / 5)} palavras transcritas.
+              O resumo é escrito por IA e fica guardado — custa uma leitura só.
+            </p>
+          )}
+
+          {erro && <p className="mt-1.5 text-[11px] leading-snug" style={{ color: C.laranja }}>{erro}</p>}
+
+          {r && (
+            <>
+              {paragrafo("O cliente", r.cliente)}
+              {paragrafo("A negociação", r.negociacao)}
+              {paragrafo("O processo", r.processo)}
+              {r.atencao && (
+                <p className="mt-2 rounded-lg px-2 py-1.5 text-[12px] leading-snug"
+                  style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
+                  <b>Cobrar:</b> {r.atencao}
+                </p>
+              )}
+              <p className="mt-2 text-[10px]" style={{ color: C.mute }}>
+                Resumo por IA{em ? ` · ${horaCurta(em)}` : ""} — leitura de máquina sobre uma transcrição
+                imperfeita. A palavra final é a transcrição.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+
+      {temTexto && verTexto && (
+        <div className="mt-2 max-h-[300px] overflow-y-auto rounded-lg p-2.5 text-[12px] leading-relaxed"
+          style={{ background: C.bg, whiteSpace: "pre-wrap" }}>
+          {viva.transcricao}
+        </div>
+      )}
+    </>
   );
 }
 
