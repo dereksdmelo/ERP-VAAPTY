@@ -1827,6 +1827,41 @@ não é desvio de uso.
 fotos no bucket. Sem ele o botão fica apagado e a tela diz o que
 fazer, em vez de falhar depois de apertado.
 
+**O descritivo passou a sair DEPOIS do Shinkai, não antes.** Pedido do
+Derek em 11/09/2026: *"o descritivo deve vir do Shinkai, pois lá tem o
+link das fotos pros lojistas; somente mostrar o descritivo depois que
+tiver isso"*. A ordem na tela do Lançamento é agora **levar o carro à
+rede → descritivo**, e antes do envio o bloco do descritivo diz o que
+falta em vez de existir vazio. É o mesmo raciocínio do gate da decisão
+1: mandar o texto ao grupo com o carro fora da plataforma produz
+exatamente a rodada de perguntas que o gate existe para evitar.
+
+**Sem chave configurada o descritivo libera assim mesmo**, com aviso.
+Travar o atendimento por causa de uma variável de ambiente que não
+subiu seria transformar um problema de configuração em cliente parado
+na mesa.
+
+**O link das fotos não vem na resposta deles.** O 200 documentado traz
+`id`, `placa`, `acao`, `status`, `fotos` (a contagem) e `avisos`, e
+mais nada. `shinkai_url` (0040) nasce vazia e o servidor a preenche com
+o primeiro campo de endereço que a resposta trouxer — `url`, `link`,
+`permalink`, `oferta_url`. **Montar a URL a partir do `id` seria chutar
+o formato do site deles**, e link quebrado no grupo dos lojistas é pior
+que link nenhum. Enquanto nada vier, a linha simplesmente não sai do
+descritivo e a tela diz por quê.
+
+**O carro chegava pelado, e era o nosso corpo que estava curto.** Até
+11/09/2026 o POST mandava identificação, valores e fotos — e deixava de
+fora **pneu, opcional, gastos e ressalva**, que são justamente os
+campos que a tela deles pede para o carro poder ser ofertado. A
+`observacoes_internas` continua fora, e não por esquecimento: a decisão
+2 a proíbe de sair da loja.
+
+**O PATCH do resultado tenta duas vezes, e a segunda é sem o
+endereço.** `shinkai_url` é coluna nova; num banco que ainda não a
+tenha, o PATCH inteiro seria recusado e levaria junto o `shinkai_em` —
+que é o que libera o descritivo. Mesmo remédio da decisão 29.
+
 ### 37. A meta da pré-venda é outra cadeia
 
 O cadastro dava a todo mundo os três campos do negociador, e na

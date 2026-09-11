@@ -1410,6 +1410,9 @@ const VAZIO = {
   mostrouProcesso: false, mostrouTestemunhal: false, necessidadeCliente: "",
   // pausa
   publicado: false,
+  // O carro na rede: o envio ao Shinkai é o que libera o descritivo,
+  // porque é lá que estão as fotos que o lojista abre.
+  shinkaiEm: null, shinkaiStatus: "", shinkaiUrl: "",
   // espera
   esperaIniciadaEm: null, notasEspera: "",
   // escuta: só liga depois do consentimento, e guarda quando ele foi dado
@@ -1540,7 +1543,13 @@ function gerarDescritivo(f, n) {
     L.push("", "📌 RESSALVAS:");
     f.ressalvas.split("\n").filter(Boolean).forEach((r) => L.push(`• ${r}`));
   }
-  L.push("", `📷 ${n} fotos`, "", "💥💥💥💥💥💥💥💥💥💥", "");
+  L.push("", `📷 ${n} fotos`);
+  // O link é o que o lojista abre para ver as fotos. Ele vem do
+  // Shinkai; enquanto eles não devolverem endereço no POST, a linha
+  // simplesmente não sai — descritivo com link quebrado é pior que
+  // descritivo sem link.
+  if (f.shinkaiUrl) L.push("", `🔗 Fotos e ficha: ${f.shinkaiUrl}`);
+  L.push("", "💥💥💥💥💥💥💥💥💥💥", "");
   L.push("💼 NEGOCIADOR", `📲 ${f.negociador || "—"}`, "");
   L.push("☑️ Gerente: THIAGO", "📲 Whats/ligação: (21) 96467-3445", "");
   L.push("☑️ Gerente: WEBERT", "📲 Whats/ligação: (47) 9213-2434");
@@ -3926,72 +3935,98 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               </div>
             </Bloco>
 
-            <section className="rounded-lg" style={{ background: C.paper, border: `1px solid ${C.line}`, opacity: liberado ? 1 : 0.45 }}>
-              <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: C.line }}>
-                <span className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.roxo, fontFamily: F.disp, fontWeight: 700 }}>Descritivo</span>
-                <button disabled={!liberado} onClick={() => copiar(descritivo, "d")} className="rounded-md px-3 py-1.5 text-[12px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>
-                  {copiado === "d" ? "Copiado" : "Copiar"}
-                </button>
-              </div>
-              <pre className="overflow-x-auto whitespace-pre-wrap px-4 py-3 text-[12px] leading-relaxed" style={{ fontFamily: F.body }}>{descritivo}</pre>
-              {/* O Shinkai. Com chave, o carro vai por botão; sem ela,
-                  o caminho antigo continua ali — e a tela diz qual dos
-                  dois está valendo, em vez de mostrar um botão que
-                  falha na frente do cliente.
+            {/* ===== o carro vai à rede, e só então sai o descritivo =====
 
-                  **O envio pede a ficha salva.** É o `veiculo_id` que
-                  dá endereço às fotos no bucket, e sem foto o carro
-                  entra lá como "em avaliação". */}
-              <div className="border-t px-4 py-3" style={{ borderColor: C.line }}>
-                {chaveShinkai ? (
-                  <>
-                    <button disabled={!liberado || !veiculoId || indoShinkai}
-                      onClick={async () => {
-                        setIndoShinkai(true); setRespShinkai(null);
-                        try { setRespShinkai(await enviarAoShinkai2(veiculoId)); }
-                        catch (ex) { setRespShinkai({ erro: ex.message || "Não consegui enviar." }); }
-                        setIndoShinkai(false);
-                      }}
-                      className="w-full rounded-md py-2.5 text-[13px] font-semibold"
-                      style={{ background: liberado && veiculoId && !indoShinkai ? C.roxo : C.line, color: "#fff" }}>
-                      {indoShinkai ? "Enviando ao Shinkai…" : respShinkai && !respShinkai.erro ? "Enviar de novo ao Shinkai" : "Enviar ao Shinkai"}
-                    </button>
-                    {!veiculoId && (
-                      <p className="mt-1.5 text-[11px]" style={{ color: C.mute }}>
-                        Salve a ficha no banco antes — é ela que leva as fotos junto.
-                      </p>
-                    )}
-                    {respShinkai && respShinkai.erro && (
-                      <p className="mt-2 text-[12px] leading-snug" style={{ color: C.laranja }}>{respShinkai.erro}</p>
-                    )}
-                    {respShinkai && !respShinkai.erro && (
-                      <div className="mt-2 text-[12px] leading-snug" style={{ color: C.verde }}>
-                        No Shinkai{respShinkai.status ? ` como ${respShinkai.status}` : ""}.
-                        {Array.isArray(respShinkai.avisos) && respShinkai.avisos.length ? (
-                          <span style={{ color: AMARELO.texto }}> {respShinkai.avisos.join(" · ")}</span>
-                        ) : null}
-                      </div>
-                    )}
-                    <button disabled={!liberado} onClick={() => copiar(JSON.stringify(payloadShinkai(f, enviadas.length), null, 2), "s")}
-                      className="mt-2 w-full rounded-md border py-2 text-[12px] font-semibold" style={{ borderColor: C.line, color: C.mute }}>
-                      {copiado === "s" ? "JSON copiado" : "Copiar o JSON, em vez disso"}
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button disabled={!liberado} onClick={() => copiar(JSON.stringify(payloadShinkai(f, enviadas.length), null, 2), "s")}
-                      className="w-full rounded-md border py-2 text-[12px] font-semibold" style={{ borderColor: C.line, color: C.roxo }}>
-                      {copiado === "s" ? "JSON copiado" : "Copiar JSON do Shinkai"}
-                    </button>
-                    {chaveShinkai === false && (
-                      <p className="mt-1.5 text-[11px] leading-snug" style={{ color: C.mute }}>
-                        O envio direto está desligado: falta a chave do Shinkai nas configurações. Por enquanto, cole o JSON no painel.
-                      </p>
-                    )}
-                  </>
-                )}
+                A ordem inverteu a pedido do Derek em 11/09/2026: "o
+                descritivo deve vir do Shinkai, pois lá tem o link das
+                fotos pros lojistas; somente mostrar o descritivo
+                depois que tiver isso".
+
+                Faz sentido para além do link. O descritivo é o texto
+                que vai ao grupo, e mandar o texto sem o carro estar na
+                plataforma produz exatamente a rodada de perguntas que
+                o gate da decisão 1 existe para evitar — o lojista
+                pergunta pelas fotos, e elas não estão em lugar nenhum.
+
+                Sem chave configurada não há como enviar, e travar o
+                descritivo ali seria travar o atendimento inteiro por
+                causa de uma variável de ambiente: aí ele libera, com
+                aviso. */}
+            <section className="rounded-lg p-4" style={{ background: C.paper, border: `1px solid ${C.line}`, opacity: liberado ? 1 : 0.45 }}>
+              <div className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.roxo, fontFamily: F.disp, fontWeight: 700 }}>
+                Levar o carro à rede
               </div>
+              <p className="mt-1 text-[11px] leading-relaxed" style={{ color: C.mute }}>
+                O carro sobe ao Shinkai com as fotos. É de lá que o lojista abre a ficha — por isso o
+                descritivo do grupo só sai depois deste passo.
+              </p>
+
+              {chaveShinkai === false ? (
+                <p className="mt-2 rounded px-2 py-1.5 text-[11px] leading-snug" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
+                  O envio direto está desligado — falta a chave do Shinkai nas configurações. Suba o carro pelo painel;
+                  o descritivo segue liberado, mas sem o link das fotos.
+                </p>
+              ) : (
+                <>
+                  <button disabled={!liberado || !veiculoId || indoShinkai}
+                    onClick={async () => {
+                      setIndoShinkai(true); setRespShinkai(null);
+                      try {
+                        const d = await enviarAoShinkai2(veiculoId);
+                        setRespShinkai(d);
+                        setVarios({ shinkaiEm: new Date().toISOString(), shinkaiStatus: d.status || "", shinkaiUrl: d.url || "" });
+                      } catch (ex) { setRespShinkai({ erro: ex.message || "Não consegui enviar." }); }
+                      setIndoShinkai(false);
+                    }}
+                    className="mt-3 w-full rounded-md py-2.5 text-[13px] font-semibold"
+                    style={{ background: liberado && veiculoId && !indoShinkai ? C.roxo : C.line, color: "#fff" }}>
+                    {indoShinkai ? "Enviando ao Shinkai…" : f.shinkaiEm ? "Enviar de novo ao Shinkai" : "Enviar ao Shinkai"}
+                  </button>
+                  {!veiculoId && (
+                    <p className="mt-1.5 text-[11px]" style={{ color: C.mute }}>
+                      Salve a ficha no banco antes — é ela que leva as fotos junto.
+                    </p>
+                  )}
+                  {respShinkai && respShinkai.erro && (
+                    <p className="mt-2 text-[12px] leading-snug" style={{ color: C.laranja }}>{respShinkai.erro}</p>
+                  )}
+                  {f.shinkaiEm && !(respShinkai && respShinkai.erro) && (
+                    <p className="mt-2 text-[12px] leading-snug" style={{ color: C.verde }}>
+                      No Shinkai{f.shinkaiStatus ? ` como ${f.shinkaiStatus}` : ""} às {new Date(f.shinkaiEm).toTimeString().slice(0, 5)}.
+                    </p>
+                  )}
+                  {respShinkai && Array.isArray(respShinkai.avisos) && !!respShinkai.avisos.length && (
+                    <p className="mt-1.5 text-[11px] leading-snug" style={{ color: AMARELO.texto }}>
+                      {respShinkai.avisos.join(" · ")}
+                    </p>
+                  )}
+                </>
+              )}
             </section>
+
+            {(f.shinkaiEm || chaveShinkai === false) ? (
+              <section className="rounded-lg" style={{ background: C.paper, border: `1px solid ${C.line}`, opacity: liberado ? 1 : 0.45 }}>
+                <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: C.line }}>
+                  <span className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.roxo, fontFamily: F.disp, fontWeight: 700 }}>Descritivo</span>
+                  <button disabled={!liberado} onClick={() => copiar(descritivo, "d")} className="rounded-md px-3 py-1.5 text-[12px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>
+                    {copiado === "d" ? "Copiado" : "Copiar"}
+                  </button>
+                </div>
+                <pre className="overflow-x-auto whitespace-pre-wrap px-4 py-3 text-[12px] leading-relaxed" style={{ fontFamily: F.body }}>{descritivo}</pre>
+                {f.shinkaiEm && !f.shinkaiUrl && (
+                  <p className="border-t px-4 py-2.5 text-[11px] leading-snug" style={{ borderColor: C.line, color: C.mute }}>
+                    O Shinkai ainda não devolve o endereço do carro, então o descritivo sai sem o link das fotos.
+                    As fotos estão lá — o lojista as vê pelo painel.
+                  </p>
+                )}
+              </section>
+            ) : (
+              <section className="rounded-lg p-4 text-[12px] leading-snug"
+                style={{ background: C.paper, border: `1px dashed ${C.line}`, color: C.mute }}>
+                <span className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.mute, fontFamily: F.disp, fontWeight: 700 }}>Descritivo</span>
+                <p className="mt-1.5">Sai depois que o carro estiver no Shinkai — é de lá que vêm as fotos que o lojista abre.</p>
+              </section>
+            )}
 
             <section className="rounded-lg p-4" style={{ background: C.paper, border: `1px solid ${C.line}`, opacity: podeSalvar ? 1 : 0.45 }}>
               <div className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.roxo, fontFamily: F.disp, fontWeight: 700 }}>Banco</div>
@@ -9517,6 +9552,10 @@ function fichaDoEstoque(e) {
     positivos: (v.pontos_positivos || []).join("\n"),
     ressalvas: (v.ressalvas_lojista || []).join("\n"),
     internas: "", negociador: e.negociador_nome || "",
+    // O link das fotos no Shinkai, quando existe: é o que o lojista
+    // abre. Vale o do estoque; se este carro só foi à rede na
+    // avaliação, vale o da ficha.
+    shinkaiUrl: e.shinkai_url || (v.shinkai_url || ""),
   };
 }
 

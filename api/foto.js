@@ -226,7 +226,11 @@ async function shinkai(req, res, tok) {
   }
 
   const CAMPOS_V = "id,placa,chassi,marca_modelo,ano_fabricacao,ano_modelo,cor,combustivel," +
-    "cambio,km_atual,fipe_codigo,fipe_valor,leilao_sinistro,gnv";
+    "cambio,km_atual,fipe_codigo,fipe_valor,leilao_sinistro,gnv," +
+    // O carro chegava pelado do outro lado: pneu, opcional e ressalva
+    // ficavam de fora do corpo, e são justamente os campos que a tela
+    // deles pede para o carro poder ser ofertado.
+    "pneu_de,pneu_dd,pneu_te,pneu_td,opcionais,gastos_descricao,ressalvas_lojista,pontos_positivos";
 
   // A leitura vai pelo TOKEN DO USUÁRIO: é a RLS que decide se esta
   // pessoa enxerga este carro. A chave de serviço entra depois, e só
@@ -287,8 +291,32 @@ async function shinkai(req, res, tok) {
       // dos dois o Shinkai recebe o carro como "em avaliação", e diz
       // isso nos avisos.
       valor_investimento: numeroOuNulo(e ? e.valor_compra : v.valor_por) || undefined,
+      // `leilao` e `sinistro` separados também, porque a documentação
+      // diz que eles aceitam os dois formatos e o nosso é um só.
       leilao_sinistro: !!v.leilao_sinistro,
+      leilao: !!v.leilao_sinistro,
+      sinistro: !!v.leilao_sinistro,
       gnv: !!v.gnv,
+      // Padrão da documentação; explícito porque a Vaapty também
+      // avalia moto, e o dia em que isso virar campo na tela o lugar
+      // já está aqui.
+      tipo_veiculo: "carros",
+      // Os quatro pneus, com os nomes que a tela deles usa. Iam de
+      // fora do corpo até 11/09/2026 — o carro entrava sem condição de
+      // pneu nenhuma.
+      pneus: {
+        dianteiro_esquerdo: v.pneu_de || undefined,
+        dianteiro_direito: v.pneu_dd || undefined,
+        traseiro_esquerdo: v.pneu_te || undefined,
+        traseiro_direito: v.pneu_td || undefined,
+      },
+      opcionais: Array.isArray(v.opcionais) && v.opcionais.length ? v.opcionais : undefined,
+      gastos: v.gastos_descricao || undefined,
+      // Ressalva vai; observação interna NUNCA (decisão 2). O Shinkai
+      // é a plataforma da casa, mas o que está nesse campo foi escrito
+      // para ser lido pelo lojista, e o outro não.
+      ressalvas: Array.isArray(v.ressalvas_lojista) && v.ressalvas_lojista.length ? v.ressalvas_lojista : undefined,
+      pontos_positivos: Array.isArray(v.pontos_positivos) && v.pontos_positivos.length ? v.pontos_positivos : undefined,
       fotos: urls.length ? urls : undefined,
     },
   };
@@ -320,19 +348,44 @@ async function shinkai(req, res, tok) {
 
   // O que voltou fica gravado: sem isso ninguém sabe se o carro já
   // está lá, e reenviar vira adivinhação.
+  // O endereço do carro na plataforma deles, que é o que o descritivo
+  // leva ao grupo dos lojistas. A resposta DOCUMENTADA não traz isso —
+  // então procuro os nomes plausíveis e aceito o primeiro que vier, em
+  // vez de montar a URL a partir do `id`: chutar o formato do site
+  // deles poria link quebrado no grupo. Enquanto nenhum vier, fica
+  // nulo e o descritivo diz que o link ainda não existe.
+  const endereco = (() => {
+    if (!d) return null;
+    for (const k of ["url", "link", "permalink", "oferta_url", "veiculo_url", "url_publica"]) {
+      const u = d[k];
+      if (typeof u === "string" && /^https?:\/\//i.test(u)) return u.slice(0, 500);
+    }
+    return null;
+  })();
+
   const marca = {
     shinkai_id: (d && d.id) || null,
     shinkai_status: (d && d.status) || null,
+    shinkai_url: endereco,
     shinkai_em: new Date().toISOString(),
   };
-  await banco(
-    e ? `${REST("estoque")}?id=eq.${eid}` : `${REST("veiculo")}?id=eq.${v.id}`,
-    { method: "PATCH", headers: json(tok), body: JSON.stringify(marca) },
-  ).catch(() => {});
+  // Duas tentativas, e a segunda é sem o endereço. `shinkai_url` é
+  // coluna nova (0040): num banco que ainda não a tenha, o PATCH
+  // inteiro seria recusado e levaria junto o `shinkai_em` — que é o
+  // que libera o descritivo. Mesmo remédio do casamento de títulos na
+  // decisão 29: o que se perde é só a amarração, nunca o principal.
+  const alvo = e ? `${REST("estoque")}?id=eq.${eid}` : `${REST("veiculo")}?id=eq.${v.id}`;
+  try {
+    await banco(alvo, { method: "PATCH", headers: json(tok), body: JSON.stringify(marca) });
+  } catch (err) {
+    const { shinkai_url, ...semUrl } = marca;
+    await banco(alvo, { method: "PATCH", headers: json(tok), body: JSON.stringify(semUrl) }).catch(() => {});
+  }
 
   return res.status(200).json({
     ok: true,
     id: d && d.id, acao: d && d.acao, status: d && d.status,
+    url: endereco,
     fotos: d && d.fotos, avisos: (d && d.avisos) || [],
     fotos_enviadas: urls.length,
   });
