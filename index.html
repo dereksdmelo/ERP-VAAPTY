@@ -4164,6 +4164,22 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                       Salve a ficha no banco antes — é ela que leva as fotos junto.
                     </p>
                   )}
+                  {/* Os três códigos da FIPE são o que move os seletores
+                      de marca, modelo e ano do lado de lá. Sem eles o
+                      carro entra com o nome escrito e os três campos
+                      vazios, e alguém preenche à mão — que é o trabalho
+                      que este envio existe para evitar.
+
+                      O aviso fica AQUI, no botão, e não junto da FIPE:
+                      é neste momento que a falta custa alguma coisa. */}
+                  {veiculoId && !(f.fipeMarcaCodigo && f.fipeModeloCodigo && f.fipeAnoCodigo) && (
+                    <p className="mt-2 rounded px-2 py-1.5 text-[11px] leading-snug"
+                      style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
+                      <b>Marca, modelo e ano vão entrar vazios lá.</b> Eles são preenchidos pelos códigos
+                      da tabela FIPE, e esta ficha ainda não passou pela conferência. Use
+                      o <b>Conferir na tabela FIPE</b> acima, salve e envie de novo.
+                    </p>
+                  )}
                   {respShinkai && respShinkai.erro && (
                     <p className="mt-2 text-[12px] leading-snug" style={{ color: C.laranja }}>{respShinkai.erro}</p>
                   )}
