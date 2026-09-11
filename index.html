@@ -3590,13 +3590,21 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 // Navegador bloqueia abertura em série. Marco só o que
                 // realmente abriu — dar por visto o que não abriu seria
                 // liberar a etapa sem ninguém ter olhado.
+                //
+                // **`noopener` não vai nas features.** Por especificação,
+                // `window.open(url, alvo, "noopener")` devolve SEMPRE null
+                // — mesmo tendo aberto a aba. Com ele ali, todas as sete
+                // abriam na cara do negociador e o sistema dizia que o
+                // navegador bloqueou todas, sem marcar nenhuma. A mesma
+                // proteção se consegue cortando o `opener` depois, e aí a
+                // referência que diz se abriu continua vindo.
                 const abrirTodos = () => {
                   const abertos = [];
                   CANAIS.forEach((c) => {
                     const url = enderecoCanal(c, termo, ma, mo);
                     if (!url) return;
-                    const j = window.open(url, "_blank", "noopener");
-                    if (j) abertos.push(c.chave);
+                    const j = window.open(url, "_blank");
+                    if (j) { try { j.opener = null; } catch (e) {} abertos.push(c.chave); }
                   });
                   if (abertos.length) set("canaisVistos", [...new Set([...vistos, ...abertos])]);
                   setErroCanais(abertos.length < possiveis.length

@@ -487,6 +487,17 @@ o que procurar.
 precisa continuar escrito. Anúncio é o que o dono pede, não o que o
 carro vende.
 
+**`noopener` não vai nas features do `window.open`.** Por
+especificação, `window.open(url, alvo, "noopener")` devolve **sempre
+`null`** — mesmo tendo aberto a aba. O "abrir todos" usava isso, então
+as sete abas abriam na cara do negociador e a tela dizia que o
+navegador tinha bloqueado todas, sem marcar nenhuma como vista: a
+etapa P não fechava nunca. O Derek viu em 11/09/2026 ("quando clica em
+abrir todos fica tudo ok aqui"). A mesma proteção se consegue cortando
+`j.opener` depois de abrir, e aí a referência que diz se abriu
+continua vindo. **Quem detecta bloqueio de pop-up pelo retorno do
+`window.open` não pode pedir `noopener` na mesma chamada.**
+
 ### 9. Login: o navegador fala pelo usuário, não pela chave de serviço
 
 Até a 0004 as funções em `api/` usavam a `SUPABASE_SERVICE_KEY` para
