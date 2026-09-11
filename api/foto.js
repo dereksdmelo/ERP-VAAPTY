@@ -186,11 +186,6 @@ const ROTULOS = [
 const SHINKAI_URL = "https://www.shinkai.com.br/api/public/veiculo";
 const SHINKAI_KEY = process.env.SHINKAI_API_KEY || "";
 const SHINKAI_ORIGEM = process.env.SHINKAI_ORIGEM || "vaapty-joinville";
-// O link público do carro no app dos lojistas. A franquia no caminho
-// é "joinville", enquanto a origem é "vaapty-joinville" — daí o corte
-// do prefixo, e a variável própria para quem abrir outra praça.
-const SHINKAI_APP = "https://www.shinkai.com.br/pwa/entrar";
-const SHINKAI_FRANQUIA = process.env.SHINKAI_FRANQUIA || SHINKAI_ORIGEM.replace(/^vaapty-/, "");
 
 const numeroOuNulo = (v) => {
   const n = Number(v);
@@ -232,6 +227,8 @@ async function shinkai(req, res, tok) {
 
   const CAMPOS_V = "id,placa,chassi,marca_modelo,marca,modelo,versao,ano_fabricacao,ano_modelo,cor,combustivel," +
     "cambio,km_atual,fipe_codigo,fipe_valor,leilao_sinistro,gnv," +
+    // Os tres codigos que movem os seletores da ficha deles (0043).
+    "fipe_marca_codigo,fipe_modelo_codigo,fipe_ano_codigo," +
     // O carro chegava pelado do outro lado: pneu, opcional e ressalva
     // ficavam de fora do corpo, e são justamente os campos que a tela
     // deles pede para o carro poder ser ofertado.
@@ -243,20 +240,33 @@ async function shinkai(req, res, tok) {
   let e = null, v = null;
   if (RX_UUID.test(eid)) {
     const achado = await banco(
-      `${REST("estoque")}?select=id,valor_compra,preco_pedido,veiculo(${CAMPOS_V})&id=eq.${eid}&limit=1`,
+      `${REST("estoque")}?select=id,valor_compra,preco_pedido,negociador_nome,veiculo(${CAMPOS_V})&id=eq.${eid}&limit=1`,
       { headers: cabecalhos(tok) }
     );
     e = Array.isArray(achado) ? achado[0] : null;
     if (!e || !e.veiculo) return res.status(404).json({ erro: "Carro não encontrado no estoque." });
     v = e.veiculo;
   } else {
+    // O `atendimento` embutido só existe para pegar o negociador: a
+    // 0001 nunca deu coluna de negociador ao veículo, e o nome do
+    // responsável é o que a ficha do Shinkai pede.
     const achado = await banco(
-      `${REST("veiculo")}?select=${CAMPOS_V},valor_por&id=eq.${vid}&limit=1`,
+      `${REST("veiculo")}?select=${CAMPOS_V},valor_por,atendimento(negociador_nome)&id=eq.${vid}&limit=1`,
       { headers: cabecalhos(tok) }
     );
     v = Array.isArray(achado) ? achado[0] : null;
     if (!v) return res.status(404).json({ erro: "Ficha não encontrada." });
   }
+
+  // Quem responde pelo carro do lado de lá. No estoque é o negociador
+  // gravado na entrada; na avaliação é o do atendimento. **O nome
+  // precisa existir na equipe da franquia** — quando não existe, o
+  // carro entra sem responsável e a resposta traz um aviso com os
+  // nomes válidos, que a tela mostra. É assim que se descobre um erro
+  // de grafia na hora, em vez de descobrir pelo carro sem dono.
+  const responsavel = (e && e.negociador_nome)
+    || (v.atendimento && v.atendimento.negociador_nome)
+    || null;
   if (!v.placa) return res.status(400).json({ erro: "O carro precisa de placa para ir ao Shinkai." });
 
   const fotos = await banco(
@@ -316,6 +326,17 @@ async function shinkai(req, res, tok) {
       // avalia moto, e o dia em que isso virar campo na tela o lugar
       // já está aqui.
       tipo_veiculo: "carros",
+      // **Os três códigos juntos, ou nenhum.** É regra da API deles:
+      // mandar um ou dois deixa os seletores vazios do mesmo jeito e
+      // ainda gera aviso. Ficha que não passou pela conferência da
+      // tabela oficial não tem os três, e aí vai sem — o nome continua
+      // preenchendo o resto.
+      ...(v.fipe_marca_codigo && v.fipe_modelo_codigo && v.fipe_ano_codigo ? {
+        fipe_marca_codigo: v.fipe_marca_codigo,
+        fipe_modelo_codigo: v.fipe_modelo_codigo,
+        fipe_ano_codigo: v.fipe_ano_codigo,
+      } : {}),
+      comprador_responsavel: responsavel || undefined,
       // Os quatro pneus, com os nomes que a tela deles usa. Iam de
       // fora do corpo até 11/09/2026 — o carro entrava sem condição de
       // pneu nenhuma.
@@ -371,24 +392,23 @@ async function shinkai(req, res, tok) {
   // nulo e o descritivo diz que o link ainda não existe.
   const endereco = (() => {
     if (!d) return null;
-    // Se um dia eles devolverem o endereço pronto, ele manda.
+    // O `url` vem pronto na resposta desde 11/09/2026. Os outros
+    // nomes ficam por tolerância: custam nada e cobrem o dia em que
+    // alguém renomear o campo do lado de lá.
     for (const k of ["url", "link", "permalink", "oferta_url", "veiculo_url", "url_publica"]) {
       const u = d[k];
       if (typeof u === "string" && /^https?:\/\//i.test(u)) return u.slice(0, 500);
     }
-    // Hoje não devolvem, e o link é o que faz o descritivo valer: é
-    // por ele que o lojista abre as fotos e manda proposta.
-    //
-    // **O formato foi conferido, não deduzido.** Em 11/09/2026 o botão
-    // "Link do app" do painel deles foi acionado em três carros e o que
-    // saiu foi sempre `…/pwa/entrar/<franquia>?c=<uuid>`; o `c` do
-    // Polo QJP1C41 bateu com o `shinkai_id` que este endpoint tinha
-    // gravado no envio. É o mesmo id, não um parecido.
-    //
-    // Se o formato mudar, o link quebra em silêncio — e é por isso que
-    // o de cima existe: no dia em que a resposta trouxer endereço, ele
-    // passa a valer sozinho.
-    return d.id ? `${SHINKAI_APP}/${SHINKAI_FRANQUIA}?c=${encodeURIComponent(d.id)}` : null;
+    // **A montagem manual saiu, e de propósito.** Ela existiu por
+    // algumas horas em 11/09/2026, enquanto a resposta não trazia
+    // endereço: o formato tinha sido conferido no botão "Link do app"
+    // do painel deles. O Mateus incluiu o campo `url` no mesmo dia e
+    // pediu para apagá-la — o app deve ganhar domínio próprio, e um
+    // link montado aqui passaria a apontar para o lugar errado sem
+    // ninguém perceber. Link quebrado no grupo dos lojistas é pior que
+    // link nenhum, e sem endereço o descritivo apenas não imprime a
+    // linha.
+    return null;
   })();
 
   const marca = {

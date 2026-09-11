@@ -1841,6 +1841,39 @@ não é desvio de uso.
 fotos no bucket. Sem ele o botão fica apagado e a tela diz o que
 fazer, em vez de falhar depois de apertado.
 
+**Os seletores da ficha deles são movidos por CÓDIGO, não por nome.**
+O Mateus respondeu em 11/09/2026: `fipe_marca_codigo` ("59"),
+`fipe_modelo_codigo` ("8068") e `fipe_ano_codigo` ("2019-5"), **os três
+juntos ou nenhum** — mandar um ou dois deixa os seletores vazios do
+mesmo jeito. Nós já tínhamos os três na mão: são exatamente os
+parâmetros que `ConferirFipe` usa na consulta à tabela oficial, e eram
+jogados fora com a resposta. A 0043 deu coluna a eles.
+
+**Os códigos batem entre as duas fontes, e isso foi conferido.** O CRM
+deles consulta a parallelum; nós consultamos a FIPE oficial. Comparei
+marca a marca e modelo a modelo: Ford 22, Land Rover 33, VW 59 nas
+duas, e 8068 é "Polo Comfort. 200 TSI 1.0 Flex 12V Aut." nas duas — a
+parallelum espelha a mesma tabela. **Quem trocar a fonte de uma das
+pontas confere assim de novo**: código de modelo trocado põe outro
+carro na ficha do lojista.
+
+**Ficha sem conferência FIPE vai sem os códigos**, e isso não é erro —
+o nome continua preenchendo o resto. `fipe_codigo` ("005477-1") é outra
+coisa: preenche o campo de referência e não move seletor nenhum.
+
+**`comprador_responsavel` é o NOME, e precisa existir na equipe da
+franquia.** Vem do negociador do estoque ou do atendimento — o veículo
+nunca teve coluna de negociador (0001). Nome que eles não reconhecem
+não derruba o envio: o carro entra sem responsável e a resposta traz um
+aviso com os nomes válidos, que a tela mostra. É assim que se descobre
+um erro de grafia na hora, em vez de descobrir pelo carro sem dono.
+
+**Pneus e opcionais: o chute estava certo.** `pneus` como objeto por
+posição e `opcionais` como texto livre são exatamente o que a API
+espera; os nossos quatro estados são traduzidos do lado deles
+(`regular` → Médio, `fraco` → Ruim). Opcional que não casa com um chip
+entra como livre e aparece na ficha igual.
+
 **O descritivo passou a sair DEPOIS do Shinkai, não antes.** Pedido do
 Derek em 11/09/2026: *"o descritivo deve vir do Shinkai, pois lá tem o
 link das fotos pros lojistas; somente mostrar o descritivo depois que
@@ -1869,11 +1902,13 @@ franquia no caminho é `joinville` enquanto a origem é
 `vaapty-joinville`, daí o corte do prefixo e a `SHINKAI_FRANQUIA` para
 quem abrir outra praça.
 
-**A resposta ainda manda, se um dia trouxer endereço.** O servidor
-procura `url`, `link`, `permalink` e `oferta_url` antes de montar o
-link, e `shinkai_url` (0040) guarda o que valeu. Se eles mudarem o
-formato do app, o link quebra em silêncio — e é esse caminho de cima
-que faz o conserto ser deles, não nosso.
+**E no mesmo dia o campo passou a vir, então a montagem manual saiu.**
+O Mateus incluiu `url` na resposta e pediu para apagá-la: o app deve
+ganhar domínio próprio, e um link montado aqui passaria a apontar para
+o lugar errado **sem ninguém perceber**. Agora `shinkai_url` (0040)
+guarda o que veio na resposta, e sem endereço o descritivo apenas não
+imprime a linha. **Quem voltar a montar o link aqui reintroduz o risco
+que esta decisão evita.**
 
 **O descritivo virou o molde do Shinkai.** O Derek mandou o texto que
 a plataforma gera ("assim que sai um descritivo") e pediu o nosso

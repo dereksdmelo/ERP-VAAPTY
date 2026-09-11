@@ -103,6 +103,11 @@ const FONTE = {
   // de `marca_modelo`: marca de duas palavras (Land Rover, Alfa Romeo)
   // quebra o corte, e é o mesmo tropeço da decisão 8.
   marca: "marca", modelo: "modeloCurto", versao: "versao",
+  // Os três códigos da FIPE (0043): são eles que movem os seletores da
+  // ficha do Shinkai. Vêm da conferência na tabela oficial, onde o
+  // negociador escolheu marca, ano e modelo à mão.
+  fipe_marca_codigo: "fipeMarcaCodigo", fipe_modelo_codigo: "fipeModeloCodigo",
+  fipe_ano_codigo: "fipeAnoCodigo",
   ano_fabricacao: "ano", ano_modelo: "ano", cor: "cor", combustivel: "combustivel",
   cambio: "cambio", km_atual: "km", km_entrada: "kmEntrada",
   fipe_codigo: "fipeCodigo", fipe_valor: "fipe",
@@ -134,6 +139,9 @@ function paraColunas(f) {
     marca: texto(f.marca),
     modelo: texto(f.modeloCurto),
     versao: texto(f.versao),
+    fipe_marca_codigo: texto(f.fipeMarcaCodigo),
+    fipe_modelo_codigo: texto(f.fipeModeloCodigo),
+    fipe_ano_codigo: texto(f.fipeAnoCodigo),
     marca_modelo: texto(f.modelo),
     ...anos(f.ano),
     cor: texto(f.cor),

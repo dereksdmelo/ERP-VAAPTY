@@ -1174,6 +1174,15 @@ function ConferirFipe({ f, set }) {
       // é a fonte mais confiável que existe aqui: o negociador acabou
       // de escolher os dois à mão. O Shinkai pede as partes separadas,
       // e até 11/09/2026 elas eram jogadas fora junto com a resposta.
+      // Os três códigos que a consulta acabou de usar. O negociador
+      // escolheu marca, ano e modelo à mão contra a tabela oficial —
+      // não há fonte melhor que esta, e até 11/09/2026 eles eram
+      // jogados fora junto com a resposta.
+      fipeMarcaCodigo: marca,
+      fipeModeloCodigo: String(escolha || "").split("|")[0] || "",
+      // O formato é ano-combustível: "2019-5". Só o ano não serve.
+      fipeAnoCodigo: ano && String(escolha || "").split("|")[1]
+        ? `${ano}-${String(escolha).split("|")[1]}` : "",
       marca: res.marca || f.marca,
       modeloCurto: (String(res.modelo || "").split(/\s+/)[0] || f.modeloCurto),
       versao: (() => {
@@ -1408,6 +1417,9 @@ const VAZIO = {
   // conferência na FIPE oficial
   fipeConferida: false, fipeOficialCodigo: "", fipeOficialMes: "", fipeAutenticacao: "",
   marca: "", modeloCurto: "", versao: "",
+  // Os três códigos da FIPE (0043). São eles que movem os seletores da
+  // ficha do Shinkai — nome não move. Os três juntos, ou nenhum.
+  fipeMarcaCodigo: "", fipeModeloCodigo: "", fipeAnoCodigo: "",
   chassi: "", cor: "", combustivel: "", renavam: "",
   pneus: ["", "", "", ""], leilao: false, gnv: false, opcionais: [],
   lataria: "", mecanica: "", positivos: "", ressalvas: "", internas: "",
@@ -1589,6 +1601,7 @@ function gerarDescritivo(f, n) {
 const fichaParaBanco = (f) => ({
   placa: f.placa, chassi: f.chassi, modelo: f.modelo, ano: f.ano,
   marca: f.marca, modeloCurto: f.modeloCurto, versao: f.versao,
+  fipeMarcaCodigo: f.fipeMarcaCodigo, fipeModeloCodigo: f.fipeModeloCodigo, fipeAnoCodigo: f.fipeAnoCodigo,
   cor: f.cor, combustivel: f.combustivel, cambio: f.cambio, renavam: f.renavam,
   km: f.km, kmEntrada: f.kmEntrada,
   fipe: f.fipe, fipeCodigo: f.fipeCodigo, por: f.por, gastos: f.gastos,
