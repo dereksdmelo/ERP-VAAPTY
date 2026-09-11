@@ -600,10 +600,13 @@ async function viva(req, res, tok) {
       return res.status(200).json({ viva: (r || [])[0] || null });
     }
 
-    // O painel: as negociações de hoje e de ontem. Mais que isso vira
-    // arquivo, e o gestor quer o que está acontecendo.
-    const dias = Math.min(30, Math.max(1, Number(req.query.dias) || 2));
-    const desde = new Date(Date.now() - dias * 86400000).toISOString();
+    // O painel é o que está na mesa AGORA. Um atendimento presencial
+    // dura menos de uma hora — a própria tela combina "cerca de 40
+    // minutos" com o cliente —, então a janela é de horas, não de
+    // dias. O que passou disso não está mais acontecendo: está na fila
+    // de revisão, que é outra pergunta.
+    const horas = Math.min(48, Math.max(1, Number(req.query.horas) || 3));
+    const desde = new Date(Date.now() - horas * 3600000).toISOString();
     const linhas = await banco(
       `${REST_V}?select=*&atualizado_em=gte.${desde}&order=atualizado_em.desc&limit=200`,
       { headers: cabecalhos(tok) }) || [];
@@ -719,6 +722,20 @@ async function revisao(req, res, tok) {
   if (req.method !== "GET") {
     res.setHeader("Allow", "GET, PUT, PATCH");
     return res.status(405).json({ erro: "Use GET, PUT ou PATCH." });
+  }
+
+  // Uma só, para o negociador ver o retorno dentro do atendimento dele.
+  const um = String(req.query.atendimento_id || "");
+  if (um) {
+    if (!RX_UUID.test(um)) return res.status(400).json({ erro: "atendimento_id inválido." });
+    const r = await banco(`${REST_R}?select=*&atendimento_id=eq.${um}`, { headers: cabecalhos(tok) });
+    const linha = (r || [])[0] || null;
+    let quem = null;
+    if (linha && linha.revisado_por) {
+      const g = await banco(`${URL_BASE}/rest/v1/perfil?select=nome&id=eq.${linha.revisado_por}`, { headers: cabecalhos(tok) });
+      quem = (g || [])[0] ? g[0].nome : null;
+    }
+    return res.status(200).json({ revisao: linha ? { ...linha, por_nome: quem } : null });
   }
 
   const de = data(req.query.de);

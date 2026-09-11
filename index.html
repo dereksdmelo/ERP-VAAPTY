@@ -855,8 +855,8 @@ async function espelharNegociacao(dados) {
   });
   return r.ok;
 }
-async function listarNegociacoesVivas(dias) {
-  const r = await fetchAut(`/api/atendimento?recurso=viva${dias ? `&dias=${dias}` : ""}`);
+async function listarNegociacoesVivas(horas) {
+  const r = await fetchAut(`/api/atendimento?recurso=viva${horas ? `&horas=${horas}` : ""}`);
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.erro || "Não consegui carregar o painel.");
   return d.negociacoes || [];
@@ -875,6 +875,13 @@ async function lerFilaRevisao(de, ate) {
   if (!r.ok) throw new Error(d.erro || "Não consegui carregar a fila de revisão.");
   return d.fila || [];
 }
+async function lerRevisaoDoAtendimento(atendimentoId) {
+  const r = await fetchAut(`/api/atendimento?recurso=revisao&atendimento_id=${encodeURIComponent(atendimentoId)}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) return null;
+  return d.revisao || null;
+}
+
 async function salvarRevisao(atendimentoId, feedback) {
   const r = await fetchAut("/api/atendimento?recurso=revisao", {
     method: "PUT", headers: { "Content-Type": "application/json" },
@@ -3268,6 +3275,22 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   // possível para roubar a atenção dele.
   const [chatAberto, setChatAberto] = useState(false);
   const [recados, setRecados] = useState(0);
+
+  /**
+   * O retorno do gestor sobre ESTE atendimento (0035).
+   *
+   * Ele aparece como tarja no alto, fora das etapas — como a da escuta
+   * — e não escondido no chat: é uma avaliação do trabalho, e uma
+   * avaliação que a pessoa precisa procurar não é lida. "Já vi" marca
+   * o `lida_em`, que é o que diz ao gestor se o retorno chegou.
+   */
+  const [retorno, setRetorno] = useState(null);
+  useEffect(() => {
+    if (!atendimento || !atendimento.id) return;
+    let vivo = true;
+    lerRevisaoDoAtendimento(atendimento.id).then((r) => { if (vivo) setRetorno(r); });
+    return () => { vivo = false; };
+  }, [atendimento && atendimento.id]);
   useEffect(() => {
     if (!atendimento || !atendimento.id) return;
     let vivo = true;
@@ -4627,6 +4650,31 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
           </>
         )}
       </div>
+
+      {/* O retorno do gestor sobre este atendimento. */}
+      {retorno && (
+        <div className="mx-4 mt-3 rounded-lg px-3.5 py-3"
+          style={{ background: retorno.lida_em ? C.bg : "#FBF7FD",
+                   border: `1px solid ${retorno.lida_em ? C.line : C.roxo}` }}>
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-[10px] uppercase tracking-[0.13em]" style={{ color: C.roxo }}>
+              Retorno {retorno.por_nome ? `de ${String(retorno.por_nome).split(" ")[0]}` : "do gestor"}
+            </span>
+            <span className="text-[10px]" style={{ color: C.mute }}>{diaBR(retorno.revisado_em)}</span>
+          </div>
+          <p className="mt-1 whitespace-pre-wrap text-[13px] leading-snug">{retorno.feedback}</p>
+          {!retorno.lida_em && (
+            <button onClick={async () => {
+                await marcarFeedbackLido(atendimento.id);
+                setRetorno({ ...retorno, lida_em: new Date().toISOString() });
+              }}
+              className="mt-2 rounded-md px-3 py-1.5 text-[12px] font-semibold"
+              style={{ background: C.roxo, color: "#fff" }}>
+              Já vi
+            </button>
+          )}
+        </div>
+      )}
 
       {/* O recado do gestor. Botão discreto acima da navegação; abre
           por cima quando o negociador decide olhar. */}
@@ -13042,13 +13090,14 @@ function FeedbackDoGestor({ atendimentoId, revisao, aoSalvar }) {
 function PainelGestor({ perfil, comp }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
-  const [dias, setDias] = useState(2);
+  // Horas, não dias: o painel é o que está na mesa agora.
+  const [horas, setHoras] = useState(3);
   const [foco, setFoco] = useState(null);      // atendimento_id aberto
   const [aba, setAba] = useState("agora");     // agora | voltas | revisar
   const [fila, setFila] = useState(null);
   const [voltas, setVoltas] = useState(null);
 
-  const carregar = () => listarNegociacoesVivas(dias).then(setLista).catch((e) => setErro(e.message));
+  const carregar = () => listarNegociacoesVivas(horas).then(setLista).catch((e) => setErro(e.message));
   const carregarFila = () => {
     const { de, ate } = faixaDoMes(comp || competenciaDe(hojeEmSP()));
     return lerFilaRevisao(de, ate).then(setFila).catch((e) => setErro(e.message));
@@ -13061,7 +13110,7 @@ function PainelGestor({ perfil, comp }) {
     // a sensação de acompanhar sem transformar isso num custo.
     const t = setInterval(carregar, 20000);
     return () => clearInterval(t);
-  }, [dias, aba]);
+  }, [horas, aba]);
 
   useEffect(() => { if (aba === "revisar") { setFila(null); carregarFila(); } }, [aba, comp]);
   useEffect(() => {
@@ -13085,7 +13134,7 @@ function PainelGestor({ perfil, comp }) {
     <div>
       <Cabecalho titulo="Painel do gestor"
         sub={aba === "agora"
-          ? "O que está acontecendo agora na mesa — etapa, rodadas e a conversa."
+          ? "Quem está na loja sendo atendido agora — etapa, rodadas e a conversa."
           : `Todo atendimento passa por aqui: o gestor revisa e devolve um retorno. ${rotuloMes(comp || competenciaDe(hojeEmSP()))}.`} />
 
       <div className="mb-3 flex flex-wrap items-center gap-1.5">
@@ -13107,9 +13156,9 @@ function PainelGestor({ perfil, comp }) {
         ))}
         {aba === "agora" && (
           <span className="ml-2 flex gap-1.5 text-[13px]">
-            {[[1, "Hoje"], [2, "2 dias"], [7, "7 dias"], [30, "30 dias"]].map(([n, r]) => (
-              <button key={n} onClick={() => setDias(n)} className="rounded-full px-3 py-1 font-semibold"
-                style={{ background: dias === n ? C.roxoFraco : "transparent", color: dias === n ? C.roxo : C.mute }}>{r}</button>
+            {[[3, "Agora"], [12, "12 h"], [24, "24 h"]].map(([n, r]) => (
+              <button key={n} onClick={() => setHoras(n)} className="rounded-full px-3 py-1 font-semibold"
+                style={{ background: horas === n ? C.roxoFraco : "transparent", color: horas === n ? C.roxo : C.mute }}>{r}</button>
             ))}
           </span>
         )}
@@ -13127,8 +13176,9 @@ function PainelGestor({ perfil, comp }) {
         <div className="rounded-xl px-4 py-8 text-center" style={{ background: C.paper, border: `1px dashed ${C.line}` }}>
           <p className="text-[15px] font-semibold">Nenhuma negociação em andamento</p>
           <p className="mt-1 text-[13px]" style={{ color: C.mute }}>
-            A linha aparece aqui assim que um negociador abre um atendimento no celular. Só entra o que foi tocado
-            nos últimos {dias === 1 ? "dia" : `${dias} dias`} e ainda não fechou — o que fechou vai para <b>Para revisar</b>.
+            A linha aparece aqui assim que um negociador abre um atendimento no celular, e some quando o
+            atendimento acaba. Só entra o que foi tocado {horas === 3 ? "nas últimas horas" : `nas últimas ${horas} horas`} e
+            ainda não fechou — o resto está em <b>Para revisar</b>.
           </p>
         </div>
       )}
@@ -13150,9 +13200,17 @@ function PainelGestor({ perfil, comp }) {
                   <span className="text-[12px]" style={{ color: C.mute }}>
                     {v.marca_modelo || a.carro_descricao || "—"}{v.placa ? ` · ${v.placa}` : ""}
                   </span>
-                  <span className="ml-auto rounded-full px-2.5 py-0.5 text-[11px] font-bold"
+                  {/* Etapa e status são coisas diferentes, e o Derek
+                      leu uma pela outra: a etapa é onde ele está no
+                      APONTE, o status é o que decide se o negócio saiu
+                      desta lista. Os dois aparecem, rotulados. */}
+                  <span className="ml-auto rounded-full px-2.5 py-0.5 text-[11px]"
+                    style={{ background: C.bg, color: C.mute }}>
+                    {rotuloStatus(a.status)}
+                  </span>
+                  <span className="rounded-full px-2.5 py-0.5 text-[11px] font-bold"
                     style={{ background: C.roxoFraco, color: C.roxo }}>
-                    {ROT_ETAPA[n.etapa] || n.etapa || "—"}
+                    etapa {ROT_ETAPA[n.etapa] || n.etapa || "—"}
                   </span>
                   {!!n.nao_lidas && (
                     <span className="rounded-full px-2 py-0.5 text-[11px] font-bold" style={{ background: C.laranja, color: "#fff" }}>
