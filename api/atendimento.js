@@ -569,6 +569,18 @@ async function viva(req, res, tok) {
     // O resultado de `etapaConcluida()`, não a regra: quem decide se a
     // etapa fechou é a tela do negociador, e reescrever isso aqui faria
     // o painel cobrar coisa que a tela não pede.
+    // O retrato da pesquisa: motivo, pretensão, dívida, decisor. É o
+    // que o gestor lê no lugar da transcrição.
+    if (c.pesquisa && typeof c.pesquisa === "object") {
+      const p = c.pesquisa;
+      linha.pesquisa = {
+        motivo: texto(p.motivo), motivo_detalhe: texto(p.motivo_detalhe),
+        pretensao: decimal(p.pretensao), quitacao: decimal(p.quitacao), debitos: decimal(p.debitos),
+        decisor: !!p.decisor, entrega_hoje: !!p.entrega_hoje,
+        necessidade: texto(p.necessidade), objecao: texto(p.objecao),
+        forma: texto(p.forma), canais: Math.trunc(Number(p.canais) || 0),
+      };
+    }
     if (Array.isArray(c.etapas_ok)) {
       linha.etapas_ok = c.etapas_ok.filter((x) => typeof x === "string").slice(0, 12);
     }

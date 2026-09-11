@@ -3319,6 +3319,13 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         // O RESULTADO de `etapaConcluida()`, calculado pela mesma
         // função que o trilho usa. O servidor não repete a regra.
         etapas_ok: ETAPAS.filter((e) => etapaConcluida(e.id, x, fotosRef.current || [])).map((e) => e.id),
+        pesquisa: {
+          motivo: x.motivo, motivo_detalhe: x.motivoDetalhe,
+          pretensao: x.pretensao, quitacao: x.quitacao, debitos: x.debitos,
+          decisor: !!x.decisorPresente, entrega_hoje: !!x.entregaHoje,
+          necessidade: x.necessidadeCliente, objecao: x.objecao,
+          forma: x.formaFechamento, canais: (x.canaisVistos || []).length,
+        },
         rodadas: (x.rodadas || []).map((r) => ({ impresso: r.impresso, contra: r.contra, em: r.em })),
         valor_fechado: x.valorFechado || null,
         objecao: x.objecao || null,
@@ -12936,7 +12943,36 @@ function ResumoDoNegocio({ viva, atendimento }) {
 
   return (
     <div className="rounded-xl p-3.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-      <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>O negócio</div>
+      {/* ---- 1. a pesquisa ---- */}
+      {(() => {
+        const q = (viva && viva.pesquisa) || {};
+        const temAlgo = q.motivo || q.pretensao || q.necessidade || q.quitacao || q.debitos;
+        if (!temAlgo) return null;
+        return (
+          <>
+            <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>A pesquisa</div>
+            <div className="mt-1.5">
+              {q.motivo ? linha("Motivo da venda", q.motivo) : null}
+              {q.motivo_detalhe ? (
+                <p className="py-0.5 text-[12px] leading-snug" style={{ color: C.ink }}>{q.motivo_detalhe}</p>
+              ) : null}
+              {q.necessidade ? (
+                <p className="py-0.5 text-[12px] leading-snug" style={{ color: C.ink }}>
+                  <span style={{ color: C.mute }}>Precisa: </span>{q.necessidade}
+                </p>
+              ) : null}
+              {q.pretensao ? linha("Pretensão do cliente", brl(q.pretensao)) : null}
+              {q.quitacao ? linha("Quitação", brl(q.quitacao), C.laranja) : null}
+              {q.debitos ? linha("Débitos", brl(q.debitos), C.laranja) : null}
+              {linha("Decisor na mesa", q.decisor ? "sim" : "não", q.decisor ? C.verde : C.laranja)}
+              {q.canais ? linha("Canais de preço abertos", q.canais) : null}
+            </div>
+          </>
+        );
+      })()}
+
+      {/* ---- 2. a negociação ---- */}
+      <div className="mt-3 text-[10px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>A negociação</div>
       <div className="mt-1.5">
         {linha("FIPE", v.fipe_valor ? brl(v.fipe_valor) : "—")}
         {linha("Rodadas", viva ? (rodadas.length || "nenhuma") : "sem registro")}
@@ -12948,6 +12984,19 @@ function ResumoDoNegocio({ viva, atendimento }) {
             ? linha("Fechou", brl(a.valor_fechado), C.verde)
             : linha("Fechamento", viva ? "ainda não" : "sem registro", C.mute)}
         {viva && viva.objecao ? linha("Objeção", viva.objecao) : null}
+        {(() => {
+          // A distância entre o que o cliente queria e o que ele
+          // aceitou é a leitura que o gestor faz da negociação inteira.
+          const q = (viva && viva.pesquisa) || {};
+          const fechou = Number((viva && viva.valor_fechado) || a.valor_fechado) || 0;
+          const quis = Number(q.pretensao) || 0;
+          if (!fechou || !quis) return null;
+          const dif = fechou - quis;
+          const pct = Math.round((dif / quis) * 100);
+          return linha("Contra a pretensão", `${dif >= 0 ? "+" : "−"}${brl(Math.abs(dif))} · ${pct}%`,
+            dif >= 0 ? C.verde : C.laranja);
+        })()}
+        {(viva && viva.pesquisa && viva.pesquisa.forma) ? linha("Forma", viva.pesquisa.forma) : null}
       </div>
 
       {/* Sem espelho, "0 de 8" seria calúnia: o atendimento é anterior
@@ -13130,6 +13179,15 @@ function PainelGestor({ perfil, comp }) {
     : (fila || []).filter((x) => x.atendimento.id === foco)[0];
   const pendentes = (fila || []).filter((x) => !x.revisao).length;
 
+  // Quem já foi revisado desce. A fila existe para ser esvaziada de
+  // cima para baixo, e o que já tem retorno só atrapalha quem procura
+  // o próximo. Dentro de cada grupo, o mais recente primeiro.
+  const filaOrdenada = useMemo(() => (fila || []).slice().sort((a, b) => {
+    const ra = a.revisao ? 1 : 0, rb = b.revisao ? 1 : 0;
+    if (ra !== rb) return ra - rb;
+    return String(b.atendimento.data || "").localeCompare(String(a.atendimento.data || ""));
+  }), [fila]);
+
   return (
     <div>
       <Cabecalho titulo="Painel do gestor"
@@ -13256,16 +13314,16 @@ function PainelGestor({ perfil, comp }) {
           })}
 
           {/* ---- a fila de revisão ---- */}
-          {aba === "revisar" && (fila || []).map((x) => {
+          {aba === "revisar" && filaOrdenada.map((x, i) => {
             const a = x.atendimento;
             const v = (a.veiculo || [])[0] || {};
             const feitas = Array.isArray(x.viva && x.viva.etapas_ok) ? x.viva.etapas_ok : [];
             const emFoco = a.id === foco;
             const revisado = !!x.revisao;
-            return (
+            const cartao = (
               <button key={a.id} onClick={() => setFoco(emFoco ? null : a.id)}
                 className="w-full rounded-xl px-3.5 py-3 text-left"
-                style={{ background: C.paper,
+                style={{ background: C.paper, opacity: revisado ? 0.72 : 1,
                          border: `1px solid ${emFoco ? C.roxo : revisado ? C.line : C.laranja}` }}>
                 <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                   <span className="text-[15px] font-semibold">{a.cliente_nome || "Sem nome"}</span>
@@ -13302,6 +13360,18 @@ function PainelGestor({ perfil, comp }) {
                 )}
               </button>
             );
+            // A linha que separa o que falta do que já foi: sem ela, a
+            // fila parece não ter fim.
+            const primeiroRevisado = revisado && (i === 0 || !filaOrdenada[i - 1].revisao);
+            return primeiroRevisado ? (
+              <React.Fragment key={`g${a.id}`}>
+                <div className="flex items-center gap-2 pt-2">
+                  <span className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>Já revisados</span>
+                  <span className="h-px flex-1" style={{ background: C.line }} />
+                </div>
+                {cartao}
+              </React.Fragment>
+            ) : cartao;
           })}
 
           {/* ---- quem prometeu voltar ---- */}
