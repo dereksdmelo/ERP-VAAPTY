@@ -564,6 +564,33 @@ vez de três, e o cartão já mostra placa e melhor proposta. Isso depende
 do PostgREST enxergar as chaves estrangeiras — se um dia a lista vier
 sem `veiculo`, é aí que se olha primeiro.
 
+**`negociador_id` aponta para `perfil`, não para `negociador`.** São
+duas tabelas com as mesmas pessoas e ids diferentes: `perfil` é quem
+tem login (0004), `negociador` é o cadastro de metas (0010). A tela de
+novo atendimento oferece a lista do CADASTRO — é ela que tem todo
+mundo, inclusive quem não tem login — e gravava aquele id no campo,
+violando a chave estrangeira: **o atendimento não abria.**
+
+**O erro era invisível para quem testava, e é por isso que durou.** Ele
+só acontece quando o nome escolhido existe no cadastro. O perfil do
+dono chama-se "dereksdmelo", que não está lá, então o campo nascia
+vazio e caía no id dele; para o ANDRÉ BRUNO, que tem o mesmo nome nas
+duas tabelas, o efeito preenchia o campo sozinho e o insert estourava —
+12/09/2026, com o cliente na frente dele.
+
+**O vínculo só existe quando dá para saber o perfil.** Quem escolhe o
+próprio nome tem o dele na mão; escolhendo o nome de outra pessoa, vai
+só o NOME — que é como os 89 atendimentos importados já vivem, e o que
+a régua do mês (decisão 22) sabe ler. **Perder o vínculo é bem menos
+grave que recusar o atendimento.** `idDePerfil()` confere no servidor
+nos três caminhos (POST, PATCH e o "chegou" do lead), porque a tela
+acertar é conveniência, não controle.
+
+Quem quiser o vínculo de volta para todo mundo: falta uma coluna
+`perfil_id` em `negociador`, ligando cadastro e login — a mesma forma
+do `shinkai_nome` (0044), onde a tradução entre dois mundos virou
+cadastro em vez de adivinhação.
+
 **PATCH que volta vazio é RLS, não erro.** A política deixa qualquer um
 da equipe *ler* todo atendimento, mas só o dono (ou o gerente)
 *escrever*. Quando alguém tenta editar o atendimento de outro, o

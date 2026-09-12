@@ -6245,11 +6245,25 @@ function NovoAtendimento({ perfil, aoCriar, aoCancelar }) {
       // logado. Gravava o de quem abriu a tela, então um atendimento
       // aberto pelo gerente para o André ficava com o nome do André e o
       // id do gerente — e os dois discordavam em toda consulta.
-      const escolhido = equipe.filter((n) => n.nome === d.negociador_nome)[0];
+      // **O id do cadastro NÃO serve aqui.** `atendimento.negociador_id`
+      // aponta para `perfil` (0004), e a lista deste campo vem de
+      // `negociador` (0010) — duas tabelas com as mesmas pessoas e ids
+      // diferentes. Mandar o id do cadastro viola a chave estrangeira e
+      // o atendimento não abre; foi o que travou o ANDRÉ BRUNO em
+      // 12/09/2026, com o cliente na frente dele.
+      //
+      // O vínculo só existe quando dá para saber o perfil: quem escolhe
+      // o próprio nome tem o dele na mão. Escolhendo o nome de outra
+      // pessoa, vai só o NOME — que é como os atendimentos importados
+      // já vivem, e o que a régua do mês lê (decisão 22). O servidor
+      // confere de novo, porque a tela esconder o erro é conveniência,
+      // não controle.
+      const meuNome = String((perfil && perfil.nome) || "").trim().toUpperCase();
+      const eleMesmo = meuNome && meuNome === String(d.negociador_nome || "").trim().toUpperCase();
       const novo = await criarAtendimento({
         ...d,
         status: "cliente_na_loja",
-        negociador_id: (escolhido && escolhido.id) || (perfil ? perfil.id : null),
+        negociador_id: !d.negociador_nome || eleMesmo ? (perfil ? perfil.id : null) : null,
         negociador_nome: d.negociador_nome || (perfil ? perfil.nome : null),
         data: new Date().toISOString().slice(0, 10),
       });
