@@ -437,6 +437,42 @@ async function resumo(req, res, tok) {
 }
 const texto1 = (v) => String(v == null ? "" : v).trim().slice(0, 900);
 
+/**
+ * O `negociador_id` do atendimento aponta para `perfil`, não para
+ * `negociador`.
+ *
+ * São duas tabelas com as mesmas pessoas e ids diferentes: `perfil` é
+ * quem tem login (0004), `negociador` é o cadastro de metas (0010). A
+ * tela de novo atendimento oferece a lista do CADASTRO — é ela que tem
+ * todo mundo, inclusive quem não tem login — e gravava aquele id aqui,
+ * o que viola a chave estrangeira.
+ *
+ * **O erro era invisível para quem testava.** Ele só acontece quando o
+ * nome escolhido existe no cadastro: o perfil do dono chama-se
+ * "dereksdmelo", que não está lá, então o campo nascia vazio e caía no
+ * id dele. Para o ANDRÉ BRUNO, que tem o mesmo nome nas duas tabelas,
+ * o campo se preenchia sozinho e o insert estourava — 12/09/2026, com
+ * o cliente na frente dele.
+ *
+ * Aqui o id é conferido contra `perfil` antes de ir ao banco. Não
+ * sendo de lá, o vínculo cai para nulo e **o nome continua gravado** —
+ * que é como os 89 atendimentos importados já vivem, e o que a régua
+ * do mês (decisão 22) sabe ler. Perder o vínculo é bem menos grave que
+ * recusar o atendimento.
+ */
+async function idDePerfil(tok, valor) {
+  const id = String(valor || "");
+  if (!RX_UUID.test(id)) return null;
+  try {
+    const r = await banco(`${URL_BASE}/rest/v1/perfil?select=id&id=eq.${id}&limit=1`, { headers: cabecalhos(tok) });
+    return (r || []).length ? id : null;
+  } catch (e) {
+    // A RLS não devolve perfil de quem está inativo, e uma falha de
+    // rede aqui não pode derrubar a abertura do atendimento.
+    return null;
+  }
+}
+
 const LEAD_STATUS = ["novo", "em_contato", "agendado", "confirmado", "compareceu", "nao_compareceu", "perdido"];
 const CAMPOS_LEAD = "*,negociador(id,nome)";
 
@@ -515,7 +551,7 @@ async function leads(req, res, tok) {
       carro_descricao: atual.carro,
       origem: atual.origem || "outro",
       status: "cliente_na_loja",
-      negociador_id: RX_UUID.test(String(corpo.negociador_id || "")) ? corpo.negociador_id : null,
+      negociador_id: await idDePerfil(tok, corpo.negociador_id),
       negociador_nome: texto(corpo.negociador_nome) || atual.negociador_nome,
       prospec: atual.prospector_nome,
       observacoes: atual.observacoes,
@@ -1080,6 +1116,11 @@ module.exports = async function handler(req, res) {
       if (!corpo) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
 
       const linha = somenteEnviadas(paraColunas(corpo), corpo);
+      // A chave estrangeira é para `perfil`; a tela oferece a lista de
+      // `negociador`. Ver `idDePerfil`.
+      if (linha.negociador_id !== undefined) {
+        linha.negociador_id = await idDePerfil(tok, linha.negociador_id);
+      }
       const r = await banco(REST("atendimento"), {
         method: "POST",
         headers: json(tok, { Prefer: "return=representation" }),
@@ -1097,6 +1138,9 @@ module.exports = async function handler(req, res) {
       if (!corpo) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
 
       const linha = somenteEnviadas(paraColunas(corpo), corpo);
+      if (linha.negociador_id !== undefined) {
+        linha.negociador_id = await idDePerfil(tok, linha.negociador_id);
+      }
       if (!Object.keys(linha).length) return res.status(400).json({ erro: "Nada para atualizar." });
 
       const r = await banco(`${REST("atendimento")}?id=eq.${id}`, {
