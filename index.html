@@ -1639,14 +1639,18 @@ const numeroCRM = (v) => {
 
 function linhaDoCRM(f, atendimento, status) {
   const a = atendimento || {};
-  // As propostas REAIS dos lojistas, da maior para a menor. O extrato
-  // de ofertas não entra aqui: ele é simulação (decisão 16), e número
-  // simulado na coluna PROPOSTAS da planilha vira proposta inventada
-  // contada como real — que é exatamente o que aquela decisão evita.
-  const props = (Array.isArray(a.proposta) ? a.proposta : [])
-    .slice().sort((x, y) => (Number(y.valor) || 0) - (Number(x.valor) || 0));
-  const melhor = props[0] || null;
-  const segunda = props[1] || null;
+  // **O valor é a última oferta do extrato, e o lojista é "extrato".**
+  // Foi a decisão do Derek em 14/09/2026, e ela resolve o problema que
+  // me fez deixar a célula vazia antes: o extrato é simulação (decisão
+  // 16), e número simulado na coluna PROPOSTAS viraria proposta de
+  // lojista inventada. Com a palavra "extrato" na coluna do lojista,
+  // quem lê a planilha sabe de onde o número veio — o rótulo é o que
+  // separa a simulação da oferta real.
+  //
+  // A última rodada, não a maior: é o número que de fato foi à mesa.
+  const rodadas = Array.isArray(f.rodadas) ? f.rodadas : [];
+  const ultima = rodadas.length ? rodadas[rodadas.length - 1] : null;
+  const ofertaExtrato = ultima ? numeroCRM(ultima.impresso) : "";
 
   const dia = a.data ? String(a.data).slice(0, 10).split("-").reverse().join("/") : "";
 
@@ -1666,10 +1670,10 @@ function linhaDoCRM(f, atendimento, status) {
     numeroCRM(f.pretensao || a.pretensao),
     celulaCRM(f.motivo || f.motivoDetalhe),
     celulaCRM([f.objecao, a.observacoes].filter(Boolean).join(" · ")),
-    segunda ? numeroCRM(segunda.valor) : "",
-    "",                                   // cx — a casa sabe o que vai aqui; o sistema não
-    melhor ? numeroCRM(melhor.valor) : "",
-    melhor ? celulaCRM(melhor.lojista) : "",
+    "",                                   // PROPOSTAS (a primeira do par)
+    "",                                   // cx
+    ofertaExtrato,                        // PROPOSTAS — a última oferta do extrato
+    ofertaExtrato ? "extrato" : "",       // LOJISTA — de onde o número veio
     "",                                   // QUEM CONSEGUIU
     "",                                   // AÇÃO
   ].join("\t");
