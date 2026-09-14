@@ -13010,6 +13010,7 @@ function TelaADM({ perfil, comp, mes }) {
 
 const ICONE = {
   atendimentos: "M4 6h16M4 12h16M4 18h10",
+  meudia: "M12 7v5l3 2M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z",
   prevendas: "M5 4h3l2 5-2 1a11 11 0 0 0 6 6l1-2 5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2zM17 3v4M15 5h4",
   estoque: "M3 13l2-5a2 2 0 0 1 2-1h10a2 2 0 0 1 2 1l2 5v5a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H6v1a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-5zm4 2h.01M17 15h.01",
   painel: "M4 20V10m6 10V4m6 16v-7",
@@ -13032,6 +13033,308 @@ const Icone = ({ nome, tam }) => (
  * Os destinos, e quem vê cada um. Administrativo aparece para quem
  * confere; gestão (cadastros, metas, importação) só para gerente.
  */
+/* ==================================================================
+ * Meu dia — a folha de bordo do negociador
+ *
+ * O Derek fotografou a folha em 14/09/2026: hora a hora, o dia
+ * inteiro numa coluna. Whats de recuperação, almoço, atendimento,
+ * ligação, conversa com o gerente — e o papel some no fim da semana.
+ *
+ * **Os atendimentos entram sozinhos, e NÃO são copiados.** A linha do
+ * tempo mistura duas fontes na hora de desenhar: a `agenda` (0046) e
+ * os atendimentos do dia. Copiar o atendimento para a agenda criaria
+ * uma segunda verdade que envelhece no minuto seguinte — o negócio
+ * muda de status e a cópia continua dizendo o que era antes.
+ *
+ * **Plano e realizado são a mesma linha.** O que ainda não aconteceu
+ * aparece esmaecido com um ○; um toque marca. É isso que deixa
+ * planejar a semana e registrar o dia caberem na mesma tela, em vez
+ * de duas que ninguém mantém em sincronia.
+ * ================================================================== */
+
+const TIPOS_AGENDA = [
+  ["recuperacao", "Recuperação", "#6D1B9E"],
+  ["prospeccao", "Prospecção", "#1B5FA8"],
+  ["ligacao", "Ligação", "#1B5FA8"],
+  ["reuniao", "Reunião", "#B26B00"],
+  ["almoco", "Almoço", "#8A8394"],
+  ["pausa", "Pausa", "#8A8394"],
+  ["outro", "Outro", "#6B6478"],
+];
+const rotTipo = (v) => (TIPOS_AGENDA.filter((x) => x[0] === v)[0] || [0, "Outro"])[1];
+const corTipo = (v) => (TIPOS_AGENDA.filter((x) => x[0] === v)[0] || [0, 0, "#6B6478"])[2];
+
+const horaAgora = () => new Date().toTimeString().slice(0, 5);
+const hhmm = (v) => String(v || "").slice(0, 5);
+// O dia em Joinville, não em Greenwich — o mesmo relógio da decisão 22.
+const diaHoje = () => hojeEmSP();
+const diaMais = (dia, n) => {
+  const d = new Date(`${dia}T12:00:00`);
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+const DIA_SEM = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+const rotuloDia = (dia) => {
+  const d = new Date(`${dia}T12:00:00`);
+  return `${DIA_SEM[d.getDay()]} ${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+};
+
+async function lerAgenda(de, ate) {
+  const r = await fetchAut(`/api/atendimento?recurso=agenda&de=${de}&ate=${ate || de}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui ler a agenda.");
+  return d.acoes || [];
+}
+async function criarAcao(dados) {
+  const r = await fetchAut("/api/atendimento?recurso=agenda", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui gravar.");
+  return d.acao;
+}
+async function mexerAcao(id, dados) {
+  const r = await fetchAut(`/api/atendimento?recurso=agenda&id=${id}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui salvar.");
+  return d.acao;
+}
+async function apagarAcao(id) {
+  const r = await fetchAut(`/api/atendimento?recurso=agenda&id=${id}`, { method: "DELETE" });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    throw new Error(d.erro || "Não consegui apagar.");
+  }
+}
+
+function TelaMeuDia({ perfil }) {
+  const [dia, setDia] = useState(diaHoje());
+  const [acoes, setAcoes] = useState([]);
+  const [semana, setSemana] = useState([]);
+  const [ats, setAts] = useState([]);
+  const [erro, setErro] = useState("");
+  const [indo, setIndo] = useState(false);
+
+  // O que se está escrevendo agora.
+  const [nova, setNova] = useState({ hora: "", tipo: "recuperacao", titulo: "" });
+  const campoRef = useRef(null);
+
+  // A semana da segunda ao sábado, para o plano.
+  const seg = useMemo(() => {
+    const d = new Date(`${dia}T12:00:00`);
+    const passo = (d.getDay() + 6) % 7;      // domingo vira 6
+    return diaMais(dia, -passo);
+  }, [dia]);
+  const diasSemana = useMemo(() => [0, 1, 2, 3, 4, 5].map((i) => diaMais(seg, i)), [seg]);
+
+  const carregar = () => {
+    setErro("");
+    // Resposta atrasada não pode sobrescrever dia novo — mesmo cuidado
+    // da régua do mês.
+    let vivo = true;
+    lerAgenda(seg, diaMais(seg, 5))
+      .then((l) => { if (vivo) { setSemana(l); setAcoes(l.filter((x) => x.dia === dia)); } })
+      .catch((e) => { if (vivo) setErro(e.message); });
+    // Só o dia, pelo filtro de data do servidor: trazer o mês inteiro
+    // para descartar 29 dias na tela seria pagar a consulta à toa.
+    // E `listarAtendimentos` devolve o ARRAY, não um objeto com ele.
+    listarAtendimentos({ de: dia, ate: dia, limite: 200 })
+      .then((l) => { if (vivo) setAts(Array.isArray(l) ? l : []); })
+      .catch(() => {});
+    return () => { vivo = false; };
+  };
+  useEffect(carregar, [dia, seg]);
+
+  // A linha do tempo: a agenda e os atendimentos do dia, misturados e
+  // ordenados pela hora. O atendimento não vira linha na agenda — ele
+  // entra aqui, na leitura, e continua vivendo na própria tabela.
+  const linha = useMemo(() => {
+    const doDia = acoes.map((a) => ({
+      id: a.id, hora: hhmm(a.hora), fim: hhmm(a.fim), tipo: a.tipo,
+      titulo: a.titulo, feito: !!a.feito_em, minha: true,
+    }));
+    const dosAts = ats.map((a) => ({
+      id: `at-${a.id}`, hora: hhmm(String(a.criado_em || "").slice(11, 16)), fim: "",
+      tipo: "atendimento",
+      titulo: `${a.cliente_nome || "sem nome"}${a.carro_descricao ? ` — ${a.carro_descricao}` : ""} · ${rotuloStatus(a.status)}`,
+      feito: true, minha: false,
+    }));
+    return doDia.concat(dosAts).sort((x, y) => {
+      // Sem hora vai para o fim: é item do plano que ainda não tem
+      // lugar no dia, e no meio da lista ele confundiria a leitura.
+      if (!x.hora && !y.hora) return 0;
+      if (!x.hora) return 1;
+      if (!y.hora) return -1;
+      return x.hora.localeCompare(y.hora);
+    });
+  }, [acoes, ats]);
+
+  const gravar = async (dados) => {
+    setIndo(true); setErro("");
+    try {
+      await criarAcao({ dia, ...dados });
+      await new Promise((r) => setTimeout(r, 60));
+      carregar();
+      setNova({ hora: "", tipo: nova.tipo, titulo: "" });
+      if (campoRef.current) campoRef.current.focus();
+    } catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+
+  const registrar = () => {
+    if (!nova.titulo.trim()) return;
+    // Sem hora digitada, é agora: o registro rápido acontece no
+    // instante em que a coisa aconteceu, e pedir a hora seria pedir
+    // o que o relógio já sabe.
+    gravar({ hora: nova.hora || horaAgora(), tipo: nova.tipo, titulo: nova.titulo.trim(), feito: true });
+  };
+
+  const atalho = (tipo, titulo) => gravar({ hora: horaAgora(), tipo, titulo, feito: true });
+
+  const marcar = async (a) => {
+    try { await mexerAcao(a.id, { feito: !a.feito, hora: a.hora || horaAgora() }); carregar(); }
+    catch (e) { setErro(e.message); }
+  };
+  const remover = async (a) => {
+    try { await apagarAcao(a.id); carregar(); }
+    catch (e) { setErro(e.message); }
+  };
+
+  const feitas = linha.filter((x) => x.feito).length;
+  const planejadas = linha.length - feitas;
+
+  return (
+    <div>
+      <Cabecalho titulo="Meu dia"
+        sub={`${rotuloDia(dia)} · ${feitas} registradas${planejadas ? ` · ${planejadas} no plano` : ""}`} />
+
+      {/* A semana inteira à vista: é onde ele planeja, e onde vê o
+          buraco antes de ele acontecer. */}
+      <div className="mb-3 grid grid-cols-6 gap-1.5">
+        {diasSemana.map((d) => {
+          const doDia = semana.filter((x) => x.dia === d);
+          const ok = doDia.filter((x) => x.feito_em).length;
+          const eHoje = d === diaHoje();
+          const sel = d === dia;
+          return (
+            <button key={d} onClick={() => setDia(d)}
+              className="rounded-lg px-2 py-2 text-left"
+              style={{ background: sel ? C.roxo : "#fff",
+                       border: `1px solid ${sel ? C.roxo : eHoje ? C.verde : C.line}` }}>
+              <div className="text-[10px] uppercase tracking-[0.1em]"
+                style={{ color: sel ? "#fff" : eHoje ? C.verde : C.mute }}>
+                {rotuloDia(d)}
+              </div>
+              <div className="mt-0.5 text-[13px]" style={{ fontFamily: F.mono, fontWeight: 700, color: sel ? "#fff" : C.ink }}>
+                {ok}<span className="text-[11px]" style={{ opacity: 0.6 }}>/{doDia.length}</span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Registrar é o gesto de todo dia, então a barra fica no topo e
+          Enter grava — quem está com o cliente não procura botão. */}
+      <Bloco titulo="Registrar agora" sub="Enter grava e limpa para o próximo. Sem hora, vale o relógio.">
+        <div className="flex flex-wrap items-end gap-2">
+          <label style={{ width: 76 }}>
+            <span className="block text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Hora</span>
+            <input className={`${inputCls} mt-[2px]`} style={{ ...inputSty, fontFamily: F.mono }}
+              placeholder={horaAgora()} value={nova.hora}
+              onChange={(e) => setNova({ ...nova, hora: e.target.value })} />
+          </label>
+          <label style={{ width: 140 }}>
+            <span className="block text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Tipo</span>
+            <select className={`${inputCls} mt-[2px]`} style={inputSty} value={nova.tipo}
+              onChange={(e) => setNova({ ...nova, tipo: e.target.value })}>
+              {TIPOS_AGENDA.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
+            </select>
+          </label>
+          <label className="min-w-[200px] flex-1">
+            <span className="block text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>O que foi</span>
+            <input ref={campoRef} className={`${inputCls} mt-[2px]`} style={inputSty}
+              placeholder="Jair — recuperação — Whats"
+              value={nova.titulo}
+              onChange={(e) => setNova({ ...nova, titulo: e.target.value })}
+              onKeyDown={(e) => { if (e.key === "Enter") registrar(); }} />
+          </label>
+          <button onClick={registrar} disabled={indo || !nova.titulo.trim()}
+            className="rounded-md px-4 py-2 text-[13px] font-semibold disabled:opacity-40"
+            style={{ background: C.roxo, color: "#fff" }}>
+            Registrar
+          </button>
+        </div>
+
+        {/* O que se repete dezenas de vezes por dia vira um toque. */}
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {[["almoco", "Almoço — início"], ["almoco", "Almoço — fim"],
+            ["ligacao", "Ligação — início"], ["ligacao", "Ligação — fim"],
+            ["reuniao", "Conversa com o gerente"]].map(([t, r]) => (
+            <button key={r} onClick={() => atalho(t, r)} disabled={indo}
+              className="rounded-full px-3 py-1 text-[11px] font-medium"
+              style={{ border: `1px solid ${C.line}`, color: C.roxo, background: "#fff" }}>
+              {r}
+            </button>
+          ))}
+          <button onClick={() => gravar({ hora: "", tipo: nova.tipo, titulo: nova.titulo.trim() || "A fazer", feito: false })}
+            disabled={indo}
+            className="rounded-full px-3 py-1 text-[11px] font-medium"
+            style={{ border: `1px dashed ${C.line}`, color: C.mute, background: "#fff" }}>
+            + no plano (sem hora)
+          </button>
+        </div>
+        {erro && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+      </Bloco>
+
+      <div className="mt-3">
+        <Bloco titulo={`A linha do dia — ${rotuloDia(dia)}`}
+          sub="Os atendimentos entram sozinhos. O resto é o que você registra.">
+          {!linha.length && (
+            <p className="text-[12px]" style={{ color: C.mute }}>
+              Nada ainda. Registre a primeira ação acima — ou planeje o dia sem hora.
+            </p>
+          )}
+          <div className="space-y-1">
+            {linha.map((x) => (
+              <div key={x.id} className="flex items-baseline gap-2.5 rounded-md px-2 py-1.5"
+                style={{ background: x.feito ? "#fff" : C.bg,
+                         border: `1px solid ${C.line}`, opacity: x.feito ? 1 : 0.75 }}>
+                <span className="w-[42px] shrink-0 text-[12px]"
+                  style={{ fontFamily: F.mono, fontWeight: 700, color: x.hora ? C.ink : C.mute }}>
+                  {x.hora || "—"}
+                </span>
+                <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold"
+                  style={{ background: x.tipo === "atendimento" ? "#F0F8F4" : "#F6F3FA",
+                           color: x.tipo === "atendimento" ? C.verde : corTipo(x.tipo) }}>
+                  {x.tipo === "atendimento" ? "Atendimento" : rotTipo(x.tipo)}
+                </span>
+                <span className="flex-1 text-[12px] leading-snug" style={{ color: C.ink }}>
+                  {x.titulo}{x.fim ? ` (até ${x.fim})` : ""}
+                </span>
+                {/* O atendimento vem da própria tabela dele: marcar ou
+                    apagar aqui mexeria no negócio, não na agenda. */}
+                {x.minha && (
+                  <>
+                    <button onClick={() => marcar(x)} className="shrink-0 text-[11px] font-semibold"
+                      style={{ color: x.feito ? C.mute : C.verde }}>
+                      {x.feito ? "✓" : "○ marcar"}
+                    </button>
+                    <button onClick={() => remover(x)} className="shrink-0 text-[11px]" style={{ color: C.mute }}>
+                      apagar
+                    </button>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </Bloco>
+      </div>
+    </div>
+  );
+}
+
 function destinosPara(perfil) {
   const gerente = !!(perfil && perfil.papel === "gerente");
   const adm = !!(perfil && (perfil.administrativo || gerente));
@@ -13044,6 +13347,9 @@ function destinosPara(perfil) {
     // existe — e não por cortesia da tela: a RLS da 0033 devolve só a
     // própria negociação a quem não é gerente.
     gerente ? { id: "gestor", rot: "Painel do gestor", curto: "Gestor", principal: true } : null,
+    // O dia do negociador. Fica entre o painel e a lista porque é a
+    // tela que ele abre de manhã e volta nela o dia inteiro.
+    { id: "meudia", rot: "Meu dia", curto: "Meu dia", principal: true },
     { id: "prevendas", rot: "Pré-vendas", curto: "Pré-v.", principal: true },
     { id: "atendimentos", rot: "Atendimentos", curto: "Atend.", principal: true },
     { id: "estoque", rot: "Estoque", curto: "Estoque", principal: true },
@@ -14200,6 +14506,7 @@ function App() {
 
   return (
     <Shell perfil={perfil} tela={tela} setTela={setTela}>
+      {tela === "meudia" && <TelaMeuDia perfil={perfil} />}
       {tela === "prevendas" && <TelaPreVendas perfil={perfil} aoAbrirAtendimento={abrir} />}
       {tela === "atendimentos" && <CRM perfil={perfil} aoAbrir={abrir} mes={{ ...mes, todos: true }} />}
       {tela === "estoque" && <TelaEstoque perfil={perfil} comp={compOuAtual} mes={mes} />}

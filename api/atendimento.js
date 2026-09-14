@@ -473,6 +473,112 @@ async function idDePerfil(tok, valor) {
   }
 }
 
+/**
+ * ===== a agenda do dia =====
+ *
+ * A folha de bordo que o negociador preenchia à mão (0046): hora a
+ * hora, o que ele fez. Plano e realizado são a mesma linha — `feito_em`
+ * nulo é plano.
+ *
+ * **Mora aqui pelo teto de 12 funções**, mas a costura não é
+ * arbitrária: metade do dia dele é atendimento, e a tela mistura as
+ * duas listas na mesma linha do tempo.
+ *
+ * **O atendimento não é copiado para a agenda.** Ele já existe, com
+ * hora e status; duplicá-lo criaria uma segunda verdade que envelhece
+ * no minuto seguinte. Quem junta as duas fontes é a tela, na hora de
+ * desenhar.
+ */
+const AGENDA_TIPOS = ["atendimento", "recuperacao", "prospeccao", "ligacao", "reuniao", "almoco", "pausa", "outro"];
+const RX_DIA = /^\d{4}-\d{2}-\d{2}$/;
+const RX_HORA = /^([01]\d|2[0-3]):[0-5]\d$/;
+const horaOuNulo = (v) => (RX_HORA.test(String(v || "")) ? String(v) : null);
+
+async function agenda(req, res, tok) {
+  const REST_A = `${URL_BASE}/rest/v1/agenda`;
+
+  if (req.method === "GET") {
+    const de = String(req.query.de || "");
+    const ate = String(req.query.ate || de);
+    if (!RX_DIA.test(de) || !RX_DIA.test(ate)) {
+      return res.status(400).json({ erro: "Informe de e ate no formato aaaa-mm-dd." });
+    }
+    // Quem pode ler o quê é a RLS da 0046: o próprio, e o gerente vê
+    // todos. Repetir a regra aqui criaria duas versões dela.
+    const f = [`dia=gte.${de}`, `dia=lte.${ate}`, "order=dia.asc,hora.asc.nullslast,criado_em.asc", "limit=500"];
+    const quem = String(req.query.perfil_id || "");
+    if (RX_UUID.test(quem)) f.push(`perfil_id=eq.${quem}`);
+    const linhas = await banco(`${REST_A}?select=*&${f.join("&")}`, { headers: cabecalhos(tok) });
+    return res.status(200).json({ acoes: linhas || [] });
+  }
+
+  if (req.method === "POST") {
+    const c = await lerCorpo(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    const titulo = texto(c.titulo);
+    if (!titulo) return res.status(400).json({ erro: "Escreva o que é." });
+    const dia = String(c.dia || "");
+    if (!RX_DIA.test(dia)) return res.status(400).json({ erro: "Dia inválido." });
+
+    // `perfil_id` NÃO vem do corpo: a RLS exige que seja o próprio, e
+    // deixar o cliente escolher seria convidar a tentativa.
+    const eu = (await banco(`${URL_BASE}/rest/v1/perfil?select=id&limit=1`, { headers: cabecalhos(tok) }) || [])[0];
+    if (!eu) return res.status(403).json({ erro: "Seu acesso ainda não está liberado." });
+
+    const linha = {
+      perfil_id: eu.id,
+      dia,
+      hora: horaOuNulo(c.hora),
+      fim: horaOuNulo(c.fim),
+      tipo: AGENDA_TIPOS.indexOf(String(c.tipo || "")) >= 0 ? c.tipo : "outro",
+      titulo,
+      atendimento_id: RX_UUID.test(String(c.atendimento_id || "")) ? c.atendimento_id : null,
+      // O registro rápido nasce feito; o item do plano nasce em aberto.
+      feito_em: c.feito ? new Date().toISOString() : null,
+    };
+    const r = await banco(REST_A, {
+      method: "POST", headers: json(tok, { Prefer: "return=representation" }), body: JSON.stringify(linha),
+    });
+    return res.status(201).json({ ok: true, acao: (Array.isArray(r) ? r[0] : r) || null });
+  }
+
+  if (req.method === "PATCH") {
+    const id = String(req.query.id || "");
+    if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido." });
+    const c = await lerCorpo(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+
+    const mud = {};
+    if (c.titulo !== undefined) mud.titulo = texto(c.titulo);
+    if (c.hora !== undefined) mud.hora = horaOuNulo(c.hora);
+    if (c.fim !== undefined) mud.fim = horaOuNulo(c.fim);
+    if (c.dia !== undefined && RX_DIA.test(String(c.dia))) mud.dia = c.dia;
+    if (c.tipo !== undefined && AGENDA_TIPOS.indexOf(String(c.tipo)) >= 0) mud.tipo = c.tipo;
+    // Marcar e desmarcar: o toque que diz "isto aconteceu" precisa
+    // desfazer, porque ele é dado por engano o tempo todo.
+    if (c.feito !== undefined) mud.feito_em = c.feito ? new Date().toISOString() : null;
+    if (!Object.keys(mud).length) return res.status(400).json({ erro: "Nada para atualizar." });
+
+    const r = await banco(`${REST_A}?id=eq.${id}`, {
+      method: "PATCH", headers: json(tok, { Prefer: "return=representation" }), body: JSON.stringify(mud),
+    });
+    const salvo = Array.isArray(r) ? r[0] : r;
+    // Vazio é a RLS recusando: a agenda é de quem a vive.
+    if (!salvo) return res.status(403).json({ erro: "Esta agenda é de outra pessoa." });
+    return res.status(200).json({ ok: true, acao: salvo });
+  }
+
+  if (req.method === "DELETE") {
+    const id = String(req.query.id || "");
+    if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido." });
+    await banco(`${REST_A}?id=eq.${id}`, { method: "DELETE", headers: cabecalhos(tok) });
+    return res.status(200).json({ ok: true });
+  }
+
+  res.setHeader("Allow", "GET, POST, PATCH, DELETE");
+  return res.status(405).json({ erro: "Use GET, POST, PATCH ou DELETE." });
+}
+
 const LEAD_STATUS = ["novo", "em_contato", "agendado", "confirmado", "compareceu", "nao_compareceu", "perdido"];
 const CAMPOS_LEAD = "*,negociador(id,nome)";
 
@@ -1026,6 +1132,11 @@ module.exports = async function handler(req, res) {
     if (String(req.query.recurso || "") === "tatica") {
     try { return await tatica(req, res, tok); }
     catch (e) { return res.status(502).json({ erro: "Não consegui analisar." }); }
+  }
+
+  if (String(req.query.recurso || "") === "agenda") {
+    try { return await agenda(req, res, tok); }
+    catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Falhou." }); }
   }
 
   if (String(req.query.recurso || "") === "resumo") {

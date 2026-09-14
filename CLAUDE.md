@@ -2238,3 +2238,65 @@ recibo de aluguel não tem veículo nenhum.
 (decisão 15): pop-up disparado depois de uma espera é bloqueado, e a
 impressão quebraria em silêncio — na frente de quem está esperando o
 papel.
+
+
+### 41. Meu dia: a folha de bordo do negociador
+
+O Derek fotografou em 14/09/2026 a folha que o negociador preenche à
+mão. É o dia inteiro numa coluna, hora a hora:
+
+```
+11:03  Whats recuperação
+11:18  Jair — Recuperação — Whats
+11:40  Almoço — início
+12:00  Atendimento — início
+12:59  Consegui um agendamento de recuperação
+13:06  Ligação com Douglas
+16:01  Atendimento finalizado — carro consignado
+```
+
+Metade disso o sistema já sabe e a outra metade só existia no papel —
+que some no fim da semana.
+
+**Plano e realizado são a MESMA linha (0046).** Uma ação nasce
+planejada (`feito_em` nulo) e ganha a marca quando acontece. Duas
+tabelas obrigariam a decidir, item a item, se o que foi feito era o que
+estava planejado; e a resposta certa — "era, com meia hora de atraso" —
+não cabe em nenhuma das duas. Na tela, o planejado aparece esmaecido
+com um ○ e um toque marca.
+
+**O atendimento NÃO é copiado para a agenda.** Ele já existe, com hora
+de criação e status; copiá-lo criaria uma segunda verdade que envelhece
+no minuto seguinte — o negócio muda de status e a cópia continua
+dizendo o que era antes. `TelaMeuDia` mescla as duas fontes **na hora
+de desenhar**, como o painel do gestor faz com a negociação viva.
+**Quem "simplificar" isso gravando o atendimento na agenda está criando
+o problema que esta decisão evita** — e é por isso que a linha do
+atendimento não tem os botões de marcar e apagar: eles mexeriam no
+negócio, não na agenda.
+
+**Sem hora vai para o fim da lista**, não para o meio: é item do plano
+que ainda não tem lugar no dia, e no meio da ordem cronológica ele
+confundiria a leitura.
+
+**Registrar é o gesto de todo dia, então Enter grava e limpa.** Quem
+acabou de desligar o telefone não procura botão — é a mesma razão da
+barra de captura da pré-venda (decisão 27). Sem hora digitada vale o
+relógio: pedir a hora seria pedir o que a máquina já sabe. E o que se
+repete dezenas de vezes — almoço, início e fim de ligação — virou
+atalho de um toque.
+
+**A agenda é pessoal, e o gerente lê todas.** Mesma régua da
+`negociacao_viva` (0033): ler o dia do colega não é o que esta tabela
+existe para permitir. **Escrever é só do dono, inclusive para o
+gerente** — agenda preenchida por outra pessoa deixa de ser o registro
+de quem viveu o dia.
+
+**A semana fica à vista, de segunda a sábado**, com feitas/total por
+dia. É onde ele planeja, e onde o buraco aparece antes de acontecer.
+
+**O que ficou de fora:** o realizado da agenda ainda não conversa com a
+meta (decisão 37). Os números existem — prospecção, recuperação,
+atendimento, todos com tipo —, então contar "35 recuperações contra a
+meta de 40" é o passo seguinte, e não foi feito porque o pedido era a
+folha.
