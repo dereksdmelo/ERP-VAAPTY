@@ -689,6 +689,36 @@ para conferir na lista.
 
 O importador só aparece para gerente.
 
+**E o caminho de volta existe desde 14/09/2026.** "Copiar linha do CRM"
+devolve o atendimento no formato da planilha, para colar no Sheets — a
+casa ainda mantém o CRM lá, e redigitar vinte colunas à mão é como o
+registro deixa de ser feito.
+
+**A ordem das colunas manda, porque colar é posicional.** Coluna
+trocada põe telefone em cima de origem sem ninguém ver. `COLUNAS_CRM`
+é a ordem que o Derek mandou, e são os mesmos nomes que o `col` do
+importador reconhece — **quem mexer numa ponta confere a outra.**
+
+**Tabulação e quebra de linha viram espaço.** A observação da
+negociação é multilinha; colada crua, quebraria a linha no meio e
+criaria uma segunda linha meia-boca na planilha.
+
+**Número sai cru, sem R$ e sem separador de milhar** — separador
+dentro da célula é o que faz a soma parar de funcionar.
+
+**Na coluna PROPOSTAS só entra proposta de lojista de verdade.** O
+extrato de ofertas é simulação (decisão 16), e pôr aquele número ali
+seria proposta inventada contada como real — que é exatamente o que
+aquela decisão evita. Sem proposta registrada, a célula sai vazia.
+
+**`cx`, `QUEM CONSEGUIU` e `AÇÃO` saem vazias**: são colunas da casa
+que o sistema não tem de onde preencher. Vazio é honesto; chute vira
+dado errado na planilha que o gerente lê.
+
+**O botão fica ao lado do status, não no fim do trilho.** Atendimento
+que não fecha nunca chega à última etapa — seria justamente o que
+ninguém registraria.
+
 ### 14. Duas FIPEs: uma adivinha, a outra confirma
 
 `/api/placa` devolve o valor FIPE a partir da placa — mas a Placa Fipe

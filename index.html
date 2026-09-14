@@ -1601,6 +1601,80 @@ const Pendente = ({ children }) => (
  * Ressalva omitida vira devolução e queima a confiança da rede
  * (decisão 2) — economizar duas linhas não paga esse risco.
  */
+/**
+ * ===== a linha do CRM =====
+ *
+ * O caminho inverso do importador (decisão 13): ele traz a planilha
+ * para o sistema, isto devolve o atendimento no formato dela, para
+ * colar de volta. A casa ainda mantém o CRM no Sheets, e redigitar
+ * vinte colunas à mão é como o registro deixa de ser feito.
+ *
+ * **A ordem das colunas é a que o Derek mandou em 14/09/2026, e ela
+ * manda.** Colar é posicional: coluna trocada põe telefone em cima de
+ * origem sem ninguém ver. Os mesmos nomes que o importador reconhece
+ * (`col`, em `Importar`) estão aqui do outro lado — **quem mexer numa
+ * ponta confere a outra.**
+ *
+ * **Tabulação e quebra de linha viram espaço.** A observação da
+ * negociação é multilinha; colada crua, ela quebraria a linha no meio
+ * e empurraria o resto para baixo, criando uma segunda linha meia-boca
+ * na planilha.
+ *
+ * **Número vai cru, sem R$ e sem separador de milhar.** A planilha
+ * formata como já formata; separador colado dentro da célula é o que
+ * faz a soma parar de funcionar.
+ */
+const COLUNAS_CRM = [
+  "DATA", "NEGOCIADORES", "PROSPECTO", "PLACA", "ANO", "CARRO", "KM",
+  "CLIENTE", "TELEFONE", "ORIGEM", "STATUS", "FIPE", "PRETENSÃO",
+  "MOTIVO DA VENDA", "OBS SOBRE NEGOCIAÇÃO",
+  "PROPOSTAS", "cx", "PROPOSTAS", "LOJISTA", "QUEM CONSEGUIU", "AÇÃO",
+];
+
+const celulaCRM = (v) => String(v == null ? "" : v).replace(/[\t\r\n]+/g, " ").trim();
+const numeroCRM = (v) => {
+  const n = Number(String(v == null ? "" : v).replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", "."));
+  return Number.isFinite(n) && n !== 0 ? String(n).replace(".", ",") : "";
+};
+
+function linhaDoCRM(f, atendimento, status) {
+  const a = atendimento || {};
+  // As propostas REAIS dos lojistas, da maior para a menor. O extrato
+  // de ofertas não entra aqui: ele é simulação (decisão 16), e número
+  // simulado na coluna PROPOSTAS da planilha vira proposta inventada
+  // contada como real — que é exatamente o que aquela decisão evita.
+  const props = (Array.isArray(a.proposta) ? a.proposta : [])
+    .slice().sort((x, y) => (Number(y.valor) || 0) - (Number(x.valor) || 0));
+  const melhor = props[0] || null;
+  const segunda = props[1] || null;
+
+  const dia = a.data ? String(a.data).slice(0, 10).split("-").reverse().join("/") : "";
+
+  return [
+    dia,
+    celulaCRM(a.negociador_nome || f.negociador),
+    celulaCRM(a.prospec),
+    celulaCRM(f.placa),
+    celulaCRM(f.ano),
+    celulaCRM(f.modelo || a.carro_descricao),
+    celulaCRM(f.km),
+    celulaCRM(a.cliente_nome),
+    celulaCRM(a.cliente_telefone),
+    celulaCRM(rotulo(ORIGENS, a.origem)),
+    celulaCRM(rotuloStatus(status || a.status)),
+    numeroCRM(f.fipe),
+    numeroCRM(f.pretensao || a.pretensao),
+    celulaCRM(f.motivo || f.motivoDetalhe),
+    celulaCRM([f.objecao, a.observacoes].filter(Boolean).join(" · ")),
+    segunda ? numeroCRM(segunda.valor) : "",
+    "",                                   // cx — a casa sabe o que vai aqui; o sistema não
+    melhor ? numeroCRM(melhor.valor) : "",
+    melhor ? celulaCRM(melhor.lojista) : "",
+    "",                                   // QUEM CONSEGUIU
+    "",                                   // AÇÃO
+  ].join("\t");
+}
+
 function gerarDescritivo(f, n) {
   const brlC = (v) => {
     const x = Number(String(v == null ? "" : v).replace(/\./g, "").replace(",", "."));
@@ -3661,6 +3735,24 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         <>
           <StatusAtendimento valor={statusAtual} erro={erroStatus}
             aoMudar={(novo) => mudarStatus(novo, true)} />
+
+          {/* A linha do CRM, para colar no Sheets.
+
+              Fica aqui, ao lado do status, e não no fim do trilho: o
+              negociador precisa dela quando lembra da planilha, e o
+              atendimento que não fecha nunca chega à última etapa —
+              seria justamente o que ninguém registraria. */}
+          <div className="mx-4 mt-2 flex items-center gap-2">
+            <button
+              onClick={() => copiar(linhaDoCRM(f, atendimento, statusAtual), "crm")}
+              className="rounded-md px-3 py-1.5 text-[12px] font-semibold"
+              style={{ border: `1px solid ${C.line}`, color: C.roxo, background: "#fff" }}>
+              {copiado === "crm" ? "✓ linha copiada — cole no Sheets" : "Copiar linha do CRM"}
+            </button>
+            <span className="text-[11px]" style={{ color: C.mute }}>
+              as {COLUNAS_CRM.length} colunas da planilha, na ordem
+            </span>
+          </div>
 
           {(statusAtual === "vai_voltar" || pedeVolta) && (
             <div className="mx-4 mt-2 flex flex-wrap items-center gap-2 rounded-lg px-3 py-2"
