@@ -88,7 +88,7 @@ da casa, com duas paradas operacionais no meio:
 
 | id | etapa | o que trava a conclusão (`etapaConcluida`, [index.html:166](index.html:166)) |
 |----|-------|------------------------------|
-| `A` | Abordagem positiva | hora de chegada, carro no pátio, tempo combinado |
+| `A` | Abordagem positiva | hora de chegada, tempo combinado |
 | `P` | Pesquise o cliente e o carro | motivo, pretensão, decisor presente |
 | `O` | Ofereça uma demonstração envolvente | mostrou o processo e um testemunhal |
 | `PUB` | Ficha, descritivo e lançamento | ficha completa **e** carro lançado |
@@ -700,6 +700,26 @@ contamina a negociação inteira.
 o negociador escolhe à mão. Ela devolve, além do valor, um **código de
 autenticação emitido pela própria FIPE** — a prova de que o número veio
 da fonte. Fica gravado na ficha.
+
+**São três tabelas, não uma, e o tipo escolhe qual responde (0045).**
+Carro, moto e caminhão — pedido do Derek em 14/09/2026, "como na
+tabela FIPE". Conferido contra a fonte na mesma data (referência 337):
+o `codigoTipoVeiculo` 1 devolve 107 marcas de carro, o 2 devolve 103
+de moto (ADLY, APRILIA, AVELLOZ) e o 3 devolve 29 de caminhão e ônibus
+(BEPOBUS, DAF); o 4 responde `nadaencontrado`. **Quem acrescentar
+código novo confere assim, não por memória.**
+
+**Os códigos de marca NÃO são compartilhados entre as três.** "59" é
+VW nos carros e outra coisa nas motos. Por isso trocar o tipo na tela
+**zera marca, ano e modelo** — manter a seleção consultaria um código
+de uma tabela contra a outra e traria o valor de outro veículo — e por
+isso o tipo fica gravado junto dos três códigos da 0043.
+
+A varredura dos seis combustíveis vale igual nas três: Honda/2022 nas
+motos devolve 29 modelos a gasolina e 7 flex.
+
+**O tipo também decide o `tipo_veiculo` do envio ao Shinkai**, que era
+"carros" fixo (decisão 36) — moto entrava lá como carro.
 
 **A ordem é MARCA → ANO → MODELO**, e não a da FIPE (marca → modelo →
 ano). Com o modelo primeiro, a lista de uma marca traz 261 itens

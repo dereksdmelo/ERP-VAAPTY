@@ -134,7 +134,10 @@ function statusDerivado(f) {
   // sistema não tem como saber que a rede não respondeu — quem marca
   // isso é o negociador, na faixa de status.
   if (f.publicado) return "aguardando";
-  if (f.carroSubiu) return "cliente_na_loja";
+  // Era o "carro subiu pro pátio" que acendia isto; com ele fora, quem
+  // diz que o cliente está na loja é a hora de chegada — que é o mesmo
+  // momento, com um toque a menos.
+  if (f.chegada) return "cliente_na_loja";
   return null;
 }
 const rotulo = (lista, v) => (lista.filter((x) => x[0] === v)[0] || [v, v])[1];
@@ -1099,7 +1102,13 @@ const AvisoFipe = ({ compacto }) => (
  * o mesmo carro de vinte anos diferentes. Escolhendo o ano antes, a
  * lista de modelos já vem curta e só com o que existiu naquele ano.
  */
+// Os três tipos da tabela FIPE. Conferidos contra a fonte em
+// 14/09/2026: 1 devolve 107 marcas de carro, 2 devolve 103 de moto e 3
+// devolve 29 de caminhão e ônibus. Não existe um quarto.
+const TIPOS_FIPE = [["1", "Carro"], ["2", "Moto"], ["3", "Caminhão"]];
+
 function ConferirFipe({ f, set }) {
+  const [tipo, setTipo] = useState(String(f.tipoVeiculo || "1"));
   const [marcas, setMarcas] = useState([]);
   const [marca, setMarca] = useState("");
   const [ano, setAno] = useState("");
@@ -1116,9 +1125,14 @@ function ConferirFipe({ f, set }) {
     return l;
   }, []);
 
+  // **Trocar o tipo zera a escolha inteira.** Marca 59 é VW nos carros
+  // e outra coisa nas motos: manter a seleção ao trocar de tabela
+  // consultaria um código de uma tabela contra a outra, e o valor que
+  // voltasse seria de outro veículo.
   useEffect(() => {
-    setIndo("marcas");
-    fipeOficial({ acao: "marcas" })
+    setMarcas([]); setMarca(""); setModelos([]); setEscolha(""); setRes(null);
+    setIndo("marcas"); setErro("");
+    fipeOficial({ acao: "marcas", tipo })
       .then((d) => {
         setMarcas(d.marcas || []);
         // Adianta o que já se sabe da ficha.
@@ -1130,13 +1144,13 @@ function ConferirFipe({ f, set }) {
       })
       .catch((e) => setErro(e.message))
       .then(() => setIndo(""));
-  }, []);
+  }, [tipo]);
 
   useEffect(() => {
     setModelos([]); setEscolha(""); setRes(null);
     if (!marca || !ano) return;
     setIndo("modelos"); setErro("");
-    fipeOficial({ acao: "modelos", marca, ano })
+    fipeOficial({ acao: "modelos", marca, ano, tipo })
       .then((d) => {
         setModelos(d.modelos || []);
         if (!(d.modelos || []).length) setErro("A FIPE não tem modelos dessa marca nesse ano.");
@@ -1147,14 +1161,14 @@ function ConferirFipe({ f, set }) {
       })
       .catch((e) => setErro(e.message))
       .then(() => setIndo(""));
-  }, [marca, ano]);
+  }, [marca, ano, tipo]);
 
   const buscarValor = (valorEscolha) => {
     setEscolha(valorEscolha); setRes(null);
     if (!valorEscolha) return;
     const [codigo, comb] = valorEscolha.split("|");
     setIndo("valor"); setErro("");
-    fipeOficial({ acao: "valor", marca, modelo: codigo, ano, combustivel: comb })
+    fipeOficial({ acao: "valor", marca, modelo: codigo, ano, combustivel: comb, tipo })
       .then(setRes)
       .catch((e) => setErro(e.message))
       .then(() => setIndo(""));
@@ -1190,6 +1204,10 @@ function ConferirFipe({ f, set }) {
         const mo = nome.split(/\s+/)[0] || "";
         return mo ? nome.slice(mo.length).trim() : f.versao;
       })(),
+      // O tipo vai para a ficha porque é ele que decide o
+      // `tipo_veiculo` do envio ao Shinkai — era "carros" fixo, e moto
+      // entrava lá como carro.
+      tipoVeiculo: String(res.tipo || tipo || "1"),
       fipeConferida: true,
       fipeOficialCodigo: res.codigo_fipe || "",
       fipeOficialMes: res.mes_referencia || "",
@@ -1222,6 +1240,19 @@ function ConferirFipe({ f, set }) {
       )}
 
       <div className="mt-2 space-y-2">
+        {/* O tipo vem antes de tudo: ele troca a tabela inteira, e
+            marca, ano e modelo só fazem sentido dentro dela. */}
+        <div className="flex gap-1.5">
+          {TIPOS_FIPE.map(([v, r]) => (
+            <button key={v} onClick={() => setTipo(v)}
+              className="flex-1 rounded-md py-1.5 text-[12px] font-semibold"
+              style={{ background: tipo === v ? C.roxo : "#fff",
+                       color: tipo === v ? "#fff" : C.roxo,
+                       border: `1px solid ${tipo === v ? C.roxo : C.line}` }}>
+              {r}
+            </button>
+          ))}
+        </div>
         <div className="grid grid-cols-2 gap-2">
           <Campo label="Marca">
             <select className={inputCls} style={inputSty} value={marca} onChange={(e) => setMarca(e.target.value)}>
@@ -1425,7 +1456,7 @@ const VAZIO = {
   lataria: "", mecanica: "", positivos: "", ressalvas: "", internas: "",
   negociador: "",
   // A
-  chegada: "", carroSubiu: false, tempoCombinado: false,
+  chegada: "", tempoCombinado: false,
   // P
   motivo: "", motivoDetalhe: "", pretensao: "", quitacao: "", debitos: "",
   decisorPresente: false, entregaHoje: false, canaisVistos: [],
@@ -1486,7 +1517,11 @@ const ETAPAS = [
 
 function etapaConcluida(id, f, fotos) {
   switch (id) {
-    case "A": return !!f.chegada && f.carroSubiu && f.tempoCombinado;
+    // "Carro subiu pro pátio" saiu a pedido do Derek em 14/09/2026: o
+    // carro estar no pátio não é passo do atendimento, é consequência
+    // de o cliente ter chegado. Cobrar o toque atrasava a etapa sem
+    // registrar nada que já não estivesse na hora de chegada.
+    case "A": return !!f.chegada && f.tempoCombinado;
     case "P": return !!f.motivo && !!f.pretensao && f.decisorPresente && faltamCanais(f).length === 0;
     case "O": return f.mostrouProcesso && f.mostrouTestemunhal;
     case "PUB": return faltando(f, fotos).length === 0 && f.publicado;
@@ -1602,6 +1637,7 @@ const fichaParaBanco = (f) => ({
   placa: f.placa, chassi: f.chassi, modelo: f.modelo, ano: f.ano,
   marca: f.marca, modeloCurto: f.modeloCurto, versao: f.versao,
   fipeMarcaCodigo: f.fipeMarcaCodigo, fipeModeloCodigo: f.fipeModeloCodigo, fipeAnoCodigo: f.fipeAnoCodigo,
+  tipoVeiculo: f.tipoVeiculo,
   cor: f.cor, combustivel: f.combustivel, cambio: f.cambio, renavam: f.renavam,
   km: f.km, kmEntrada: f.kmEntrada,
   fipe: f.fipe, fipeCodigo: f.fipeCodigo, por: f.por, gastos: f.gastos,
@@ -3338,12 +3374,12 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     catch (e) { setStatusAtual(antes); setErroStatus(e.message); }
   };
 
-  // Segue o preenchimento: carro no pátio, lançamento, propostas,
-  // rodadas, fechamento.
+  // Segue o preenchimento: chegada, lançamento, propostas, rodadas,
+  // fechamento.
   useEffect(() => {
     const derivado = statusDerivado(f);
     if (derivado) mudarStatus(derivado, false);
-  }, [f.carroSubiu, f.publicado, f.aceiteFinal, f.valorFechado, f.rodadas.length]);
+  }, [f.chegada, f.publicado, f.aceiteFinal, f.valorFechado, f.rodadas.length]);
 
   const salvarCliente = async () => {
     if (!atendimento) { setErroCliente("Abra o atendimento pela lista para salvar."); return; }
@@ -3701,7 +3737,6 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                     className="shrink-0 rounded-md border px-3 text-[13px] font-semibold" style={{ borderColor: C.line, color: C.roxo }}>Agora</button>
                 </div>
               </Campo>
-              <Toggle label="Carro subiu pro pátio" valor={f.carroSubiu} onChange={(v) => set("carroSubiu", v)} />
               <Toggle label="Combinei o tempo do processo com o cliente" nota="“A avaliação leva cerca de 40 minutos, tudo bem?”" valor={f.tempoCombinado} onChange={(v) => set("tempoCombinado", v)} />
             </div>
           </Bloco>

@@ -108,6 +108,8 @@ const FONTE = {
   // negociador escolheu marca, ano e modelo à mão.
   fipe_marca_codigo: "fipeMarcaCodigo", fipe_modelo_codigo: "fipeModeloCodigo",
   fipe_ano_codigo: "fipeAnoCodigo",
+  // Em qual das três tabelas da FIPE os códigos acima valem (0045).
+  tipo_veiculo: "tipoVeiculo",
   ano_fabricacao: "ano", ano_modelo: "ano", cor: "cor", combustivel: "combustivel",
   cambio: "cambio", km_atual: "km", km_entrada: "kmEntrada",
   fipe_codigo: "fipeCodigo", fipe_valor: "fipe",
@@ -139,6 +141,10 @@ function paraColunas(f) {
     marca: texto(f.marca),
     modelo: texto(f.modeloCurto),
     versao: texto(f.versao),
+    // Fora de 1..3 cai em carro, que é o padrão da coluna: tipo
+    // inválido vindo de ficha antiga não pode recusar o salvamento.
+    tipo_veiculo: [1, 2, 3].indexOf(Math.trunc(Number(f.tipoVeiculo))) >= 0
+      ? Math.trunc(Number(f.tipoVeiculo)) : 1,
     fipe_marca_codigo: texto(f.fipeMarcaCodigo),
     fipe_modelo_codigo: texto(f.fipeModeloCodigo),
     fipe_ano_codigo: texto(f.fipeAnoCodigo),

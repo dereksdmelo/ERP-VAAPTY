@@ -23,7 +23,33 @@
  */
 
 const FIPE = "https://veiculos.fipe.org.br/api/veiculos";
-const CARRO = 1;                       // codigoTipoVeiculo
+/**
+ * Os três tipos da tabela FIPE.
+ *
+ * Eram só carros aqui, e a Vaapty também avalia moto e caminhão — foi
+ * o pedido do Derek em 14/09/2026: "preciso poder selecionar se é moto
+ * ou caminhão, como na tabela FIPE".
+ *
+ * **Conferido contra a FIPE, não de memória** (14/09/2026, tabela de
+ * referência 337): o tipo 1 devolve 107 marcas de carro, o 2 devolve
+ * 103 de moto (ADLY, APRILIA, AVELLOZ) e o 3 devolve 29 de caminhão e
+ * ônibus (BEPOBUS, DAF). O 4 responde `nadaencontrado` — não existe
+ * quarto tipo. **Quem acrescentar código novo confere assim.**
+ *
+ * O rótulo em `SHINKAI` é o que a API deles espera em `tipo_veiculo`
+ * (decisão 36); guardar os dois juntos evita uma segunda tabela de
+ * tradução em outro arquivo.
+ */
+const TIPOS = {
+  1: { nome: "carro", shinkai: "carros" },
+  2: { nome: "moto", shinkai: "motos" },
+  3: { nome: "caminhao", shinkai: "caminhoes" },
+};
+const CARRO = 1;                       // codigoTipoVeiculo, o padrão
+
+// O tipo vem da tela; fora de 1..3 cai em carro, que é a esmagadora
+// maioria — tipo inválido não pode virar erro na frente do cliente.
+const tipoDe = (req) => (TIPOS[inteiro(req.query.tipo)] ? inteiro(req.query.tipo) : CARRO);
 /**
  * Os códigos de combustível da FIPE — **todos os seis**.
  *
@@ -136,13 +162,14 @@ module.exports = async function handler(req, res) {
   if (!tokenDe(req)) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
 
   const acao = String(req.query.acao || "");
+  const tipo = tipoDe(req);
 
   try {
     const ref = await referencia();
 
     if (acao === "marcas") {
       const marcas = await chamar("ConsultarMarcas", {
-        codigoTabelaReferencia: ref.codigo, codigoTipoVeiculo: CARRO,
+        codigoTabelaReferencia: ref.codigo, codigoTipoVeiculo: tipo,
       });
       res.setHeader("Cache-Control", "public, max-age=0, s-maxage=86400");
       return res.status(200).json({
@@ -163,7 +190,7 @@ module.exports = async function handler(req, res) {
       const respostas = await Promise.all(COMBUSTIVEIS.map(async ([comb]) => {
         try {
           const lista = await chamar("ConsultarModelosAtravesDoAno", {
-            codigoTabelaReferencia: ref.codigo, codigoTipoVeiculo: CARRO,
+            codigoTabelaReferencia: ref.codigo, codigoTipoVeiculo: tipo,
             codigoMarca: marca, ano: `${ano}-${comb}`,
             codigoTipoCombustivel: comb, anoModelo: ano,
           });
@@ -223,10 +250,10 @@ module.exports = async function handler(req, res) {
       if (!marca || !modelo || !ano) return res.status(400).json({ erro: "Informe marca, modelo e ano." });
 
       const d = await chamar("ConsultarValorComTodosParametros", {
-        codigoTabelaReferencia: ref.codigo, codigoTipoVeiculo: CARRO,
+        codigoTabelaReferencia: ref.codigo, codigoTipoVeiculo: tipo,
         codigoMarca: marca, codigoModelo: modelo,
         ano: `${ano}-${comb}`, anoModelo: ano, codigoTipoCombustivel: comb,
-        tipoVeiculo: "carro", tipoConsulta: "tradicional",
+        tipoVeiculo: (TIPOS[tipo] || TIPOS[CARRO]).nome, tipoConsulta: "tradicional",
       });
 
       if (!d || !d.Valor) return res.status(422).json({ erro: "A FIPE não tem valor para essa combinação." });
@@ -240,6 +267,11 @@ module.exports = async function handler(req, res) {
         ano_modelo: d.AnoModelo,
         combustivel: d.Combustivel,
         codigo_fipe: d.CodigoFipe,
+        // O tipo volta junto para a ficha guardá-lo: é ele que decide o
+        // `tipo_veiculo` do envio ao Shinkai (decisão 36), que até aqui
+        // era "carros" fixo.
+        tipo: tipo,
+        tipo_nome: (TIPOS[tipo] || TIPOS[CARRO]).nome,
         mes_referencia: String(d.MesReferencia || "").trim(),
         // Código que a própria FIPE emite para a consulta. É a prova de
         // que o número veio da fonte, e não de estimativa.

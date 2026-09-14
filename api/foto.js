@@ -228,7 +228,7 @@ async function shinkai(req, res, tok) {
   const CAMPOS_V = "id,placa,chassi,marca_modelo,marca,modelo,versao,ano_fabricacao,ano_modelo,cor,combustivel," +
     "cambio,km_atual,fipe_codigo,fipe_valor,leilao_sinistro,gnv," +
     // Os tres codigos que movem os seletores da ficha deles (0043).
-    "fipe_marca_codigo,fipe_modelo_codigo,fipe_ano_codigo," +
+    "fipe_marca_codigo,fipe_modelo_codigo,fipe_ano_codigo,tipo_veiculo," +
     // O carro chegava pelado do outro lado: pneu, opcional e ressalva
     // ficavam de fora do corpo, e são justamente os campos que a tela
     // deles pede para o carro poder ser ofertado.
@@ -344,10 +344,10 @@ async function shinkai(req, res, tok) {
       leilao: !!v.leilao_sinistro,
       sinistro: !!v.leilao_sinistro,
       gnv: !!v.gnv,
-      // Padrão da documentação; explícito porque a Vaapty também
-      // avalia moto, e o dia em que isso virar campo na tela o lugar
-      // já está aqui.
-      tipo_veiculo: "carros",
+      // Deixou de ser "carros" fixo em 14/09/2026: a conferência da FIPE
+      // passou a perguntar o tipo, e moto entrava aqui como carro.
+      // Ficha sem a coluna (0045) cai em carro, que é o padrão dela.
+      tipo_veiculo: ({ 2: "motos", 3: "caminhoes" })[v.tipo_veiculo] || "carros",
       // **Os três códigos juntos, ou nenhum.** É regra da API deles:
       // mandar um ou dois deixa os seletores vazios do mesmo jeito e
       // ainda gera aviso. Ficha que não passou pela conferência da
