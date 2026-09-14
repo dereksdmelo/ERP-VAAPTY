@@ -520,13 +520,13 @@ async function agenda(req, res, tok) {
     const dia = String(c.dia || "");
     if (!RX_DIA.test(dia)) return res.status(400).json({ erro: "Dia inválido." });
 
-    // `perfil_id` NÃO vem do corpo: a RLS exige que seja o próprio, e
-    // deixar o cliente escolher seria convidar a tentativa.
-    const eu = (await banco(`${URL_BASE}/rest/v1/perfil?select=id&limit=1`, { headers: cabecalhos(tok) }) || [])[0];
-    if (!eu) return res.status(403).json({ erro: "Seu acesso ainda não está liberado." });
-
+    // **`perfil_id` não é escolhido aqui, e não é procurado aqui.**
+    // A primeira versão fazia `select id from perfil limit 1` — o que
+    // para um negociador funciona por acidente (a RLS devolve só a
+    // própria linha) e **para o gerente traz o primeiro da equipe**,
+    // que é outra pessoa. Quem diz o dono é o banco, pelo default
+    // `auth.uid()` da 0047: mesma fonte que a política confere.
     const linha = {
-      perfil_id: eu.id,
       dia,
       hora: horaOuNulo(c.hora),
       fim: horaOuNulo(c.fim),
