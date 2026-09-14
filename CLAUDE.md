@@ -2300,3 +2300,54 @@ meta (decisão 37). Os números existem — prospecção, recuperação,
 atendimento, todos com tipo —, então contar "35 recuperações contra a
 meta de 40" é o passo seguinte, e não foi feito porque o pedido era a
 folha.
+
+**O lembrete de meia em meia hora, e por que ele não acumula.** É o
+que transforma a folha em hábito: ninguém lembra de registrar, mas
+todo mundo responde uma pergunta que aparece na frente. Entre 8h30 e
+18h, a caixa pergunta "o que você está fazendo agora?" — uma linha, e
+vai para a agenda com a hora do slot, não a de quando terminou de
+digitar.
+
+**Ele pergunta pelo instante em que aparece, nunca pelos que
+passaram.** Ao montar, o slot corrente é marcado como visto **sem
+perguntar**; só vira pergunta quando o relógio cruza o próximo. Sem
+isso, quem volta do almoço às 14h encontraria cinco caixas empilhadas
+perguntando o que fez às 12h, 12h30, 13h — e fecharia todas sem ler,
+que é como um lembrete morre.
+
+**Fechar é resposta válida**, e deixa o buraco aparecer na grade.
+Registrar à força o que a pessoa não quis dizer produziria dado
+inventado no lugar de silêncio honesto.
+
+**O gerente não recebe** — ele não preenche folha de bordo. Vê a caixa
+pelo botão "ver o lembrete", no próprio "Meu dia".
+
+**A grade mostra o vazio, e é para isso que ela existe.** Meia em meia
+hora, das 8h às 19h. Uma lista corrida mostra o que foi feito e
+esconde o que não foi; a grade mostra as duas coisas no mesmo desenho
+— a faixa em branco das 15h às 16h é a informação que o gerente
+procura, e ela não existe numa lista. O que cai fora do horário da
+loja, e o que ainda não tem hora, aparecem embaixo em vez de sumir.
+
+**Abrir não marca nada; editar marca, e dizendo o quê.** Navegar pela
+lista não é trabalho, e contá-lo como trabalho estragaria a única
+coisa que a folha mede. O que vira linha é mudança de fase ("Mudou a
+fase — Aguardando → Em negociação") e etapa do processo concluída
+("Concluiu a etapa Pesquisa") — o status é do negócio, a etapa é do
+processo, e as duas contam.
+
+**Isso grava EVENTO, não estado — e é o que o reconcilia com a regra
+de não copiar o atendimento.** O estado envelhece; "às 14:32 ele mudou
+a fase" não envelhece nunca. Pelo mesmo motivo a linha automática do
+atendimento diz **"Cliente chegou"** e não o status atual: mostrar o
+status de agora na hora da chegada reescreveria o passado toda vez que
+o negócio andasse.
+
+**A primeira passada não registra etapa nenhuma.** `etapasJaVistas`
+nasce com o que já estava fechado; sem isso, recarregar a página no
+meio da tarde despejaria seis linhas dizendo que ele acabou de fazer
+tudo de novo.
+
+**O registro falha em silêncio**, de propósito: ele é subproduto do que
+a pessoa veio fazer, e um erro ali não pode aparecer como se o
+atendimento não tivesse salvado.

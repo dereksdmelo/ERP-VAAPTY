@@ -3448,6 +3448,11 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
       await atualizarAtendimento(atendimento.id, { status: novo });
       if (novo === "vai_voltar" && !voltaEm) setPedeVolta(true);
       if (novo !== "vai_voltar") setPedeVolta(false);
+      // A fase mudou de verdade: isso é atividade, e vai para a folha
+      // do dia dizendo O QUE mudou. Abrir o atendimento para olhar não
+      // passa por aqui, e é isso que separa trabalho de navegação.
+      registrarNaAgenda(`Mudou a fase — ${rotuloStatus(antes)} → ${rotuloStatus(novo)}`,
+        atendimento);
     }
     catch (e) { setStatusAtual(antes); setErroStatus(e.message); }
   };
@@ -3458,6 +3463,34 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     const derivado = statusDerivado(f);
     if (derivado) mudarStatus(derivado, false);
   }, [f.chegada, f.publicado, f.aceiteFinal, f.valorFechado, f.rodadas.length]);
+
+  /**
+   * A etapa do processo que acabou de fechar vai para a folha do dia,
+   * pelo nome.
+   *
+   * É a outra metade do "falar qual parte do processo foi alterada":
+   * mudar a fase é o status do negócio; concluir a Pesquisa ou o
+   * Lançamento é o processo. Os dois contam como trabalho, e são
+   * coisas diferentes.
+   *
+   * **O que já estava fechado ao abrir a tela não registra.** Sem
+   * isto, recarregar a página no meio da tarde despejaria seis linhas
+   * na agenda dizendo que ele acabou de fazer tudo de novo. A primeira
+   * passada apenas anota o que já estava pronto; daí em diante, só o
+   * que vira.
+   */
+  const etapasJaVistas = useRef(null);
+  useEffect(() => {
+    const fechadas = ETAPAS.filter((e) => etapaConcluida(e.id, f, fotos)).map((e) => e.id);
+    if (etapasJaVistas.current === null) { etapasJaVistas.current = fechadas; return; }
+    const novas = fechadas.filter((id) => etapasJaVistas.current.indexOf(id) < 0);
+    etapasJaVistas.current = fechadas;
+    if (!atendimento) return;
+    novas.forEach((id) => {
+      const nome = (ETAPAS.filter((e) => e.id === id)[0] || {}).curto || id;
+      registrarNaAgenda(`Concluiu a etapa ${nome}`, atendimento);
+    });
+  }, [f, fotos, atendimento]);
 
   const salvarCliente = async () => {
     if (!atendimento) { setErroCliente("Abra o atendimento pela lista para salvar."); return; }
@@ -13064,6 +13097,23 @@ const TIPOS_AGENDA = [
 const rotTipo = (v) => (TIPOS_AGENDA.filter((x) => x[0] === v)[0] || [0, "Outro"])[1];
 const corTipo = (v) => (TIPOS_AGENDA.filter((x) => x[0] === v)[0] || [0, 0, "#6B6478"])[2];
 
+// As faixas do dia da loja, de meia em meia hora. É a régua da
+// agenda: fora dela o registro não some, aparece embaixo.
+const HORA_ABRE = 8, HORA_FECHA = 19;
+const FAIXAS_DIA = (() => {
+  const l = [];
+  for (let h = HORA_ABRE; h < HORA_FECHA; h++) {
+    l.push(`${String(h).padStart(2, "0")}:00`);
+    l.push(`${String(h).padStart(2, "0")}:30`);
+  }
+  return l;
+})();
+const faixaSeguinte = (f) => {
+  const [h, m] = f.split(":").map(Number);
+  const t = h * 60 + m + 30;
+  return `${String(Math.floor(t / 60) % 24).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+};
+
 const horaAgora = () => new Date().toTimeString().slice(0, 5);
 const hhmm = (v) => String(v || "").slice(0, 5);
 // O dia em Joinville, não em Greenwich — o mesmo relógio da decisão 22.
@@ -13085,6 +13135,38 @@ async function lerAgenda(de, ate) {
   if (!r.ok) throw new Error(d.erro || "Não consegui ler a agenda.");
   return d.acoes || [];
 }
+/**
+ * Registra na folha do dia o que acabou de mudar num atendimento.
+ *
+ * **Abrir não marca nada; editar marca, e dizendo o quê.** Foi o
+ * pedido do Derek em 14/09/2026 — "só marcar que fez algo se houver
+ * uma edição, não marca se só abrir; se alterar alguma coisa, falar
+ * qual parte do processo foi alterada". Navegar pela lista não é
+ * trabalho, e contá-lo como trabalho estragaria a única coisa que a
+ * folha mede.
+ *
+ * **Isto grava EVENTO, não estado — e é o que o separa da regra da
+ * decisão 41.** Lá o atendimento não é copiado para a agenda porque o
+ * estado dele envelhece; "às 14:32 ele mudou a fase para Em
+ * negociação" não envelhece nunca: aconteceu, e continua verdade
+ * depois que o negócio fecha.
+ *
+ * **Falha em silêncio, de propósito.** O registro é subproduto do que
+ * a pessoa veio fazer; um erro aqui não pode aparecer como se o
+ * atendimento não tivesse salvado.
+ */
+function registrarNaAgenda(oque, atendimento) {
+  const quem = atendimento && (atendimento.cliente_nome || atendimento.carro_descricao);
+  criarAcao({
+    dia: diaHoje(),
+    hora: horaAgora(),
+    tipo: "atendimento",
+    titulo: quem ? `${oque} · ${quem}` : oque,
+    atendimento_id: (atendimento && atendimento.id) || null,
+    feito: true,
+  }).catch(() => {});
+}
+
 async function criarAcao(dados) {
   const r = await fetchAut("/api/atendimento?recurso=agenda", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
@@ -13109,6 +13191,122 @@ async function apagarAcao(id) {
   }
 }
 
+/**
+ * O lembrete de meia em meia hora: "o que você está fazendo agora?"
+ *
+ * Pedido do Derek em 14/09/2026. É o que transforma a folha de bordo
+ * em hábito: ninguém lembra de registrar, mas todo mundo responde uma
+ * pergunta que aparece na frente.
+ *
+ * **Não acumula, e essa é a regra que faz a coisa não virar praga.**
+ * Ele pergunta pelo instante em que aparece — não pelos slots que
+ * passaram enquanto a tela estava fechada. Quem volta do almoço às 14h
+ * não encontra cinco caixas empilhadas perguntando o que fez às 12h,
+ * 12h30, 13h… Ao montar, o slot corrente é marcado como visto **sem
+ * perguntar**: só vira pergunta quando o relógio cruza o próximo.
+ *
+ * **Fechar é uma resposta válida**, e deixa o buraco aparecer na
+ * agenda — que é justamente o que a grade de horários existe para
+ * mostrar. Registrar à força o que a pessoa não quis dizer produziria
+ * dado inventado no lugar de silêncio honesto.
+ *
+ * Só entre 8h30 e 18h, e só para quem preenche folha: o gerente não
+ * tem folha de bordo. Ele vê o lembrete pelo botão da própria tela,
+ * quando quer conferir como ficou.
+ */
+const LEMBRETE_DE = "08:30", LEMBRETE_ATE = "18:00";
+
+function slotDeAgora() {
+  const h = horaAgora();
+  if (h < LEMBRETE_DE || h > LEMBRETE_ATE) return "";
+  const [hh, mm] = h.split(":").map(Number);
+  return `${String(hh).padStart(2, "0")}:${mm < 30 ? "00" : "30"}`;
+}
+
+function LembreteDoDia({ perfil, forcar, aoFechar }) {
+  const [slot, setSlot] = useState("");
+  const [texto, setTexto] = useState("");
+  const [tipo, setTipo] = useState("recuperacao");
+  const [indo, setIndo] = useState(false);
+  const [erro, setErro] = useState("");
+  // O último slot que já foi mostrado. Nasce com o slot corrente para
+  // que abrir a tela não dispare pergunta sobre o instante que já
+  // estava correndo.
+  const visto = useRef(slotDeAgora());
+
+  useEffect(() => {
+    if (forcar) { setSlot(slotDeAgora() || horaAgora()); setTexto(""); }
+  }, [forcar]);
+
+  useEffect(() => {
+    const t = setInterval(() => {
+      const s = slotDeAgora();
+      if (!s || s === visto.current) return;
+      visto.current = s;
+      setSlot(s); setTexto(""); setErro("");
+    }, 20000);
+    return () => clearInterval(t);
+  }, []);
+
+  const fechar = () => { setSlot(""); if (aoFechar) aoFechar(); };
+
+  const responder = async () => {
+    if (!texto.trim()) return;
+    setIndo(true); setErro("");
+    try {
+      // A hora gravada é a do slot, não a de quando ele terminou de
+      // digitar: a pergunta é sobre aquele momento.
+      await criarAcao({ dia: diaHoje(), hora: slot, tipo, titulo: texto.trim(), feito: true });
+      fechar();
+    } catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+
+  if (!slot) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center"
+      style={{ background: "rgba(24,20,32,0.45)" }}>
+      <div className="w-full max-w-[440px] rounded-xl p-4"
+        style={{ background: C.paper, border: `1px solid ${C.line}`, boxShadow: "0 18px 50px rgba(24,20,32,0.28)" }}>
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="text-[15px]" style={{ fontFamily: F.disp, fontWeight: 800 }}>
+            O que você está fazendo agora?
+          </span>
+          <span className="text-[13px]" style={{ fontFamily: F.mono, fontWeight: 700, color: C.roxo }}>{slot}</span>
+        </div>
+        <p className="mt-1 text-[11px] leading-snug" style={{ color: C.mute }}>
+          Uma linha, e vai para a sua agenda de hoje. Fechar também vale — o horário fica em branco.
+        </p>
+
+        <div className="mt-2.5 flex gap-2">
+          <select className={inputCls} style={{ ...inputSty, width: 150 }} value={tipo}
+            onChange={(e) => setTipo(e.target.value)}>
+            {TIPOS_AGENDA.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
+          </select>
+          <input autoFocus className={inputCls} style={inputSty} value={texto}
+            placeholder="Jair — recuperação — Whats"
+            onChange={(e) => setTexto(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") responder(); }} />
+        </div>
+        {erro && <p className="mt-1.5 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+
+        <div className="mt-3 flex gap-2">
+          <button onClick={responder} disabled={indo || !texto.trim()}
+            className="flex-1 rounded-md py-2.5 text-[13px] font-semibold disabled:opacity-40"
+            style={{ background: C.roxo, color: "#fff" }}>
+            {indo ? "Gravando…" : "Registrar"}
+          </button>
+          <button onClick={fechar} className="rounded-md px-4 py-2.5 text-[13px] font-semibold"
+            style={{ border: `1px solid ${C.line}`, color: C.mute, background: "#fff" }}>
+            Agora não
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TelaMeuDia({ perfil }) {
   const [dia, setDia] = useState(diaHoje());
   const [acoes, setAcoes] = useState([]);
@@ -13119,6 +13317,7 @@ function TelaMeuDia({ perfil }) {
 
   // O que se está escrevendo agora.
   const [nova, setNova] = useState({ hora: "", tipo: "recuperacao", titulo: "" });
+  const [verLembrete, setVerLembrete] = useState(0);
   const campoRef = useRef(null);
 
   // A semana da segunda ao sábado, para o plano.
@@ -13155,10 +13354,15 @@ function TelaMeuDia({ perfil }) {
       id: a.id, hora: hhmm(a.hora), fim: hhmm(a.fim), tipo: a.tipo,
       titulo: a.titulo, feito: !!a.feito_em, minha: true,
     }));
+    // **A linha do atendimento é um EVENTO, não o estado dele.** Ela
+    // diz que o cliente chegou àquela hora — e não o status de agora,
+    // que mudaria o passado toda vez que o negócio andasse: às 13:19
+    // apareceria "Consignado" porque foi isso que ele virou às 16h. O
+    // que mudou depois entra como linha própria, na hora em que mudou.
     const dosAts = ats.map((a) => ({
       id: `at-${a.id}`, hora: hhmm(String(a.criado_em || "").slice(11, 16)), fim: "",
       tipo: "atendimento",
-      titulo: `${a.cliente_nome || "sem nome"}${a.carro_descricao ? ` — ${a.carro_descricao}` : ""} · ${rotuloStatus(a.status)}`,
+      titulo: `Cliente chegou — ${a.cliente_nome || "sem nome"}${a.carro_descricao ? ` · ${a.carro_descricao}` : ""}`,
       feito: true, minha: false,
     }));
     return doDia.concat(dosAts).sort((x, y) => {
@@ -13209,6 +13413,11 @@ function TelaMeuDia({ perfil }) {
     <div>
       <Cabecalho titulo="Meu dia"
         sub={`${rotuloDia(dia)} · ${feitas} registradas${planejadas ? ` · ${planejadas} no plano` : ""}`} />
+
+      {!!verLembrete && (
+        <LembreteDoDia perfil={perfil} forcar={verLembrete}
+          aoFechar={() => { setVerLembrete(0); carregar(); }} />
+      )}
 
       {/* A semana inteira à vista: é onde ele planeja, e onde vê o
           buraco antes de ele acontecer. */}
@@ -13284,53 +13493,108 @@ function TelaMeuDia({ perfil }) {
             style={{ border: `1px dashed ${C.line}`, color: C.mute, background: "#fff" }}>
             + no plano (sem hora)
           </button>
+          {/* O gerente não recebe o lembrete de meia em meia hora — ele
+              não preenche folha de bordo. O botão existe para ele ver
+              como a caixa aparece para a equipe. */}
+          <button onClick={() => setVerLembrete(Date.now())}
+            className="rounded-full px-3 py-1 text-[11px] font-medium"
+            style={{ border: `1px dashed ${C.line}`, color: C.mute, background: "#fff" }}>
+            ver o lembrete
+          </button>
         </div>
         {erro && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
       </Bloco>
 
+      {/* A grade de meia em meia hora.
+
+          **O vazio fica vazio, e é de propósito.** Uma lista corrida
+          mostra o que foi feito e esconde o que não foi; a grade mostra
+          as duas coisas no mesmo desenho — a faixa em branco das 15h às
+          16h é a informação que o gerente procura, e ela não existe
+          numa lista. Foi o pedido do Derek em 14/09/2026: "deixar o que
+          está vazio vazio, pra mostrar que ele não tava fazendo nada".
+
+          A janela é 8h–19h porque é o dia da loja; o que cai fora dela
+          aparece embaixo, para não sumir. */}
       <div className="mt-3">
-        <Bloco titulo={`A linha do dia — ${rotuloDia(dia)}`}
-          sub="Os atendimentos entram sozinhos. O resto é o que você registra.">
-          {!linha.length && (
-            <p className="text-[12px]" style={{ color: C.mute }}>
-              Nada ainda. Registre a primeira ação acima — ou planeje o dia sem hora.
-            </p>
-          )}
-          <div className="space-y-1">
-            {linha.map((x) => (
-              <div key={x.id} className="flex items-baseline gap-2.5 rounded-md px-2 py-1.5"
-                style={{ background: x.feito ? "#fff" : C.bg,
-                         border: `1px solid ${C.line}`, opacity: x.feito ? 1 : 0.75 }}>
-                <span className="w-[42px] shrink-0 text-[12px]"
-                  style={{ fontFamily: F.mono, fontWeight: 700, color: x.hora ? C.ink : C.mute }}>
-                  {x.hora || "—"}
-                </span>
-                <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold"
-                  style={{ background: x.tipo === "atendimento" ? "#F0F8F4" : "#F6F3FA",
-                           color: x.tipo === "atendimento" ? C.verde : corTipo(x.tipo) }}>
-                  {x.tipo === "atendimento" ? "Atendimento" : rotTipo(x.tipo)}
-                </span>
-                <span className="flex-1 text-[12px] leading-snug" style={{ color: C.ink }}>
-                  {x.titulo}{x.fim ? ` (até ${x.fim})` : ""}
-                </span>
-                {/* O atendimento vem da própria tabela dele: marcar ou
-                    apagar aqui mexeria no negócio, não na agenda. */}
-                {x.minha && (
-                  <>
-                    <button onClick={() => marcar(x)} className="shrink-0 text-[11px] font-semibold"
-                      style={{ color: x.feito ? C.mute : C.verde }}>
-                      {x.feito ? "✓" : "○ marcar"}
-                    </button>
-                    <button onClick={() => remover(x)} className="shrink-0 text-[11px]" style={{ color: C.mute }}>
-                      apagar
-                    </button>
-                  </>
-                )}
-              </div>
-            ))}
+        <Bloco titulo={`A agenda — ${rotuloDia(dia)}`}
+          sub="Meia em meia hora. O que está vazio aparece vazio.">
+          <div className="space-y-[2px]">
+            {FAIXAS_DIA.map((faixa) => {
+              const dentro = linha.filter((x) => x.hora && x.hora >= faixa && x.hora < faixaSeguinte(faixa));
+              const cheia = !!dentro.length;
+              return (
+                <div key={faixa} className="flex items-stretch gap-2">
+                  <span className="w-[42px] shrink-0 pt-1.5 text-[11px]"
+                    style={{ fontFamily: F.mono, color: cheia ? C.ink : C.mute, fontWeight: cheia ? 700 : 400 }}>
+                    {faixa}
+                  </span>
+                  <div className="flex-1 space-y-[2px]">
+                    {!cheia && (
+                      <div className="rounded px-2 py-1.5 text-[11px]"
+                        style={{ background: "repeating-linear-gradient(45deg,#FAFAFB,#FAFAFB 6px,#F3F2F6 6px,#F3F2F6 12px)",
+                                 color: C.mute, border: `1px solid ${C.line}` }}>
+                        —
+                      </div>
+                    )}
+                    {dentro.map((x) => <ItemAgenda key={x.id} x={x} marcar={marcar} remover={remover} />)}
+                  </div>
+                </div>
+              );
+            })}
           </div>
+
+          {/* Fora da janela do dia, e o que ainda não tem hora. */}
+          {(() => {
+            const fora = linha.filter((x) => !x.hora || x.hora < FAIXAS_DIA[0] || x.hora >= faixaSeguinte(FAIXAS_DIA[FAIXAS_DIA.length - 1]));
+            if (!fora.length) return null;
+            return (
+              <div className="mt-3 border-t pt-2" style={{ borderColor: C.line }}>
+                <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>
+                  Fora do horário da loja, e o que ainda não tem hora
+                </div>
+                <div className="mt-1.5 space-y-[2px]">
+                  {fora.map((x) => <ItemAgenda key={x.id} x={x} marcar={marcar} remover={remover} />)}
+                </div>
+              </div>
+            );
+          })()}
         </Bloco>
       </div>
+    </div>
+  );
+}
+
+function ItemAgenda({ x, marcar, remover }) {
+  return (
+    <div className="flex items-baseline gap-2 rounded px-2 py-1.5"
+      style={{ background: x.feito ? "#fff" : C.bg,
+               border: `1px solid ${C.line}`, opacity: x.feito ? 1 : 0.75 }}>
+      <span className="w-[38px] shrink-0 text-[11px]"
+        style={{ fontFamily: F.mono, fontWeight: 700, color: x.hora ? C.ink : C.mute }}>
+        {x.hora || "—"}
+      </span>
+      <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold"
+        style={{ background: x.tipo === "atendimento" ? "#F0F8F4" : "#F6F3FA",
+                 color: x.tipo === "atendimento" ? C.verde : corTipo(x.tipo) }}>
+        {x.tipo === "atendimento" ? "Atendimento" : rotTipo(x.tipo)}
+      </span>
+      <span className="flex-1 text-[12px] leading-snug" style={{ color: C.ink }}>
+        {x.titulo}{x.fim ? ` (até ${x.fim})` : ""}
+      </span>
+      {/* O atendimento vem da própria tabela dele: marcar ou apagar
+          aqui mexeria no negócio, não na agenda. */}
+      {x.minha && (
+        <>
+          <button onClick={() => marcar(x)} className="shrink-0 text-[11px] font-semibold"
+            style={{ color: x.feito ? C.mute : C.verde }}>
+            {x.feito ? "✓" : "○ marcar"}
+          </button>
+          <button onClick={() => remover(x)} className="shrink-0 text-[11px]" style={{ color: C.mute }}>
+            apagar
+          </button>
+        </>
+      )}
     </div>
   );
 }
@@ -14430,6 +14694,9 @@ function App() {
   // Chegou pelo link do "esqueci minha senha": a sessão vem no
   // fragmento da URL e a única tela que faz sentido é a da senha.
   const [recuperando, setRecuperando] = useState(false);
+  // Quem preenche folha de bordo recebe o lembrete de meia em meia
+  // hora. O gerente não — ele vê a caixa pelo botão do "Meu dia".
+  const pedeLembrete = !!perfil && perfil.papel !== "gerente";
 
   const verQuemSou = async () => {
     try {
@@ -14506,6 +14773,9 @@ function App() {
 
   return (
     <Shell perfil={perfil} tela={tela} setTela={setTela}>
+      {/* Fica dentro da casca, sobre qualquer destino: a pergunta
+          aparece onde a pessoa estiver, e não só no "Meu dia". */}
+      {pedeLembrete && <LembreteDoDia perfil={perfil} />}
       {tela === "meudia" && <TelaMeuDia perfil={perfil} />}
       {tela === "prevendas" && <TelaPreVendas perfil={perfil} aoAbrirAtendimento={abrir} />}
       {tela === "atendimentos" && <CRM perfil={perfil} aoAbrir={abrir} mes={{ ...mes, todos: true }} />}
