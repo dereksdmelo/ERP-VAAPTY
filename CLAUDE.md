@@ -876,6 +876,21 @@ sorteio dentro, `simularPorMelhor()` tenta algumas vezes corrigindo pela
 razão e fica com a rodada mais perto. Conferido: alvo 40.600 crava em
 40.600 com referência 45.009.
 
+**O arredondamento desce de degrau quando a centena zera a nuvem.** A
+conta da planilha arredonda tudo à centena, e o degrau é
+`0,018 × referência` — então **abaixo de uns R$ 2.800 ele arredonda
+para zero** e todas as propostas colapsam no mesmo número. O Derek viu
+em 15/09/2026 com uma proposta de R$ 2.000: cinquenta linhas de
+"R$ 2.000", que não é folha de negociação, é um carimbo.
+
+`degraus()` tenta a centena primeiro e **só desce para a dezena, e
+depois para o real, se o degrau tiver zerado**. Conferido: para
+44.935, 30.000, 15.000, 8.000, 5.000 e 3.000 a conta sai **bit a bit
+idêntica** à de antes — a planilha continua sendo a fonte, e o único
+caso que muda é o que estava quebrado. Com alvo de R$ 2.000 a folha
+passou de 1 para 33 valores distintos, e `simularPorMelhor` continua
+cravando o número pedido em todas as faixas, de R$ 500 a R$ 40.600.
+
 **Não se força a melhor no fim.** Daria o número exato sempre, mas a
 nuvem deixaria de ser a da planilha e a folha mostraria uma proposta que
 a conta não produz. Quando não crava, a tela diz onde o sorteio parou.

@@ -6229,22 +6229,49 @@ function EscutaPainel({ escuta, f, set, atendimentoId, taticas }) {
  */
 
 const cem = (n) => Math.round(n / 100) * 100;
+const noPasso = (n, passo) => Math.round(n / passo) * passo;
+
+/**
+ * **O arredondamento desce de degrau quando a centena zera a nuvem.**
+ *
+ * A conta da planilha arredonda tudo à centena, e isso funciona no
+ * carro — mas o degrau é `0,018 × referência`, então abaixo de uns
+ * R$ 2.800 ele arredonda para **zero** e todas as propostas colapsam
+ * no mesmo número. O Derek viu em 15/09/2026 com uma proposta de
+ * R$ 2.000: cinquenta linhas de "R$ 2.000", que não é folha de
+ * negociação, é um carimbo.
+ *
+ * O conserto tenta a centena primeiro e **só desce se o degrau tiver
+ * zerado**. Para tudo que hoje funciona, a conta sai bit a bit igual à
+ * de antes — a planilha continua sendo a fonte, e o único caso que
+ * muda é o que estava quebrado.
+ */
+function degraus(ref) {
+  for (const passo of [100, 10, 1]) {
+    const vmax = noPasso(ref * 0.9, passo);
+    const vmedio = noPasso(vmax * 0.9, passo);
+    const intervalo = noPasso((vmax - vmedio) / 5, passo);
+    if (intervalo > 0) return { passo, vmax, vmedio, intervalo };
+  }
+  // Valor tão baixo que nem o real separa os degraus. Um passo de R$ 1
+  // é o mínimo que ainda é dinheiro.
+  const vmax = Math.round(ref * 0.9);
+  return { passo: 1, vmax, vmedio: Math.round(vmax * 0.9), intervalo: 1 };
+}
 
 function simularPropostas(referencia, quantidade) {
   const ref = Number(referencia) || 0;
   const qtd = Math.max(1, Math.min(90, Math.round(Number(quantidade) || 0)));
   if (ref <= 0) return null;
 
-  const vmax = cem(ref * 0.9);
-  const vmedio = cem(vmax * 0.9);
-  const intervalo = cem((vmax - vmedio) / 5);
+  const { passo, vmax, vmedio, intervalo } = degraus(ref);
   const v0 = vmedio - 10 * intervalo;
 
   const valores = [];
   for (let n = 1; n <= qtd; n++) {
     const sorteio = Math.round(Math.random() * 16);
     const onda = Math.abs(Math.sin((Math.PI * n) / 45));
-    valores.push(cem(v0 + sorteio * intervalo * onda));
+    valores.push(noPasso(v0 + sorteio * intervalo * onda, passo));
   }
 
   const soma = valores.reduce((a, b) => a + b, 0);
