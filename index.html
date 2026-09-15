@@ -3155,39 +3155,90 @@ const extrairProtocolo = (html) => {
 function MandarAssinar({ doc, telefone, nome }) {
   const [indo, setIndo] = useState(false);
   const [link, setLink] = useState("");
+  const [copiou, setCopiou] = useState(false);
   const [erro, setErro] = useState("");
+  const campo = useRef(null);
 
   if (!doc || !doc.docId || ASSINAVEIS.indexOf(doc.tipo) < 0) return null;
 
   const gerar = async () => {
-    setIndo(true); setErro("");
+    setIndo(true); setErro(""); setCopiou(false);
     try {
       const d = await criarLinkAssinatura({ documento_id: doc.docId, nome, telefone });
       setLink(d.url);
-      // A janela abre no clique, como todo documento desta casa
-      // (decisão 15): pop-up disparado depois de um await é bloqueado.
-      const msg = `Oi${nome ? `, ${String(nome).split(" ")[0]}` : ""}! Segue o ${(doc.rotulo || "documento").toLowerCase()} para você conferir e assinar pelo celular:\n\n${d.url}\n\nO link é pessoal e vale por 7 dias.`;
-      window.open(telefone ? zap(telefone, msg) : d.url, "_blank");
+      // Tenta copiar sozinho, mas **o campo é a garantia**: o
+      // navegador recusa a área de transferência depois de um await em
+      // parte dos casos, e aí o negociador ficaria com o link
+      // invisível. O que não pode acontecer é ele achar que copiou.
+      try { await navigator.clipboard.writeText(d.url); setCopiou(true); } catch (e) {}
     } catch (e) { setErro(e.message); }
     setIndo(false);
   };
 
-  return (
-    <div className="mt-1">
-      {!link ? (
+  const copiar = async () => {
+    try { await navigator.clipboard.writeText(link); setCopiou(true); }
+    catch (e) {
+      // Sem permissão para a área de transferência, seleciona o texto:
+      // aí é ⌘C, e funciona em qualquer navegador.
+      if (campo.current) { campo.current.focus(); campo.current.select(); }
+    }
+  };
+
+  const msg = `Oi${nome ? `, ${String(nome).split(" ")[0]}` : ""}! Segue o ${(doc.rotulo || "documento").toLowerCase()} para você conferir e assinar pelo celular:\n\n${link}\n\nO link é pessoal e vale por 7 dias.`;
+
+  if (!link) {
+    return (
+      <div className="mt-1">
         <button onClick={gerar} disabled={indo}
           className="rounded-md px-2 py-1 text-[10px] font-semibold"
           style={{ border: `1px solid ${C.roxo}`, color: C.roxo, background: "#fff" }}>
-          {indo ? "gerando…" : telefone ? "mandar para assinar" : "criar link de assinatura"}
+          {indo ? "gerando…" : "criar link para assinar"}
         </button>
-      ) : (
-        <div className="text-[10px]" style={{ color: C.mute }}>
-          Link criado.{" "}
-          <button onClick={() => { navigator.clipboard.writeText(link).catch(() => {}); }}
-            className="font-semibold" style={{ color: C.roxo }}>copiar de novo</button>
-        </div>
-      )}
-      {erro && <p className="text-[10px]" style={{ color: C.laranja }}>{erro}</p>}
+        {erro && <p className="text-[10px]" style={{ color: C.laranja }}>{erro}</p>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-1.5 rounded-md p-2" style={{ background: "#F6F3FA", border: `1px solid ${C.line}` }}>
+      <div className="flex items-center gap-1.5">
+        {/* O link fica à vista e selecionável. Link que só existe na
+            área de transferência some no primeiro ⌘C de outra coisa. */}
+        <input ref={campo} readOnly value={link}
+          onFocus={(e) => e.target.select()}
+          className="min-w-0 flex-1 rounded px-1.5 py-1 text-[10px]"
+          style={{ border: `1px solid ${C.line}`, background: "#fff", fontFamily: F.mono, color: C.ink }} />
+        <button onClick={copiar}
+          className="shrink-0 rounded px-2 py-1 text-[10px] font-semibold"
+          style={{ background: copiou ? C.verde : C.roxo, color: "#fff" }}>
+          {copiou ? "✓ copiado" : "copiar"}
+        </button>
+      </div>
+      {/* Três saídas, e a ordem é a do uso.
+
+          **"Assinar agora" é para o cliente que está na mesa** — passa
+          o aparelho e ele assina ali, sem WhatsApp no meio. Era o que
+          faltava: o link nasceu pensando em quem foi embora, e a maior
+          parte dos documentos é assinada com a pessoa sentada na
+          frente. */}
+      <div className="mt-1.5 flex flex-wrap items-center gap-2">
+        <a href={link} target="_blank" rel="noopener noreferrer"
+          className="rounded px-2 py-1 text-[10px] font-semibold"
+          style={{ background: C.verde, color: "#fff" }}>
+          assinar agora
+        </a>
+        {telefone && (
+          <a href={zap(telefone, msg)} target="_blank" rel="noopener noreferrer"
+            className="text-[10px] font-semibold" style={{ color: C.verde }}>
+            mandar no WhatsApp
+          </a>
+        )}
+        <button onClick={() => { setLink(""); setCopiou(false); }}
+          className="text-[10px]" style={{ color: C.mute }}>
+          gerar outro
+        </button>
+        <span className="text-[10px]" style={{ color: C.mute }}>vale 7 dias · uma assinatura só</span>
+      </div>
     </div>
   );
 }
