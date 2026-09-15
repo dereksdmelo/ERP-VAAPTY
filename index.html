@@ -10135,27 +10135,35 @@ function LeadsPerdidos({ perfil }) {
           vender agora.
         </div>
       )}
-      <div className="grid gap-2">
-        {lista.map((l) => (
-          <div key={l.id} className="rounded-xl p-3.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="text-[15px] font-semibold">{l.nome}</div>
-                <div className="text-[13px]" style={{ color: C.mute }}>
+      {/* Mesma lista fina da fila de leads: as três abas se leem
+          igual, e trocar de aba não obriga a reaprender a tela. */}
+      <div className="overflow-hidden rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        {lista.map((l, k) => (
+          <div key={l.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2"
+            style={{ borderTop: k ? `1px solid ${C.line}` : "none" }}>
+            <div className="min-w-[150px] flex-1">
+              <div className="flex flex-wrap items-baseline gap-x-2">
+                <span className="text-[13.5px] font-semibold">{l.nome}</span>
+                <span className="text-[11.5px]" style={{ color: C.mute }}>
                   {[l.carro, rotulo(ORIGENS, l.origem)].filter(Boolean).join(" · ")}
-                </div>
-                {l.observacoes && (
-                  <div className="mt-1 text-[11px] leading-snug" style={{ color: C.mute, whiteSpace: "pre-wrap" }}>
-                    {l.observacoes}
-                  </div>
-                )}
+                </span>
               </div>
-              <span className="text-[11px] uppercase tracking-[0.06em]" style={{ color: C.mute }}>Perdido</span>
+              {l.observacoes && (
+                <div className="truncate text-[11px]" style={{ color: C.mute }}>
+                  {String(l.observacoes).split("\n").slice(-1)[0]}
+                </div>
+              )}
             </div>
-            <div className="mt-2 flex flex-wrap items-center gap-3 text-[13px]">
-              {l.telefone && <a href={`tel:${soDigitos(l.telefone)}`} style={{ color: C.roxo, fontWeight: 600 }}>{telBR(l.telefone)}</a>}
-              {l.telefone && <a href={zap(l.telefone, `Olá ${l.nome}! Aqui é da Vaapty Joinville. Tudo bem?`)} target="_blank" rel="noreferrer" style={{ color: C.verde, fontWeight: 600 }}>WhatsApp</a>}
-              <button onClick={() => voltar(l)} className="ml-auto rounded-lg px-3 py-1.5 font-semibold"
+            {l.telefone && (
+              <a href={`tel:${soDigitos(l.telefone)}`} className="text-[12.5px] font-semibold"
+                style={{ color: C.roxo, fontFamily: F.mono }}>{telBR(l.telefone)}</a>
+            )}
+            <div className="flex items-center gap-2 text-[12px]">
+              {l.telefone && (
+                <a href={zap(l.telefone, `Olá ${l.nome}! Aqui é da Vaapty Joinville. Tudo bem?`)}
+                  target="_blank" rel="noreferrer" style={{ color: C.verde, fontWeight: 600 }}>zap</a>
+              )}
+              <button onClick={() => voltar(l)} className="rounded-md px-2.5 py-1 font-semibold"
                 style={{ border: `1px solid ${C.roxo}`, color: C.roxo, background: "#fff" }}>
                 voltar para a fila
               </button>
@@ -10297,34 +10305,62 @@ function FunilLeads({ perfil, equipe }) {
         </div>
       )}
 
-      <div className="grid gap-2">
-        {(lista || []).map((l) => (
-          <div key={l.id} className="rounded-xl p-3.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="text-[15px] font-semibold">{l.nome}</div>
-                <div className="text-[13px]" style={{ color: C.mute }}>
+      {/* **A fila é lista, não cartões.** Cada lead ocupava três linhas
+          e um retângulo próprio; numa tela cabiam quatro. Quem trabalha
+          a fila liga em sequência e precisa ver o tamanho dela — foi o
+          pedido do Derek em 15/09/2026, "uma lista mais fininha pra
+          caber mais".
+
+          No desktop tudo cabe numa linha; no celular o nome e os
+          botões quebram, e é lá que o dedo precisa de alvo grande. */}
+      <div className="overflow-hidden rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        {(lista || []).map((l, k) => (
+          <div key={l.id}
+            className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2"
+            style={{ borderTop: k ? `1px solid ${C.line}` : "none" }}>
+
+            <div className="min-w-[150px] flex-1">
+              <div className="flex flex-wrap items-baseline gap-x-2">
+                <span className="text-[13.5px] font-semibold">{l.nome}</span>
+                <span className="text-[11.5px]" style={{ color: C.mute }}>
                   {[l.carro, rotulo(ORIGENS, l.origem)].filter(Boolean).join(" · ")}
-                  {l.proximo_contato && <span style={{ color: AMARELO.texto }}> · retornar {diaBR(l.proximo_contato)}</span>}
-                </div>
+                </span>
+                {l.proximo_contato && (
+                  <span className="text-[11.5px] font-semibold" style={{ color: AMARELO.texto }}>
+                    ↻ {diaBR(l.proximo_contato)}
+                  </span>
+                )}
               </div>
-              <span className="text-[11px] uppercase tracking-[0.06em]" style={{ color: C.mute }}>{LEAD_ROT[l.status]}</span>
+              {/* A anotação fica numa linha só, cortada: o que interessa
+                  na fila é lembrar que existe, não ler tudo. */}
+              {l.observacoes && (
+                <div className="truncate text-[11px]" style={{ color: C.mute }}>
+                  {String(l.observacoes).split("\n").slice(-1)[0]}
+                </div>
+              )}
             </div>
-            <div className="mt-2 flex flex-wrap items-center gap-3 text-[13px]">
-              {l.telefone && <a href={`tel:${soDigitos(l.telefone)}`} style={{ color: C.roxo, fontWeight: 600 }}>{telBR(l.telefone)}</a>}
-              {l.telefone && <a href={zap(l.telefone, `Olá ${l.nome}! Aqui é da Vaapty Joinville. Tudo bem?`)} target="_blank" rel="noreferrer" style={{ color: C.verde, fontWeight: 600 }}>WhatsApp</a>}
-              <button onClick={() => setAgendando(l)} className="rounded-lg px-3 py-1.5 font-semibold" style={{ background: C.roxo, color: "#fff" }}>Agendar</button>
+
+            {l.telefone && (
+              <a href={`tel:${soDigitos(l.telefone)}`} className="text-[12.5px] font-semibold"
+                style={{ color: C.roxo, fontFamily: F.mono }}>{telBR(l.telefone)}</a>
+            )}
+
+            <div className="flex items-center gap-2 text-[12px]">
+              {l.telefone && (
+                <a href={zap(l.telefone, `Olá ${l.nome}! Aqui é da Vaapty Joinville. Tudo bem?`)}
+                  target="_blank" rel="noreferrer" style={{ color: C.verde, fontWeight: 600 }}>zap</a>
+              )}
+              <button onClick={() => setAgendando(l)} className="rounded-md px-2.5 py-1 font-semibold"
+                style={{ background: C.roxo, color: "#fff" }}>Agendar</button>
               <button onClick={() => setVoltando(l)} style={{ color: C.mute }}>ligar depois</button>
-              <button onClick={() => setPerdendo(l)} className="ml-auto" style={{ color: C.mute }}>saiu da fila</button>
+              <button onClick={() => setPerdendo(l)} style={{ color: C.mute }}>saiu</button>
             </div>
+
+            <span className="w-[74px] shrink-0 text-right text-[10px] uppercase tracking-[0.05em]"
+              style={{ color: C.mute }}>{LEAD_ROT[l.status]}</span>
           </div>
         ))}
       </div>
-
-      {agendando && (
-        <Agendador lead={agendando} equipe={equipe} aoFechar={() => setAgendando(null)}
-          aoAgendar={async (dados) => { await mexer(agendando, dados); setAgendando(null); }} />
-      )}
 
       {perdendo && (
         <PorQuePerdeu aoFechar={() => setPerdendo(null)}
