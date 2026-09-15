@@ -402,6 +402,52 @@ module.exports = async function handler(req, res) {
   const tok = tokenDe(req);
   if (!tok) return res.status(401).json(SEM_LOGIN);
 
+  /**
+   * Em que pé está a assinatura de cada documento.
+   *
+   * **Uma consulta para a lista toda, não uma por documento.** Um
+   * atendimento tem pré-contrato, três termos de aceite e o check
+   * list; consultar um a um seriam cinco idas ao banco para desenhar
+   * uma tela.
+   *
+   * O estado sai da combinação de duas tabelas: existe assinatura →
+   * `assinado`; existe link vivo e não usado → `aguardando`; nada →
+   * o documento nunca foi mandado.
+   */
+  if (String(req.query.recurso || "") === "assinar-estado") {
+    try {
+      const ids = String(req.query.ids || "").split(",").map((x) => x.trim()).filter((x) => RX_UUID.test(x));
+      if (!ids.length) return res.status(200).json({ estados: {} });
+      const lista = ids.slice(0, 40).join(",");
+
+      const [assinadas, links] = await Promise.all([
+        banco(`${URL_BASE}/rest/v1/assinatura?select=codigo,documento_id,assinado_em,nome&documento_id=in.(${lista})`,
+          { headers: cabecalhos(tok) }),
+        banco(`${URL_BASE}/rest/v1/assinatura_link?select=documento_id,usado_em,expira_em,revogado_em&documento_id=in.(${lista})&order=criado_em.desc`,
+          { headers: cabecalhos(tok) }),
+      ]);
+
+      const estados = {};
+      (links || []).forEach((l) => {
+        // A lista vem da mais nova para a mais velha: a primeira que
+        // aparece por documento é a que vale.
+        if (estados[l.documento_id]) return;
+        const vivo = !l.revogado_em && !l.usado_em && new Date(l.expira_em) > new Date();
+        estados[l.documento_id] = { situacao: vivo ? "aguardando" : "expirado", expira_em: l.expira_em };
+      });
+      (assinadas || []).forEach((a) => {
+        estados[a.documento_id] = {
+          situacao: "assinado", codigo: a.codigo, assinado_em: a.assinado_em, nome: a.nome,
+        };
+      });
+
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(200).json({ estados });
+    } catch (e) {
+      return res.status(e.status || 400).json({ erro: limpar(e.message) || "Falhou." });
+    }
+  }
+
   // Criar o convite é da equipe, e passa pelo token de quem pediu: a
   // função do banco confere `e_equipe()` com o JWT.
   if (String(req.query.recurso || "") === "assinar-link") {

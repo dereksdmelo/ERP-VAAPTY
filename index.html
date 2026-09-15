@@ -948,6 +948,15 @@ async function consultarFunil(de, ate) {
  * de servidor, não entra em log de proxy e não viaja no cabeçalho
  * Referer quando o cliente clica em alguma coisa depois.
  */
+async function lerEstadosAssinatura(ids) {
+  const lista = (ids || []).filter(Boolean);
+  if (!lista.length) return {};
+  const r = await fetchAut(`/api/documento?recurso=assinar-estado&ids=${lista.join(",")}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui ler o estado das assinaturas.");
+  return d.estados || {};
+}
+
 async function criarLinkAssinatura({ documento_id, nome, telefone, dias }) {
   const r = await fetchAut("/api/documento?recurso=assinar-link", {
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -3152,7 +3161,7 @@ const extrairProtocolo = (html) => {
  * em claro, e ele vale — token em claro no banco é token vazado junto
  * com o banco.
  */
-function MandarAssinar({ doc, telefone, nome }) {
+function MandarAssinar({ doc, telefone, nome, estado, aoMudar }) {
   const [indo, setIndo] = useState(false);
   const [link, setLink] = useState("");
   const [copiou, setCopiou] = useState(false);
@@ -3171,6 +3180,7 @@ function MandarAssinar({ doc, telefone, nome }) {
       // parte dos casos, e aí o negociador ficaria com o link
       // invisível. O que não pode acontecer é ele achar que copiou.
       try { await navigator.clipboard.writeText(d.url); setCopiou(true); } catch (e) {}
+      if (aoMudar) aoMudar();
     } catch (e) { setErro(e.message); }
     setIndo(false);
   };
@@ -3186,14 +3196,42 @@ function MandarAssinar({ doc, telefone, nome }) {
 
   const msg = `Oi${nome ? `, ${String(nome).split(" ")[0]}` : ""}! Segue o ${(doc.rotulo || "documento").toLowerCase()} para você conferir e assinar pelo celular:\n\n${link}\n\nO link é pessoal e vale por 7 dias.`;
 
-  if (!link) {
+  // **Assinado é estado final, e a tela para aqui.** Gerar link novo
+  // para documento já assinado produziria uma segunda assinatura da
+  // mesma via — e aí ninguém sabe qual vale. Quem precisa de outra via
+  // gera o documento de novo, que nasce com protocolo próprio.
+  if (estado && estado.situacao === "assinado") {
     return (
-      <div className="mt-1">
+      <div className="mt-1 flex flex-wrap items-center gap-2 rounded-md px-2 py-1.5"
+        style={{ background: "#F0F8F4", border: `1px solid ${C.verde}` }}>
+        <span className="text-[10px] font-bold" style={{ color: C.verde }}>✓ ASSINADO</span>
+        <span className="text-[10px]" style={{ color: C.verde }}>
+          {estado.nome ? `${estado.nome} · ` : ""}{estado.assinado_em ? new Date(estado.assinado_em).toLocaleString("pt-BR") : ""}
+        </span>
+        <a href={`/verificar.html?c=${encodeURIComponent(estado.codigo)}`} target="_blank" rel="noopener noreferrer"
+          className="text-[10px] font-semibold" style={{ color: C.roxo, fontFamily: F.mono }}>
+          {estado.codigo}
+        </a>
+      </div>
+    );
+  }
+
+  if (!link) {
+    const esperando = estado && estado.situacao === "aguardando";
+    return (
+      <div className="mt-1 flex flex-wrap items-center gap-2">
         <button onClick={gerar} disabled={indo}
           className="rounded-md px-2 py-1 text-[10px] font-semibold"
-          style={{ border: `1px solid ${C.roxo}`, color: C.roxo, background: "#fff" }}>
-          {indo ? "gerando…" : "criar link para assinar"}
+          style={{ border: `1px solid ${esperando ? C.line : C.roxo}`,
+                   color: esperando ? C.mute : C.roxo, background: "#fff" }}>
+          {indo ? "gerando…" : esperando ? "gerar outro link" : "criar link para assinar"}
         </button>
+        {esperando && (
+          <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold"
+            style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
+            aguardando assinatura
+          </span>
+        )}
         {erro && <p className="text-[10px]" style={{ color: C.laranja }}>{erro}</p>}
       </div>
     );
@@ -3876,6 +3914,34 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   }, [atendimento && atendimento.id]);
 
   const docs = f.documentos || [];
+
+  /**
+   * Em que pé está cada assinatura.
+   *
+   * **Recarrega quando a janela volta ao foco.** O negociador aperta
+   * "assinar agora", o cliente assina na outra aba, e ele volta — se a
+   * tela não se atualizasse aí, ele veria "aguardando" com o documento
+   * já assinado, e mandaria o link de novo. É o momento exato em que a
+   * resposta mudou.
+   */
+  const [assin, setAssin] = useState({});
+  const idsAssinaveis = docs.filter((x) => x.docId && ASSINAVEIS.indexOf(x.tipo) >= 0).map((x) => x.docId);
+  const chaveIds = idsAssinaveis.join(",");
+  useEffect(() => {
+    if (!chaveIds) { setAssin({}); return; }
+    let vivo = true;
+    const buscar = () => lerEstadosAssinatura(chaveIds.split(","))
+      .then((e) => { if (vivo) setAssin(e); }).catch(() => {});
+    buscar();
+    const aoVoltar = () => { if (!document.hidden) buscar(); };
+    document.addEventListener("visibilitychange", aoVoltar);
+    window.addEventListener("focus", buscar);
+    return () => {
+      vivo = false;
+      document.removeEventListener("visibilitychange", aoVoltar);
+      window.removeEventListener("focus", buscar);
+    };
+  }, [chaveIds]);
   // A ordem do fechamento em três verdades, calculadas uma vez.
   //
   // O contrato abre depois do laudo — aprovado, ou reprovado **com o
@@ -4800,7 +4866,8 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                       {docsDe("extrato_ofertas", i + 1).concat(docsDe("termo_aceite", i + 1)).map((d, k) => (
                         <div key={k} className="mt-1 text-[10px]" style={{ color: C.verde }}>
                           {d.rotulo} às {hhmm(d.em)}{d.protocolo ? ` · ${d.protocolo}` : ""}{d.noBanco ? "" : " · fora do banco"}
-                          <MandarAssinar doc={d} telefone={cliente.cliente_telefone} nome={cliente.cliente_nome} />
+                          <MandarAssinar doc={d} telefone={cliente.cliente_telefone} nome={cliente.cliente_nome}
+                            estado={assin[d.docId]} aoMudar={() => setAssin({ ...assin, [d.docId]: { situacao: "aguardando" } })} />
                         </div>
                       ))}
                     </div>
@@ -4881,7 +4948,8 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 {docsDe("pre_contrato").concat(docsDe("autorizacao_cautelar")).map((d, k) => (
                   <div key={k} className="text-[11px]" style={{ color: C.verde }}>
                     {d.rotulo} às {hhmm(d.em)}{d.protocolo ? ` · ${d.protocolo}` : ""}
-                    <MandarAssinar doc={d} telefone={cliente.cliente_telefone} nome={cliente.cliente_nome} />
+                    <MandarAssinar doc={d} telefone={cliente.cliente_telefone} nome={cliente.cliente_nome}
+                            estado={assin[d.docId]} aoMudar={() => setAssin({ ...assin, [d.docId]: { situacao: "aguardando" } })} />
                   </div>
                 ))}
                 {!podeImprimir && (
@@ -4928,7 +4996,8 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               {docsDe("check_list").map((d, k) => (
                 <div key={k} className="mt-1 text-[11px]" style={{ color: C.verde }}>
                   {d.rotulo} às {hhmm(d.em)}{d.protocolo ? ` · ${d.protocolo}` : ""}
-                  <MandarAssinar doc={d} telefone={cliente.cliente_telefone} nome={cliente.cliente_nome} />
+                  <MandarAssinar doc={d} telefone={cliente.cliente_telefone} nome={cliente.cliente_nome}
+                            estado={assin[d.docId]} aoMudar={() => setAssin({ ...assin, [d.docId]: { situacao: "aguardando" } })} />
                 </div>
               ))}
             </Bloco>
