@@ -2351,3 +2351,93 @@ tudo de novo.
 **O registro falha em silêncio**, de propósito: ele é subproduto do que
 a pessoa veio fazer, e um erro ali não pode aparecer como se o
 atendimento não tivesse salvado.
+
+
+### 42. Assinatura eletrônica própria: o papel some do caminho
+
+O Derek trouxe em 15/09/2026 a especificação do assinador que já roda
+no ERP da Camisetas Já, escrita para ser reproduzida aqui. O objetivo
+dele é direto: *"aí não precisamos imprimir"*.
+
+**Três pilares, e só valem juntos.** Aceite expresso (cláusula no
+documento + caixa de ciência), trilha de auditoria (quem, quando, de
+onde, em quê, o desenho) e integridade (SHA-256 conferível por
+qualquer pessoa). Trilha sem aceite prova que alguém clicou, não que
+concordou; aceite sem hash não impede trocar o arquivo depois; hash
+sem trilha prova que o arquivo não mudou e nada sobre quem assinou.
+
+**O ZapSign fica, e só no contrato final de compra** — decisão do
+Derek: "a validade é melhor". Todo o resto do caminho vai pelo
+assinador próprio. **A cláusula só entra nos documentos que vão por
+ele**: pô-la no contrato do ZapSign descreveria um procedimento que
+não aconteceu. `ASSINAVEIS` é a lista — pré-contrato, termo de aceite
+e check list. Autorização de cautelar não precisa, e os extratos são
+folha de mesa, não instrumento: ninguém assina uma lista de propostas.
+
+**A cláusula é texto jurídico, e a decisão 7 vale aqui inteira.** O
+Derek autorizou acrescentá-la ("só adiciona a cláusula que dá validade
+à assinatura digital"); o resto do contrato é o da casa e não foi
+tocado. Ela mora em `CLAUSULA_ASSINATURA`, em um lugar só. **Documento
+gerado antes de 15/09/2026 não a tem** — quem for mandar um antigo
+para assinar gera de novo primeiro.
+
+---
+
+**Três fragilidades da especificação de origem foram corrigidas aqui,
+e ela mesma pede isso.**
+
+**O link tem token de verdade.** Lá a URL é `?orc=ORC-0123`,
+sequencial: quem chutar um código abre o pedido de outra pessoa e pode
+assiná-lo — o documento diz, com todas as letras, *"não copie para o
+Vaapty"*. Aqui são 32 bytes aleatórios e o banco guarda **só o
+SHA-256**, como senha. Vazamento do banco não entrega link nenhum, e
+link perdido não se recupera: gera-se outro.
+
+**O código de verificação nasce no servidor.** Lá o navegador sorteia
+o próprio identificador. Quem é identificado por um número não pode
+ser quem o escolhe.
+
+**O IP é lido da requisição, nunca do corpo.** Evidência que a parte
+interessada digita não é evidência. Cidade e UF vêm dos cabeçalhos da
+borda da Vercel — conferido no ar: "Joinville, SC, BR".
+
+**E a verificação pública mostra o mínimo.** Quem tem só o código vê o
+documento mascarado (`123******09`), sem IP e sem o arquivo. No ERP de
+origem o código sozinho abre o PDF inteiro e o IP completo.
+
+---
+
+**A chave de serviço não entra nisso, e essa foi a decisão de
+arquitetura mais importante.** O signatário é um cliente sem login: o
+caminho óbvio seria a `SUPABASE_SERVICE_KEY` — numa rota **pública**, o
+que abriria a tabela `atendimento` inteira, com CPF e telefone de
+cliente. Em vez disso, as três operações do público passam por funções
+`security definer` estreitas (0048) que exigem o token do link. Mesmo
+remédio da `marcar_contrato_assinado()` (0015) e da senha (0032).
+**Quem trocar isso pela chave de serviço está desfazendo a decisão 9.**
+
+**Não há PDF, e isso é decisão.** Gerar PDF no navegador pediria
+html2canvas + jsPDF, e guardá-lo pediria a chave de serviço no
+Storage. O que se assina e se hasheia é o **HTML do documento**, que já
+é a fonte única (decisão 7) — e o hash do conteúdo é mais robusto que
+o do PDF, que muda se a fonte ou a margem mudarem. O desenho da
+assinatura viaja como PNG dentro das evidências.
+
+**As duas páginas do público são arquivos ESTÁTICOS** (`assinar.html`,
+`verificar.html`). O teto de 12 funções da Vercel está cheio; fossem
+funções, estas telas não existiriam. **Quem as transformar em função
+derruba o build inteiro.**
+
+**O token vai no fragmento (`#t=`), não na query.** Fragmento não entra
+em log de servidor, não entra em log de proxy e não viaja no cabeçalho
+`Referer`. A página lê o `location.hash` e manda o token no corpo do
+POST.
+
+**Uso único garantido pela transação.** O `update … where usado_em is
+null` só pega a linha uma vez: dois toques no botão, ou dois
+aparelhos, produzem uma assinatura só. Conferido no ar — a segunda
+tentativa volta "Este link não está mais válido".
+
+**O CPF é validado pelos dígitos no navegador.** Documento inventado no
+campo é a falha mais comum, e ela só aparece meses depois, quando
+alguém precisa do papel.
