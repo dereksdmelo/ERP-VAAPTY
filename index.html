@@ -10227,6 +10227,53 @@ function PorQuePerdeu({ aoEscolher, aoFechar }) {
   );
 }
 
+/**
+ * A ordem da fila, e ela é a ordem de quem liga.
+ *
+ * Regra do Derek em 15/09/2026:
+ *
+ *   1. ATRASADO   data já passou        vermelho — é dívida
+ *   2. HOJE       data é hoje           amarelo  — é o compromisso do dia
+ *   3. SEM DATA   nunca foi trabalhado  o mais antigo primeiro
+ *   4. AGENDADO   data no futuro        verde, por data
+ *
+ * **Sem data vem ANTES de quem tem data futura**, e isso não é
+ * descuido: lead que ninguém tocou é o mais quente da fila — ele
+ * acabou de entrar e ainda não ouviu a loja. Quem já tem retorno
+ * marcado para semana que vem está resolvido até lá.
+ *
+ * **E o mais antigo sem data vem primeiro** porque um lead esquecido
+ * há três dias esfria; o de hoje de manhã ainda está morno.
+ */
+const FAIXAS_LEAD = {
+  atrasado: { ordem: 0, cor: "#C0281B", rot: "atrasado" },
+  hoje:     { ordem: 1, cor: "#B26B00", rot: "hoje" },
+  semdata:  { ordem: 2, cor: null,      rot: "" },
+  futuro:   { ordem: 3, cor: "#1D7F58", rot: "" },
+};
+
+function faixaDoLead(l) {
+  const d = String(l.proximo_contato || "").slice(0, 10);
+  if (!d) return "semdata";
+  const hoje = hojeEmSP();
+  if (d < hoje) return "atrasado";
+  if (d === hoje) return "hoje";
+  return "futuro";
+}
+
+function ordenarFila(lista) {
+  return (lista || []).slice().sort((a, b) => {
+    const fa = FAIXAS_LEAD[faixaDoLead(a)], fb = FAIXAS_LEAD[faixaDoLead(b)];
+    if (fa.ordem !== fb.ordem) return fa.ordem - fb.ordem;
+    // Dentro de atrasado, o mais vencido primeiro — é o que espera há
+    // mais tempo. Dentro de futuro, o mais próximo primeiro.
+    const da = String(a.proximo_contato || ""), db = String(b.proximo_contato || "");
+    if (da && db && da !== db) return da < db ? -1 : 1;
+    // Sem data (e empates): o mais antigo primeiro.
+    return String(a.criado_em || "") < String(b.criado_em || "") ? -1 : 1;
+  });
+}
+
 function FunilLeads({ perfil, equipe }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
@@ -10333,10 +10380,15 @@ function FunilLeads({ perfil, equipe }) {
           No desktop tudo cabe numa linha; no celular o nome e os
           botões quebram, e é lá que o dedo precisa de alvo grande. */}
       <div className="overflow-hidden rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-        {(lista || []).map((l, k) => (
+        {ordenarFila(lista).map((l, k) => (
           <div key={l.id}
-            className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2"
-            style={{ borderTop: k ? `1px solid ${C.line}` : "none" }}>
+            className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 pr-3"
+            style={{ borderTop: k ? `1px solid ${C.line}` : "none",
+                     // O traço à esquerda é o que deixa a fila legível de
+                     // longe: vermelho em cima, depois amarelo, e o verde
+                     // lá embaixo é o que já está resolvido.
+                     borderLeft: `3px solid ${FAIXAS_LEAD[faixaDoLead(l)].cor || "transparent"}`,
+                     paddingLeft: 9 }}>
 
             <div className="min-w-[150px] flex-1">
               <div className="flex flex-wrap items-baseline gap-x-2">
@@ -10344,11 +10396,14 @@ function FunilLeads({ perfil, equipe }) {
                 <span className="text-[11.5px]" style={{ color: C.mute }}>
                   {[l.carro, rotulo(ORIGENS, l.origem)].filter(Boolean).join(" · ")}
                 </span>
-                {l.proximo_contato && (
-                  <span className="text-[11.5px] font-semibold" style={{ color: AMARELO.texto }}>
-                    ↻ {diaBR(l.proximo_contato)}
-                  </span>
-                )}
+                {l.proximo_contato && (() => {
+                  const f = FAIXAS_LEAD[faixaDoLead(l)];
+                  return (
+                    <span className="text-[11.5px] font-semibold" style={{ color: f.cor || C.mute }}>
+                      ↻ {diaBR(l.proximo_contato)}{f.rot ? ` · ${f.rot}` : ""}
+                    </span>
+                  );
+                })()}
               </div>
               {/* A anotação fica numa linha só, cortada: o que interessa
                   na fila é lembrar que existe, não ler tudo. */}
