@@ -1759,6 +1759,71 @@ function gerarDescritivo(f, n) {
 }
 // Só o que tem coluna em supabase/migrations/0001_veiculo.sql. O
 // mapeamento nome → coluna mora no servidor, em api/veiculo.js.
+/**
+ * O caminho de volta: a linha do banco vira ficha da tela.
+ *
+ * **Sem isto, a ficha só existia no aparelho em que foi digitada.** O
+ * negociador preencheu um 206 no celular, abriu no computador e a tela
+ * veio vazia — o dado estava inteiro no banco, mas ninguém o lia de
+ * volta. Aconteceu em 15/09/2026 e é o limite que PENDENCIAS.md
+ * chamava de "dados presos ao aparelho".
+ *
+ * **E o risco era maior que o susto:** salvar do aparelho "vazio"
+ * mandaria os campos em branco por cima do que já estava gravado
+ * (`somenteEnviadas` só descarta o que NÃO vem no corpo — vazio vem, e
+ * sobrescreve). O conserto é ler antes de deixar escrever.
+ *
+ * É o inverso de `fichaParaBanco`; **quem acrescentar campo lá
+ * acrescenta aqui**, senão o campo novo volta a viver só no aparelho.
+ */
+function fichaDoVeiculo(v) {
+  if (!v) return null;
+  const cap = (x) => (x ? String(x).charAt(0).toUpperCase() + String(x).slice(1) : "");
+  const ano = v.ano_fabricacao && v.ano_modelo && v.ano_fabricacao !== v.ano_modelo
+    ? `${v.ano_fabricacao}/${v.ano_modelo}`
+    : String(v.ano_modelo || v.ano_fabricacao || "");
+  const n = (x) => (x == null ? "" : String(x));
+  return {
+    placa: n(v.placa), chassi: n(v.chassi), modelo: n(v.marca_modelo), ano,
+    cor: n(v.cor), combustivel: n(v.combustivel), cambio: n(v.cambio), renavam: n(v.renavam),
+    km: n(v.km_atual), kmEntrada: n(v.km_entrada),
+    fipe: n(v.fipe_valor), fipeCodigo: n(v.fipe_codigo), por: n(v.valor_por),
+    gastos: n(v.gastos_descricao),
+    pneus: [cap(v.pneu_de), cap(v.pneu_dd), cap(v.pneu_te), cap(v.pneu_td)],
+    leilao: !!v.leilao_sinistro, gnv: !!v.gnv,
+    opcionais: Array.isArray(v.opcionais) ? v.opcionais : [],
+    lataria: n(v.detalhes_lataria), mecanica: n(v.detalhes_mecanica),
+    positivos: (v.pontos_positivos || []).join("\n"),
+    ressalvas: (v.ressalvas_lojista || []).join("\n"),
+    internas: n(v.observacoes_internas),
+    marca: n(v.marca), modeloCurto: n(v.modelo), versao: n(v.versao),
+    fipeMarcaCodigo: n(v.fipe_marca_codigo), fipeModeloCodigo: n(v.fipe_modelo_codigo),
+    fipeAnoCodigo: n(v.fipe_ano_codigo), tipoVeiculo: n(v.tipo_veiculo) || "1",
+    shinkaiEm: v.shinkai_em || null, shinkaiStatus: n(v.shinkai_status), shinkaiUrl: n(v.shinkai_url),
+  };
+}
+
+/**
+ * Mescla a ficha do banco na do aparelho — **sem nunca sobrescrever o
+ * que a pessoa acabou de digitar**.
+ *
+ * O banco preenche só o que está vazio aqui. Quem está com o cliente
+ * na frente e digitou o KM agora não pode ver o número mudar sozinho
+ * porque o servidor tinha outro; e quem abriu num aparelho novo
+ * precisa da ficha inteira. As duas coisas cabem nesta regra.
+ */
+function mesclarFicha(local, doBanco) {
+  if (!doBanco) return local;
+  const vazio = (x) =>
+    x == null || x === "" || x === false ||
+    (Array.isArray(x) && (!x.length || x.every((y) => !y)));
+  const out = { ...local };
+  Object.keys(doBanco).forEach((k) => {
+    if (vazio(out[k]) && !vazio(doBanco[k])) out[k] = doBanco[k];
+  });
+  return out;
+}
+
 const fichaParaBanco = (f) => ({
   placa: f.placa, chassi: f.chassi, modelo: f.modelo, ano: f.ano,
   marca: f.marca, modeloCurto: f.modeloCurto, versao: f.versao,
@@ -3453,6 +3518,43 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         try {
           const r = await window.storage.get(CH_VEIC);
           if (r && r.value) { vid = JSON.parse(r.value).id || null; setVeiculoId(vid); }
+        } catch (e) {}
+      }
+
+      /**
+       * **A ficha vem do banco, e é isto que tira o dado do aparelho.**
+       *
+       * Até 15/09/2026 a tela só lia o `localStorage`: o negociador
+       * preenchia um 206 no celular, abria no computador e via tudo em
+       * branco — o dado estava salvo, ninguém o lia de volta. E a linha
+       * do CRM, que se monta da ficha da tela, saía pela metade pelo
+       * mesmo motivo.
+       *
+       * O banco preenche só o que está vazio aqui (`mesclarFicha`):
+       * quem digitou o KM agora não pode ver o número mudar sozinho
+       * porque o servidor tinha outro.
+       *
+       * **Falha em silêncio.** Sem rede, o aparelho continua com o que
+       * tem — bloquear o atendimento por causa de uma leitura seria
+       * pior que a tela incompleta.
+       */
+      if (atendimento && atendimento.id) {
+        try {
+          const vBanco = await veiculoDoAtendimento(atendimento.id);
+          const daFicha = fichaDoVeiculo(vBanco);
+          if (daFicha) {
+            if (vBanco && vBanco.id && !vid) { vid = vBanco.id; setVeiculoId(vid); }
+            const junta = (x) => {
+              const n = mesclarFicha(x, daFicha);
+              fRef.current = n;
+              return n;
+            };
+            setF(junta);
+            // `fRef` é a versão autoritativa para o que roda depois de
+            // um await; sem atualizá-la aqui, o primeiro salvamento
+            // mandaria de novo a ficha velha.
+            fRef.current = mesclarFicha(fRef.current || VAZIO, daFicha);
+          }
         } catch (e) {}
       }
 

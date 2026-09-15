@@ -1076,9 +1076,9 @@ lista que acumula item resolvido para de ser lida. Os principais:
 - **O login existe, o CRM ainda não.** Nome e telefone de cliente já
   têm coluna (0004) mas ainda não têm tela. Enquanto a etapa 3 não
   chega, o sistema segue sem dado pessoal dentro.
-- **Dados presos ao aparelho.** Fora a ficha do veículo salva no banco,
-  tudo o mais do atendimento — fotos, rodadas, notas da espera — vive no
-  celular. Trocou de aparelho, perdeu.
+- **Dados presos ao aparelho.** As rodadas, as notas da espera e os
+  toggles do APONTE ainda vivem no celular. **A ficha do veículo saiu
+  dessa lista em 15/09/2026** — ver decisão 43.
 - **Link de foto vence em 1 h.** As miniaturas usam URL assinada; um
   atendimento que passe disso sem recarregar a tela mostra imagem
   quebrada. Recarregar refaz os links.
@@ -2489,3 +2489,39 @@ tentativa volta "Este link não está mais válido".
 **O CPF é validado pelos dígitos no navegador.** Documento inventado no
 campo é a falha mais comum, e ela só aparece meses depois, quando
 alguém precisa do papel.
+
+
+### 43. A ficha vem do banco, e não só do aparelho
+
+Um negociador preencheu um 206 no celular, abriu o mesmo atendimento no
+computador e viu tudo em branco. Depois copiou a linha do CRM e ela
+saiu pela metade.
+
+**O dado não tinha se perdido.** Fui ao banco antes de teorizar: a
+ficha estava inteira — chassi, câmbio, os quatro pneus, os opcionais,
+FIPE e POR. O que faltava era alguém **ler de volta**: a tela montava a
+ficha só do `localStorage`, que é por aparelho (decisão 10), e a linha
+do CRM se monta da ficha da tela.
+
+**E o susto escondia um risco maior.** Salvar do aparelho "vazio"
+mandaria os campos em branco por cima do que já estava gravado —
+`somenteEnviadas()` descarta a coluna que **não vem** no corpo, e vazio
+vem. Era perda de dado esperando acontecer.
+
+**`fichaDoVeiculo()` é o caminho de volta de `fichaParaBanco()`.**
+**Quem acrescentar campo em um acrescenta no outro**, senão o campo
+novo volta a viver só no aparelho.
+
+**O banco preenche só o que está vazio na tela** (`mesclarFicha`). Quem
+está com o cliente na frente e acabou de digitar o KM não pode ver o
+número mudar sozinho porque o servidor tinha outro; quem abriu num
+aparelho novo precisa da ficha inteira. As duas coisas cabem nessa
+regra, e ela foi conferida com os dois casos.
+
+**`fRef` é atualizada junto.** Ela é a versão autoritativa para o que
+roda depois de um `await`; sem isso o primeiro salvamento mandaria de
+novo a ficha velha e desfaria a leitura.
+
+**A leitura falha em silêncio.** Sem rede o aparelho segue com o que
+tem — travar o atendimento por causa de uma consulta seria pior que a
+tela incompleta.
