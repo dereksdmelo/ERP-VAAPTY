@@ -272,6 +272,16 @@ async function zapsignWebhook(req, res) {
  * interessada digita não é evidência — é a recomendação 4.3 da
  * especificação, e o ERP de origem não a segue.
  */
+// Este arquivo não tem `lerCorpo` — cada rota desembrulha o corpo na
+// mão. Com quatro rotas novas, vale o helper; sem ele, o primeiro
+// teste no ar devolveu "lerCorpo is not defined".
+function corpoDe(req) {
+  let c = req.body;
+  if (c && typeof Buffer !== "undefined" && Buffer.isBuffer(c)) c = c.toString("utf8");
+  if (typeof c === "string") { try { c = JSON.parse(c); } catch (e) { c = null; } }
+  return c && typeof c === "object" ? c : null;
+}
+
 const ipDe = (req) => {
   const x = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
   return x || String(req.headers["x-real-ip"] || "") || "";
@@ -305,7 +315,7 @@ async function rpc(nome, corpo) {
 // entra em log de servidor, de proxy e no cabeçalho Referer.
 async function abrirAssinatura(req, res) {
   if (req.method !== "POST") { res.setHeader("Allow", "POST"); return res.status(405).json({ erro: "Use POST." }); }
-  const c = await lerCorpo(req);
+  const c = corpoDe(req);
   const token = String((c && c.token) || "");
   if (token.length < 32) return res.status(400).json({ erro: "Link inválido." });
 
@@ -324,7 +334,7 @@ async function abrirAssinatura(req, res) {
 // Gravar a assinatura (público, com o token).
 async function assinarPublico(req, res) {
   if (req.method !== "POST") { res.setHeader("Allow", "POST"); return res.status(405).json({ erro: "Use POST." }); }
-  const c = await lerCorpo(req);
+  const c = corpoDe(req);
   if (!c) return res.status(400).json({ erro: "Corpo vazio." });
 
   const d = await rpc("gravar_assinatura", {
@@ -397,7 +407,7 @@ module.exports = async function handler(req, res) {
   if (String(req.query.recurso || "") === "assinar-link") {
     try {
       if (req.method !== "POST") { res.setHeader("Allow", "POST"); return res.status(405).json({ erro: "Use POST." }); }
-      const c = await lerCorpo(req);
+      const c = corpoDe(req);
       const doc = String((c && c.documento_id) || "");
       if (!RX_UUID.test(doc)) return res.status(400).json({ erro: "documento_id inválido." });
 
