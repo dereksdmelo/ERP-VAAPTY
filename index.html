@@ -12639,6 +12639,97 @@ function ContratoDoNegocio({ atendimento, checklist, perfil, aoSalvarChecklist }
   );
 }
 
+/**
+ * Os documentos assinados eletronicamente, para o arquivo do negócio.
+ *
+ * Pedido do Derek em 15/09/2026: o assinado precisa ficar guardado e
+ * disponível ao administrativo e ao gestor.
+ *
+ * **O documento é montado no servidor, não guardado como arquivo.** O
+ * conteúdo vem da tabela `documento` — a mesma folha que o cliente leu
+ * — e o bloco de assinatura é reconstruído dos campos gravados. Guardar
+ * um PDF pronto no bucket pediria a chave de serviço numa rota que o
+ * cliente aciona (decisão 42), e o que esse arquivo provaria já está
+ * provado pelo hash: qualquer alteração muda o código.
+ *
+ * **Salvar em PDF é a impressão do navegador**, como todo documento
+ * desta casa (decisão 15). A janela abre ANTES do `await`: pop-up
+ * disparado depois de uma espera é bloqueado, e a impressão quebraria
+ * em silêncio.
+ */
+function DocumentosAssinados({ atendimentoId, perfil }) {
+  const [lista, setLista] = useState([]);
+  const [erro, setErro] = useState("");
+  const pode = !!(perfil && (perfil.administrativo || perfil.papel === "gerente"));
+
+  useEffect(() => {
+    if (!atendimentoId) return;
+    let vivo = true;
+    (async () => {
+      try {
+        // Os documentos pendem do VEÍCULO, não do atendimento — são
+        // duas voltas, como no check list ao lado.
+        const v = await veiculoDoAtendimento(atendimentoId);
+        if (!v || !v.id) return;
+        const docs = await listarDocumentos(v.id);
+        const ids = (docs || []).map((x) => x.id).filter(Boolean);
+        if (!ids.length) return;
+        const est = await lerEstadosAssinatura(ids);
+        const assinados = (docs || [])
+          .map((x) => ({ doc: x, e: est[x.id] }))
+          .filter((x) => x.e && x.e.situacao === "assinado");
+        if (vivo) setLista(assinados);
+      } catch (e) { if (vivo) setErro(e.message); }
+    })();
+    return () => { vivo = false; };
+  }, [atendimentoId]);
+
+  const abrir = async (codigo) => {
+    const j = window.open("", "_blank");
+    if (j) j.document.write("<p style='font:14px system-ui;padding:24px'>Montando o documento…</p>");
+    try {
+      const r = await fetchAut(`/api/documento?recurso=assinado&codigo=${encodeURIComponent(codigo)}`);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.erro || "Não consegui abrir.");
+      if (j) { j.document.open(); j.document.write(d.html); j.document.close(); }
+    } catch (e) {
+      setErro(e.message);
+      if (j) j.close();
+    }
+  };
+
+  if (!pode || (!lista.length && !erro)) return null;
+
+  return (
+    <div className="rounded-xl" style={{ background: C.paper, border: `1px solid ${C.verde}` }}>
+      <div className="px-3 py-2 text-[12px] font-semibold uppercase tracking-[0.06em]"
+        style={{ color: C.verde, borderBottom: `1px solid ${C.line}` }}>
+        Assinados eletronicamente · arquivo do negócio
+      </div>
+      <div className="space-y-1.5 px-3 py-2.5">
+        {lista.map(({ doc, e }) => (
+          <div key={doc.id} className="flex flex-wrap items-center gap-2 text-[12px]">
+            <span className="font-semibold">{ROT_DOC[doc.tipo] || doc.tipo}</span>
+            <span style={{ color: C.mute }}>
+              {e.nome} · {new Date(e.assinado_em).toLocaleString("pt-BR")}
+            </span>
+            <button onClick={() => abrir(e.codigo)}
+              className="rounded px-2 py-0.5 text-[11px] font-semibold"
+              style={{ background: C.roxoFraco, color: C.roxo }}>
+              abrir e salvar em PDF
+            </button>
+            <a href={`/verificar.html?c=${encodeURIComponent(e.codigo)}`} target="_blank" rel="noopener noreferrer"
+              className="text-[11px] font-semibold" style={{ color: C.verde, fontFamily: F.mono }}>
+              {e.codigo}
+            </a>
+          </div>
+        ))}
+        {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+      </div>
+    </div>
+  );
+}
+
 function ChecklistDocumentos({ atendimentoId, perfil }) {
   const [d, setD] = useState(null);
   const [erro, setErro] = useState("");
@@ -12890,6 +12981,8 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
       {/* O que veio da negociação e não é de nenhum item: comprovante de
           pagamento, extrato, termo de aceite. Some da conferência se não
           aparecer em lugar nenhum, e é papel do mesmo negócio. */}
+      <DocumentosAssinados atendimentoId={atendimentoId} perfil={perfil} />
+
       {(() => {
         const usados = {};
         d.itens.forEach((it) => { doItem(it[0]).forEach((a) => { usados[a.id] = 1; }); });

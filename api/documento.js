@@ -414,6 +414,92 @@ module.exports = async function handler(req, res) {
    * `assinado`; existe link vivo e não usado → `aguardando`; nada →
    * o documento nunca foi mandado.
    */
+  /**
+   * O documento assinado, pronto para arquivar.
+   *
+   * **Montado AQUI, a partir das colunas** — não é o HTML que o
+   * navegador do cliente mandou. O conteúdo vem da tabela `documento`
+   * (a mesma folha que ele leu) e o bloco de assinatura é reconstruído
+   * dos campos gravados. Aceitar o HTML do cliente como arquivo do
+   * negócio seria guardar como prova aquilo que a parte interessada
+   * produziu.
+   *
+   * **Sai como HTML, e imprimir para PDF é do navegador.** É o caminho
+   * de todo documento desta casa (decisão 15): sem biblioteca no
+   * servidor, e o arquivo sai com a fonte e a margem que a pessoa vê
+   * na tela. Guardar um PDF pronto no bucket pediria a chave de
+   * serviço, e o que ele provaria já está provado pelo hash.
+   */
+  if (String(req.query.recurso || "") === "assinado") {
+    try {
+      const cod = String(req.query.codigo || "").trim().toUpperCase();
+      if (!/^VPT-[A-Z0-9]{6,12}$/.test(cod)) return res.status(400).json({ erro: "Código inválido." });
+
+      const r = await banco(
+        // **O embed vai com apelido.** A tabela `assinatura` tem uma coluna
+        // `documento` (o CPF/CNPJ) e uma FK `documento_id` para a tabela
+        // `documento`: sem o apelido, os dois disputam o mesmo nome no
+        // retorno e o CPF some atrás do embed.
+        `${URL_BASE}/rest/v1/assinatura?select=*,doc:documento_id(tipo,conteudo,protocolo)&codigo=eq.${cod}&limit=1`,
+        { headers: cabecalhos(tok) });
+      const a = (Array.isArray(r) ? r[0] : r) || null;
+      // Vazio aqui é a RLS: quem não é da equipe não lê assinatura.
+      if (!a) return res.status(404).json({ erro: "Assinatura não encontrada." });
+
+      const ev = a.evidencias || {};
+      const png = typeof ev.assinatura_png === "string" && ev.assinatura_png.startsWith("data:image/png") ? ev.assinatura_png : "";
+      const quando = new Date(a.assinado_em).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+      const doc = (a.doc && a.doc.conteudo) || "";
+
+      const esc = (t) => String(t == null ? "" : t).replace(/[&<>"]/g, (c) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+      // O CPF sai com máscara: no papel do arquivo ele é lido por
+      // pessoa, não por máquina.
+      const d = String(a.documento || "");
+      const cpf = d.length === 11
+        ? d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4")
+        : d.length === 14
+          ? d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5")
+          : d;
+
+      const bloco = `
+<div style="margin-top:28px;padding:16px;border:1.5px solid #1D7F58;border-radius:8px;
+            font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+            page-break-inside:avoid">
+  <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#1D7F58;font-weight:700">
+    Assinado eletronicamente
+  </div>
+  ${png ? `<img src="${png}" alt="assinatura" style="display:block;height:76px;margin:10px 0 4px" />` : ""}
+  <div style="border-top:1px solid #999;width:280px;margin-bottom:8px"></div>
+  <table style="font-size:11.5px;border-collapse:collapse;line-height:1.5">
+    <tr><td style="padding-right:14px;color:#6B6478">Nome</td><td><strong>${esc(a.nome)}</strong></td></tr>
+    <tr><td style="padding-right:14px;color:#6B6478">CPF / CNPJ</td><td>${esc(cpf)}</td></tr>
+    <tr><td style="padding-right:14px;color:#6B6478">Data e hora</td><td>${esc(quando)} (horário de Brasília)</td></tr>
+    <tr><td style="padding-right:14px;color:#6B6478">Origem</td><td>${esc(a.local || "")}${a.ip ? ` · IP ${esc(a.ip)}` : ""}</td></tr>
+    <tr><td style="padding-right:14px;color:#6B6478">Dispositivo</td><td style="font-size:10px">${esc(String(a.user_agent || "").slice(0, 110))}</td></tr>
+    <tr><td style="padding-right:14px;color:#6B6478">Código</td><td><strong style="font-family:ui-monospace,Menlo,monospace">${esc(a.codigo)}</strong></td></tr>
+    <tr><td style="padding-right:14px;color:#6B6478;vertical-align:top">Integridade</td>
+        <td style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;word-break:break-all">${esc(a.pdf_sha256)}</td></tr>
+  </table>
+  <p style="font-size:10px;color:#6B6478;margin:10px 0 0;line-height:1.5">
+    Aceite registrado: “${esc(a.aceite_texto)}”
+  </p>
+  <p style="font-size:10px;color:#6B6478;margin:6px 0 0">
+    Confira a autenticidade em erpvaapty.vercel.app/verificar.html — código ${esc(a.codigo)}.
+  </p>
+</div>`;
+
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(200).json({
+        codigo: a.codigo, tipo: a.doc && a.doc.tipo, nome: a.nome,
+        assinado_em: a.assinado_em, html: doc + bloco,
+      });
+    } catch (e) {
+      return res.status(e.status || 400).json({ erro: limpar(e.message) || "Falhou." });
+    }
+  }
+
   if (String(req.query.recurso || "") === "assinar-estado") {
     try {
       const ids = String(req.query.ids || "").split(",").map((x) => x.trim()).filter((x) => RX_UUID.test(x));
