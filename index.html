@@ -948,6 +948,24 @@ async function consultarFunil(de, ate) {
  * de servidor, não entra em log de proxy e não viaja no cabeçalho
  * Referer quando o cliente clica em alguma coisa depois.
  */
+/**
+ * Os retornos marcados para um dia: leads da pré-venda e indicações.
+ *
+ * **Nada é copiado para a agenda.** Os dois vêm das próprias tabelas e
+ * entram na linha do dia na hora de desenhar — mesma regra do
+ * atendimento (decisão 41). Copiar criaria uma segunda verdade que
+ * envelhece quando o lead muda de status ou a data é remarcada.
+ */
+async function lerRetornosDoDia(dia) {
+  const [leads, inds] = await Promise.all([
+    fetchAut(`/api/atendimento?recurso=lead&fila=funil&proximo=${dia}`)
+      .then((r) => r.json()).then((d) => d.leads || []).catch(() => []),
+    fetchAut(`/api/atendimento?recurso=indicacoes&proximo=${dia}`)
+      .then((r) => r.json()).then((d) => d.indicacoes || []).catch(() => []),
+  ]);
+  return { leads, inds };
+}
+
 async function lerEstadosAssinatura(ids) {
   const lista = (ids || []).filter(Boolean);
   if (!lista.length) return {};
@@ -7288,10 +7306,23 @@ function LeadsIndicacao() {
   const [erro, setErro] = useState("");
   const [filtro, setFiltro] = useState("");
 
+  const [voltando, setVoltando] = useState(null);
+
   const carregar = (st) =>
     listarIndicacoes(st || undefined).then(setLista).catch((e) => setErro(e.message));
 
   useEffect(() => { if (aberto) { setErro(""); carregar(filtro); } }, [aberto, filtro]);
+
+  // A mesma escrita otimista, mas para qualquer campo — a data de
+  // retorno e a anotação entram pelo mesmo caminho do status.
+  const mudarIndicacao = async (l, mud) => {
+    setLista((ls) => ls.map((x) => (x.id === l.id ? { ...x, ...mud } : x)));
+    try { await atualizarIndicacao(l.id, mud); }
+    catch (e) {
+      setErro(e.message);
+      setLista((ls) => ls.map((x) => (x.id === l.id ? l : x)));
+    }
+  };
 
   const mudar = async (l, status) => {
     // Otimista: a fila é trabalhada com o telefone na orelha, e esperar
@@ -7349,7 +7380,8 @@ function LeadsIndicacao() {
                 <th className="py-1 pr-3 text-left font-medium">Negociador</th>
                 <th className="py-1 pr-3 text-left font-medium">Quem indicou</th>
                 <th className="py-1 pr-3 text-left font-medium">Telefone de quem indicou</th>
-                <th className="py-1 text-left font-medium">Status</th>
+                <th className="py-1 pr-3 text-left font-medium">Status</th>
+                <th className="py-1 text-left font-medium">Voltar a ligar</th>
               </tr>
             </thead>
             <tbody>
@@ -7368,17 +7400,48 @@ function LeadsIndicacao() {
                       ? <a href={`tel:${String(l.cliente_telefone).replace(/\D/g, "")}`} style={{ color: C.roxo }}>{l.cliente_telefone}</a>
                       : <span style={{ color: C.mute }}>—</span>}
                   </td>
-                  <td className="py-2">
+                  <td className="py-2 pr-3">
                     <select value={l.status} onChange={(e) => mudar(l, e.target.value)}
                       className="rounded border px-2 py-1 text-[11px]" style={{ borderColor: C.line, background: "#fff", color: C.ink }}>
                       {STATUS_LEAD.map(([k, r]) => <option key={k} value={k}>{r}</option>)}
                     </select>
+                  </td>
+                  {/* A data de retorno e a anotação: sem elas a fila diz
+                      quem ligar e não diz quando voltar, e o lead que não
+                      deu em nada na primeira ligação some da cabeça de
+                      quem ligou. */}
+                  <td className="py-2">
+                    <button onClick={() => setVoltando(l)}
+                      className="rounded px-2 py-1 text-[11px] font-semibold"
+                      style={{ border: `1px solid ${l.proximo_contato ? C.verde : C.line}`,
+                               color: l.proximo_contato ? C.verde : C.roxo, background: "#fff" }}>
+                      {l.proximo_contato ? `↻ ${diaBR(l.proximo_contato)}` : "marcar retorno"}
+                    </button>
+                    {l.observacoes && (
+                      <div className="mt-1 max-w-[260px] text-[10px] leading-snug" style={{ color: C.mute, whiteSpace: "pre-wrap" }}>
+                        {l.observacoes}
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      )}
+
+      {voltando && (
+        <QuandoVoltar titulo="Quando voltar a ligar para esta indicação?"
+          valor={voltando.proximo_contato || ""}
+          aoFechar={() => setVoltando(null)}
+          aoEscolher={async (dia, obs) => {
+            const nota = obs ? `${diaBR(dia)}: ${obs}` : "";
+            await mudarIndicacao(voltando, {
+              proximo_contato: dia,
+              observacoes: [voltando.observacoes, nota].filter(Boolean).join("\n"),
+            });
+            setVoltando(null);
+          }} />
       )}
     </div>
     </div>
@@ -9857,6 +9920,86 @@ function proximosDias(n) {
  * Aparece como sobreposição porque é o momento em que a ligação está
  * acontecendo — qualquer coisa a mais na tela é uma chance de errar.
  */
+/**
+ * Quando voltar a ligar.
+ *
+ * **Chips primeiro, calendário depois.** Quem está com o telefone na
+ * orelha diz "me liga terça" ou "semana que vem" — obrigar a abrir um
+ * seletor de data para isso é o que faz a pessoa apertar qualquer
+ * coisa. É a mesma régua do agendador de três toques (decisão 27).
+ *
+ * Antes deste componente o "ligar depois" gravava **hoje**, sem
+ * perguntar: o lead voltava para a fila do próprio dia e não lembrava
+ * ninguém de nada.
+ */
+function QuandoVoltar({ titulo, valor, aoEscolher, aoFechar }) {
+  const [dia, setDia] = useState(valor || "");
+  const [obs, setObs] = useState("");
+  const opcoes = [
+    ["amanhã", 1], ["em 2 dias", 2], ["em 3 dias", 3],
+    ["em 1 semana", 7], ["em 15 dias", 15],
+  ];
+  const maisDias = (n) => {
+    const d = new Date(`${hojeEmSP()}T12:00:00`);
+    d.setDate(d.getDate() + n);
+    return d.toISOString().slice(0, 10);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center"
+      style={{ background: "rgba(24,20,32,0.45)" }} onClick={aoFechar}>
+      <div className="w-full max-w-[420px] rounded-xl p-4" onClick={(e) => e.stopPropagation()}
+        style={{ background: C.paper, border: `1px solid ${C.line}`, boxShadow: "0 18px 50px rgba(24,20,32,0.28)" }}>
+        <div className="text-[15px]" style={{ fontFamily: F.disp, fontWeight: 800 }}>
+          {titulo || "Quando voltar a ligar?"}
+        </div>
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
+          {opcoes.map(([r, n]) => {
+            const d = maisDias(n);
+            const sel = dia === d;
+            return (
+              <button key={r} onClick={() => setDia(d)}
+                className="rounded-full px-3 py-1.5 text-[12px] font-semibold"
+                style={{ background: sel ? C.roxo : "#fff", color: sel ? "#fff" : C.roxo,
+                         border: `1px solid ${sel ? C.roxo : C.line}` }}>
+                {r}
+              </button>
+            );
+          })}
+        </div>
+        <label className="mt-3 block">
+          <span className="block text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Ou escolha o dia</span>
+          <input type="date" className={`${inputCls} mt-[2px]`} style={inputSty} value={dia}
+            min={hojeEmSP()} onChange={(e) => setDia(e.target.value)} />
+        </label>
+        <label className="mt-2 block">
+          <span className="block text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>
+            O que anotar (opcional)
+          </span>
+          <input className={`${inputCls} mt-[2px]`} style={inputSty} value={obs}
+            placeholder="pediu para ligar de manhã"
+            onChange={(e) => setObs(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && dia) aoEscolher(dia, obs.trim()); }} />
+        </label>
+        <div className="mt-3 flex gap-2">
+          <button onClick={() => dia && aoEscolher(dia, obs.trim())} disabled={!dia}
+            className="flex-1 rounded-md py-2.5 text-[13px] font-semibold disabled:opacity-40"
+            style={{ background: C.roxo, color: "#fff" }}>
+            Marcar o retorno
+          </button>
+          <button onClick={aoFechar} className="rounded-md px-4 py-2.5 text-[13px] font-semibold"
+            style={{ border: `1px solid ${C.line}`, color: C.mute, background: "#fff" }}>
+            Cancelar
+          </button>
+        </div>
+        <p className="mt-2 text-[11px] leading-snug" style={{ color: C.mute }}>
+          No dia marcado ele aparece sozinho no seu <b>Meu dia</b>, junto com o resto da agenda.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function Agendador({ lead, equipe, aoFechar, aoAgendar }) {
   const [dia, setDia] = useState(String(lead.agendado_para || "").slice(0, 10) || hojeEmSP());
   const [hora, setHora] = useState(horaBR(lead.agendado_para) || "");
@@ -9944,6 +10087,7 @@ function FunilLeads({ perfil, equipe }) {
   const [busca, setBusca] = useState("");
   const [novo, setNovo] = useState({ nome: "", telefone: "", carro: "", origem: "google" });
   const [agendando, setAgendando] = useState(null);
+  const [voltando, setVoltando] = useState(null);
   const [salvando, setSalvando] = useState(false);
   const campoNome = React.useRef(null);
 
@@ -10031,7 +10175,7 @@ function FunilLeads({ perfil, equipe }) {
               {l.telefone && <a href={`tel:${soDigitos(l.telefone)}`} style={{ color: C.roxo, fontWeight: 600 }}>{telBR(l.telefone)}</a>}
               {l.telefone && <a href={zap(l.telefone, `Olá ${l.nome}! Aqui é da Vaapty Joinville. Tudo bem?`)} target="_blank" rel="noreferrer" style={{ color: C.verde, fontWeight: 600 }}>WhatsApp</a>}
               <button onClick={() => setAgendando(l)} className="rounded-lg px-3 py-1.5 font-semibold" style={{ background: C.roxo, color: "#fff" }}>Agendar</button>
-              <button onClick={() => mexer(l, { status: "em_contato", proximo_contato: hojeEmSP() })} style={{ color: C.mute }}>ligar depois</button>
+              <button onClick={() => setVoltando(l)} style={{ color: C.mute }}>ligar depois</button>
               <button onClick={() => mexer(l, { status: "perdido" })} className="ml-auto" style={{ color: C.mute }}>sem interesse</button>
             </div>
           </div>
@@ -10041,6 +10185,22 @@ function FunilLeads({ perfil, equipe }) {
       {agendando && (
         <Agendador lead={agendando} equipe={equipe} aoFechar={() => setAgendando(null)}
           aoAgendar={async (dados) => { await mexer(agendando, dados); setAgendando(null); }} />
+      )}
+
+      {voltando && (
+        <QuandoVoltar valor={voltando.proximo_contato || ""}
+          aoFechar={() => setVoltando(null)}
+          aoEscolher={async (dia, obs) => {
+            // A anotação entra junto do que já havia, com a data na
+            // frente: sem ela, três retornos viram um parágrafo sem
+            // dono e ninguém sabe o que foi dito quando.
+            const nota = obs ? `${diaBR(dia)}: ${obs}` : "";
+            await mexer(voltando, {
+              status: "em_contato", proximo_contato: dia,
+              observacoes: [voltando.observacoes, nota].filter(Boolean).join("\n"),
+            });
+            setVoltando(null);
+          }} />
       )}
     </div>
   );
@@ -10057,6 +10217,7 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
   const [agendando, setAgendando] = useState(null);
+  const [voltando, setVoltando] = useState(null);
   const [indo, setIndo] = useState("");
 
   const carregar = () => {
@@ -10150,7 +10311,7 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
                       )}
                       {l.telefone && <a href={`tel:${soDigitos(l.telefone)}`} style={{ color: C.roxo, fontWeight: 600 }}>{telBR(l.telefone)}</a>}
                       <button onClick={() => setAgendando(l)} style={{ color: C.mute }}>remarcar</button>
-                      <button onClick={() => mexer(l, { status: "nao_compareceu" })} style={{ color: C.mute }}>não veio</button>
+                      <button onClick={() => setVoltando(l)} style={{ color: C.mute }}>não veio</button>
                       <button onClick={() => chegou(l)} disabled={indo === l.id}
                         className="ml-auto rounded-lg px-4 py-2 font-semibold" style={{ background: C.roxo, color: "#fff", opacity: indo === l.id ? 0.5 : 1 }}>
                         {indo === l.id ? "abrindo…" : "Chegou"}
@@ -10167,6 +10328,23 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
       {agendando && (
         <Agendador lead={agendando} equipe={equipe} aoFechar={() => setAgendando(null)}
           aoAgendar={async (dados) => { await mexer(agendando, dados); setAgendando(null); }} />
+      )}
+
+      {/* Quem não veio volta para a fila COM data de retorno. Sem a
+          data ele voltaria para o mesmo lugar de onde saiu, e a
+          próxima ligação dependeria de alguém lembrar. */}
+      {voltando && (
+        <QuandoVoltar titulo="Não veio — quando ligar de volta?"
+          valor={voltando.proximo_contato || ""}
+          aoFechar={() => setVoltando(null)}
+          aoEscolher={async (dia, obs) => {
+            const nota = obs ? `${diaBR(dia)}: ${obs}` : "";
+            await mexer(voltando, {
+              status: "nao_compareceu", proximo_contato: dia,
+              observacoes: [voltando.observacoes, nota].filter(Boolean).join("\n"),
+            });
+            setVoltando(null);
+          }} />
       )}
     </div>
   );
@@ -13672,6 +13850,7 @@ function TelaMeuDia({ perfil }) {
   const [acoes, setAcoes] = useState([]);
   const [semana, setSemana] = useState([]);
   const [ats, setAts] = useState([]);
+  const [retornos, setRetornos] = useState({ leads: [], inds: [] });
   const [erro, setErro] = useState("");
   const [indo, setIndo] = useState(false);
 
@@ -13702,6 +13881,11 @@ function TelaMeuDia({ perfil }) {
     listarAtendimentos({ de: dia, ate: dia, limite: 200 })
       .then((l) => { if (vivo) setAts(Array.isArray(l) ? l : []); })
       .catch(() => {});
+    // Os retornos marcados para hoje — pré-venda e indicações. É o que
+    // faz a data que se marca na fila virar lembrete no dia certo.
+    lerRetornosDoDia(dia)
+      .then((r) => { if (vivo) setRetornos(r); })
+      .catch(() => {});
     return () => { vivo = false; };
   };
   useEffect(carregar, [dia, seg]);
@@ -13725,7 +13909,22 @@ function TelaMeuDia({ perfil }) {
       titulo: `Cliente chegou — ${a.cliente_nome || "sem nome"}${a.carro_descricao ? ` · ${a.carro_descricao}` : ""}`,
       feito: true, minha: false,
     }));
-    return doDia.concat(dosAts).sort((x, y) => {
+    // Os retornos entram sem hora: são "hoje", não "às 14h". Ficam no
+    // fim da lista, junto do resto do plano sem horário — que é onde a
+    // pessoa olha quando abre um buraco na agenda.
+    const dosRetornos = []
+      .concat((retornos.leads || []).map((l) => ({
+        id: `lead-${l.id}`, hora: "", fim: "", tipo: "prospeccao",
+        titulo: `Ligar de volta — ${l.nome}${l.carro ? ` · ${l.carro}` : ""}${l.telefone ? ` · ${telBR(l.telefone)}` : ""}`,
+        feito: false, minha: false,
+      })))
+      .concat((retornos.inds || []).map((i) => ({
+        id: `ind-${i.id}`, hora: "", fim: "", tipo: "recuperacao",
+        titulo: `Indicação — ${i.nome}${i.telefone ? ` · ${telBR(i.telefone)}` : ""}${i.cliente_nome ? ` (de ${i.cliente_nome})` : ""}`,
+        feito: false, minha: false,
+      })));
+
+    return doDia.concat(dosAts).concat(dosRetornos).sort((x, y) => {
       // Sem hora vai para o fim: é item do plano que ainda não tem
       // lugar no dia, e no meio da lista ele confundiria a leitura.
       if (!x.hora && !y.hora) return 0;
@@ -13733,7 +13932,7 @@ function TelaMeuDia({ perfil }) {
       if (!y.hora) return -1;
       return x.hora.localeCompare(y.hora);
     });
-  }, [acoes, ats]);
+  }, [acoes, ats, retornos]);
 
   const gravar = async (dados) => {
     setIndo(true); setErro("");

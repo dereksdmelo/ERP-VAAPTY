@@ -621,18 +621,27 @@ async function leads(req, res, tok) {
   if (req.method === "GET") {
     const f = [];
     const fila = String(req.query.fila || "funil");
+    // "O que eu tenho para ligar neste dia" — é o que leva o lead para
+    // a agenda do Meu dia sem virar linha na tabela `agenda`.
+    const proximo = String(req.query.proximo || "");
     const st = String(req.query.status || "");
     if (LEAD_STATUS.indexOf(st) >= 0) f.push(`status=eq.${st}`);
     // A agenda é o que tem hora marcada e ainda não foi resolvido; o
     // funil é o resto. Separar aqui evita a tela filtrar 500 linhas
     // para mostrar 8.
     if (fila === "agenda") f.push("status=in.(agendado,confirmado)");
-    else if (fila === "funil" && !f.length) f.push("status=in.(novo,em_contato)");
+    // **`nao_compareceu` entra no funil, e isso era um vazamento.** A
+    // fila da agenda só mostra `agendado` e `confirmado`; ao marcar
+    // "não veio" o lead saía dos dois e não entrava em lista nenhuma —
+    // sumia do sistema com o cliente ainda por atender. O Derek viu em
+    // 15/09/2026. Quem não veio é justamente quem precisa de ligação.
+    else if (fila === "funil" && !f.length) f.push("status=in.(novo,em_contato,nao_compareceu)");
     const de = data(req.query.de), ate = data(req.query.ate);
     if (de) f.push(`agendado_para=gte.${de}T00:00:00`);
     if (ate) f.push(`agendado_para=lte.${ate}T23:59:59`);
     const q = String(req.query.q || "").trim().replace(/[(),*]/g, " ").trim();
     if (q) f.push(`or=(nome.ilike.*${q}*,telefone.ilike.*${q}*,carro.ilike.*${q}*)`);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(proximo)) f.push(`proximo_contato=eq.${proximo}`);
     const ordem = fila === "agenda" ? "agendado_para.asc" : "criado_em.desc";
     const url = `${base}?select=${CAMPOS_LEAD}&order=${ordem}&limit=300${f.length ? `&${f.join("&")}` : ""}`;
     const lista = await banco(url, { headers: cabecalhos(tok) });
@@ -737,7 +746,11 @@ async function leads(req, res, tok) {
 async function indicacoes(req, res, tok) {
   if (req.method === "GET") {
     const st = String(req.query.status || "");
-    const filtro = STATUS_INDICACAO.indexOf(st) >= 0 ? `&status=eq.${st}` : "";
+    let filtro = STATUS_INDICACAO.indexOf(st) >= 0 ? `&status=eq.${st}` : "";
+    // "O que eu tenho para ligar neste dia" — o que leva a indicação
+    // para a agenda do Meu dia sem virar linha na tabela `agenda`.
+    const proximo = String(req.query.proximo || "");
+    if (/^\d{4}-\d{2}-\d{2}$/.test(proximo)) filtro += `&proximo_contato=eq.${proximo}`;
     const lim = Math.min(500, Math.max(1, Number(req.query.limite) || 200));
     const lista = await banco(
       `${REST("indicacao")}?select=*&order=criado_em.desc&limit=${lim}${filtro}`,
@@ -791,6 +804,12 @@ async function indicacoes(req, res, tok) {
     }
     ["nome", "telefone", "negociador_nome", "cliente_nome", "cliente_telefone", "observacoes"]
       .forEach((k) => { if (corpo[k] != null) linha[k] = texto(corpo[k]); });
+    // A data do próximo contato (0049). Vazia limpa o retorno — é como
+    // se tira da fila do dia quem já foi resolvido.
+    if (corpo.proximo_contato !== undefined) {
+      const d = String(corpo.proximo_contato || "");
+      linha.proximo_contato = /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
+    }
 
     const r = await banco(`${REST("indicacao")}?id=eq.${id}`, {
       method: "PATCH",
