@@ -7307,6 +7307,7 @@ function LeadsIndicacao() {
   const [filtro, setFiltro] = useState("");
 
   const [voltando, setVoltando] = useState(null);
+  const [perdendo, setPerdendo] = useState(null);
 
   const carregar = (st) =>
     listarIndicacoes(st || undefined).then(setLista).catch((e) => setErro(e.message));
@@ -10064,12 +10065,18 @@ function TelaPreVendas({ perfil, aoAbrirAtendimento }) {
     <div>
       <Cabecalho titulo="Pré-vendas" sub="Do telefone tocando ao cliente sentado na mesa." />
       <div className="mb-4 flex flex-wrap gap-1.5">
-        {[["funil", "Leads"], ["agenda", "Agendamentos"]].map(([v, r]) => (
+        {/* Três filas, e a terceira existe porque perdido não pode
+            simplesmente sumir: é onde se confere se o cliente foi
+            mesmo embora — vendeu fora ou não tem interesse — e de onde
+            ele volta se mudar de ideia. */}
+        {[["funil", "Leads"], ["agenda", "Agendamentos"], ["perdidos", "Perdidos"]].map(([v, r]) => (
           <button key={v} onClick={() => setAba(v)} className="rounded-full px-3.5 py-1.5 text-[13px] font-semibold"
             style={{ background: aba === v ? C.roxo : C.paper, color: aba === v ? "#fff" : C.ink, border: `1px solid ${aba === v ? C.roxo : C.line}` }}>{r}</button>
         ))}
       </div>
-      {aba === "funil" ? <FunilLeads perfil={perfil} equipe={equipe} /> : <Agendamentos perfil={perfil} equipe={equipe} aoAbrirAtendimento={aoAbrirAtendimento} />}
+      {aba === "funil" && <FunilLeads perfil={perfil} equipe={equipe} />}
+      {aba === "agenda" && <Agendamentos perfil={perfil} equipe={equipe} aoAbrirAtendimento={aoAbrirAtendimento} />}
+      {aba === "perdidos" && <LeadsPerdidos perfil={perfil} />}
     </div>
   );
 }
@@ -10081,6 +10088,138 @@ function TelaPreVendas({ perfil, aoAbrirAtendimento }) {
  * telefone tocando pede é digitar e apertar Enter, não procurar um
  * botão de "novo".
  */
+/**
+ * Os perdidos.
+ *
+ * **Perdido não é lixeira.** O Derek definiu o que entra aqui em
+ * 15/09/2026: quem **já vendeu fora** e quem **não tem interesse no
+ * negócio** — e mais nada. Lead que não atendeu o telefone, que pediu
+ * para ligar depois ou que não veio ao agendamento continua na fila de
+ * trabalho, porque ainda é cliente.
+ *
+ * **Por isso o motivo é perguntado.** Sem ele, "perdido" vira o botão
+ * que se aperta para tirar da tela, e a fila fica limpa mentindo. Com
+ * o motivo escrito, dá para responder no fim do mês quantos a loja
+ * perdeu para a concorrência — que é outra conversa, e a única que
+ * muda alguma coisa.
+ *
+ * **E daqui ele volta.** Cliente que vendeu fora hoje troca de carro
+ * daqui a dois anos; quem some do sistema não é reencontrado.
+ */
+function LeadsPerdidos({ perfil }) {
+  const [lista, setLista] = useState(null);
+  const [erro, setErro] = useState("");
+
+  const carregar = () =>
+    listarLeads({ fila: "perdidos" }).then(setLista).catch((e) => setErro(e.message));
+  useEffect(() => { carregar(); }, []);
+
+  const voltar = async (l) => {
+    setErro("");
+    try {
+      await atualizarLead(l.id, { status: "em_contato" });
+      carregar();
+    } catch (e) { setErro(e.message); }
+  };
+
+  if (!lista) return <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>;
+
+  return (
+    <div>
+      {erro && <p className="mb-2 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+      {!lista.length && (
+        <div className="rounded-xl p-4 text-[13px]" style={{ background: C.paper, border: `1px solid ${C.line}`, color: C.mute }}>
+          Ninguém aqui. Só sai da fila quem está <b>fora do negócio</b>: já vendeu o carro para
+          outro, não tem carro para vender, procurava comprar ou queria empréstimo.
+          <b> Quem tem carro para vender continua sendo lead</b> — mesmo que diga que não quer
+          vender agora.
+        </div>
+      )}
+      <div className="grid gap-2">
+        {lista.map((l) => (
+          <div key={l.id} className="rounded-xl p-3.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-[15px] font-semibold">{l.nome}</div>
+                <div className="text-[13px]" style={{ color: C.mute }}>
+                  {[l.carro, rotulo(ORIGENS, l.origem)].filter(Boolean).join(" · ")}
+                </div>
+                {l.observacoes && (
+                  <div className="mt-1 text-[11px] leading-snug" style={{ color: C.mute, whiteSpace: "pre-wrap" }}>
+                    {l.observacoes}
+                  </div>
+                )}
+              </div>
+              <span className="text-[11px] uppercase tracking-[0.06em]" style={{ color: C.mute }}>Perdido</span>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-3 text-[13px]">
+              {l.telefone && <a href={`tel:${soDigitos(l.telefone)}`} style={{ color: C.roxo, fontWeight: 600 }}>{telBR(l.telefone)}</a>}
+              {l.telefone && <a href={zap(l.telefone, `Olá ${l.nome}! Aqui é da Vaapty Joinville. Tudo bem?`)} target="_blank" rel="noreferrer" style={{ color: C.verde, fontWeight: 600 }}>WhatsApp</a>}
+              <button onClick={() => voltar(l)} className="ml-auto rounded-lg px-3 py-1.5 font-semibold"
+                style={{ border: `1px solid ${C.roxo}`, color: C.roxo, background: "#fff" }}>
+                voltar para a fila
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Por que o cliente saiu da fila.
+ *
+ * **A régua é uma só, e o Derek a deu em 15/09/2026: enquanto a pessoa
+ * tem um carro para vender, ela é lead — mesmo que diga que não quer
+ * vender agora.** Quem não quer hoje quer em seis meses; quem some do
+ * sistema não é reencontrado.
+ *
+ * Então "perdido" não é desinteresse: é a pessoa estar **fora do
+ * negócio**. Ou ela já vendeu o carro para outro, ou nunca teve carro
+ * para vender — procurava comprar, ou queria empréstimo.
+ *
+ * **Sem o motivo escrito, "perdido" vira o botão de tirar da tela**, e
+ * a fila fica limpa mentindo. Com ele, dá para responder no fim do mês
+ * quantos a loja perdeu para a concorrência — que é a única dessas
+ * quatro respostas que cobra alguma coisa da equipe.
+ */
+function PorQuePerdeu({ aoEscolher, aoFechar }) {
+  const MOTIVOS = [
+    ["Vendeu fora", "Tinha o carro e fechou com outro comprador."],
+    ["Não tem carro para vender", "Não é o público da loja."],
+    ["Quer comprar, não vender", "Procurava carro para comprar."],
+    ["Queria empréstimo", "Procurava crédito, não venda."],
+  ];
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center"
+      style={{ background: "rgba(24,20,32,0.45)" }} onClick={aoFechar}>
+      <div className="w-full max-w-[400px] rounded-xl p-4" onClick={(e) => e.stopPropagation()}
+        style={{ background: C.paper, border: `1px solid ${C.line}`, boxShadow: "0 18px 50px rgba(24,20,32,0.28)" }}>
+        <div className="text-[15px]" style={{ fontFamily: F.disp, fontWeight: 800 }}>Por que saiu da fila?</div>
+        <p className="mt-1 text-[11px] leading-snug" style={{ color: AMARELO.texto }}>
+          <b>Tem carro para vender?</b> Então continua sendo lead — mesmo que diga que não quer
+          vender agora. Nesse caso use <b>ligar depois</b> e marque a data.
+        </p>
+        <div className="mt-3 grid gap-2">
+          {MOTIVOS.map(([r, sub]) => (
+            <button key={r} onClick={() => aoEscolher(r)}
+              className="rounded-lg px-3 py-2.5 text-left"
+              style={{ border: `1px solid ${C.line}`, background: "#fff" }}>
+              <div className="text-[13px] font-semibold" style={{ color: C.ink }}>{r}</div>
+              <div className="text-[11px]" style={{ color: C.mute }}>{sub}</div>
+            </button>
+          ))}
+        </div>
+        <button onClick={aoFechar} className="mt-3 w-full rounded-md py-2 text-[13px] font-semibold"
+          style={{ border: `1px solid ${C.line}`, color: C.mute, background: "#fff" }}>
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function FunilLeads({ perfil, equipe }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
@@ -10176,7 +10315,7 @@ function FunilLeads({ perfil, equipe }) {
               {l.telefone && <a href={zap(l.telefone, `Olá ${l.nome}! Aqui é da Vaapty Joinville. Tudo bem?`)} target="_blank" rel="noreferrer" style={{ color: C.verde, fontWeight: 600 }}>WhatsApp</a>}
               <button onClick={() => setAgendando(l)} className="rounded-lg px-3 py-1.5 font-semibold" style={{ background: C.roxo, color: "#fff" }}>Agendar</button>
               <button onClick={() => setVoltando(l)} style={{ color: C.mute }}>ligar depois</button>
-              <button onClick={() => mexer(l, { status: "perdido" })} className="ml-auto" style={{ color: C.mute }}>sem interesse</button>
+              <button onClick={() => setPerdendo(l)} className="ml-auto" style={{ color: C.mute }}>saiu da fila</button>
             </div>
           </div>
         ))}
@@ -10185,6 +10324,21 @@ function FunilLeads({ perfil, equipe }) {
       {agendando && (
         <Agendador lead={agendando} equipe={equipe} aoFechar={() => setAgendando(null)}
           aoAgendar={async (dados) => { await mexer(agendando, dados); setAgendando(null); }} />
+      )}
+
+      {perdendo && (
+        <PorQuePerdeu aoFechar={() => setPerdendo(null)}
+          aoEscolher={async (motivo) => {
+            // O motivo vai para a observação com a data: é o que
+            // responde, no fim do mês, quantos a loja perdeu para a
+            // concorrência — e "perdido" sozinho não responde nada.
+            const nota = `${diaBR(hojeEmSP())}: saiu da fila — ${motivo}`;
+            await mexer(perdendo, {
+              status: "perdido", proximo_contato: null,
+              observacoes: [perdendo.observacoes, nota].filter(Boolean).join("\n"),
+            });
+            setPerdendo(null);
+          }} />
       )}
 
       {voltando && (

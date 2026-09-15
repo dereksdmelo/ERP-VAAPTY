@@ -630,6 +630,10 @@ async function leads(req, res, tok) {
     // funil é o resto. Separar aqui evita a tela filtrar 500 linhas
     // para mostrar 8.
     if (fila === "agenda") f.push("status=in.(agendado,confirmado)");
+    // **Perdido tem fila própria, e não é lixeira.** É onde se confere
+    // se o cliente foi mesmo embora — vendeu fora, ou não tem
+    // interesse no negócio — e de onde ele volta se mudar de ideia.
+    else if (fila === "perdidos") f.push("status=eq.perdido");
     // **`nao_compareceu` entra no funil, e isso era um vazamento.** A
     // fila da agenda só mostra `agendado` e `confirmado`; ao marcar
     // "não veio" o lead saía dos dois e não entrava em lista nenhuma —

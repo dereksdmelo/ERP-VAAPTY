@@ -1488,6 +1488,43 @@ devolve o mesmo id em vez de criar um segundo.
 agendamento que ninguém resolveu é o vazamento silencioso do funil — se
 ele apenas sumisse da lista, ninguém saberia que existiu.
 
+**E "não veio" era um vazamento de verdade, desses que só aparecem no
+uso.** A fila da agenda mostra `agendado` e `confirmado`; o funil
+mostrava `novo` e `em_contato`. Ao marcar "não veio", o lead saía dos
+dois e **não entrava em lista nenhuma** — sumia do sistema com o
+cliente ainda por atender. O Derek viu em 15/09/2026. `nao_compareceu`
+passou a entrar no funil: quem não veio é justamente quem precisa de
+ligação.
+
+**Retorno sem data não é retorno.** "Ligar depois" gravava `hoje` sem
+perguntar — o lead voltava para a fila do próprio dia e não lembrava
+ninguém de nada. `QuandoVoltar` pergunta, e **chips vêm antes do
+calendário**: quem está com o telefone na orelha diz "me liga terça",
+não abre seletor de data. Mesma régua do agendador de três toques.
+
+**A anotação entra com a data na frente.** Sem isso, três retornos
+viram um parágrafo sem dono e ninguém sabe o que foi dito quando.
+
+**No dia marcado, lead e indicação aparecem no "Meu dia"** — sem hora,
+junto do plano, porque são "hoje" e não "às 14h". **Nada é copiado para
+a `agenda`** (decisão 41): entram na leitura, como o atendimento, e
+assim remarcar a data ou mudar o status não deixa uma cópia velha para
+trás.
+
+**Perdido é fila, não lixeira — e a régua é do Derek:** *"enquanto a
+pessoa tem um carro para vender, mesmo que ela não queira, é lead"*.
+Quem não quer hoje quer em seis meses; quem some do sistema não é
+reencontrado. Então perdido não é desinteresse, é estar **fora do
+negócio**: já vendeu para outro, não tem carro, procurava comprar, ou
+queria empréstimo — as quatro respostas de `PorQuePerdeu`.
+
+**O motivo é perguntado, e é isso que salva a fila.** Sem ele "perdido"
+vira o botão que se aperta para tirar da tela, e a lista fica limpa
+mentindo. Com o motivo escrito, dá para responder quantos a loja perdeu
+**para a concorrência** — a única das quatro que cobra algo da equipe.
+E da aba Perdidos o lead volta para a fila: cliente que vendeu fora
+hoje troca de carro daqui a dois anos.
+
 **Mora em `api/atendimento.js` sob `?recurso=lead`**, pelo teto de 12
 funções — mas a costura não é arbitrária: o lead existe para virar
 atendimento, que é o assunto do arquivo.
