@@ -937,6 +937,27 @@ async function consultarFunil(de, ate) {
   return d;
 }
 
+/**
+ * Cria o link de assinatura de um documento e devolve a URL pronta.
+ *
+ * **O token volta uma única vez.** O banco guarda só o SHA-256 dele
+ * (0048), então link perdido não se recupera — gera-se outro. Por isso
+ * ele não é guardado em lugar nenhum daqui: vai direto para o WhatsApp.
+ *
+ * **Vai no fragmento (#t=), não na query.** Fragmento não entra em log
+ * de servidor, não entra em log de proxy e não viaja no cabeçalho
+ * Referer quando o cliente clica em alguma coisa depois.
+ */
+async function criarLinkAssinatura({ documento_id, nome, telefone, dias }) {
+  const r = await fetchAut("/api/documento?recurso=assinar-link", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ documento_id, nome, telefone, dias: dias || 7 }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui criar o link.");
+  return { url: `${location.origin}/assinar.html#t=${d.token}`, expira_em: d.expira_em };
+}
+
 async function registrarDocumento(reg) {
   const r = await fetchAut("/api/documento", {
     method: "POST",
@@ -1784,6 +1805,52 @@ const vazio = (rotulo) =>
 const ou = (valor, rotulo) => (valor ? String(valor) : vazio(rotulo));
 
 /* ---------------- moldura ---------------- */
+
+/**
+ * A cláusula que dá validade à assinatura eletrônica.
+ *
+ * **Isto é texto jurídico, e a decisão 7 vale aqui inteira.** O Derek
+ * autorizou acrescentá-la em 15/09/2026 ("só adiciona a cláusula que
+ * dá validade à assinatura digital"); o resto do contrato é o da casa
+ * e não foi tocado. Ela é escrita para a VAAPTY — a versão que veio no
+ * documento de referência é da Camisetas Já e cita o domínio deles.
+ *
+ * **Ela é o primeiro dos três pilares** (decisão 42): sem o
+ * reconhecimento expresso das partes, a MP 2.200-2/2001 art. 10 §2º
+ * não socorre a assinatura sem certificado ICP-Brasil. A trilha e o
+ * hash provam quem e o quê; esta cláusula é o que faz isso valer.
+ *
+ * **Só entra em documento que vai por assinatura própria.** O contrato
+ * final de compra vai pelo ZapSign, por decisão do Derek — lá a
+ * validade é sustentada por outro mecanismo, e pôr esta cláusula nele
+ * descreveria um procedimento que não aconteceu.
+ *
+ * **Não inventa obrigação nova.** Ela reconhece a forma e descreve o
+ * que o sistema de fato registra — nada além. Se o jurídico da Vaapty
+ * quiser outra redação, é aqui que se troca, e em nenhum outro lugar.
+ */
+const CLAUSULA_ASSINATURA = `
+<p><strong>Cláusula da assinatura eletrônica.</strong> As partes reconhecem como válida, eficaz e
+juridicamente vinculante a assinatura eletrônica deste instrumento, realizada em ambiente digital
+da VAAPTY, nos termos do art. 10, §2º da Medida Provisória nº 2.200-2/2001 e da Lei nº 14.063/2020,
+dispensando-se a assinatura manuscrita, o reconhecimento de firma e a presença de testemunhas. A
+autoria e a integridade do documento são comprovadas pelo registro eletrônico mantido pela VAAPTY,
+que contém o nome e o documento informados pelo signatário, a data e a hora do aceite, o endereço
+IP e a localidade de origem, o dispositivo utilizado, o desenho da assinatura e o código de
+verificação do arquivo (hash SHA-256). Qualquer alteração posterior no conteúdo deste documento
+invalida o referido código, permitindo a constatação da adulteração. A conferência é pública e pode
+ser feita a qualquer tempo em erpvaapty.vercel.app/verificar.html, mediante o código impresso ao
+final deste documento.</p>`;
+
+/**
+ * Os documentos que vão por assinatura eletrônica própria.
+ *
+ * Decisão do Derek em 15/09/2026: o **contrato final de compra**
+ * continua no ZapSign ("a validade é melhor"); a **autorização de
+ * cautelar** não precisa de assinatura; e os extratos são folha de
+ * mesa, não instrumento — ninguém assina uma lista de propostas.
+ */
+const ASSINAVEIS = ["pre_contrato", "termo_aceite", "check_list"];
 
 function moldura({ titulo, corpo, protocolo, logo, paisagem }) {
   return `<!DOCTYPE html>
@@ -2827,6 +2894,8 @@ assinado por duas testemunhas.</p>
 <p>Fica eleito o foro da Comarca de Joinville, com renúncia expressa a qualquer outro, por mais
 privilegiado que seja, para dirimir eventuais controvérsias oriundas deste instrumento.</p>
 
+${CLAUSULA_ASSINATURA}
+
 <p style="margin-top:16px">Por estarem justos e contratados, assinam o presente instrumento em
 2 vias de igual teor e forma.</p>
 
@@ -2869,6 +2938,8 @@ ${blocoCliente(f)}
 
 <p>O(A) proprietário(a) declara estar ciente de que o resultado da vistoria pode alterar as
 condições da negociação, e que o laudo será disponibilizado a ambas as partes.</p>
+
+${CLAUSULA_ASSINATURA}
 
 ${assinaturas("Proprietário(a) do veículo", "Vaapty Intermediação Veicular")}`;
 
@@ -2948,6 +3019,8 @@ os quais são necessários para avaliar a segurança do negócio e a integridade
 informa que, enquanto esses procedimentos não forem ultimados, não assume a garantia de que o
 negócio será concluído. No entanto, o caráter irrevogável e irretratável do presente termo
 permanece em relação ao(a) DECLARANTE.</p>
+
+${CLAUSULA_ASSINATURA}
 
 <p style="margin-top:16px">Joinville, ${vazio("dia")} / ${vazio("mês")} / ${new Date().getFullYear()}.</p>
 
@@ -3065,6 +3138,60 @@ const extrairProtocolo = (html) => {
  * ideia do trilho da Negociação: mostrar em que passo o negócio está,
  * e por que o próximo ainda não abriu.
  */
+/**
+ * O botão que manda o documento para o cliente assinar no celular.
+ *
+ * **Só aparece em documento que está no banco.** O link aponta para uma
+ * linha de `documento`; sem ela não há o que abrir. Documento gerado
+ * antes de a ficha ser salva fica sem conteúdo (decisão 15), e é
+ * justamente esse caso.
+ *
+ * **O link vai uma vez e não volta.** O banco guarda só o hash do token
+ * (0048), então não há "reenviar o mesmo link": gera-se outro, e o
+ * anterior continua válido até vencer. É o preço de não guardar o token
+ * em claro, e ele vale — token em claro no banco é token vazado junto
+ * com o banco.
+ */
+function MandarAssinar({ doc, telefone, nome }) {
+  const [indo, setIndo] = useState(false);
+  const [link, setLink] = useState("");
+  const [erro, setErro] = useState("");
+
+  if (!doc || !doc.docId || ASSINAVEIS.indexOf(doc.tipo) < 0) return null;
+
+  const gerar = async () => {
+    setIndo(true); setErro("");
+    try {
+      const d = await criarLinkAssinatura({ documento_id: doc.docId, nome, telefone });
+      setLink(d.url);
+      // A janela abre no clique, como todo documento desta casa
+      // (decisão 15): pop-up disparado depois de um await é bloqueado.
+      const msg = `Oi${nome ? `, ${String(nome).split(" ")[0]}` : ""}! Segue o ${(doc.rotulo || "documento").toLowerCase()} para você conferir e assinar pelo celular:\n\n${d.url}\n\nO link é pessoal e vale por 7 dias.`;
+      window.open(telefone ? zap(telefone, msg) : d.url, "_blank");
+    } catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+
+  return (
+    <div className="mt-1">
+      {!link ? (
+        <button onClick={gerar} disabled={indo}
+          className="rounded-md px-2 py-1 text-[10px] font-semibold"
+          style={{ border: `1px solid ${C.roxo}`, color: C.roxo, background: "#fff" }}>
+          {indo ? "gerando…" : telefone ? "mandar para assinar" : "criar link de assinatura"}
+        </button>
+      ) : (
+        <div className="text-[10px]" style={{ color: C.mute }}>
+          Link criado.{" "}
+          <button onClick={() => { navigator.clipboard.writeText(link).catch(() => {}); }}
+            className="font-semibold" style={{ color: C.roxo }}>copiar de novo</button>
+        </div>
+      )}
+      {erro && <p className="text-[10px]" style={{ color: C.laranja }}>{erro}</p>}
+    </div>
+  );
+}
+
 function TrilhoFechamento({ f, preContratoFeito, contratoLiberado }) {
   const passos = [
     ["Valor", !!f.valorFechado, "quanto fechou"],
@@ -3394,11 +3521,15 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
 
     if (veiculoId) {
       try {
-        await registrarDocumento({
+        const salvo = await registrarDocumento({
           veiculo_id: veiculoId, tipo, rodada: reg.rodada,
           protocolo: reg.protocolo, conteudo: html, negociador: fRef.current.negociador,
         });
         reg.noBanco = true;
+        // O id do documento é o que o link de assinatura precisa. Sem
+        // guardá-lo aqui, mandar para assinar exigiria procurar de novo
+        // qual das linhas é esta.
+        reg.docId = (salvo && salvo.id) || null;
       } catch (e) { setErroDoc(e.message); }
     }
 
@@ -4618,6 +4749,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                       {docsDe("extrato_ofertas", i + 1).concat(docsDe("termo_aceite", i + 1)).map((d, k) => (
                         <div key={k} className="mt-1 text-[10px]" style={{ color: C.verde }}>
                           {d.rotulo} às {hhmm(d.em)}{d.protocolo ? ` · ${d.protocolo}` : ""}{d.noBanco ? "" : " · fora do banco"}
+                          <MandarAssinar doc={d} telefone={cliente.cliente_telefone} nome={cliente.cliente_nome} />
                         </div>
                       ))}
                     </div>
@@ -4692,6 +4824,15 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                     Pré-contrato
                   </button>
                 </div>
+                {/* Os assináveis vão para o celular do cliente em vez
+                    de sair na impressora. Foi o pedido do Derek em
+                    15/09/2026: "aí não precisamos imprimir". */}
+                {docsDe("pre_contrato").concat(docsDe("autorizacao_cautelar")).map((d, k) => (
+                  <div key={k} className="text-[11px]" style={{ color: C.verde }}>
+                    {d.rotulo} às {hhmm(d.em)}{d.protocolo ? ` · ${d.protocolo}` : ""}
+                    <MandarAssinar doc={d} telefone={cliente.cliente_telefone} nome={cliente.cliente_nome} />
+                  </div>
+                ))}
                 {!podeImprimir && (
                   <p className="text-[11px]" style={{ color: AMARELO.texto }}>
                     Falta {faltamCliente.map((x) => x[1]).join(" · ")} do cliente — preencha na etapa Pesquisa para liberar a impressão.
@@ -4733,6 +4874,12 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 style={{ borderColor: C.line, color: podeImprimir ? C.roxo : C.mute }}>
                 Imprimir o check list
               </button>
+              {docsDe("check_list").map((d, k) => (
+                <div key={k} className="mt-1 text-[11px]" style={{ color: C.verde }}>
+                  {d.rotulo} às {hhmm(d.em)}{d.protocolo ? ` · ${d.protocolo}` : ""}
+                  <MandarAssinar doc={d} telefone={cliente.cliente_telefone} nome={cliente.cliente_nome} />
+                </div>
+              ))}
             </Bloco>
 
             {/* A cautelar pode reprovar, e aí a negociação reabre.

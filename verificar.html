@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="referrer" content="no-referrer" />
+<title>Conferir assinatura — Vaapty</title>
+<!--
+  A prova que o cliente mostra a terceiros. É a única tela do sistema
+  aberta sem login e sem token.
+
+  **Aberta não é devassa.** Quem tem só o código vê o documento
+  MASCARADO e não vê o IP nem o arquivo. Isso é a recomendação 8.2.7 da
+  especificação, que o ERP de origem não segue: lá o código sozinho abre
+  o PDF inteiro e o IP completo de quem assinou.
+-->
+<style>
+  :root{--roxo:#6D1B9E;--tinta:#1B1725;--mute:#6B6478;--linha:#E6E2EC;--verde:#1D7F58;--laranja:#EA5423}
+  *{box-sizing:border-box}
+  body{margin:0;background:#F7F5FA;color:var(--tinta);
+       font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  .caixa{max-width:620px;margin:0 auto;padding:16px 14px 40px}
+  .marca{display:flex;align-items:center;gap:8px;padding:14px 0}
+  .logo{width:30px;height:30px;border-radius:8px;background:var(--roxo);color:#fff;display:grid;place-items:center;font-weight:800}
+  .cartao{background:#fff;border:1px solid var(--linha);border-radius:14px;padding:18px;margin-bottom:14px}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{color:var(--mute);font-size:13px;margin:0}
+  input{width:100%;margin-top:8px;padding:12px;border:1px solid var(--linha);border-radius:9px;font-size:16px;
+        font-family:ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase}
+  button{width:100%;padding:13px;border:0;border-radius:10px;background:var(--roxo);color:#fff;font-size:15px;font-weight:700;margin-top:10px}
+  .linha{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--linha);font-size:13.5px}
+  .linha:last-child{border:0}
+  .rot{color:var(--mute)}
+  .val{font-weight:600;text-align:right;word-break:break-word}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;letter-spacing:-.01em}
+  .selo{display:flex;align-items:center;gap:9px;background:#F0F8F4;border:1px solid var(--verde);
+        border-radius:10px;padding:12px;color:var(--verde);font-weight:700}
+  .erro{color:var(--laranja);font-size:13.5px;margin-top:10px}
+  .nota{font-size:12px;color:var(--mute);line-height:1.5;margin-top:12px}
+</style>
+</head>
+<body>
+<div class="caixa">
+  <div class="marca"><span class="logo">V</span><strong>Vaapty</strong></div>
+  <div id="raiz"></div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (t) => String(t == null ? "" : t).replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+const rotulo = (t) => ({
+  pre_contrato: "Pré-contrato", termo_aceite: "Termo de aceite", check_list: "Check list do negócio",
+  contrato_final: "Contrato", autorizacao_cautelar: "Autorização de cautelar",
+}[t] || "Documento");
+
+function telaBusca(msg) {
+  $("raiz").innerHTML = `<div class="cartao">
+    <h1>Conferir uma assinatura</h1>
+    <p class="sub">Digite o código que aparece no fim do documento assinado.</p>
+    <input id="c" placeholder="VPT-XXXXXXXX" value="${esc((new URLSearchParams(location.search)).get("c") || "")}" />
+    <button id="b">Conferir</button>
+    ${msg ? `<p class="erro">${esc(msg)}</p>` : ""}
+    <p class="nota">Esta página mostra o essencial para conferir a autenticidade: quem assinou, quando e
+      o código de integridade do documento. Por proteção aos dados de quem assinou, o CPF ou CNPJ aparece
+      parcialmente e o endereço de origem não é exibido.</p>
+  </div>`;
+  $("b").onclick = () => buscar($("c").value);
+  $("c").onkeydown = (e) => { if (e.key === "Enter") buscar($("c").value); };
+}
+
+function telaResultado(a) {
+  const quando = a.assinado_em ? new Date(a.assinado_em).toLocaleString("pt-BR") : "—";
+  $("raiz").innerHTML = `<div class="cartao">
+    <div class="selo"><span style="font-size:20px">✓</span>
+      <span>Assinatura encontrada e íntegra</span></div>
+    <div style="margin-top:14px">
+      <div class="linha"><span class="rot">Documento</span><span class="val">${esc(rotulo(a.tipo))}</span></div>
+      <div class="linha"><span class="rot">Assinado por</span><span class="val">${esc(a.nome)}</span></div>
+      <div class="linha"><span class="rot">CPF / CNPJ</span><span class="val mono">${esc(a.documento_mascarado)}</span></div>
+      <div class="linha"><span class="rot">Data e hora</span><span class="val">${esc(quando)}</span></div>
+      <div class="linha"><span class="rot">Origem</span><span class="val">${esc(a.local || "não registrada")}</span></div>
+      <div class="linha"><span class="rot">Código</span><span class="val mono">${esc(a.codigo)}</span></div>
+    </div>
+    <p class="sub" style="margin-top:14px"><strong>Código de integridade (SHA-256)</strong></p>
+    <p class="mono" style="word-break:break-all;margin:4px 0 0">${esc(a.pdf_sha256)}</p>
+    <p class="nota">Este código é calculado a partir do conteúdo exato do documento assinado.
+      Qualquer alteração posterior — uma letra, um número — produz um código diferente,
+      e é assim que se constata a adulteração.</p>
+    <button onclick="telaBusca('')" style="background:#fff;color:var(--roxo);border:1px solid var(--linha)">
+      Conferir outro código</button>
+  </div>`;
+}
+
+async function buscar(cod) {
+  const c = String(cod || "").trim().toUpperCase();
+  if (!/^VPT-[A-Z0-9]{6,12}$/.test(c)) return telaBusca("O código tem o formato VPT- seguido de 8 caracteres.");
+  $("raiz").innerHTML = `<div class="cartao"><p class="sub">Conferindo…</p></div>`;
+  try {
+    const r = await fetch(`/api/documento?recurso=verificar&c=${encodeURIComponent(c)}`);
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) return telaBusca(d.erro || "Código não encontrado.");
+    telaResultado(d.assinatura);
+  } catch (e) {
+    telaBusca("Não consegui conferir agora. Tente de novo em instantes.");
+  }
+}
+
+const inicial = (new URLSearchParams(location.search)).get("c");
+if (inicial) buscar(inicial); else telaBusca("");
+</script>
+</body>
+</html>

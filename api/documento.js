@@ -256,6 +256,116 @@ async function zapsignWebhook(req, res) {
   return ok();
 }
 
+/**
+ * ===== assinatura eletrônica própria (0048) =====
+ *
+ * Três recursos, e dois deles são PÚBLICOS: o signatário é um cliente
+ * sem login. Eles vêm antes da checagem de token, como o webhook.
+ *
+ * **Nenhum deles usa a chave de serviço.** Tudo passa pelas funções
+ * `security definer` da 0048, chamadas com a chave anônima — elas é
+ * que conferem o token do link e decidem o que devolver. Uma rota
+ * pública com a chave de serviço abriria a tabela `atendimento`
+ * inteira, com CPF e telefone de cliente.
+ *
+ * **O IP é lido da requisição, nunca do corpo.** Evidência que a parte
+ * interessada digita não é evidência — é a recomendação 4.3 da
+ * especificação, e o ERP de origem não a segue.
+ */
+const ipDe = (req) => {
+  const x = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  return x || String(req.headers["x-real-ip"] || "") || "";
+};
+const localDe = (req) => {
+  // A Vercel entrega a geolocalização da borda em cabeçalhos próprios.
+  const cidade = decodeURIComponent(String(req.headers["x-vercel-ip-city"] || ""));
+  const uf = String(req.headers["x-vercel-ip-country-region"] || "");
+  const pais = String(req.headers["x-vercel-ip-country"] || "");
+  return [cidade, uf, pais].filter(Boolean).join(", ");
+};
+
+async function rpc(nome, corpo) {
+  const r = await fetch(`${URL_BASE}/rest/v1/rpc/${nome}`, {
+    method: "POST",
+    headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, "Content-Type": "application/json" },
+    body: JSON.stringify(corpo),
+  });
+  const texto = await r.text();
+  let d = null;
+  try { d = texto ? JSON.parse(texto) : null; } catch (e) {}
+  if (!r.ok) {
+    const e = new Error((d && (d.message || d.hint)) || "Falhou.");
+    e.status = r.status === 404 ? 404 : 400;
+    throw e;
+  }
+  return d;
+}
+
+// Abrir o link (público). O token vai no CORPO, não na query: query
+// entra em log de servidor, de proxy e no cabeçalho Referer.
+async function abrirAssinatura(req, res) {
+  if (req.method !== "POST") { res.setHeader("Allow", "POST"); return res.status(405).json({ erro: "Use POST." }); }
+  const c = await lerCorpo(req);
+  const token = String((c && c.token) || "");
+  if (token.length < 32) return res.status(400).json({ erro: "Link inválido." });
+
+  const linhas = await rpc("abrir_link_assinatura", { p_token: token });
+  const l = (Array.isArray(linhas) ? linhas[0] : linhas) || null;
+  if (!l) return res.status(404).json({ erro: "Este link não existe ou já não vale." });
+
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Cache-Control", "no-store");
+  return res.status(200).json({
+    situacao: l.situacao, tipo: l.tipo, conteudo: l.conteudo,
+    nome_esperado: l.nome_esperado, expira_em: l.expira_em, codigo: l.codigo_existente,
+  });
+}
+
+// Gravar a assinatura (público, com o token).
+async function assinarPublico(req, res) {
+  if (req.method !== "POST") { res.setHeader("Allow", "POST"); return res.status(405).json({ erro: "Use POST." }); }
+  const c = await lerCorpo(req);
+  if (!c) return res.status(400).json({ erro: "Corpo vazio." });
+
+  const d = await rpc("gravar_assinatura", {
+    p_token: String(c.token || ""),
+    p_nome: String(c.nome || ""),
+    p_documento: String(c.documento || ""),
+    p_email: String(c.email || ""),
+    p_telefone: String(c.telefone || ""),
+    p_aceite: String(c.aceite || ""),
+    p_pdf_sha: String(c.pdf_sha256 || ""),
+    p_conteudo_sha: String(c.conteudo_sha256 || ""),
+    p_pdf_caminho: c.pdf_caminho || null,
+    p_png_caminho: c.png_caminho || null,
+    // Estes três vêm daqui, não do cliente.
+    p_ip: ipDe(req),
+    p_local: localDe(req),
+    p_user_agent: String(req.headers["user-agent"] || ""),
+    p_hora_cliente: String(c.hora_cliente || ""),
+    p_fuso_cliente: String(c.fuso_cliente || ""),
+    p_evidencias: c.evidencias || {},
+  });
+  const a = (Array.isArray(d) ? d[0] : d) || null;
+  if (!a) return res.status(400).json({ erro: "Não consegui registrar." });
+  res.setHeader("Cache-Control", "no-store");
+  return res.status(200).json({ ok: true, codigo: a.codigo, assinado_em: a.assinado_em });
+}
+
+// Verificar (público, sem token). É a prova que o cliente mostra.
+async function verificarPublico(req, res) {
+  const cod = String(req.query.c || "").trim();
+  if (!/^VPT-[A-Z0-9]{6,12}$/i.test(cod)) return res.status(400).json({ erro: "Código inválido." });
+  const d = await rpc("verificar_assinatura", { p_codigo: cod });
+  const a = (Array.isArray(d) ? d[0] : d) || null;
+  // Resposta uniforme: não dizer se o código existe ou não impediria a
+  // pessoa de saber que digitou errado. Aqui dizer é o certo — o
+  // código é protocolo, não segredo.
+  if (!a) return res.status(404).json({ erro: "Código não encontrado." });
+  res.setHeader("Cache-Control", "public, max-age=0, s-maxage=60");
+  return res.status(200).json({ assinatura: a });
+}
+
 module.exports = async function handler(req, res) {
   if (!URL_BASE || !ANON) {
     return res.status(500).json({ erro: "SUPABASE_URL ou SUPABASE_ANON_KEY não configurados." });
@@ -266,8 +376,51 @@ module.exports = async function handler(req, res) {
     return await zapsignWebhook(req, res);
   }
 
+  // As rotas do signatário também chegam sem login, pelo mesmo motivo:
+  // quem assina é o cliente, e ele não tem conta aqui.
+  const pub = String(req.query.recurso || "");
+  if (pub === "assinar-abrir" || pub === "assinar" || pub === "verificar") {
+    try {
+      if (pub === "assinar-abrir") return await abrirAssinatura(req, res);
+      if (pub === "assinar") return await assinarPublico(req, res);
+      return await verificarPublico(req, res);
+    } catch (e) {
+      return res.status(e.status || 400).json({ erro: limpar(e.message) || "Falhou." });
+    }
+  }
+
   const tok = tokenDe(req);
   if (!tok) return res.status(401).json(SEM_LOGIN);
+
+  // Criar o convite é da equipe, e passa pelo token de quem pediu: a
+  // função do banco confere `e_equipe()` com o JWT.
+  if (String(req.query.recurso || "") === "assinar-link") {
+    try {
+      if (req.method !== "POST") { res.setHeader("Allow", "POST"); return res.status(405).json({ erro: "Use POST." }); }
+      const c = await lerCorpo(req);
+      const doc = String((c && c.documento_id) || "");
+      if (!RX_UUID.test(doc)) return res.status(400).json({ erro: "documento_id inválido." });
+
+      const r = await banco(`${URL_BASE}/rest/v1/rpc/criar_link_assinatura`, {
+        method: "POST", headers: json(tok),
+        body: JSON.stringify({
+          p_documento: doc,
+          p_nome: (c && c.nome) || null,
+          p_telefone: (c && c.telefone) || null,
+          p_dias: (c && Number(c.dias)) || 7,
+        }),
+      });
+      const l = (Array.isArray(r) ? r[0] : r) || null;
+      if (!l) return res.status(400).json({ erro: "Não consegui criar o link." });
+      // **O token em claro passa por aqui uma única vez.** O banco só
+      // guarda o hash dele; link perdido não se recupera, gera-se
+      // outro. Por isso ele não vai para log nenhum.
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(201).json({ ok: true, id: l.id, token: l.token, expira_em: l.expira_em });
+    } catch (e) {
+      return res.status(e.status || 400).json({ erro: limpar(e.message) || "Falhou." });
+    }
+  }
 
   if (String(req.query.recurso || "") === "zapsign") {
     try { return await zapsign(req, res, tok); }
