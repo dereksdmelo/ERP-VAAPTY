@@ -10235,6 +10235,8 @@ function FunilLeads({ perfil, equipe }) {
   const [agendando, setAgendando] = useState(null);
   const [voltando, setVoltando] = useState(null);
   const [perdendo, setPerdendo] = useState(null);
+  const [anotando, setAnotando] = useState(null);
+  const [nota, setNota] = useState("");
   const [salvando, setSalvando] = useState(false);
   const campoNome = React.useRef(null);
 
@@ -10256,6 +10258,23 @@ function FunilLeads({ perfil, equipe }) {
     } catch (e) { setErro(e.message); return null; }
     finally { setSalvando(false); }
   };
+  /**
+   * Anota sem tirar a pessoa da linha.
+   *
+   * **Cada nota entra com a data na frente, e nada é sobrescrito.** A
+   * anotação de um lead é o histórico do que já foi tentado; trocar a
+   * anterior pela nova apagaria justamente a informação que faz a
+   * terceira ligação ser diferente da primeira.
+   */
+  const salvarNota = async (l) => {
+    const t = nota.trim();
+    if (!t) return;
+    await mexer(l, {
+      observacoes: [l.observacoes, `${diaBR(hojeEmSP())}: ${t}`].filter(Boolean).join("\n"),
+    });
+    setNota(""); setAnotando(null);
+  };
+
   const mexer = async (l, mud) => {
     setLista((ls) => ls.map((x) => (x.id === l.id ? { ...x, ...mud } : x)));
     try { await atualizarLead(l.id, mud); carregar(); }
@@ -10353,11 +10372,46 @@ function FunilLeads({ perfil, equipe }) {
               <button onClick={() => setAgendando(l)} className="rounded-md px-2.5 py-1 font-semibold"
                 style={{ background: C.roxo, color: "#fff" }}>Agendar</button>
               <button onClick={() => setVoltando(l)} style={{ color: C.mute }}>ligar depois</button>
+              <button onClick={() => setAnotando(anotando === l.id ? null : l.id)}
+                style={{ color: l.observacoes ? C.roxo : C.mute, fontWeight: l.observacoes ? 700 : 400 }}>
+                obs{l.observacoes ? " ✓" : ""}
+              </button>
               <button onClick={() => setPerdendo(l)} style={{ color: C.mute }}>saiu</button>
             </div>
 
             <span className="w-[74px] shrink-0 text-right text-[10px] uppercase tracking-[0.05em]"
               style={{ color: C.mute }}>{LEAD_ROT[l.status]}</span>
+
+            {/* A anotação abre NA LINHA, não em janela.
+
+                Quem anota está no telefone e volta a ligar em seguida;
+                uma caixa por cima da lista obriga a fechar para ver o
+                próximo. Aberta aqui, o histórico fica à vista enquanto
+                a pessoa escreve — e é ele que diz o que já foi tentado. */}
+            {anotando === l.id && (
+              <div className="w-full" style={{ borderTop: `1px solid ${C.line}`, paddingTop: 8, marginTop: 4 }}>
+                {l.observacoes && (
+                  <div className="mb-1.5 max-h-[110px] overflow-y-auto rounded px-2 py-1.5 text-[11.5px] leading-snug"
+                    style={{ background: C.bg, color: C.ink, whiteSpace: "pre-wrap" }}>
+                    {l.observacoes}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <input autoFocus className={inputCls} style={{ ...inputSty, fontSize: 13 }}
+                    placeholder="o que ele disse…"
+                    value={nota}
+                    onChange={(e) => setNota(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") salvarNota(l); }} />
+                  <button onClick={() => salvarNota(l)} disabled={!nota.trim()}
+                    className="shrink-0 rounded-md px-3 text-[12px] font-semibold disabled:opacity-40"
+                    style={{ background: C.roxo, color: "#fff" }}>
+                    anotar
+                  </button>
+                  <button onClick={() => { setAnotando(null); setNota(""); }}
+                    className="shrink-0 text-[12px]" style={{ color: C.mute }}>fechar</button>
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </div>
