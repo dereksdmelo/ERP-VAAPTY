@@ -7307,7 +7307,6 @@ function LeadsIndicacao() {
   const [filtro, setFiltro] = useState("");
 
   const [voltando, setVoltando] = useState(null);
-  const [perdendo, setPerdendo] = useState(null);
 
   const carregar = (st) =>
     listarIndicacoes(st || undefined).then(setLista).catch((e) => setErro(e.message));
@@ -10235,6 +10234,7 @@ function FunilLeads({ perfil, equipe }) {
   const [novo, setNovo] = useState({ nome: "", telefone: "", carro: "", origem: "google" });
   const [agendando, setAgendando] = useState(null);
   const [voltando, setVoltando] = useState(null);
+  const [perdendo, setPerdendo] = useState(null);
   const [salvando, setSalvando] = useState(false);
   const campoNome = React.useRef(null);
 

@@ -350,6 +350,17 @@ Negociação e no Fechamento.
 campo na tela. Volta quando houver — e, pela decisão do Derek, só
 interessa quando o carro fecha de verdade.
 
+**Estado de React usado fora do componente que o declara passa pelo
+Babel e quebra na tela.** Em 15/09/2026 um `const [perdendo, …]` foi
+parar na tela de indicações enquanto o `setPerdendo()` ficou no funil
+de leads: a transpilação não reclamou, e a **Pré-vendas abriu em
+branco** — `ReferenceError: perdendo is not defined`, visível só no
+console. Transpilar não é testar; **antes de dar uma tela por pronta,
+abrir nela logado** (decisão 24). `ferramentas-escopo.js` varre o
+arquivo procurando esse caso: `node ferramentas-escopo.js`. Ele acusa
+quatro falsos positivos conhecidos — `setC`, `setV`, `setL` em
+`ContratoDoNegocio` e `setComp` em `Cabecalho` — que são props.
+
 **O formulário do cliente é expressão JSX, não componente.** Componente
 declarado dentro de outro vira tipo novo a cada render: o React remonta
 o formulário e **o campo perde o foco a cada tecla digitada**. Quem
