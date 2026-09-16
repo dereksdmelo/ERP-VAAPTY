@@ -1148,20 +1148,48 @@ laranja, o que é a leitura correta.
 O Derek perguntou em 16/09/2026 se o gestor consegue **ouvir** a
 conversa ao vivo, do computador dele.
 
-**Áudio ao vivo não, e o que barra é o consentimento.** O parecer
+**O que barra o áudio não é o código, é o consentimento.** O parecer
 jurídico de 28/08/2026 (decisão 17) põe o aceite do cliente antes de
-tudo, e a frase que o negociador lê em voz alta diz quatro coisas: a
-conversa vai ser transcrita para texto, o áudio **não** fica gravado, a
-transcrição passa pelo serviço de voz do celular, e ela fica registrada
-no sistema da loja. **Não diz que outra pessoa está escutando a sala
-ao vivo** — e isso não é detalhe de redação: é uma terceira pessoa
-ouvindo o cliente sem ele saber. Ligar isso pede frase nova no aceite e
-o jurídico de novo, nessa ordem. Código antes de consentimento aqui
-seria derrubar o parecer inteiro.
+tudo, e a frase que o negociador lia dizia quatro coisas: a conversa
+vai ser transcrita, o áudio **não** fica gravado, a transcrição passa
+pelo serviço de voz do celular, e fica registrada no sistema da loja.
+**Não dizia que outra pessoa escuta a sala ao vivo** — e isso não é
+detalhe de redação: é uma terceira pessoa ouvindo o cliente sem ele
+saber.
 
-Teria custo técnico também — WebRTC pede servidor de sinalização e
-TURN, e o teto de 12 funções está cheio —, **mas esse não é o
-argumento.** Mesmo que fosse barato, continuaria dependendo do aceite.
+**O Derek mandou acrescentar a frase, e ela está no ar.**
+`CONSENTIMENTO_ESCUTA` passou a autorizar o gerente a **acompanhar e
+ouvir enquanto a conversa acontece**. Ela mora em um lugar só, como a
+`CLAUSULA_ASSINATURA` (decisão 42) — duas redações do mesmo aceite
+seriam dois consentimentos para a mesma coisa. **Isto é texto de base
+legal: quem mexer conversa com o jurídico da Vaapty antes** (decisão
+7), e o Derek autorizou esta redação sabendo que ela vai para lá.
+
+**Está escrita como AUTORIZAÇÃO, não como descrição.** "O gerente
+**pode** acompanhar — e ouvir" é o alcance concedido; não afirma que
+alguém está ouvindo agora. A diferença é o que a mantém verdadeira
+enquanto o áudio não existe.
+
+**E ela enfraquece uma promessa, de propósito — é a parte que o
+jurídico precisa olhar.** Antes: *"o áudio não fica gravado"*, ponto.
+Autorizar a escuta ao vivo obriga o som a sair do aparelho, e o
+compromisso que sobra é **não ficar guardado depois**. Quem construir o
+áudio está preso a essa frase: **transmitir pode, reter não.**
+
+**Qual redação o cliente ouviu fica gravado (0051).** `escuta_versao`
+guarda a data de `CONSENTIMENTO_VERSAO`, e nulo quer dizer aceite
+anterior a 16/09/2026 — transcrição sim, ouvir a sala não. Sem isso,
+"autorizado às 14:32" não diz autorizado a **quê**, e no dia em que o
+áudio existir não haveria como saber em quais atendimentos ele pode
+ligar. **Não se reconstrói depois**: quem não perguntou na hora não
+sabe mais o que foi dito. O painel do gestor marca esses aceites com
+"aceite antigo, só o texto". **Quem mudar a redação muda a data
+junto.**
+
+O áudio em si ainda não foi construído — WebRTC pede servidor de
+sinalização e TURN, e o teto de 12 funções está cheio; a alternativa é
+pedaço de áudio pelo Storage, que já é o caminho da decisão 36. **O
+aceite deixou de ser o bloqueio; agora é escolha de engenharia.**
 
 **O texto sim, e já estava quase pronto.** A transcrição sobe do
 aparelho do negociador a cada cinco segundos desde a 0050; o que

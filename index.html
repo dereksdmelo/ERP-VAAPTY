@@ -1540,7 +1540,7 @@ const VAZIO = {
   // espera
   esperaIniciadaEm: null, notasEspera: "",
   // escuta: só liga depois do consentimento, e guarda quando ele foi dado
-  escutaOk: false, escutaEm: null, transcricao: "",
+  escutaOk: false, escutaEm: null, escutaVersao: "", transcricao: "",
   // N
   rodadas: [], objecao: "",
   // T
@@ -4190,6 +4190,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
       objecao: x.objecao || null,
       escuta_ok: !!x.escutaOk,
       escuta_em: x.escutaEm || null,
+      escuta_versao: x.escutaVersao || null,
       transcricao: x.transcricao || "",
       ficha: semTranscricao(x),
     });
@@ -4500,7 +4501,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         {etapa === "A" && (
           <Bloco titulo="Escutar a conversa"
             sub="Peça agora, no começo. Uma vez ligada, a escuta acompanha todas as etapas.">
-            <EscutaControle escuta={escuta} f={f} set={set} />
+            <EscutaControle escuta={escuta} f={f} setVarios={setVarios} />
           </Bloco>
         )}
 
@@ -5968,8 +5969,12 @@ const numeroBR = (v) => {
  *   · **o áudio vai para o serviço de voz da Google ou da Apple**,
  *     conforme o navegador. Não é processamento local, e está escrito
  *     na tela de consentimento porque o cliente precisa saber disso.
- *   · nós não gravamos áudio em lugar nenhum. Só o texto fica, e fica
- *     no aparelho, junto com o resto do atendimento.
+ *   · **nós não guardamos áudio.** Desde 16/09/2026 o aceite autoriza
+ *     o gerente a OUVIR ao vivo (decisão 45) — transmitir pode, reter
+ *     não. Quem construir isso está preso à frase que o cliente ouviu,
+ *     em `CONSENTIMENTO_ESCUTA`.
+ *   · o texto vai para o servidor desde a 0033, e o gerente acompanha
+ *     enquanto a conversa acontece.
  *   · os "sinais" abaixo são busca por palavra, não modelo de
  *     linguagem. Chamar isso de IA na frente de quem decide seria
  *     mentira. Um resumo de verdade precisa de um LLM, o que pede uma
@@ -6106,20 +6111,76 @@ function useEscuta(f, set) {
   return { Rec, ouvindo, parcial, erro, desde, ligar, desligar, limpar };
 }
 
+/**
+ * O QUE O CLIENTE OUVE ANTES DE AUTORIZAR (decisão 45).
+ *
+ * **Isto mora em um lugar só**, como a `CLAUSULA_ASSINATURA` (decisão
+ * 42): é a base legal da escuta inteira, e duas redações do mesmo
+ * aceite seriam dois consentimentos diferentes para a mesma coisa.
+ *
+ * **Está escrito como AUTORIZAÇÃO, não como descrição.** "O gerente
+ * pode acompanhar e ouvir" é o alcance que o cliente concede; não
+ * afirma que alguém está ouvindo agora. A diferença importa: o áudio
+ * ao vivo ainda não foi construído, e uma frase que dissesse "está
+ * sendo ouvida" seria falsa hoje.
+ *
+ * **O que mudou em 16/09/2026, e é a parte que o jurídico precisa
+ * olhar:** a frase anterior dizia *"o áudio não fica gravado"*, ponto.
+ * Autorizar a escuta ao vivo enfraquece isso por necessidade — o som
+ * passa a sair do aparelho — e o compromisso que sobra é **não ficar
+ * guardado depois**. Quem construir o áudio ao vivo está preso a essa
+ * frase: transmitir pode, reter não.
+ *
+ * O aceite anterior falava em transcrição e em áudio não gravado, e
+ * nada sobre alguém acompanhar ao vivo:
+ *
+ *   "a conversa vai ser transcrita para texto, o áudio não fica
+ *    gravado, a transcrição passa pelo serviço de voz do celular
+ *    (Google ou Apple) e fica registrada no sistema da loja."
+ */
+const CONSENTIMENTO_ESCUTA =
+  "Leia em voz alta: esta conversa vai ser transcrita para texto, e o gerente da loja pode " +
+  "acompanhar — e ouvir — enquanto ela acontece. A transcrição fica registrada no sistema da " +
+  "loja; o áudio não fica guardado depois. A transcrição passa pelo serviço de voz do celular " +
+  "(Google ou Apple). Sem esse aceite o microfone não liga.";
+
+/**
+ * A data da redação que o cliente ouviu, gravada junto com o aceite.
+ *
+ * **Sem isso, "autorizado às 14:32" não diz autorizado a QUÊ.** Quem
+ * consentiu com a frase antiga concordou com transcrição e com áudio
+ * não gravado — e não com o gerente ouvindo a sala. No dia em que o
+ * áudio ao vivo existir, é esta marca que vai dizer para quais
+ * atendimentos ele pode ligar. Reconstruir isso depois é impossível.
+ *
+ * **Quem mudar `CONSENTIMENTO_ESCUTA` muda esta data junto.**
+ */
+const CONSENTIMENTO_VERSAO = "2026-09-16";
+
 /** O aceite e o microfone. Fica na Abordagem: é onde se pede. */
-function EscutaControle({ escuta, f, set }) {
+function EscutaControle({ escuta, f, setVarios }) {
   const { Rec, ouvindo, erro, ligar, desligar } = escuta;
   return (
     <div>
       <div className="rounded-md p-3" style={{ background: "#FBF7FD", border: `1px solid ${C.line}` }}>
         <Toggle
           label="O cliente foi avisado e autorizou a escuta"
-          nota="Leia em voz alta: a conversa vai ser transcrita para texto, o áudio não fica gravado, a transcrição passa pelo serviço de voz do celular (Google ou Apple) e fica registrada no sistema da loja. Sem esse aceite o microfone não liga."
+          nota={CONSENTIMENTO_ESCUTA}
           valor={f.escutaOk}
-          onChange={(v) => { if (!v) desligar(); set("escutaOk", v); set("escutaEm", v ? new Date().toISOString() : null); }} />
+          onChange={(v) => {
+            if (!v) desligar();
+            setVarios({
+              escutaOk: v,
+              escutaEm: v ? new Date().toISOString() : null,
+              // A redação que ele ouviu, não a que estiver no código
+              // quando alguém for olhar isto meses depois.
+              escutaVersao: v ? CONSENTIMENTO_VERSAO : "",
+            });
+          }} />
         {f.escutaOk && f.escutaEm && (
           <p className="mt-2 text-[11px]" style={{ color: C.mute, fontFamily: F.mono }}>
             autorizado em {new Date(f.escutaEm).toLocaleString("pt-BR")}
+            {f.escutaVersao ? ` · aceite de ${f.escutaVersao}` : ""}
           </p>
         )}
       </div>
@@ -15565,6 +15626,12 @@ function ConversaResumida({ viva, verTexto, setVerTexto }) {
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-[11px]" style={{ color: C.verde, fontWeight: 600 }}>
           Escuta autorizada{viva.escuta_em ? ` ${horaCurta(viva.escuta_em)}` : ""}
+          {/* Aceite anterior a 16/09/2026 autoriza a transcrição e não
+              autoriza ouvir a sala (decisão 45). O gestor precisa ver
+              isso aqui, e não descobrir depois. */}
+          {viva.escuta_ok && !viva.escuta_versao && (
+            <span style={{ color: C.mute, fontWeight: 500 }}> · aceite antigo, só o texto</span>
+          )}
         </span>
         {temTexto && (
           <button onClick={() => setVerTexto((x) => !x)} className="text-[11px] font-semibold" style={{ color: C.mute }}>

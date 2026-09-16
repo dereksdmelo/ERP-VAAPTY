@@ -859,6 +859,9 @@ async function viva(req, res, tok) {
     if (c.valor_fechado !== undefined) linha.valor_fechado = decimal(c.valor_fechado);
     if (c.escuta_ok !== undefined) linha.escuta_ok = !!c.escuta_ok;
     if (c.escuta_em !== undefined) linha.escuta_em = c.escuta_em || null;
+    // Qual redação o cliente ouviu (0051). Nulo é "aceite antigo", que
+    // é a resposta certa para tudo que veio antes de 16/09/2026.
+    if (c.escuta_versao !== undefined) linha.escuta_versao = texto(c.escuta_versao) || null;
     // A transcrição tem teto. Uma conversa de uma hora dá uns 30 KB; o
     // teto existe para o caso de o reconhecimento entrar em laço e
     // encher a coluna — e corta o COMEÇO, porque o fim é o que importa

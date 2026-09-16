@@ -256,12 +256,17 @@ o microfone ligar. O que ficou:
 ## Ideias que ficaram para depois
 
 - **Áudio ao vivo para o gestor.** Pedido do Derek em 16/09/2026;
-  entregue só o texto (decisão 45). **O que destrava não é código, é o
-  aceite**: a frase que o cliente ouve hoje fala em transcrição e em
-  áudio não gravado, e não em alguém escutando a sala ao vivo. Caminho:
-  redação nova + jurídico, e só então decidir entre WebRTC (servidor de
-  sinalização e TURN) ou pedaços de áudio no Storage — os dois esbarram
-  no teto de 12 funções.
+  entregue o texto ao vivo, e o **aceite já autoriza o áudio** (decisão
+  45). Falta construir: WebRTC (servidor de sinalização e TURN) ou
+  pedaços de áudio pelo Storage, que é o caminho da decisão 36 e não
+  gasta função nova. **Duas obrigações que a frase do cliente criou:**
+  o áudio não pode ficar guardado depois, e só pode ligar em
+  atendimento cujo `escuta_versao` (0051) não seja nulo — aceite
+  anterior a 16/09/2026 autoriza a transcrição e não a sala.
+- **A redação do aceite precisa passar pelo jurídico da Vaapty.** O
+  Derek autorizou o texto e ele está no ar; a revisão continua devendo.
+  Ele enfraquece, por necessidade, a promessa de que o áudio não é
+  gravado — virou "não fica guardado depois".
 
 - **KBB por modelo.** O link para na marca porque o modelo lá fica sob a
   carroceria (`/hatchback/i30/`), que a FIPE não devolve.
