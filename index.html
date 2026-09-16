@@ -11,7 +11,7 @@
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<style>html,body{margin:0;padding:0;background:#F4F2F7;-webkit-font-smoothing:antialiased}@media print{aside,nav{display:none!important}main{padding:0!important}body{background:#fff}}</style>
+<style>html,body{margin:0;padding:0;background:#F4F2F7;-webkit-font-smoothing:antialiased}@media print{aside,nav{display:none!important}main{padding:0!important}body{background:#fff}}@keyframes vp-pulso{0%,100%{opacity:1}50%{opacity:.25}}.vp-pulso{animation:vp-pulso 1.4s ease-in-out infinite}@media(prefers-reduced-motion:reduce){.vp-pulso{animation:none}}</style>
 </head>
 <body>
 <div id="raiz"></div>
@@ -15434,6 +15434,89 @@ function ResumoDoNegocio({ viva, atendimento }) {
  * depois de o resumo ser escrito — e a tela diz de quando é o texto
  * que está na frente dele.
  */
+/**
+ * A conversa chegando, enquanto ela acontece.
+ *
+ * O Derek perguntou em 16/09/2026 se dá para o gestor **ouvir** a
+ * conversa do computador dele. Áudio não — e o que barra não é o
+ * código, é o consentimento (ver a decisão 45). O que dá, e já estava
+ * quase pronto, é **acompanhar o texto**: a transcrição sobe do
+ * aparelho do negociador a cada cinco segundos desde a 0050.
+ *
+ * **Mostra o FIM, não o começo.** Quem abre o painel no meio de um
+ * atendimento quer saber o que está sendo dito agora; rolar duas mil
+ * palavras para chegar lá é o mesmo problema que o resumo (decisão 39)
+ * resolveu para o passado. O quadro rola sozinho para baixo conforme
+ * o texto cresce.
+ *
+ * **E ele diz quando PAROU de chegar.** Celular bloqueado, aba no
+ * fundo, reconhecimento de voz que caiu: qualquer uma dessas faz o
+ * texto congelar, e um quadro parado com "ao vivo" em cima seria
+ * mentira — o gestor concluiria que a mesa está em silêncio. Passados
+ * 45 segundos sem novidade (são três voltas da sincronização), a tarja
+ * troca de cor e diz há quanto tempo.
+ *
+ * **A tela diz que é texto e que atrasa.** Entre a fala e este quadro
+ * há o reconhecimento de voz, os cinco segundos do aparelho e os cinco
+ * daqui. Chamar isso de "ao vivo" sem dizer o resto faria o gestor
+ * cobrar pelo que ainda não chegou.
+ */
+function ConversaAoVivo({ viva }) {
+  const caixa = useRef(null);
+  const [, forcar] = useState(0);
+  // O relógio precisa andar mesmo quando nada chega — é justamente aí
+  // que a informação "parou há 2 min" é a que importa.
+  useEffect(() => {
+    const t = setInterval(() => forcar((x) => x + 1), 5000);
+    return () => clearInterval(t);
+  }, []);
+
+  const texto = String(viva.transcricao || "");
+  // O fim da conversa, não ela inteira: é o que se lê em pé.
+  const fim = texto.length > 1200 ? texto.slice(texto.length - 1200) : texto;
+
+  useEffect(() => {
+    const el = caixa.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [texto.length]);
+
+  if (!viva.escuta_ok) return null;
+
+  const em = viva.atualizado_em ? new Date(viva.atualizado_em).getTime() : 0;
+  const seg = em ? Math.max(0, Math.round((Date.now() - em) / 1000)) : 999999;
+  const chegando = seg < 45;
+  const parouHa = seg > 3600 ? `${Math.round(seg / 3600)} h`
+    : seg > 90 ? `${Math.round(seg / 60)} min` : `${seg}s`;
+
+  return (
+    <div className="mt-2 rounded-lg" style={{ border: `1px solid ${chegando ? C.verde : C.line}`, overflow: "hidden" }}>
+      <div className="flex items-baseline justify-between gap-2 px-2.5 py-1"
+        style={{ background: chegando ? "#EDF7F0" : C.bg }}>
+        <span className="text-[10px] uppercase tracking-[0.12em]"
+          style={{ color: chegando ? C.verde : C.mute, fontWeight: 700 }}>
+          {chegando
+            ? <><span className="vp-pulso">●</span> a conversa, agora</>
+            : `parou de chegar há ${parouHa}`}
+        </span>
+        <span className="text-[10px]" style={{ color: C.mute }}>
+          {Math.round(texto.length / 5)} palavras
+        </span>
+      </div>
+
+      <div ref={caixa} className="max-h-[220px] overflow-y-auto px-2.5 py-2 text-[12px] leading-relaxed"
+        style={{ background: C.paper, whiteSpace: "pre-wrap" }}>
+        {fim.trim() || <span style={{ color: C.mute }}>Microfone ligado e ninguém falou ainda.</span>}
+      </div>
+
+      <p className="px-2.5 pb-1.5 pt-1 text-[10px] leading-snug" style={{ color: C.mute }}>
+        {chegando
+          ? "É o texto da conversa, não o áudio, e chega com alguns segundos de atraso. O reconhecimento de voz erra palavras."
+          : "O aparelho do negociador parou de mandar — celular bloqueado, aba no fundo ou escuta desligada. Não quer dizer que a mesa esteja em silêncio."}
+      </p>
+    </div>
+  );
+}
+
 function ConversaResumida({ viva, verTexto, setVerTexto }) {
   // O que veio guardado do banco é o ponto de partida; o que foi
   // gerado agora manda, e é por isso que são dois estados e não um.
@@ -15490,7 +15573,9 @@ function ConversaResumida({ viva, verTexto, setVerTexto }) {
         )}
       </div>
 
-      {!temTexto && <p className="mt-1 text-[11px]" style={{ color: C.mute }}>Nada transcrito ainda.</p>}
+      <ConversaAoVivo viva={viva} />
+
+      {!temTexto && !viva.escuta_ok && <p className="mt-1 text-[11px]" style={{ color: C.mute }}>Nada transcrito ainda.</p>}
 
       {temTexto && (
         <div className="mt-2 rounded-lg p-2.5" style={{ background: "#F6F3FA", border: `1px solid ${C.line}` }}>
@@ -15653,6 +15738,43 @@ function PainelGestor({ perfil, comp }) {
     ? emAndamento.filter((n) => n.atendimento_id === foco)[0]
     : (fila || []).filter((x) => x.atendimento.id === foco)[0];
   const pendentes = (fila || []).filter((x) => !x.revisao).length;
+
+  /**
+   * O atendimento aberto é puxado de perto (0050).
+   *
+   * A lista inteira continua a cada 20 s — ela é um mural, e vinte
+   * atendimentos de cinco em cinco segundos seria pagar por movimento
+   * que ninguém está olhando. Mas quando o gestor ABRE um cartão ele
+   * está acompanhando aquela mesa, e aí o que importa é a conversa
+   * chegando: cinco segundos, que é o mesmo passo com que o aparelho
+   * do negociador manda.
+   *
+   * Só com a aba à vista, e uma puxada imediata quando ela volta —
+   * mesma régua da sincronização do atendimento.
+   */
+  const [aoVivo, setAoVivo] = useState(null);
+  useEffect(() => {
+    setAoVivo(null);
+    if (aba !== "agora" || !foco) return;
+    let vivo = true;
+    const puxar = () => {
+      if (document.hidden) return;
+      lerNegociacaoViva(foco)
+        .then((v) => { if (vivo && v && v.atendimento_id === foco) setAoVivo(v); })
+        .catch(() => {});
+    };
+    puxar();
+    const t = setInterval(puxar, 5000);
+    const aoVoltar = () => { if (!document.hidden) puxar(); };
+    document.addEventListener("visibilitychange", aoVoltar);
+    window.addEventListener("focus", puxar);
+    return () => {
+      vivo = false;
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", aoVoltar);
+      window.removeEventListener("focus", puxar);
+    };
+  }, [foco, aba]);
 
   // Quem já foi revisado desce. A fila existe para ser esvaziada de
   // cima para baixo, e o que já tem retorno só atrapalha quem procura
@@ -15906,7 +16028,12 @@ function PainelGestor({ perfil, comp }) {
           // para baixo é tudo igual, então normaliza uma vez.
           const at = aba === "agora" ? aberto.atendimento : aberto.atendimento;
           const aid = aba === "agora" ? aberto.atendimento_id : aberto.atendimento.id;
-          const vivaX = aba === "agora" ? aberto : aberto.viva;
+          // A linha puxada de perto manda sobre a da lista, que pode
+          // ter até vinte segundos. Sem a conferência do id, trocar de
+          // cartão mostraria a conversa do anterior por um instante.
+          const vivaX = aba === "agora"
+            ? ((aoVivo && aoVivo.atendimento_id === aberto.atendimento_id) ? aoVivo : aberto)
+            : aberto.viva;
           const revX = aba === "agora" ? null : aberto.revisao;
           return (
           <div className="space-y-3 lg:sticky lg:top-4 lg:self-start">
