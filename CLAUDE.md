@@ -1143,6 +1143,57 @@ cláusula de gerente — de propósito: o espelho vem do aparelho de quem
 conduz. Gerente que abrir o atendimento de um negociador vê a tarja
 laranja, o que é a leitura correta.
 
+### 45. Acompanhar a conversa: o texto sim, o áudio não
+
+O Derek perguntou em 16/09/2026 se o gestor consegue **ouvir** a
+conversa ao vivo, do computador dele.
+
+**Áudio ao vivo não, e o que barra é o consentimento.** O parecer
+jurídico de 28/08/2026 (decisão 17) põe o aceite do cliente antes de
+tudo, e a frase que o negociador lê em voz alta diz quatro coisas: a
+conversa vai ser transcrita para texto, o áudio **não** fica gravado, a
+transcrição passa pelo serviço de voz do celular, e ela fica registrada
+no sistema da loja. **Não diz que outra pessoa está escutando a sala
+ao vivo** — e isso não é detalhe de redação: é uma terceira pessoa
+ouvindo o cliente sem ele saber. Ligar isso pede frase nova no aceite e
+o jurídico de novo, nessa ordem. Código antes de consentimento aqui
+seria derrubar o parecer inteiro.
+
+Teria custo técnico também — WebRTC pede servidor de sinalização e
+TURN, e o teto de 12 funções está cheio —, **mas esse não é o
+argumento.** Mesmo que fosse barato, continuaria dependendo do aceite.
+
+**O texto sim, e já estava quase pronto.** A transcrição sobe do
+aparelho do negociador a cada cinco segundos desde a 0050; o que
+faltava era o painel seguir. Quando o gestor abre um cartão na aba
+"Em andamento", aquela linha passa a ser puxada de cinco em cinco
+segundos — a **lista** continua em vinte, porque ela é um mural e vinte
+atendimentos em cinco segundos seria pagar por movimento que ninguém
+está olhando.
+
+**O quadro mostra o FIM, e rola sozinho.** Quem abre o painel no meio
+de um atendimento quer o que está sendo dito agora; rolar duas mil
+palavras para chegar lá é o mesmo problema que o resumo (decisão 39)
+resolveu para o passado. A transcrição inteira continua atrás de "ver a
+transcrição", que é outra pergunta.
+
+**E ele diz quando PAROU de chegar.** Celular bloqueado, aba no fundo,
+reconhecimento de voz que caiu — qualquer uma dessas congela o texto, e
+um quadro parado com "ao vivo" em cima faria o gestor concluir que a
+mesa está em silêncio, que é a leitura errada mais cara possível.
+Passados 45 segundos sem novidade — três voltas da sincronização — a
+tarja troca de cor e diz há quanto tempo. **Quem mexer aqui mantém
+essa distinção**; é ela que separa acompanhar de adivinhar.
+
+**A tela diz que é texto e que atrasa.** Entre a fala e o quadro estão
+o reconhecimento de voz, os cinco segundos do aparelho e os cinco
+daqui. Chamar isso de "ao vivo" sem dizer o resto faria o gestor cobrar
+pelo que ainda não chegou.
+
+**Nada mudou na RLS.** Quem lê a `negociacao_viva` continua sendo o
+gerente e o dono do atendimento (0033) — ler a mesa do colega segue
+fora.
+
 ## Convenções do código
 
 - **Português no domínio.** Estado, funções e rótulos em pt-BR

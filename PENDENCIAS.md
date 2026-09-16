@@ -255,6 +255,14 @@ o microfone ligar. O que ficou:
 
 ## Ideias que ficaram para depois
 
+- **Áudio ao vivo para o gestor.** Pedido do Derek em 16/09/2026;
+  entregue só o texto (decisão 45). **O que destrava não é código, é o
+  aceite**: a frase que o cliente ouve hoje fala em transcrição e em
+  áudio não gravado, e não em alguém escutando a sala ao vivo. Caminho:
+  redação nova + jurídico, e só então decidir entre WebRTC (servidor de
+  sinalização e TURN) ou pedaços de áudio no Storage — os dois esbarram
+  no teto de 12 funções.
+
 - **KBB por modelo.** O link para na marca porque o modelo lá fica sob a
   carroceria (`/hatchback/i30/`), que a FIPE não devolve.
 - **Chaves na Mão.** Não responde a nenhum padrão de URL; ficaria
