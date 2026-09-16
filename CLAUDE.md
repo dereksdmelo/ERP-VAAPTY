@@ -72,6 +72,7 @@ e um `.env` local para o `vercel dev`):
 | `IA_JANELA` | opcional; padrão 2500 caracteres do fim da conversa. É o que se paga por leitura |
 | `SHINKAI_API_KEY` | `api/foto.js?recurso=shinkai` — sem ela o envio ao Shinkai fica desligado e a tela cai no JSON copiado |
 | `SHINKAI_ORIGEM` | opcional; padrão `vaapty-joinville` |
+| `TURN_URL`, `TURN_USUARIO`, `TURN_SENHA` | opcionais; o retransmissor de áudio para quando a conexão direta do "ouvir a mesa" não fecha (decisão 45). Sem elas vai só o STUN, que resolve a maioria das redes — e a tela diz quando não resolveu |
 
 **Nenhuma delas, fora a anônima, pode chegar ao navegador** — é essa a razão de as
 funções em `api/` existirem em vez de o `index.html` chamar os serviços
@@ -1098,6 +1099,16 @@ vazio, e o outro aparelho o adotaria como novidade: seria a perda do
 206 a cada cinco segundos. **Quem mexer neste efeito mantém essa
 guarda.**
 
+**O batimento a cada 25 s existe porque um aparelho vivo parecia
+morto.** O envio só acontecia quando algo mudava, e `atualizado_em` é o
+que diz ao painel do gestor se aquele celular ainda está lá. Um
+negociador conversando com o cliente, sem tocar na tela, aparecia como
+**"parou de chegar há 2 min"** — apareceu assim no teste de
+16/09/2026, com o aparelho perfeito. Alarme falso na direção que mais
+custa: o gestor concluiria que a mesa está em silêncio. Agora manda de
+novo mesmo sem mudança, o que dá duas requisições por minuto no pior
+caso contra as doze de mandar sempre.
+
 **Cinco segundos, e só com a aba à vista** — mais uma volta imediata
 quando ela volta a aparecer, que é o instante exato em que a pessoa
 larga o celular e pega o computador. Rodar escondido gastaria o 4G da
@@ -1186,10 +1197,71 @@ sabe mais o que foi dito. O painel do gestor marca esses aceites com
 "aceite antigo, só o texto". **Quem mudar a redação muda a data
 junto.**
 
-O áudio em si ainda não foi construído — WebRTC pede servidor de
-sinalização e TURN, e o teto de 12 funções está cheio; a alternativa é
-pedaço de áudio pelo Storage, que já é o caminho da decisão 36. **O
-aceite deixou de ser o bloqueio; agora é escolha de engenharia.**
+---
+
+**E o áudio foi construído no mesmo dia (0052).** O gestor aperta
+"ouvir a mesa" e o som sai do celular do negociador **direto** para o
+computador dele, abaixo de um segundo. WebRTC.
+
+**Ponta a ponta não é preferência de arquitetura — é o que sustenta a
+frase do aceite.** Com o som indo direto, **não existe lugar onde ele
+pudesse ficar guardado**: não passa pela Vercel, pelo Postgres nem
+pelo Storage. O que trafega pela 0052 é só o combinado da chamada, o
+SDP dos dois lados. **Quem trouxer o áudio para o servidor "para
+simplificar" desfaz a promessa que o cliente ouviu**, e aí a conversa
+com o jurídico recomeça.
+
+**Sem trickle ICE, de propósito.** O jeito completo manda os endereços
+candidatos aos pingos e exigiria duas filas no banco e polling nos dois
+lados. Esperar a descoberta terminar e mandar tudo dentro do SDP custa
+uns dois segundos a mais e derruba metade das peças móveis. O teto de
+3 s existe porque rede que não responde ao STUN deixaria o gestor
+olhando para "conectando…" sem fim.
+
+**O teto de 12 funções não foi tocado**: a sinalização é
+`?recurso=escuta` no `api/atendimento.js`, pelo mesmo motivo das
+indicações e do lead.
+
+**O pedido chega de carona.** O aparelho do negociador já bate no
+`?recurso=viva` de cinco em cinco segundos (decisão 44); a sessão vem
+junto dessa resposta. Uma consulta própria dobraria o tráfego do
+celular para uma pergunta que quase sempre responde "ninguém está
+ouvindo".
+
+**Só liga quando alguém aperta.** Fora disso o microfone não é
+capturado para chamada nenhuma — poupa bateria e não produz som sem ter
+quem escute.
+
+**O negociador VÊ que está sendo ouvido**, numa tarja roxa no alto. Não
+é cortesia: é ele quem responde ao cliente se for perguntado, e escuta
+que roda escondida do próprio negociador é a forma mais rápida de
+perder a equipe. Mesma razão da tarja da decisão 17.
+
+**Quatro falhas silenciosas ganharam nome**, e é onde estava o trabalho
+de verdade:
+
+- microfone ocupado pela transcrição, ou permissão negada: o aparelho
+  manda o motivo e ele aparece no painel;
+- conexão direta que não fecha: a tela diz que precisa de um servidor
+  de retransmissão (`TURN_URL`, `TURN_USUARIO`, `TURN_SENHA`, opcionais
+  na Vercel). **Sem dizer isso, o gestor conclui que a mesa está em
+  silêncio** — a leitura errada mais cara possível;
+- som bloqueado pela política de autoplay: diria "ligado" sem tocar
+  nada, então a tela manda clicar na página e tentar de novo;
+- **conectado e mudo é indistinguível de sala em silêncio pelo
+  ouvido**, então há um medidor de nível. Sem ele, o gestor tiraria
+  conclusão sobre a negociação a partir de uma falha técnica.
+
+**O que continua sem solução:** tela bloqueada do lado do negociador
+suspende a captura, como já suspende a transcrição. É limite de rodar
+no navegador.
+
+**Conferido no ar em 16/09/2026** com dois navegadores: a chamada
+fechou, o medidor mostrou áudio atravessando, a tarja apareceu no lado
+do negociador e sumiu ao parar. **O que falta testar é o microfone de
+verdade num celular** — se o `SpeechRecognition` e o `getUserMedia`
+dividem o aparelho. No Android costumam; no iPhone é instável, e nesse
+caso vira escolha entre transcrever e ouvir.
 
 **O texto sim, e já estava quase pronto.** A transcrição sobe do
 aparelho do negociador a cada cinco segundos desde a 0050; o que

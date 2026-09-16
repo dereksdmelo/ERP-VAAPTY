@@ -255,14 +255,18 @@ o microfone ligar. O que ficou:
 
 ## Ideias que ficaram para depois
 
-- **Áudio ao vivo para o gestor.** Pedido do Derek em 16/09/2026;
-  entregue o texto ao vivo, e o **aceite já autoriza o áudio** (decisão
-  45). Falta construir: WebRTC (servidor de sinalização e TURN) ou
-  pedaços de áudio pelo Storage, que é o caminho da decisão 36 e não
-  gasta função nova. **Duas obrigações que a frase do cliente criou:**
-  o áudio não pode ficar guardado depois, e só pode ligar em
-  atendimento cujo `escuta_versao` (0051) não seja nulo — aceite
-  anterior a 16/09/2026 autoriza a transcrição e não a sala.
+- **O microfone de verdade ainda não foi testado.** O "ouvir a mesa"
+  (decisão 45) foi conferido no ar com dois navegadores e um tom no
+  lugar do microfone: a chamada fecha e o áudio atravessa. **Falta o
+  celular.** A pergunta aberta é se o `SpeechRecognition` (transcrição)
+  e o `getUserMedia` (chamada) dividem o microfone do aparelho — no
+  Android costumam, no iPhone é instável. Se não dividirem, vira
+  escolha entre transcrever e ouvir, e a tela precisa perguntar.
+- **TURN não está configurado.** Sem ele, a chamada não fecha quando as
+  duas pontas estão em redes que não se enxergam (celular no 4G e
+  gestor em casa, por exemplo). A tela diz isso quando acontece.
+  Destrava com `TURN_URL`, `TURN_USUARIO` e `TURN_SENHA` na Vercel —
+  serviço pago, poucos dólares por mês.
 - **A redação do aceite precisa passar pelo jurídico da Vaapty.** O
   Derek autorizou o texto e ele está no ar; a revisão continua devendo.
   Ele enfraquece, por necessidade, a promessa de que o áudio não é
