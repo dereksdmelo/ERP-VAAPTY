@@ -862,12 +862,33 @@ async function enviarParaAssinatura(atendimentoId, dados) {
 
 /* ----------- painel do gestor (0033) ----------- */
 
-/** O espelho do aparelho do negociador. Silencioso de propósito. */
+/**
+ * Manda o estado de agora para o servidor.
+ *
+ * **Deixou de ser silencioso na 0050.** Enquanto isto servia só ao
+ * painel do gestor, engolir a falha era o certo — não se interrompe um
+ * atendimento por causa de um relatório. Agora é por aqui que o
+ * trabalho do celular chega ao computador, e sincronização que falha
+ * calada é exatamente como o dado do 206 sumiu: a tela precisa poder
+ * dizer "isto ainda está só neste aparelho".
+ */
 async function espelharNegociacao(dados) {
   const r = await fetchAut("/api/atendimento?recurso=viva", {
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
   });
-  return r.ok;
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui sincronizar.");
+  // Vazio é a RLS recusando: quem não conduz o atendimento não espelha.
+  if (!d.ok) throw new Error("Este atendimento não é seu para editar.");
+  return true;
+}
+
+/** O que o outro aparelho deixou no servidor. */
+async function lerNegociacaoViva(atendimentoId) {
+  const r = await fetchAut(`/api/atendimento?recurso=viva&atendimento_id=${encodeURIComponent(atendimentoId)}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui ler a sincronização.");
+  return d.viva || null;
 }
 async function listarNegociacoesVivas(horas) {
   const r = await fetchAut(`/api/atendimento?recurso=viva${horas ? `&horas=${horas}` : ""}`);
@@ -1822,6 +1843,116 @@ function mesclarFicha(local, doBanco) {
     if (vazio(out[k]) && !vazio(doBanco[k])) out[k] = doBanco[k];
   });
   return out;
+}
+
+/**
+ * A mescla de TRÊS pontas: o que o servidor tinha da última vez que os
+ * dois lados se falaram (`base`), o que está nesta tela (`local`), e o
+ * que o outro aparelho deixou lá (`remoto`).
+ *
+ * **A regra da decisão 43 não basta aqui.** "O banco preenche só o que
+ * está vazio" resolve ABRIR a ficha; não resolve os dois aparelhos
+ * EDITANDO ao mesmo tempo — com ela, corrigir um KM já preenchido no
+ * computador nunca chegaria ao celular, porque lá o campo não está
+ * vazio. O que responde os dois casos é comparar com a base:
+ *
+ * - campo que eu **não** toquei desde a última conversa: vale o do
+ *   servidor — foi o outro aparelho que mexeu, ou ninguém mexeu.
+ * - campo que eu toquei: vale o meu, e ele sobe no envio seguinte.
+ *   **Nada que a pessoa acabou de digitar muda sozinho na frente
+ *   dela** — é a mesma promessa da decisão 43.
+ *
+ * Só sobra um caso lossy, e é honesto dizer qual: os dois aparelhos
+ * editando o MESMO campo entre duas voltas da sincronização. Cada tela
+ * fica com o que ela digitou, e o servidor fica com a última que
+ * mandar. Resolver isso de verdade pediria marca de tempo por campo,
+ * com dois relógios que não conversam — e o caso real é a pessoa
+ * digitando de um lado de cada vez.
+ *
+ * **Chave que o remoto não tem fica como está.** Sem essa guarda, um
+ * aparelho com versão mais velha do sistema apagaria da tela do outro
+ * todo campo que ele ainda não conhece.
+ */
+const igualNaFicha = (a, b) =>
+  JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
+
+/**
+ * Chaves que são REGISTRO, não campo: cada aparelho acrescenta e
+ * nenhum apaga. Aqui a mescla é união por identidade, e não três
+ * pontas — com três pontas, a rodada impressa no celular sumiria
+ * quando o computador mandasse a lista dele, que é justamente o
+ * dado que dói perder.
+ */
+const REGISTROS_DA_FICHA = {
+  rodadas: (r) => (r && r.em) || `${(r || {}).impresso}|${(r || {}).contra}`,
+  documentos: (d) => (d && (d.protocolo || d.em)) || JSON.stringify(d),
+  revisoes: (v) => (v && v.em) || JSON.stringify(v),
+};
+
+function unirRegistros(local, remoto, chaveDe) {
+  const a = Array.isArray(local) ? local : [];
+  const b = Array.isArray(remoto) ? remoto : [];
+  const vistos = new Set(); const out = [];
+  [...a, ...b].forEach((x) => {
+    const k = String(chaveDe(x));
+    if (vistos.has(k)) return;
+    vistos.add(k); out.push(x);
+  });
+  // Em ordem de quando aconteceu, senão a rodada do celular entraria
+  // depois da do computador só por ter chegado depois.
+  return out.sort((x, y) => String((x || {}).em || "").localeCompare(String((y || {}).em || "")));
+}
+
+function mesclarAoVivo(base, local, remoto) {
+  if (!remoto) return local;
+  const b = base || {};
+  const out = { ...local };
+  Object.keys(remoto).forEach((k) => {
+    if (REGISTROS_DA_FICHA[k]) {
+      out[k] = unirRegistros(local[k], remoto[k], REGISTROS_DA_FICHA[k]);
+      return;
+    }
+    // Canal aberto é visto para sempre: a etapa P só fecha depois de
+    // todos, e cada aparelho abre os seus. União, nunca substituição.
+    if (k === "canaisVistos") {
+      out[k] = [...new Set([...(local[k] || []), ...(remoto[k] || [])])];
+      return;
+    }
+    // Os quatro pneus são quatro campos numa lista só; comparar a lista
+    // inteira faria o pneu classificado num aparelho apagar o do outro.
+    if (k === "pneus") {
+      const l = Array.isArray(local[k]) ? local[k] : ["", "", "", ""];
+      const r = Array.isArray(remoto[k]) ? remoto[k] : ["", "", "", ""];
+      const ba = Array.isArray(b[k]) ? b[k] : ["", "", "", ""];
+      out[k] = [0, 1, 2, 3].map((i) => (igualNaFicha(l[i], ba[i]) ? r[i] : l[i]));
+      return;
+    }
+    if (igualNaFicha(local[k], b[k])) out[k] = remoto[k];
+  });
+  return out;
+}
+
+/**
+ * A volta completa: o que veio do servidor entra na tela.
+ *
+ * Na PRIMEIRA volta ainda não há base — os dois lados nunca se
+ * falaram —, e aí a regra é a da decisão 43: o servidor preenche só o
+ * que está vazio aqui. Ela trata `false`, `""` e lista vazia como
+ * vazio, que é o que um aparelho recém-aberto tem. Da segunda em
+ * diante é a comparação com a base, que é o que deixa CORRIGIR um
+ * campo já preenchido no outro aparelho.
+ *
+ * Registro (rodada, documento, revisão) é unido nas duas voltas: ele
+ * não pode se perder nem na primeira.
+ */
+function reconciliar(base, local, remoto) {
+  if (!remoto) return local;
+  const n = base ? mesclarAoVivo(base, local, remoto) : mesclarFicha(local, remoto);
+  Object.keys(REGISTROS_DA_FICHA).forEach((k) => {
+    if (remoto[k] === undefined) return;
+    n[k] = unirRegistros(local[k], remoto[k], REGISTROS_DA_FICHA[k]);
+  });
+  return n;
 }
 
 const fichaParaBanco = (f) => ({
@@ -3998,40 +4129,163 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     return () => { vivo = false; clearInterval(t); };
   }, [atendimento && atendimento.id, chatAberto]);
 
-  const espelhoRef = useRef("");
+  /**
+   * A sincronização do atendimento (0050) — as duas mãos.
+   *
+   * O negociador trabalha com o celular na mão e o computador na mesa
+   * ao mesmo tempo. O espelho da 0033 já subia um retrato disto para o
+   * painel do gestor, mas nunca voltava: era relatório, não
+   * sincronização. Agora cada volta faz as duas coisas.
+   *
+   * **Ler ANTES de escrever, sempre.** Assim este aparelho nunca
+   * grava por cima do que o outro mandou sem ter visto. Invertida, a
+   * ordem transforma cada volta numa chance de apagar o trabalho do
+   * outro lado — e seria invisível, porque o dado não some da tela de
+   * quem apagou.
+   *
+   * **Nada antes de `pronto`.** A tela nasce com a ficha VAZIA e só
+   * depois carrega o aparelho e o banco. Mandar nesse intervalo
+   * publicaria o vazio, e o outro aparelho o adotaria como novidade.
+   * É o mesmo risco que a decisão 43 anotou no salvamento, agora a
+   * cada cinco segundos.
+   *
+   * **Só com a aba à vista**, e uma volta imediata quando ela volta a
+   * aparecer — é exatamente o instante em que a pessoa larga o celular
+   * e pega o computador. Rodar escondido gastaria o 4G da loja para
+   * atualizar uma tela que ninguém está olhando.
+   *
+   * **A etapa sobe e não desce.** O painel do gestor precisa saber em
+   * que passo ele está; puxar de volta faria a tela pular de etapa
+   * debaixo do dedo de quem está com o cliente na frente.
+   */
+  const baseRef = useRef(null);
+  const enviadoRef = useRef("");
+  const sincOcupado = useRef(false);
+  const [sinc, setSinc] = useState({ estado: "", em: null, erro: "" });
+
   useEffect(() => {
-    if (!atendimento || !atendimento.id) return;
-    const mandar = () => {
-      const x = fRef.current || {};
-      const corpo = {
-        atendimento_id: atendimento.id,
-        etapa: etapaRef.current,
-        // O RESULTADO de `etapaConcluida()`, calculado pela mesma
-        // função que o trilho usa. O servidor não repete a regra.
-        etapas_ok: ETAPAS.filter((e) => etapaConcluida(e.id, x, fotosRef.current || [])).map((e) => e.id),
-        pesquisa: {
-          motivo: x.motivo, motivo_detalhe: x.motivoDetalhe,
-          pretensao: x.pretensao, quitacao: x.quitacao, debitos: x.debitos,
-          decisor: !!x.decisorPresente, entrega_hoje: !!x.entregaHoje,
-          necessidade: x.necessidadeCliente, objecao: x.objecao,
-          forma: x.formaFechamento, canais: (x.canaisVistos || []).length,
-        },
-        rodadas: (x.rodadas || []).map((r) => ({ impresso: r.impresso, contra: r.contra, em: r.em })),
-        valor_fechado: x.valorFechado || null,
-        objecao: x.objecao || null,
-        escuta_ok: !!x.escutaOk,
-        escuta_em: x.escutaEm || null,
-        transcricao: x.transcricao || "",
-      };
+    if (!atendimento || !atendimento.id || !pronto) return;
+    let vivo = true;
+
+    // A transcrição tem coluna própria desde a 0033 e passa de 100 KB
+    // numa conversa longa: repeti-la dentro da ficha dobraria o que
+    // trafega a cada volta.
+    const semTranscricao = (x) => { const n = { ...x }; delete n.transcricao; return n; };
+
+    const corpoDe = (x) => ({
+      atendimento_id: atendimento.id,
+      etapa: etapaRef.current,
+      // O RESULTADO de `etapaConcluida()`, calculado pela mesma
+      // função que o trilho usa. O servidor não repete a regra.
+      etapas_ok: ETAPAS.filter((e) => etapaConcluida(e.id, x, fotosRef.current || [])).map((e) => e.id),
+      pesquisa: {
+        motivo: x.motivo, motivo_detalhe: x.motivoDetalhe,
+        pretensao: x.pretensao, quitacao: x.quitacao, debitos: x.debitos,
+        decisor: !!x.decisorPresente, entrega_hoje: !!x.entregaHoje,
+        necessidade: x.necessidadeCliente, objecao: x.objecao,
+        forma: x.formaFechamento, canais: (x.canaisVistos || []).length,
+      },
+      rodadas: (x.rodadas || []).map((r) => ({ impresso: r.impresso, contra: r.contra, em: r.em })),
+      valor_fechado: x.valorFechado || null,
+      objecao: x.objecao || null,
+      escuta_ok: !!x.escutaOk,
+      escuta_em: x.escutaEm || null,
+      transcricao: x.transcricao || "",
+      ficha: semTranscricao(x),
+    });
+
+    const mandar = async (atual) => {
+      const corpo = corpoDe(atual);
       const assinatura = JSON.stringify(corpo);
-      if (assinatura === espelhoRef.current) return;
-      espelhoRef.current = assinatura;
-      espelharNegociacao(corpo).catch(() => {});
+      if (assinatura === enviadoRef.current) return false;
+      await espelharNegociacao(corpo);
+      enviadoRef.current = assinatura;
+      baseRef.current = { ...corpo.ficha, transcricao: corpo.transcricao };
+      return true;
     };
-    mandar();
-    const t = setInterval(mandar, 15000);
-    return () => { clearInterval(t); mandar(); };
-  }, [atendimento && atendimento.id]);
+
+    const volta = async () => {
+      if (!vivo || sincOcupado.current) return;
+      sincOcupado.current = true;
+      try {
+        const r = await lerNegociacaoViva(atendimento.id);
+        if (!vivo) return;
+        let atual = fRef.current || VAZIO;
+        if (r) {
+          const remota = { ...(r.ficha || {}), transcricao: r.transcricao || "" };
+          const junto = reconciliar(baseRef.current, atual, remota);
+          baseRef.current = remota;
+          if (JSON.stringify(junto) !== JSON.stringify(atual)) { guardarFicha(junto); atual = junto; }
+        }
+        await mandar(atual);
+        if (vivo) setSinc({ estado: "ok", em: Date.now(), erro: "" });
+      } catch (e) {
+        if (vivo) setSinc((p) => ({ estado: "erro", em: p.em, erro: e.message }));
+      } finally { sincOcupado.current = false; }
+    };
+
+    // Ao sair de vista, só o envio: ler para uma tela que ninguém está
+    // olhando não serve, e o que não pode esperar é o que ela digitou.
+    const despedir = () => { mandar(fRef.current || VAZIO).catch(() => {}); };
+
+    const aoTrocarVisibilidade = () => { if (document.hidden) despedir(); else volta(); };
+
+    volta();
+    const t = setInterval(() => { if (!document.hidden) volta(); }, 5000);
+    document.addEventListener("visibilitychange", aoTrocarVisibilidade);
+    window.addEventListener("focus", volta);
+    window.addEventListener("pagehide", despedir);
+    return () => {
+      vivo = false;
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", aoTrocarVisibilidade);
+      window.removeEventListener("focus", volta);
+      window.removeEventListener("pagehide", despedir);
+      despedir();
+    };
+  }, [atendimento && atendimento.id, pronto]);
+
+  /**
+   * As fotos do outro aparelho.
+   *
+   * Foto sobe para o Storage na hora (decisão 6) e nunca ficou no
+   * aparelho — o que faltava era listar de novo. **Ao voltar o foco**,
+   * que é quando a pessoa larga o celular onde fotografou e pega o
+   * computador; em intervalo seria uma requisição a cada volta da
+   * sincronização para um dado que muda uma vez por atendimento.
+   *
+   * De quebra, resolve o link assinado que vence em 1 h: quem fica
+   * horas no mesmo atendimento via miniatura quebrada e precisava
+   * recarregar a página.
+   *
+   * O que ainda não subiu daqui continua na lista — a lista do
+   * servidor é a verdade só para o que já é do servidor.
+   */
+  useEffect(() => {
+    if (!veiculoId || !pronto) return;
+    let vivo = true;
+    const buscar = () => {
+      if (document.hidden) return;
+      listarFotos(veiculoId).then((ls) => {
+        if (!vivo) return;
+        aplicar((prev) => [
+          ...ls.map((x) => ({
+            chave: `s-${x.id}`, id: x.id, caminho: x.caminho, url: x.url,
+            local: null, estado: "ok", erro: "",
+          })),
+          ...prev.filter((p) => !p.id),
+        ]);
+      }).catch(() => {});
+    };
+    const aoVoltar = () => { if (!document.hidden) buscar(); };
+    document.addEventListener("visibilitychange", aoVoltar);
+    window.addEventListener("focus", buscar);
+    return () => {
+      vivo = false;
+      document.removeEventListener("visibilitychange", aoVoltar);
+      window.removeEventListener("focus", buscar);
+    };
+  }, [veiculoId, pronto]);
 
   const docs = f.documentos || [];
 
@@ -4215,6 +4469,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
       </div>
 
       <BarraEscuta escuta={escuta} />
+      <BarraSinc sinc={sinc} />
 
       <div className="px-4 pt-4">
         <h2 className="text-[16px] font-semibold leading-tight">{et.nome}</h2>
@@ -5892,6 +6147,40 @@ function EscutaControle({ escuta, f, set }) {
       <p className="mt-3 text-[11px]" style={{ color: C.mute }}>
         Uma vez ligada, a escuta segue por todo o atendimento — você troca de etapa e ela continua. Os ganchos aparecem na Pesquisa, na Espera e na Negociação.
       </p>
+    </div>
+  );
+}
+
+/**
+ * Em que pé está a sincronização entre os aparelhos (0050).
+ *
+ * **A tarja só grita quando há o que gritar.** Em dia, é uma linha
+ * cinza de um dedo de altura — o negociador precisa saber que existe,
+ * não ser parabenizado a cada cinco segundos. Atrasada ou recusada,
+ * fica laranja e diz a única coisa que ele precisa fazer com essa
+ * informação: **não fechar esta aba antes de voltar o sinal**, porque
+ * o que ele digitou está no aparelho e ainda não saiu dele.
+ *
+ * Trinta segundos é o corte. Uma volta é de cinco; três perdidas ainda
+ * é rede ruim de loja, e acusar aí encheria a tela de laranja no 4G.
+ */
+function BarraSinc({ sinc }) {
+  const [, forcar] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => forcar((x) => x + 1), 5000);
+    return () => clearInterval(t);
+  }, []);
+  const atrasado = !sinc.em || Date.now() - sinc.em > 30000;
+  if (!atrasado) {
+    return (
+      <div className="px-4 py-1 text-[10px]" style={{ background: "#F6F4F8", color: C.mute }}>
+        ✓ sincronizado — dá para continuar este atendimento no outro aparelho
+      </div>
+    );
+  }
+  return (
+    <div className="px-4 py-1.5 text-[11px] font-semibold" style={{ background: C.laranja, color: "#fff" }}>
+      Sem sincronizar{sinc.erro ? ` · ${sinc.erro}` : ""} — o que você digitou está neste aparelho. Não feche esta aba até voltar.
     </div>
   );
 }

@@ -893,6 +893,27 @@ async function viva(req, res, tok) {
       }));
     }
 
+    // A ficha de trabalho inteira (0050). Ela volta para a tela do
+    // outro aparelho, então aqui não se recorta nada: campo que este
+    // arquivo não conhecesse sumiria no caminho de volta, e o
+    // negociador veria o dado evaporar — que é o problema que a 0050
+    // existe para resolver.
+    //
+    // **Grande demais é erro, não silêncio.** Enquanto o espelho
+    // servia só ao painel do gestor, engolir a falha era o certo: não
+    // se interrompe um atendimento por causa de um relatório. Agora
+    // ele carrega o trabalho da pessoa, e sincronização que falha
+    // calada é exatamente como o dado do 206 sumiu.
+    if (c.ficha !== undefined) {
+      if (!c.ficha || typeof c.ficha !== "object" || Array.isArray(c.ficha)) {
+        return res.status(400).json({ erro: "ficha fora do formato." });
+      }
+      if (JSON.stringify(c.ficha).length > 600000) {
+        return res.status(413).json({ erro: "A ficha passou do tamanho que cabe na sincronização." });
+      }
+      linha.ficha = c.ficha;
+    }
+
     const r = await banco(`${REST_V}?on_conflict=atendimento_id`, {
       method: "POST",
       headers: json(tok, { Prefer: "resolution=merge-duplicates,return=representation" }),
