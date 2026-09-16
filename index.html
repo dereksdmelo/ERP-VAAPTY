@@ -4240,6 +4240,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
    */
   const baseRef = useRef(null);
   const enviadoRef = useRef("");
+  const ultimoEnvioRef = useRef(0);
   const sincOcupado = useRef(false);
   const [sinc, setSinc] = useState({ estado: "", em: null, erro: "" });
 
@@ -4280,12 +4281,29 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
       ficha: semTranscricao(x),
     });
 
+    /**
+     * **Manda de novo a cada 25 s mesmo sem mudança nenhuma.**
+     *
+     * `atualizado_em` é o que diz ao painel do gestor se este aparelho
+     * ainda está vivo. Sem batimento, ele só avançava quando algo era
+     * digitado — e um negociador conversando com o cliente, sem tocar
+     * na tela, aparecia lá como **"parou de chegar"**. Foi o que o
+     * teste no ar mostrou em 16/09/2026: o aparelho estava perfeito, e
+     * a tela dizia ao gestor que a conversa tinha morrido. Alarme
+     * falso na direção que mais custa — ele concluiria que a mesa está
+     * em silêncio.
+     *
+     * São duas requisições por minuto no pior caso, contra as doze que
+     * mandar sempre custaria.
+     */
     const mandar = async (atual) => {
       const corpo = corpoDe(atual);
       const assinatura = JSON.stringify(corpo);
-      if (assinatura === enviadoRef.current) return false;
+      const parado = Date.now() - ultimoEnvioRef.current;
+      if (assinatura === enviadoRef.current && parado < 25000) return false;
       await espelharNegociacao(corpo);
       enviadoRef.current = assinatura;
+      ultimoEnvioRef.current = Date.now();
       baseRef.current = { ...corpo.ficha, transcricao: corpo.transcricao };
       return true;
     };
