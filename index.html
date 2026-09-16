@@ -883,12 +883,92 @@ async function espelharNegociacao(dados) {
   return true;
 }
 
-/** O que o outro aparelho deixou no servidor. */
+/**
+ * O que o outro aparelho deixou no servidor — e, junto, se alguém
+ * pediu para ouvir a mesa (0052).
+ *
+ * Devolve a resposta inteira, não só a `viva`: o pedido de escuta vem
+ * de carona porque esta consulta já roda de cinco em cinco segundos no
+ * aparelho do negociador, e uma consulta própria para isso dobraria o
+ * tráfego dele para uma pergunta que quase sempre responde "ninguém".
+ */
 async function lerNegociacaoViva(atendimentoId) {
   const r = await fetchAut(`/api/atendimento?recurso=viva&atendimento_id=${encodeURIComponent(atendimentoId)}`);
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.erro || "Não consegui ler a sincronização.");
-  return d.viva || null;
+  return d;
+}
+
+/* ----------- ouvir a mesa (0052) ----------- */
+
+/**
+ * **O áudio não passa por nenhuma destas chamadas.** Elas carregam só
+ * o combinado da chamada — quem quer ouvir, e por onde cada ponta pode
+ * ser alcançada. O som vai do celular direto para o computador, e é
+ * isso que mantém verdadeira a frase que o cliente ouviu: não existe
+ * lugar onde ele pudesse ficar guardado (decisão 45).
+ */
+async function pedirParaOuvir(atendimentoId, oferta) {
+  const r = await fetchAut("/api/atendimento?recurso=escuta", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ atendimento_id: atendimentoId, oferta }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui pedir para ouvir.");
+  return d;
+}
+async function lerEscutaDoAtendimento(atendimentoId) {
+  const r = await fetchAut(`/api/atendimento?recurso=escuta&atendimento_id=${encodeURIComponent(atendimentoId)}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui ler a chamada.");
+  return d;
+}
+async function lerSessaoEscuta(id) {
+  const r = await fetchAut(`/api/atendimento?recurso=escuta&id=${encodeURIComponent(id)}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui ler a chamada.");
+  return d.sessao || null;
+}
+async function mudarEscuta(corpo) {
+  const r = await fetchAut("/api/atendimento?recurso=escuta", {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(corpo),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui atualizar a chamada.");
+  return d.sessao || null;
+}
+
+/**
+ * Espera a descoberta de endereços terminar antes de mandar o SDP.
+ *
+ * **Sem trickle ICE, de propósito.** O jeito completo manda os
+ * endereços candidatos aos pingos, conforme aparecem, e exigiria duas
+ * filas no banco e polling nos dois lados. Esperar e mandar tudo
+ * dentro do SDP custa uns dois segundos a mais na conexão e derruba
+ * metade das peças móveis.
+ *
+ * **O teto de 3 s não é enfeite.** Rede que não responde ao STUN
+ * deixaria a promessa pendurada para sempre, e o gestor olhando para
+ * "conectando…" sem fim. Com os candidatos locais que já tiver, a
+ * chamada ainda fecha quando as duas pontas estão na mesma wifi — que
+ * é o caso da loja.
+ */
+function esperarEnderecos(pc, teto) {
+  return new Promise((ok) => {
+    if (pc.iceGatheringState === "complete") return ok();
+    let feito = false;
+    const pronto = () => {
+      if (feito) return;
+      feito = true;
+      clearTimeout(t);
+      pc.removeEventListener("icegatheringstatechange", olhar);
+      ok();
+    };
+    const olhar = () => { if (pc.iceGatheringState === "complete") pronto(); };
+    pc.addEventListener("icegatheringstatechange", olhar);
+    const t = setTimeout(pronto, teto || 3000);
+  });
 }
 async function listarNegociacoesVivas(horas) {
   const r = await fetchAut(`/api/atendimento?recurso=viva${horas ? `&horas=${horas}` : ""}`);
@@ -4163,6 +4243,11 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   const sincOcupado = useRef(false);
   const [sinc, setSinc] = useState({ estado: "", em: null, erro: "" });
 
+  // Quem pediu para ouvir a mesa (0052), e o microfone que responde.
+  const [pedidoEscuta, setPedidoEscuta] = useState(null);
+  const [ouvindoGestor, setOuvindoGestor] = useState(false);
+  const chamadaRef = useRef(null);   // { id, pc, faixa }
+
   useEffect(() => {
     if (!atendimento || !atendimento.id || !pronto) return;
     let vivo = true;
@@ -4209,8 +4294,11 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
       if (!vivo || sincOcupado.current) return;
       sincOcupado.current = true;
       try {
-        const r = await lerNegociacaoViva(atendimento.id);
+        const d = await lerNegociacaoViva(atendimento.id);
         if (!vivo) return;
+        const r = d.viva;
+        // Quem pediu para ouvir a mesa vem de carona nesta consulta.
+        setPedidoEscuta(d.sessao || null);
         let atual = fRef.current || VAZIO;
         if (r) {
           const remota = { ...(r.ficha || {}), transcricao: r.transcricao || "" };
@@ -4287,6 +4375,100 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
       window.removeEventListener("focus", buscar);
     };
   }, [veiculoId, pronto]);
+
+  /**
+   * ATENDER O PEDIDO DE ESCUTA (0052).
+   *
+   * O gestor apertou "ouvir" e deixou a oferta no servidor. Aqui o
+   * aparelho abre o microfone e responde — e a partir daí **o som vai
+   * direto para o computador dele**, sem passar por nós.
+   *
+   * **A tarja no alto não é cortesia.** Quem está com o cliente na
+   * frente precisa saber que a mesa está sendo ouvida — é ele quem vai
+   * dizer isso ao cliente se for perguntado, e escuta que roda
+   * escondida do próprio negociador é a forma mais rápida de perder a
+   * confiança da equipe. Mesma razão da tarja laranja da transcrição
+   * (decisão 17).
+   *
+   * **O erro sobe para o gestor.** Microfone ocupado pela transcrição,
+   * permissão negada, navegador sem suporte: engolir isso deixaria ele
+   * olhando para "conectando…" sem fim, e concluindo que a mesa está em
+   * silêncio.
+   */
+  useEffect(() => {
+    const s = pedidoEscuta;
+    const atual = chamadaRef.current;
+
+    // Encerrou lá, ou sumiu: fecha o microfone aqui.
+    if (atual && (!s || s.id !== atual.id || s.encerrado_em)) {
+      try { atual.faixa && atual.faixa.getTracks().forEach((t) => t.stop()); } catch (e) {}
+      try { atual.pc && atual.pc.close(); } catch (e) {}
+      chamadaRef.current = null;
+      setOuvindoGestor(false);
+    }
+
+    // Nada a atender: sem pedido, já respondido, já falhado, ou
+    // encerrado. `resposta` preenchida é a chamada em pé — passar de
+    // novo por aqui abriria um segundo microfone.
+    if (!s || !s.oferta || s.resposta || s.erro || s.encerrado_em) return;
+    if (chamadaRef.current) return;
+
+    let vivo = true;
+    (async () => {
+      let faixa = null;
+      try {
+        if (!window.RTCPeerConnection || !navigator.mediaDevices) {
+          throw new Error("Este navegador não sabe transmitir áudio ao vivo.");
+        }
+        // **O microfone já pode estar ocupado pela transcrição.** No
+        // Android os dois costumam dividir; no iPhone é instável. Se
+        // não der, o gestor precisa ler o porquê.
+        faixa = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true }, video: false,
+        });
+        if (!vivo) { faixa.getTracks().forEach((t) => t.stop()); return; }
+
+        const { ice } = await lerEscutaDoAtendimento(atendimento.id);
+        const pc = new RTCPeerConnection({ iceServers: ice || [] });
+        chamadaRef.current = { id: s.id, pc, faixa };
+        faixa.getTracks().forEach((t) => pc.addTrack(t, faixa));
+        pc.onconnectionstatechange = () => {
+          if (!vivo) return;
+          setOuvindoGestor(pc.connectionState === "connected");
+        };
+        await pc.setRemoteDescription(JSON.parse(s.oferta));
+        const resp = await pc.createAnswer();
+        await pc.setLocalDescription(resp);
+        await esperarEnderecos(pc, 3000);
+        if (!vivo) return;
+        await mudarEscuta({ id: s.id, resposta: JSON.stringify(pc.localDescription) });
+      } catch (e) {
+        try { faixa && faixa.getTracks().forEach((t) => t.stop()); } catch (x) {}
+        chamadaRef.current = null;
+        if (vivo) setOuvindoGestor(false);
+        const msg = /NotAllowedError|Permission/i.test(String(e && e.name) + String(e && e.message))
+          ? "O negociador não liberou o microfone para a chamada."
+          : /NotReadableError|NotFound/i.test(String(e && e.name))
+            ? "O microfone do aparelho está ocupado ou indisponível."
+            : (e.message || "Não consegui abrir o microfone.");
+        mudarEscuta({ id: s.id, erro: msg }).catch(() => {});
+      }
+    })();
+
+    return () => { vivo = false; };
+  }, [pedidoEscuta && pedidoEscuta.id, pedidoEscuta && pedidoEscuta.encerrado_em]);
+
+  // Sair do atendimento fecha o microfone. Sem isto, voltar para a
+  // lista deixaria a sala sendo ouvida por uma tela que nem está mais
+  // aberta.
+  useEffect(() => () => {
+    const a = chamadaRef.current;
+    if (!a) return;
+    try { a.faixa && a.faixa.getTracks().forEach((t) => t.stop()); } catch (e) {}
+    try { a.pc && a.pc.close(); } catch (e) {}
+    mudarEscuta({ id: a.id, encerrar: true }).catch(() => {});
+    chamadaRef.current = null;
+  }, []);
 
   const docs = f.documentos || [];
 
@@ -4470,6 +4652,14 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
       </div>
 
       <BarraEscuta escuta={escuta} />
+      {/* Ouvida ao vivo pelo gestor (0052). Fica ao lado da tarja do
+          microfone porque é a mesma classe de informação: o que está
+          saindo desta sala agora. */}
+      {ouvindoGestor && (
+        <div className="px-4 py-1.5 text-[11px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>
+          <span className="vp-pulso">●</span> O gerente está ouvindo esta conversa agora
+        </div>
+      )}
       <BarraSinc sinc={sinc} />
 
       <div className="px-4 pt-4">
@@ -15578,6 +15768,225 @@ function ConversaAoVivo({ viva }) {
   );
 }
 
+/**
+ * OUVIR A MESA (0052) — o áudio, de verdade, ao vivo.
+ *
+ * O texto (`ConversaAoVivo`) chega com uns dez segundos e passa pelo
+ * reconhecimento de voz, que erra palavras. Isto é o som: **sai do
+ * celular do negociador e entra no computador do gestor**, abaixo de
+ * um segundo, sem passar pelo nosso servidor.
+ *
+ * **Ponta a ponta não é detalhe de arquitetura — é o que sustenta a
+ * frase do aceite.** O cliente ouve que o áudio não fica guardado
+ * depois (decisão 45); com o som indo direto, não existe lugar onde
+ * ele pudesse ficar. Quem trouxer o áudio para o servidor "para
+ * simplificar" está desfazendo a promessa.
+ *
+ * **Só liga quando alguém aperta.** Fora disso o microfone não é
+ * capturado para chamada nenhuma: poupa a bateria do aparelho e não
+ * produz som sem ter quem escute do outro lado.
+ *
+ * **O que pode dar errado tem nome na tela**, e é de propósito:
+ *   · aceite anterior a 16/09/2026 — o botão nem aparece, porque
+ *     aquele cliente autorizou a transcrição e não a sala;
+ *   · microfone ocupado pela transcrição, ou permissão negada — o
+ *     aparelho manda o motivo e ele aparece aqui;
+ *   · conexão direta que não fecha — acontece quando as duas pontas
+ *     estão em redes que não se enxergam, e o remédio é um servidor de
+ *     retransmissão (TURN, `TURN_URL`/`TURN_USUARIO`/`TURN_SENHA`).
+ *     **Sem dizer isso, o gestor conclui que a mesa está em
+ *     silêncio**, que é a leitura errada mais cara possível.
+ *   · tela bloqueada do lado do negociador — o navegador suspende a
+ *     captura. É o mesmo limite que faz a transcrição parar de chegar.
+ */
+function OuvirAMesa({ viva }) {
+  const audioRef = useRef(null);
+  const pcRef = useRef(null);
+  const sessaoRef = useRef(null);
+  const [estado, setEstado] = useState("");   // "" | "ligando" | "ligado" | "erro"
+  const [erro, setErro] = useState("");
+  const [nivel, setNivel] = useState(0);
+  const pararMedidor = useRef(null);
+
+  /**
+   * O medidor de som, e por que ele não é enfeite.
+   *
+   * "Conectado" e "a mesa está em silêncio" são indistinguíveis pelo
+   * ouvido quando o problema é o microfone do outro lado ter vindo
+   * mudo. O medidor responde a única pergunta que importa nesse
+   * instante: **está chegando som?** Sem ele, o gestor tiraria
+   * conclusão sobre a negociação a partir de uma falha técnica.
+   *
+   * Dez leituras por segundo, não sessenta: `requestAnimationFrame`
+   * redesenharia a tela a cada quadro para desenhar uma barrinha.
+   */
+  const medir = (fluxo) => {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      const ctx = new AC();
+      const an = ctx.createAnalyser();
+      an.fftSize = 256;
+      ctx.createMediaStreamSource(fluxo).connect(an);
+      const dados = new Uint8Array(an.fftSize);
+      const t = setInterval(() => {
+        an.getByteTimeDomainData(dados);
+        let pico = 0;
+        for (let i = 0; i < dados.length; i++) {
+          const d = Math.abs(dados[i] - 128);
+          if (d > pico) pico = d;
+        }
+        setNivel(Math.min(1, pico / 45));
+      }, 100);
+      pararMedidor.current = () => {
+        clearInterval(t);
+        try { ctx.close(); } catch (e) {}
+        pararMedidor.current = null;
+      };
+    } catch (e) {}
+  };
+
+  const encerrar = () => {
+    const id = sessaoRef.current;
+    sessaoRef.current = null;
+    if (pararMedidor.current) pararMedidor.current();
+    setNivel(0);
+    try { pcRef.current && pcRef.current.close(); } catch (e) {}
+    pcRef.current = null;
+    if (audioRef.current) audioRef.current.srcObject = null;
+    // Encerrar avisa o aparelho a fechar o microfone. Sem isso ele
+    // continuaria transmitindo para uma tela que já foi fechada.
+    if (id) mudarEscuta({ id, encerrar: true }).catch(() => {});
+  };
+
+  // Fechar o painel, ou trocar de atendimento, desliga.
+  useEffect(() => () => encerrar(), []);
+  useEffect(() => { encerrar(); setEstado(""); setErro(""); }, [viva.atendimento_id]);
+
+  useEffect(() => {
+    if (estado !== "ligando") return;
+    let vivo = true;
+    const desde = Date.now();
+    const olhar = async () => {
+      const id = sessaoRef.current;
+      if (!id || !vivo) return;
+      try {
+        const s = await lerSessaoEscuta(id);
+        if (!vivo || !s) return;
+        if (s.erro) { setErro(s.erro); setEstado("erro"); encerrar(); return; }
+        if (s.resposta && pcRef.current && !pcRef.current.currentRemoteDescription) {
+          await pcRef.current.setRemoteDescription(JSON.parse(s.resposta));
+        }
+      } catch (e) {}
+      // Promessa pendurada é pior que recusa: quem espera sem prazo
+      // acha que está prestes a funcionar.
+      if (vivo && Date.now() - desde > 45000) {
+        setErro("O aparelho do negociador não respondeu. Ele pode estar com a tela bloqueada, sem rede, ou com o atendimento fechado.");
+        setEstado("erro"); encerrar();
+      }
+    };
+    olhar();
+    const t = setInterval(olhar, 1000);
+    return () => { vivo = false; clearInterval(t); };
+  }, [estado]);
+
+  const ouvir = async () => {
+    setErro(""); setEstado("ligando");
+    try {
+      if (!window.RTCPeerConnection) throw new Error("Este navegador não sabe receber áudio ao vivo.");
+      const { ice } = await lerEscutaDoAtendimento(viva.atendimento_id);
+      const pc = new RTCPeerConnection({ iceServers: ice || [] });
+      pcRef.current = pc;
+      // Só recebe. Pedir também o microfone daqui abriria a via de
+      // volta, e ninguém pediu para o gestor falar na mesa.
+      pc.addTransceiver("audio", { direction: "recvonly" });
+      pc.ontrack = (ev) => {
+        if (!audioRef.current) return;
+        audioRef.current.srcObject = ev.streams[0];
+        medir(ev.streams[0]);
+        // **Som bloqueado pelo navegador é falha silenciosa**: a tela
+        // diria "ligado" e o gestor não ouviria nada, concluindo que a
+        // mesa está calada. Acontece quando a política de autoplay
+        // considera que o clique já expirou.
+        audioRef.current.play().catch(() => {
+          setErro("O navegador bloqueou o som. Clique em qualquer lugar desta página e aperte ouvir de novo.");
+        });
+      };
+      pc.onconnectionstatechange = () => {
+        const st = pc.connectionState;
+        if (st === "connected") { setEstado("ligado"); setErro(""); }
+        if (st === "failed") {
+          setErro("A conexão direta não fechou: as duas pontas estão em redes que não se enxergam. Isso precisa de um servidor de retransmissão (TURN) configurado na Vercel.");
+          setEstado("erro");
+        }
+        if (st === "disconnected") setErro("A conexão caiu — o aparelho pode ter trocado de rede.");
+      };
+      const of = await pc.createOffer();
+      await pc.setLocalDescription(of);
+      await esperarEnderecos(pc, 3000);
+      const d = await pedirParaOuvir(viva.atendimento_id, JSON.stringify(pc.localDescription));
+      sessaoRef.current = (d.sessao || {}).id || null;
+      if (!sessaoRef.current) throw new Error("O servidor não devolveu a chamada.");
+    } catch (e) {
+      setErro(e.message || "Não consegui abrir a chamada.");
+      setEstado("erro");
+      encerrar();
+    }
+  };
+
+  if (!viva.escuta_ok) return null;
+
+  // Aceite anterior à redação de 16/09/2026 autoriza a transcrição e
+  // não autoriza ouvir a sala. O botão não aparece, e a tela diz por
+  // quê — o servidor recusa de qualquer forma (decisão 45).
+  if (!viva.escuta_versao) {
+    return (
+      <p className="mt-2 text-[11px] leading-snug" style={{ color: C.mute }}>
+        Não dá para ouvir este atendimento: o aceite é anterior a 16/09/2026 e autoriza a
+        transcrição, não a conversa.
+      </p>
+    );
+  }
+
+  const ligado = estado === "ligado";
+  return (
+    <div className="mt-2">
+      <audio ref={audioRef} autoPlay playsInline />
+      <div className="flex items-center gap-2">
+        <button
+          onClick={ligado || estado === "ligando" ? () => { encerrar(); setEstado(""); } : ouvir}
+          className="rounded-md px-3 py-1.5 text-[12px] font-semibold"
+          style={{
+            background: ligado ? C.laranja : estado === "ligando" ? C.line : C.roxo,
+            color: estado === "ligando" ? C.ink : "#fff",
+          }}>
+          {ligado ? "● parar de ouvir" : estado === "ligando" ? "conectando…" : "ouvir a mesa"}
+        </button>
+        {ligado && (
+          <>
+            <div className="h-1.5 w-20 overflow-hidden rounded-full" style={{ background: C.line }}
+              title="o som que está chegando">
+              <div style={{
+                width: `${Math.round(nivel * 100)}%`, height: "100%",
+                background: nivel > 0.05 ? C.verde : C.line, transition: "width .1s linear",
+              }} />
+            </div>
+            <span className="text-[11px]" style={{ color: C.verde, fontWeight: 600 }}>
+              ao vivo — o negociador está vendo que você está ouvindo
+            </span>
+          </>
+        )}
+      </div>
+      {erro && <p className="mt-1.5 text-[11px] leading-snug" style={{ color: C.laranja }}>{erro}</p>}
+      {estado === "ligando" && !erro && (
+        <p className="mt-1.5 text-[11px] leading-snug" style={{ color: C.mute }}>
+          Avisando o aparelho do negociador. Leva alguns segundos.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function ConversaResumida({ viva, verTexto, setVerTexto }) {
   // O que veio guardado do banco é o ponto de partida; o que foi
   // gerado agora manda, e é por isso que são dois estados e não um.
@@ -15641,6 +16050,7 @@ function ConversaResumida({ viva, verTexto, setVerTexto }) {
       </div>
 
       <ConversaAoVivo viva={viva} />
+      <OuvirAMesa viva={viva} />
 
       {!temTexto && !viva.escuta_ok && <p className="mt-1 text-[11px]" style={{ color: C.mute }}>Nada transcrito ainda.</p>}
 
@@ -15827,7 +16237,10 @@ function PainelGestor({ perfil, comp }) {
     const puxar = () => {
       if (document.hidden) return;
       lerNegociacaoViva(foco)
-        .then((v) => { if (vivo && v && v.atendimento_id === foco) setAoVivo(v); })
+        .then((d) => {
+          const v = d && d.viva;
+          if (vivo && v && v.atendimento_id === foco) setAoVivo(v);
+        })
         .catch(() => {});
     };
     puxar();

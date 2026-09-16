@@ -35,7 +35,12 @@ blocos.forEach((b) => {
   if (assin) assin[1].split(",").forEach((p) => props.add(p.split(":")[0].trim()));
 
   const vistos = new Set();
-  const ru = /\b(set[A-Z][\w$]*)\s*\(/g;
+  // Chamada com ponto na frente (`pc.setRemoteDescription()`) é método
+  // de objeto, nunca estado de React — um setter do React se chama
+  // sempre pelado. Sem esta exclusão, cada API do navegador que usa
+  // `setAlgumaCoisa` vira um falso positivo novo, e ferramenta que
+  // acusa demais para de ser lida.
+  const ru = /(?<![.\w$])(set[A-Z][\w$]*)\s*\(/g;
   while ((x = ru.exec(corpo))) {
     const s = x[1];
     if (declara.has(s) || props.has(s) || NATIVOS.test(s) || vistos.has(s)) continue;

@@ -844,6 +844,126 @@ async function indicacoes(req, res, tok) {
  * todas, o negociador vê a dele. Repetir a regra neste arquivo criaria
  * duas versões dela para manter em sincronia.
  */
+/**
+ * OUVIR A MESA — só o combinado da chamada (0052).
+ *
+ * O som vai do celular do negociador direto para o computador do
+ * gestor (WebRTC). **Nada de áudio passa por aqui**; o que trafega é
+ * o SDP dos dois lados. É isso que mantém verdadeira a frase que o
+ * cliente ouviu: não há lugar onde o áudio pudesse ficar guardado.
+ *
+ * **A trava do consentimento é AQUI, não na tela.** A tela esconder o
+ * botão é conveniência; a recusa é do servidor — mesma régua do
+ * `api/checklist.js` com os vistos do administrativo (decisão 19).
+ * Sem aceite, ou com aceite anterior à redação de 16/09/2026
+ * (`escuta_versao` nulo, 0051), não abre sessão nenhuma: aquele
+ * cliente autorizou a transcrição e não autorizou ninguém ouvir a
+ * sala.
+ */
+async function escuta(req, res, tok) {
+  const REST_E = `${URL_BASE}/rest/v1/escuta_sessao`;
+
+  // STUN é de graça e resolve a maioria das redes. TURN é o
+  // retransmissor para quando a conexão direta não fecha — serviço
+  // pago, opcional, e as credenciais só saem daqui para quem já está
+  // autenticado. Sem as variáveis, vai só o STUN e a tela avisa se a
+  // conexão não fechar.
+  const ice = () => {
+    const lista = [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }];
+    if (process.env.TURN_URL && process.env.TURN_USUARIO && process.env.TURN_SENHA) {
+      lista.push({
+        urls: String(process.env.TURN_URL).split(",").map((x) => x.trim()).filter(Boolean),
+        username: process.env.TURN_USUARIO,
+        credential: process.env.TURN_SENHA,
+      });
+    }
+    return lista;
+  };
+
+  if (req.method === "POST") {
+    const c = await lerCorpo(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    const aid = String(c.atendimento_id || "");
+    if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
+    const oferta = String(c.oferta || "");
+    if (!oferta) return res.status(400).json({ erro: "Sem a oferta da chamada." });
+
+    // O aceite do cliente, lido do banco — nunca do corpo.
+    const viv = await banco(
+      `${URL_BASE}/rest/v1/negociacao_viva?select=escuta_ok,escuta_versao&atendimento_id=eq.${aid}`,
+      { headers: cabecalhos(tok) });
+    const v = (viv || [])[0];
+    if (!v || !v.escuta_ok) {
+      return res.status(403).json({ erro: "O cliente não autorizou a escuta neste atendimento." });
+    }
+    if (!v.escuta_versao) {
+      return res.status(403).json({
+        erro: "O aceite deste atendimento é anterior a 16/09/2026: ele autoriza a transcrição, não ouvir a conversa.",
+      });
+    }
+
+    // Uma aberta por vez (índice único da 0052). Encerrar a anterior
+    // antes é o que deixa o gestor tentar de novo depois de uma
+    // tentativa que ficou pendurada.
+    await banco(`${REST_E}?atendimento_id=eq.${aid}&encerrado_em=is.null`, {
+      method: "PATCH", headers: json(tok),
+      body: JSON.stringify({ encerrado_em: new Date().toISOString() }),
+    }).catch(() => {});
+
+    const r = await banco(REST_E, {
+      method: "POST",
+      headers: json(tok, { Prefer: "return=representation" }),
+      // `gestor_id` não vai no corpo: o padrão da coluna é `auth.uid()`
+      // (0052). Quem é identificado por um id não pode ser quem o
+      // escolhe — mesma lição da agenda (0047).
+      body: JSON.stringify({ atendimento_id: aid, oferta }),
+    });
+    const sessao = Array.isArray(r) ? r[0] : r;
+    if (!sessao) return res.status(403).json({ erro: "Só o gerente pode ouvir a mesa." });
+    return res.status(200).json({ sessao, ice: ice() });
+  }
+
+  if (req.method === "GET") {
+    const id = String(req.query.id || "");
+    if (RX_UUID.test(id)) {
+      const r = await banco(`${REST_E}?select=*&id=eq.${id}`, { headers: cabecalhos(tok) });
+      return res.status(200).json({ sessao: (r || [])[0] || null });
+    }
+    const aid = String(req.query.atendimento_id || "");
+    if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "Informe id ou atendimento_id." });
+    const r = await banco(
+      `${REST_E}?select=*&atendimento_id=eq.${aid}&encerrado_em=is.null&order=criado_em.desc&limit=1`,
+      { headers: cabecalhos(tok) });
+    return res.status(200).json({ sessao: (r || [])[0] || null, ice: ice() });
+  }
+
+  if (req.method === "PATCH") {
+    const c = await lerCorpo(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    const id = String(c.id || "");
+    if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido." });
+
+    const mud = {};
+    if (c.resposta !== undefined) mud.resposta = String(c.resposta || "") || null;
+    // O erro é para ser LIDO pelo gestor: microfone ocupado pela
+    // transcrição, permissão negada, aparelho sem suporte. Sem isso
+    // ele fica olhando para um botão que não acontece.
+    if (c.erro !== undefined) mud.erro = texto(c.erro);
+    if (c.encerrar) mud.encerrado_em = new Date().toISOString();
+    if (!Object.keys(mud).length) return res.status(400).json({ erro: "Nada para mudar." });
+
+    const r = await banco(`${REST_E}?id=eq.${id}`, {
+      method: "PATCH", headers: json(tok, { Prefer: "return=representation" }),
+      body: JSON.stringify(mud),
+    });
+    const sessao = Array.isArray(r) ? r[0] : r;
+    if (!sessao) return res.status(403).json({ erro: "Esta chamada não é sua." });
+    return res.status(200).json({ sessao });
+  }
+
+  return res.status(405).json({ erro: "Método não suportado." });
+}
+
 async function viva(req, res, tok) {
   const REST_V = `${URL_BASE}/rest/v1/negociacao_viva`;
 
@@ -933,8 +1053,16 @@ async function viva(req, res, tok) {
     const aid = String(req.query.atendimento_id || "");
     if (aid) {
       if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
-      const r = await banco(`${REST_V}?select=*&atendimento_id=eq.${aid}`, { headers: cabecalhos(tok) });
-      return res.status(200).json({ viva: (r || [])[0] || null });
+      // O pedido de escuta vem junto (0052). O aparelho do negociador
+      // já bate aqui de cinco em cinco segundos; uma consulta própria
+      // para isso dobraria o tráfego dele para uma pergunta que quase
+      // sempre responde "ninguém está ouvindo".
+      const [r, ses] = await Promise.all([
+        banco(`${REST_V}?select=*&atendimento_id=eq.${aid}`, { headers: cabecalhos(tok) }),
+        banco(`${URL_BASE}/rest/v1/escuta_sessao?select=*&atendimento_id=eq.${aid}&encerrado_em=is.null&order=criado_em.desc&limit=1`,
+          { headers: cabecalhos(tok) }).catch(() => []),
+      ]);
+      return res.status(200).json({ viva: (r || [])[0] || null, sessao: (ses || [])[0] || null });
     }
 
     // O painel é o que está na mesa AGORA. Um atendimento presencial
@@ -1189,6 +1317,11 @@ module.exports = async function handler(req, res) {
   if (String(req.query.recurso || "") === "resumo") {
     try { return await resumo(req, res, tok); }
     catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Não consegui resumir." }); }
+  }
+
+  if (String(req.query.recurso || "") === "escuta") {
+    try { return await escuta(req, res, tok); }
+    catch (e) { return res.status(500).json({ erro: limpar(e.message) }); }
   }
 
   if (String(req.query.recurso || "") === "viva") {
