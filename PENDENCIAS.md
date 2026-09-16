@@ -68,19 +68,28 @@ uso.**
 
 ## Dados que ainda vivem só no aparelho
 
-Trocou de celular, perdeu. Só a ficha do veículo, as fotos, os
-documentos e o atendimento estão no banco.
+**Resolvido em 16/09/2026 para o atendimento inteiro** — ver a decisão
+44. Rodadas, notas da espera, indicações, toggles do APONTE e
+`fipeDesval` sobem para `negociacao_viva.ficha` a cada cinco segundos e
+voltam para a tela do outro aparelho. Trocar de celular no meio do
+atendimento deixou de perder o que foi digitado.
 
-- **Rodadas de negociação** (extrato impresso e contraproposta)
-- **Notas da espera**
-- **Indicações** da etapa E
-- **Toggles do APONTE** (carro subiu, decisor presente, mostrou o vídeo…)
-- **`fipeDesval`** — a chave do desvalorizômetro. Reabrir o atendimento
-  em outro aparelho perde o gráfico até reconsultar a placa (gasta cota).
+O que ainda é do aparelho, e por quê:
 
-*Conserto:* migração nova com uma tabela de rodadas e colunas para o
-resto, ou um campo JSON no atendimento para o que não precisa de
-consulta.
+- **O bloco de dados do cliente** (nome, CPF, RG, endereço) tem botão
+  de salvar próprio e grava no `atendimento`; enquanto ele não for
+  apertado, o que está digitado é só daquele aparelho. *Conserto:*
+  gravar com atraso, como a ficha faz.
+- **Foto que ainda não subiu.** É de propósito (decisão 6) — o que já
+  está no Storage não fica guardado no celular, e a lista é relida
+  quando a aba volta ao foco.
+- **A sessão** (`vaapty:sessao`), que é o token do Supabase e não pode
+  sair dali.
+
+E duas coisas continuam **sem coluna no `veiculo`**, vivendo só na
+ficha de trabalho: `fipeConferida` com o código de autenticação da
+FIPE, e `fipeDesval`. Sobrevivem à troca de aparelho, mas não são
+registro consultável do carro.
 
 ---
 
@@ -89,7 +98,7 @@ consulta.
 | o que | situação |
 |-------|----------|
 | `renavam` | tem coluna no banco e não tem campo na tela. Saiu dos documentos por isso — volta quando houver campo, e só interessa em carro que fecha |
-| conferência da FIPE | `fipeConferida` e o código de autenticação vivem só no aparelho — não têm coluna no banco |
+| conferência da FIPE | `fipeConferida` e o código de autenticação não têm coluna em `veiculo`. Desde a 0050 sobrevivem à troca de aparelho, na ficha de trabalho — mas não dá para consultar "quais carros foram conferidos na FIPE oficial" |
 | `positivos`, `lataria`, `mecanica` | vão no JSON do Shinkai, sempre vazios — não têm campo |
 | `proposta.apresentada` | coluna existe, não há botão para marcar |
 | Ativar perfil de negociador | só por SQL |
@@ -235,11 +244,12 @@ o microfone ligar. O que ficou:
   navegador que transcreve, não nós. Está escrito na tela de
   consentimento; se o jurídico quiser processamento local, o caminho é
   outro e custa serviço próprio.
-- **A transcrição fica só no aparelho.** Trocou de celular, perdeu — o
-  mesmo limite das rodadas e das notas da espera.
-- **Retenção não foi decidida.** Ninguém definiu por quanto tempo a
-  transcrição pode ficar guardada. Enquanto ela não sai do aparelho, o
-  problema é pequeno; no dia em que for para o banco, precisa de regra.
+- **Retenção não foi decidida, e agora isso pesa.** A transcrição está
+  no banco desde a 0033 — a frase lida ao cliente já diz "e fica
+  registrada no sistema da loja" —, e ninguém definiu por quanto tempo
+  ela pode ficar guardada. Enquanto vivia no celular o problema era
+  pequeno. É conversa com o jurídico, junto da retenção dos dados
+  bancários do check list.
 
 ---
 

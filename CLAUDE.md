@@ -11,9 +11,10 @@ veículo, registra as rodadas de negociação e gera as duas saídas que
 alimentam a rede — o descritivo do WhatsApp e o JSON do Shinkai.
 
 Em produção-leve. Uma página estática mais doze funções de servidor na
-Vercel, com login por papel e Postgres no Supabase. O que ainda vive só
-no `localStorage` do aparelho são as rodadas de negociação, as notas da
-espera e os toggles do APONTE — ver PENDENCIAS.md.
+Vercel, com login por papel e Postgres no Supabase. Desde 16/09/2026 o
+atendimento inteiro sincroniza entre o celular e o computador do
+negociador (decisão 44); o que ainda depende de um botão é o bloco de
+dados do cliente — ver PENDENCIAS.md.
 
 ```
 index.html                       aplicação inteira (React 18 + Babel via CDN, sem build)
@@ -1049,6 +1050,99 @@ por cima. Fechar de verdade pediria trigger no banco.
 entrou no `EMBUTIDO` do `api/atendimento.js`; sem isso seria uma
 consulta por linha.
 
+### 44. O atendimento sincroniza entre o celular e o computador
+
+O negociador trabalha com os dois ao mesmo tempo: o celular na mão
+para fotografar e digitar em pé, o computador na mesa para o extrato e
+o contrato. O Derek pediu em 15/09/2026 — *"preciso que salve tudo em
+tempo real"* —, logo depois do 206 que abriu em branco (decisão 43).
+
+**A `negociacao_viva` era um relatório, não uma sincronização.** Ela
+já subia um retrato do atendimento a cada 15 s desde a 0033, mas de
+MÃO ÚNICA: ia para o painel do gestor e nunca voltava para a tela. A
+0050 dá a ela uma coluna `ficha` com o estado de trabalho inteiro, e a
+volta passa a ser das duas mãos.
+
+**A regra da decisão 43 não bastava.** "O banco preenche só o que está
+vazio" resolve ABRIR a ficha; não resolve os dois aparelhos EDITANDO —
+com ela, corrigir no computador um KM já preenchido nunca chegaria ao
+celular, porque lá o campo não está vazio. O que responde os dois
+casos é guardar o que o servidor tinha da última vez que os dois lados
+se falaram (a **base**) e comparar três pontas:
+
+- campo que este aparelho **não** tocou desde a base: vale o do
+  servidor — foi o outro que mexeu, ou ninguém mexeu;
+- campo que ele tocou: vale o daqui, e sobe no envio seguinte.
+
+**Nada que a pessoa acabou de digitar muda sozinho na frente dela** —
+é a mesma promessa da 43, agora nos dois sentidos. Conferido no ar em
+16/09/2026 com dois navegadores no mesmo atendimento: um digitou
+QUITAÇÃO, o outro DÉBITOS e reescreveu o detalhe do motivo, e os dois
+convergiram sem que nenhum perdesse o campo em que estava.
+
+**Registro é unido, não sobrescrito.** Rodada, documento e revisão
+entram por identidade (`REGISTROS_DA_FICHA`): com três pontas, a
+rodada impressa no celular sumiria quando o computador mandasse a
+lista dele — e é justamente o dado que dói perder. Canal visto é união
+pelo mesmo motivo; os quatro pneus são comparados **posição a
+posição**, senão classificar dois aqui apagaria os dois de lá.
+
+**Ler ANTES de escrever, sempre.** Assim este aparelho nunca grava por
+cima do que o outro mandou sem ter visto. Invertida, a ordem
+transforma cada volta numa chance de apagar o trabalho do outro lado —
+e seria invisível, porque o dado não some da tela de quem apagou.
+
+**Nada antes de `pronto`.** A tela nasce com a ficha VAZIA e só depois
+carrega o aparelho e o banco. Mandar nesse intervalo publicaria o
+vazio, e o outro aparelho o adotaria como novidade: seria a perda do
+206 a cada cinco segundos. **Quem mexer neste efeito mantém essa
+guarda.**
+
+**Cinco segundos, e só com a aba à vista** — mais uma volta imediata
+quando ela volta a aparecer, que é o instante exato em que a pessoa
+larga o celular e pega o computador. Rodar escondido gastaria o 4G da
+loja para atualizar tela que ninguém olha. Ao sair de vista, sai só o
+envio: o que não pode esperar é o que ela digitou.
+
+**A etapa sobe e não desce.** O painel do gestor precisa saber em que
+passo ele está; puxar de volta faria a tela pular de etapa debaixo do
+dedo de quem está com o cliente na frente.
+
+**A transcrição fica na coluna dela**, que existe desde a 0033 e passa
+de 100 KB numa conversa longa. Repeti-la dentro da `ficha` dobraria o
+que trafega a cada volta.
+
+**A tarja deixou de ser silenciosa, e isso inverte a 0033.** Enquanto
+o espelho servia só ao painel, engolir a falha era o certo — não se
+interrompe um atendimento por causa de um relatório. Agora ele carrega
+o trabalho da pessoa, e sincronização que falha calada é exatamente
+como o dado do 206 sumiu. Em dia, é uma linha cinza; parada há mais de
+trinta segundos, fica laranja e diz a única coisa acionável: **não
+feche esta aba até voltar o sinal**.
+
+**O que fica lossy, e é honesto dizer qual:** os dois aparelhos
+editando o MESMO campo entre duas voltas. Cada tela fica com o que
+digitou, e o servidor fica com a última que mandar. Resolver isso
+pediria marca de tempo por campo, com dois relógios que não conversam
+— e o caso real é a pessoa digitando de um lado de cada vez.
+
+**`ferramentas-sincronizacao.js` guarda a regra**, com dezoito casos
+lidos do próprio `index.html` — cópia de código de teste envelhece
+calada, e aí o teste passa enquanto a tela erra.
+
+**A ficha de trabalho não é o registro.** O do carro continua sendo
+`veiculo` (decisão 5), com colunas e consulta; o das rodadas continua
+sendo `documento`, com protocolo. A `ficha` é a área de trabalho de um
+atendimento que dura menos de uma hora, e é por isso que é jsonb: dar
+coluna a cada toggle do APONTE criaria um segundo esquema do carro
+para manter em sincronia com o da 0001.
+
+**O gerente não sincroniza o atendimento de outro.** A política de
+escrita da 0033 é do dono (ou de atendimento sem dono), e não tem
+cláusula de gerente — de propósito: o espelho vem do aparelho de quem
+conduz. Gerente que abrir o atendimento de um negociador vê a tarja
+laranja, o que é a leitura correta.
+
 ## Convenções do código
 
 - **Português no domínio.** Estado, funções e rótulos em pt-BR
@@ -1091,12 +1185,14 @@ lista que acumula item resolvido para de ser lida. Os principais:
 - **O login existe, o CRM ainda não.** Nome e telefone de cliente já
   têm coluna (0004) mas ainda não têm tela. Enquanto a etapa 3 não
   chega, o sistema segue sem dado pessoal dentro.
-- **Dados presos ao aparelho.** As rodadas, as notas da espera e os
-  toggles do APONTE ainda vivem no celular. **A ficha do veículo saiu
-  dessa lista em 15/09/2026** — ver decisão 43.
-- **Link de foto vence em 1 h.** As miniaturas usam URL assinada; um
-  atendimento que passe disso sem recarregar a tela mostra imagem
-  quebrada. Recarregar refaz os links.
+- **O bloco do cliente ainda depende do botão.** Nome, CPF, RG e
+  endereço gravam no `atendimento` quando alguém aperta salvar; até
+  lá são daquele aparelho. Todo o resto do atendimento saiu dessa
+  lista — ver decisões 43 e 44.
+- **Link de foto vence em 1 h.** As miniaturas usam URL assinada. A
+  lista é relida quando a aba volta ao foco (decisão 44), o que cobre
+  o caso comum; quem fica uma hora na mesma aba sem sair dela ainda vê
+  imagem quebrada até recarregar.
 - **Chassi às vezes parcial.** Preenche sozinho só com 17 caracteres
   válidos (`chassiCompleto`); fora disso, digitar do CRLV. Renavam nunca
   vem da consulta.
