@@ -905,6 +905,24 @@ tempo. **A planilha não tem gráfico** — o único desenho embutido nela é
 o logo da Vaapty; o histograma que existiu aqui por um dia era invenção
 minha e saiu junto com a tarja laranja.
 
+**E desde 17/09/2026 ele também é um destino do menu**, fora de
+qualquer atendimento — pedido do Derek. Antes, tirar uma folha exigia
+abrir um atendimento mesmo sem ninguém sentado na mesa.
+
+É o **mesmo** `SimuladorPropostas` e o **mesmo** `extratoOfertas`. Duas
+implementações da conta da planilha seriam duas folhas diferentes para
+o mesmo carro, que é exatamente o que esta decisão existe para evitar.
+**Quem mexer na conta mexe nos dois lugares de uma vez — porque é um
+lugar só.**
+
+**A folha avulsa não vira rodada de negócio nenhum, e a tela grita
+isso.** Dentro da Negociação cada impressão cria a rodada e grava o
+documento com protocolo (decisão 15); aqui não há a que amarrar — a
+tabela `documento` exige `veiculo_id` (decisão 40). **Se o negociador
+usar a tela avulsa no lugar da etapa N, o CRM perde a rodada**, e o
+aviso amarelo no topo manda ele voltar para o atendimento. O destino
+aparece para todo mundo: é uma calculadora, não mostra dado de cliente.
+
 **Nada dali é gravado como proposta.** O resultado não vai para a
 tabela `proposta` nem para o funil — só a Melhor Proposta vira o valor
 impresso da rodada. A tarja "nenhum lojista ofereceu isto" saiu a
