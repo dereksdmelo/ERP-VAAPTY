@@ -2342,6 +2342,67 @@ endereço.** `shinkai_url` é coluna nova; num banco que ainda não a
 tenha, o PATCH inteiro seria recusado e levaria junto o `shinkai_em` —
 que é o que libera o descritivo. Mesmo remédio da decisão 29.
 
+### 46. O que chega ao Shinkai, e o que eu tinha chutado
+
+O Derek viu em 17/09/2026 que a ficha do lojista estava incompleta —
+*"não vai os gastos, nem pedida, nem placa"*. Fui olhar a ficha de um
+carro nosso **dentro do CRM deles** (AWA1F10, HONDA CBR, enviado
+naquele mesmo dia às 16:28) antes de mexer em qualquer linha.
+
+**A placa chega.** Ela é obrigatória e o `api/foto.js` recusa o envio
+sem ela. No descritivo que o CRM deles gera ela sai **mascarada**
+(`Placa: F-0`), que é decisão da tela deles, não perda de dado.
+
+**O que não chega são exatamente os campos cujo nome eu chutei.** E o
+contraste no MESMO corpo é a prova:
+
+| enviado | nome | chegou |
+|---------|------|--------|
+| pneus, opcionais, `comprador_responsavel` | confirmados pelo Mateus em 11/09 | sim |
+| `gastos`, `ressalvas`, `pontos_positivos` | chutados por mim | **não** |
+
+O banco tinha `"1 PEÇA / MOTOR FUMANDO"` naquele carro e o campo GASTOS
+da ficha deles estava vazio. **Campo desconhecido é ignorado em
+silêncio** — o 422 só acontece quando o JSON não é legível —, então
+isso passou uma semana sem ninguém ver.
+
+**Isto é risco da decisão 2, não cosmético.** A etiqueta do campo deles
+diz *"sai no descritivo e na oferta"*: a ressalva do carro não está
+chegando ao lojista pelo link do Shinkai. O descritivo que **nós**
+geramos continua imprimindo gastos e ressalvas, então o que o
+negociador manda no WhatsApp está inteiro — o buraco é só a ficha de lá.
+
+**E a tela deles tem UM campo para "Pontos fortes e ressalvas"**, não
+dois. Eu mando dois. Mesmo com o nome certo, mandar separado
+continuaria errado.
+
+**PEDIDA é outro número, e nunca foi enviado.** `valor_investimento`
+chega e vira o **POR** do descritivo deles (conferido: R$ 29.900). A
+PEDIDA — o que a Vaapty pede ao lojista — fica R$ 0 em todos os carros,
+e não há campo documentado para ela. Era a pergunta em aberto da
+decisão 36, e agora tem nome e lugar na tela deles.
+
+**`para-o-mateus-4.md` é o pedido, com a prova junto.** Enquanto não
+vier resposta, **não invente nome novo** — foi exatamente isso que
+produziu uma semana de dado sumindo em silêncio. Chutar um segundo
+nome, ou mandar o mesmo texto sob três nomes na esperança de que um
+pegue, arrisca a linha aparecer duplicada no descritivo do lojista.
+
+**O que era nosso foi consertado no mesmo dia:** a HONDA CBR estava na
+ficha deles como **Carro**. O `tipo_veiculo` (0045) só era escolhido na
+conferência da FIPE oficial; ficha montada pela consulta de placa
+nascia sem ele, `somenteEnviadas()` descartava a coluna e o servidor
+caía no padrão carro. Agora o tipo é campo da ficha, ao lado do câmbio,
+e `VAZIO` o traz preenchido — **coluna que nasce `undefined` nunca é
+gravada** (decisão 5), e é assim que um campo "opcional" vira dado
+errado na mão do lojista.
+
+**Os três seletores da FIPE ficam vazios em ficha que não passou pela
+conferência oficial**, porque sem os três códigos não se manda nenhum
+(decisão 36). Isso é conhecido e continua certo — mas soma à sensação
+de ficha pela metade, e é mais um motivo para a conferência FIPE virar
+rotina.
+
 ### 37. A meta da pré-venda é outra cadeia
 
 O cadastro dava a todo mundo os três campos do negociador, e na

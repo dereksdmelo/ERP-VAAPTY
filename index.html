@@ -1597,6 +1597,12 @@ const VAZIO = {
   // conferência na FIPE oficial
   fipeConferida: false, fipeOficialCodigo: "", fipeOficialMes: "", fipeAutenticacao: "",
   marca: "", modeloCurto: "", versao: "",
+  // Carro, moto ou caminhão (0045). **Nasce preenchido**: sem valor,
+  // `somenteEnviadas()` descartava a coluna e o tipo nunca era gravado
+  // — a ficha ia ao Shinkai como CARRO mesmo sendo moto, porque o
+  // padrão do servidor é carro. Era assim que uma HONDA CBR 1000 RR
+  // aparecia como carro na ficha do lojista.
+  tipoVeiculo: "1",
   // Os três códigos da FIPE (0043). São eles que movem os seletores da
   // ficha do Shinkai — nome não move. Os três juntos, ou nenhum.
   fipeMarcaCodigo: "", fipeModeloCodigo: "", fipeAnoCodigo: "",
@@ -5043,6 +5049,19 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               <div className="space-y-3">
                 <Campo label="Modelo" req><input className={inputCls} style={inputSty} value={f.modelo} onChange={(e) => set("modelo", e.target.value)} /></Campo>
                 <div className="grid grid-cols-2 gap-3">
+                  {/* **Carro, moto ou caminhão — na ficha, não só na
+                      conferência FIPE.** Até 17/09/2026 o tipo só era
+                      escolhido na tabela oficial (decisão 14); ficha
+                      montada pela consulta de placa ficava no padrão
+                      CARRO e ia assim para o Shinkai. Uma HONDA CBR
+                      1000 RR estava lá como carro — dado errado na
+                      ficha que o lojista abre. */}
+                  <Campo label="Tipo" req>
+                    <select className={inputCls} style={inputSty} value={f.tipoVeiculo || "1"}
+                      onChange={(e) => set("tipoVeiculo", e.target.value)}>
+                      {TIPOS_FIPE.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
+                    </select>
+                  </Campo>
                   <Campo label="Ano / modelo" req><input className={inputCls} style={inputSty} value={f.ano} onChange={(e) => set("ano", e.target.value)} /></Campo>
                   <Campo label="Câmbio" req>
                     <select className={inputCls} style={inputSty} value={f.cambio} onChange={(e) => set("cambio", e.target.value)}>
