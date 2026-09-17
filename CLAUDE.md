@@ -124,6 +124,20 @@ os dois botões de copiar e derruba a opacidade do bloco para 0.45; o
 painel no topo de `PUB` lista nominalmente o que falta. Não existe
 "copiar assim mesmo".
 
+**"Básico" existe porque o gate estava empurrando para a mentira.**
+Ele pede ao menos um opcional marcado; num carro pelado o negociador
+tinha que marcar algo falso para liberar o descritivo. Pedido do Derek
+em 17/09/2026. **Ele e "Completo" se excluem** (`OPOSTOS`) — carro não
+é completo e básico ao mesmo tempo, e mandar os dois produziria uma
+ficha que se contradiz na mão do lojista. Do lado do Shinkai não quebra
+nada: opcional que não casa com um chip da ficha deles entra como texto
+livre e aparece igual (decisão 36).
+
+**A lição é maior que o chip:** gate que não tem como ser satisfeito
+com a verdade não protege nada — ele treina a equipe a preencher
+qualquer coisa. Quem acrescentar exigência nova pergunta antes qual é a
+resposta honesta de quem não tem o que preencher.
+
 Ao mexer aqui: um campo novo só é obrigatório se entrar em
 `OBRIGATORIOS` **com rótulo legível** — o rótulo é o que aparece na
 lista de pendências. Campo obrigatório sem rótulo bom deixa o
