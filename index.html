@@ -15203,6 +15203,80 @@ function ItemAgenda({ x, marcar, remover }) {
   );
 }
 
+/**
+ * EXTRATO DE OFERTAS AVULSO — a folha sem abrir atendimento.
+ *
+ * Pedido do Derek em 17/09/2026. O simulador já existia, mas só dentro
+ * da Negociação (decisão 16): para tirar uma folha era preciso abrir um
+ * atendimento, mesmo quando ninguém está sentado na mesa.
+ *
+ * **É o MESMO `SimuladorPropostas` e o MESMO `extratoOfertas`.** Duas
+ * implementações da conta da planilha seriam duas folhas diferentes
+ * para o mesmo carro, e a decisão 16 existe justamente para o papel
+ * sair igual ao que está na tela.
+ *
+ * **O que sai daqui não vira rodada de negócio nenhum, e a tela diz
+ * isso.** Dentro da Negociação, cada impressão cria a rodada e grava o
+ * documento com protocolo (decisão 15); aqui não há a que amarrar — a
+ * tabela `documento` exige `veiculo_id` (decisão 40). Se o negociador
+ * usar esta tela no lugar da etapa N, **o CRM perde a rodada**, e é por
+ * isso que o aviso é grande e manda ele voltar para o atendimento.
+ *
+ * O negociador vem do login, como no fechamento (decisão 35):
+ * perguntar o nome de quem acabou de entrar com a própria senha é
+ * pedir duas vezes a mesma coisa. Continua editável para quem abre no
+ * aparelho do colega.
+ */
+function TelaExtratoAvulso({ perfil }) {
+  const [veiculo, setVeiculo] = useState("");
+  const [negociador, setNegociador] = useState((perfil && perfil.nome) || "");
+  const [erro, setErro] = useState("");
+
+  return (
+    <div>
+      <Cabecalho titulo="Extrato de ofertas"
+        sub="A folha da mesa, sem precisar abrir um atendimento." />
+
+      <div className="space-y-4 p-4">
+        <div className="rounded-lg px-3 py-2.5 text-[12px] leading-snug"
+          style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
+          <b>Esta folha não entra em negócio nenhum.</b> Numa negociação de verdade, imprima
+          pela etapa <b>Negociação</b> do atendimento: é lá que a impressão vira rodada,
+          ganha protocolo e aparece no CRM. Daqui sai só o papel.
+        </div>
+
+        <Bloco titulo="O carro" sub="O que vai no cabeçalho da folha.">
+          <div className="space-y-2.5">
+            <Campo label="Veículo">
+              <input className={inputCls} style={inputSty} value={veiculo}
+                onChange={(e) => setVeiculo(e.target.value)} placeholder="marca e modelo" />
+            </Campo>
+            <Campo label="Negociador">
+              <input className={inputCls} style={inputSty} value={negociador}
+                onChange={(e) => setNegociador(e.target.value)} placeholder="quem leva à mesa" />
+            </Campo>
+          </div>
+        </Bloco>
+
+        <Bloco titulo="Extrato de ofertas"
+          sub="Digite a melhor proposta que quer levar à mesa. O valor de referência é consequência.">
+          <SimuladorPropostas
+            veiculo={veiculo} negociador={negociador}
+            rotuloImprimir="Imprimir o extrato"
+            aoImprimir={(r) => {
+              // A janela abre no clique, antes de qualquer espera:
+              // pop-up disparado depois de um await é bloqueado
+              // (decisão 15), e a impressão quebraria em silêncio.
+              const j = abrirDocumento(extratoOfertas({}, r, 1, "Extrato de ofertas"));
+              setErro(j.ok ? "" : j.erro);
+            }} />
+          {erro && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+        </Bloco>
+      </div>
+    </div>
+  );
+}
+
 function destinosPara(perfil) {
   const gerente = !!(perfil && perfil.papel === "gerente");
   const adm = !!(perfil && (perfil.administrativo || gerente));
@@ -15222,6 +15296,10 @@ function destinosPara(perfil) {
     { id: "atendimentos", rot: "Atendimentos", curto: "Atend.", principal: true },
     { id: "estoque", rot: "Estoque", curto: "Estoque", principal: true },
     { id: "painel", rot: "Painel do mês", curto: "Painel" },
+    // Ferramenta, não destino de todo dia: fica no menu e fora da
+    // barra do polegar. Todo mundo vê — é uma calculadora, não mostra
+    // dado de cliente nenhum.
+    { id: "extrato", rot: "Extrato de ofertas", curto: "Extrato" },
     // Rentabilidade e Venda para lojistas mostram margem e custo por
     // carro: é conversa de gestão, não de quem está com o cliente na
     // mesa. Fora para negociador e pré-venda.
@@ -16745,6 +16823,7 @@ function App() {
       {tela === "rentabilidade" && podeGestao && <TelaEstoque perfil={perfil} comp={compOuAtual} mes={mes} modo="rentabilidade" />}
       {tela === "painel" && <Funil perfil={perfil} comp={compOuAtual} mes={mes} />}
       {tela === "leads" && <LeadsIndicacao />}
+      {tela === "extrato" && <TelaExtratoAvulso perfil={perfil} />}
       {tela === "gestor" && <PainelGestor perfil={perfil} comp={compOuAtual} />}
       {tela === "adm" && <TelaADM perfil={perfil} comp={compOuAtual} mes={mes} />}
       {tela === "gestao" && <TelaGestao perfil={perfil} comp={compOuAtual} />}
