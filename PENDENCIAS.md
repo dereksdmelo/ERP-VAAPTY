@@ -255,6 +255,20 @@ o microfone ligar. O que ficou:
 
 ## Ideias que ficaram para depois
 
+- **A PEDIDA no Shinkai ainda não foi vista chegando.** A tubulação
+  está pronta (0053, campo na ficha ao lado do POR, `pedida` no envio),
+  mas nenhum carro tem valor digitado — e inventar preço de repasse num
+  carro de cliente seria dado falso na mão do lojista. **Digite a
+  pedida em um carro, reenvie, e dá para confirmar em um minuto.**
+- **Os carros que já estão no Shinkai foram enviados antes de tudo
+  isto.** Só a AWA1F10 foi reenviada (e conferida). Os outros seis
+  continuam lá sem gastos e sem ressalvas até alguém apertar "enviar de
+  novo" — ou até a próxima edição da ficha.
+- **Lista vazia LIMPA o campo do lado deles**, e nós não usamos isso:
+  ressalva apagada aqui continua na ficha do lojista. Manter assim
+  protege o que o operador deles digitou à mão; mudar protege contra
+  ressalva que deixou de valer. **Decisão do Derek.**
+
 - **O microfone de verdade ainda não foi testado.** O "ouvir a mesa"
   (decisão 45) foi conferido no ar com dois navegadores e um tom no
   lugar do microfone: a chamada fecha e o áudio atravessa. **Falta o
