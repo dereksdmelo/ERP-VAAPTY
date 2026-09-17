@@ -64,7 +64,14 @@ const brl = (n) =>
 const PNEU = ["Novo", "Bom", "Médio", "Fraco"];
 const CAMBIO = ["", "Manual", "Automático", "Automatizado", "CVT"];
 const OPCIONAIS = [
-  "Completo",
+  // **"Completo" e "Básico" são os dois extremos**, e o par existe por
+  // uma razão prática: o gate pede ao menos um opcional marcado
+  // (decisão 1), e num carro sem nada o negociador era empurrado a
+  // marcar algo falso só para liberar o descritivo. Pedido do Derek em
+  // 17/09/2026. Eles se excluem — carro não é completo e básico ao
+  // mesmo tempo, e mandar os dois ao lojista seria ficha que se
+  // contradiz.
+  "Completo", "Básico",
   "Ar condicionado", "Ar digital", "Direção hid./elét.",
   "Vidros elétricos", "Travas elétricas", "Retrovisor elétrico",
   "ABS", "Airbag duplo", "Controle de estabilidade",
@@ -1643,6 +1650,9 @@ const VAZIO = {
   // documentos gerados: { tipo, rotulo, rodada, protocolo, em, noBanco }
   documentos: [],
 };
+
+/** Os pares que não podem conviver na mesma ficha. */
+const OPOSTOS = { "Completo": "Básico", "Básico": "Completo" };
 
 const OBRIGATORIOS = [
   ["modelo", "Modelo"], ["ano", "Ano / modelo"], ["cambio", "Câmbio"],
@@ -5139,7 +5149,10 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                     {OPCIONAIS.map((o) => {
                       const on = f.opcionais.includes(o);
                       return (
-                        <button key={o} onClick={() => set("opcionais", on ? f.opcionais.filter((x) => x !== o) : [...f.opcionais, o])}
+                        <button key={o} onClick={() => set("opcionais", on
+                          ? f.opcionais.filter((x) => x !== o)
+                          // Marcar um dos dois extremos desmarca o outro.
+                          : [...f.opcionais.filter((x) => !(OPOSTOS[o] === x)), o])}
                           className="rounded-full px-3 py-1.5 text-[12px]"
                           style={{ background: on ? C.roxo : "#fff", color: on ? "#fff" : C.mute, border: `1px solid ${on ? C.roxo : C.line}` }}>{o}</button>
                       );
