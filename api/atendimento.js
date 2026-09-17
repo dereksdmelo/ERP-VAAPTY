@@ -1037,11 +1037,28 @@ async function viva(req, res, tok) {
       linha.ficha = c.ficha;
     }
 
-    const r = await banco(`${REST_V}?on_conflict=atendimento_id`, {
-      method: "POST",
-      headers: json(tok, { Prefer: "resolution=merge-duplicates,return=representation" }),
-      body: JSON.stringify(linha),
-    });
+    // **RLS aqui não é erro, é resposta.** A política da 0033 deixa
+    // escrever só quem conduz o atendimento — nem o gerente escreve no
+    // de outro, de propósito: o espelho vem do aparelho de quem está
+    // com o cliente. Sem esta tradução, o gerente que abre o
+    // atendimento de um negociador para OLHAR leva na tela o texto cru
+    // do Postgres ("new row violates row-level security policy for
+    // table negociacao_viva") dentro de uma tarja laranja dizendo que
+    // o trabalho dele pode se perder. Não pode: ele não está digitando
+    // nada.
+    let r;
+    try {
+      r = await banco(`${REST_V}?on_conflict=atendimento_id`, {
+        method: "POST",
+        headers: json(tok, { Prefer: "resolution=merge-duplicates,return=representation" }),
+        body: JSON.stringify(linha),
+      });
+    } catch (e) {
+      if (/row-level security|violates row/i.test(String(e && e.message))) {
+        return res.status(403).json({ erro: "alheio", detalhe: "Este atendimento é de outro negociador." });
+      }
+      throw e;
+    }
     const salvo = Array.isArray(r) ? r[0] : r;
     // Vazio é a RLS recusando: quem não conduz o atendimento não
     // espelha. A tela não mostra isso — o espelho é silencioso de

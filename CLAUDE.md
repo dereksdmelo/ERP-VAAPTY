@@ -2376,17 +2376,51 @@ negociador manda no WhatsApp está inteiro — o buraco é só a ficha de lá.
 dois. Eu mando dois. Mesmo com o nome certo, mandar separado
 continuaria errado.
 
-**PEDIDA é outro número, e nunca foi enviado.** `valor_investimento`
-chega e vira o **POR** do descritivo deles (conferido: R$ 29.900). A
-PEDIDA — o que a Vaapty pede ao lojista — fica R$ 0 em todos os carros,
-e não há campo documentado para ela. Era a pergunta em aberto da
-decisão 36, e agora tem nome e lugar na tela deles.
+**PEDIDA é outro número, e nunca tinha saído daqui.**
+`valor_investimento` chega e vira o **POR** do descritivo deles
+(conferido: R$ 29.900). A PEDIDA — o que a Vaapty pede ao lojista —
+ficava R$ 0 em todos os carros. Era a pergunta em aberto da decisão 36.
 
-**`para-o-mateus-4.md` é o pedido, com a prova junto.** Enquanto não
-vier resposta, **não invente nome novo** — foi exatamente isso que
-produziu uma semana de dado sumindo em silêncio. Chutar um segundo
-nome, ou mandar o mesmo texto sob três nomes na esperança de que um
-pegue, arrisca a linha aparecer duplicada no descritivo do lojista.
+O campo `pedida` existia no objeto da ficha **desde sempre e nunca era
+gravado**: sem campo na tela, sem coluna, sem entrada em `FONTE`. Morria
+no aparelho, como o 206 da decisão 43. A 0053 dá a coluna, a tela ganha
+o campo ao lado do POR, e o envio manda `pedida` — do estoque quando o
+carro já é nosso, da ficha quando está em avaliação, mesmo par do
+`valor_compra`/`valor_por`. **A última perna é a única não conferida no
+ar:** sem um número real digitado, não há o que ver chegar, e inventar
+preço de repasse num carro de cliente seria dado falso na mão do
+lojista.
+
+**Gastos virou campo de várias linhas**, que é o formato da ficha deles
+("1 por linha") e o que a API quebra em itens. **O texto antigo não é
+partido por conta própria**: barra sem espaço aparece em medida de pneu
+("205/55"), e adivinhar separador em texto que a pessoa digitou é da
+mesma família do erro que causou tudo isto.
+
+**O Mateus respondeu no mesmo dia, e corrigiu metade do diagnóstico.**
+`gastos`, `ressalvas` e `pontos_positivos` **já eram os nomes certos** —
+os campos é que não existiam na API dele até 17/09/2026. Nada mudou
+aqui, e ele confirmou que prefere receber positivos e ressalvas como
+**duas listas**, do jeito que já iam: o Shinkai junta no campo único da
+tela dele, positivos primeiro.
+
+**Conferido na ficha da AWA1F10 depois do reenvio:** GASTOS com
+`1 PEÇA / MOTOR FUMANDO`, PONTOS FORTES E RESSALVAS com `Motor
+fumando`, TIPO em **Moto** — e os pneus viraram dianteiro/traseiro
+sozinhos, que é o que a doc dele diz sobre moto.
+
+**A lição fica de pé mesmo com o nome certo:** campo desconhecido é
+ignorado em silêncio, e ninguém viu por uma semana. **Não invente nome
+novo**, e não mande o mesmo texto sob três nomes esperando que um pegue
+— duas entradas que peguem viram linha duplicada no descritivo do
+lojista.
+
+**Lista vazia LIMPA o campo lá (`[]` ou `""`), e nós ainda não usamos
+isso.** Hoje campo vazio aqui vira `undefined` e o reenvio não encosta
+no que está no CRM deles — então uma ressalva apagada aqui continua na
+ficha do lojista. Deixar assim protege o que o operador deles digitou à
+mão; mudar protege contra ressalva que deixou de valer. **É decisão do
+Derek, e ainda não foi tomada.**
 
 **O que era nosso foi consertado no mesmo dia:** a HONDA CBR estava na
 ficha deles como **Carro**. O `tipo_veiculo` (0045) só era escolhido na
@@ -2396,6 +2430,15 @@ caía no padrão carro. Agora o tipo é campo da ficha, ao lado do câmbio,
 e `VAZIO` o traz preenchido — **coluna que nasce `undefined` nunca é
 gravada** (decisão 5), e é assim que um campo "opcional" vira dado
 errado na mão do lojista.
+
+**E o gerente que abre o atendimento de um negociador levava um erro
+cru do Postgres na cara.** A tarja da sincronização mostrava *"new row
+violates row-level security policy for table negociacao_viva"* dentro
+do aviso laranja de "não feche esta aba até voltar" — alarme sobre
+trabalho que não existe, porque ele está olhando, não digitando. A
+recusa é de propósito (0033: o espelho vem do aparelho de quem conduz);
+o que faltava era traduzir. Agora é uma linha cinza: *"atendimento de
+outro negociador — você está vendo, não editando"*.
 
 **Os três seletores da FIPE ficam vazios em ficha que não passou pela
 conferência oficial**, porque sem os três códigos não se manda nenhum

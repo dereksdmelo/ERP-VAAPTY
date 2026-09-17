@@ -877,9 +877,12 @@ async function espelharNegociacao(dados) {
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
   });
   const d = await r.json().catch(() => ({}));
+  // "alheio" é o gerente olhando o atendimento de outro. Não é falha
+  // de rede e não há o que perder: a tela trata em separado.
+  if (r.status === 403 && d.erro === "alheio") { const e = new Error("alheio"); e.alheio = true; throw e; }
   if (!r.ok) throw new Error(d.erro || "Não consegui sincronizar.");
   // Vazio é a RLS recusando: quem não conduz o atendimento não espelha.
-  if (!d.ok) throw new Error("Este atendimento não é seu para editar.");
+  if (!d.ok) { const e = new Error("alheio"); e.alheio = true; throw e; }
   return true;
 }
 
@@ -4338,7 +4341,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         await mandar(atual);
         if (vivo) setSinc({ estado: "ok", em: Date.now(), erro: "" });
       } catch (e) {
-        if (vivo) setSinc((p) => ({ estado: "erro", em: p.em, erro: e.message }));
+        if (vivo) setSinc((p) => ({ estado: "erro", em: p.em, erro: e.message, alheio: !!e.alheio }));
       } finally { sincOcupado.current = false; }
     };
 
@@ -6483,6 +6486,18 @@ function BarraSinc({ sinc }) {
     const t = setInterval(() => forcar((x) => x + 1), 5000);
     return () => clearInterval(t);
   }, []);
+  // **Atendimento de outra pessoa não é falha.** O gerente abre para
+  // ver, não para editar, e a política da 0033 recusa o espelho de
+  // propósito. Tarja laranja aqui seria alarme sobre trabalho que não
+  // existe — e foi assim que ela apareceu no primeiro gerente que abriu
+  // a ficha de um negociador, em 17/09/2026.
+  if (sinc.alheio) {
+    return (
+      <div className="px-4 py-1 text-[10px]" style={{ background: "#F6F4F8", color: C.mute }}>
+        Atendimento de outro negociador — você está vendo, não editando.
+      </div>
+    );
+  }
   const atrasado = !sinc.em || Date.now() - sinc.em > 30000;
   if (!atrasado) {
     return (
