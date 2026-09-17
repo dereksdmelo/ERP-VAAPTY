@@ -232,7 +232,9 @@ async function shinkai(req, res, tok) {
     // O carro chegava pelado do outro lado: pneu, opcional e ressalva
     // ficavam de fora do corpo, e são justamente os campos que a tela
     // deles pede para o carro poder ser ofertado.
-    "pneu_de,pneu_dd,pneu_te,pneu_td,opcionais,gastos_descricao,ressalvas_lojista,pontos_positivos";
+    "pneu_de,pneu_dd,pneu_te,pneu_td,opcionais,gastos_descricao,ressalvas_lojista,pontos_positivos," +
+    // A PEDIDA (0053) — outro número, não o `valor_por`.
+    "preco_pedido";
 
   // A leitura vai pelo TOKEN DO USUÁRIO: é a RLS que decide se esta
   // pessoa enxerga este carro. A chave de serviço entra depois, e só
@@ -338,6 +340,15 @@ async function shinkai(req, res, tok) {
       // dos dois o Shinkai recebe o carro como "em avaliação", e diz
       // isso nos avisos.
       valor_investimento: numeroOuNulo(e ? e.valor_compra : v.valor_por) || undefined,
+      // **A PEDIDA é outro número, e ficou R$ 0 em todos os carros até
+      // 17/09/2026.** O `valor_investimento` acima vira o POR do
+      // descritivo deles (conferido na ficha da AWA1F10); a `pedida` é
+      // o que se pede ao lojista. O Mateus confirmou o nome no mesmo
+      // dia — `valor_minimo_aceitavel` é o apelido antigo dela.
+      //
+      // Comprado, é o preço pedido do estoque (0019); em avaliação, o
+      // da ficha (0053). Mesmo par do `valor_compra`/`valor_por`.
+      pedida: numeroOuNulo(e ? e.preco_pedido : v.preco_pedido) || undefined,
       // `leilao` e `sinistro` separados também, porque a documentação
       // diz que eles aceitam os dois formatos e o nosso é um só.
       leilao_sinistro: !!v.leilao_sinistro,

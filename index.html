@@ -1700,8 +1700,12 @@ const Rotulo = ({ children, req }) => (
     {children}{req && <span style={{ color: C.laranja }}> *</span>}
   </span>
 );
-const Campo = ({ label, req, children }) => (
-  <label className="block"><Rotulo req={req}>{label}</Rotulo><div className="mt-1">{children}</div></label>
+const Campo = ({ label, req, nota, children }) => (
+  <label className="block">
+    <Rotulo req={req}>{label}</Rotulo>
+    <div className="mt-1">{children}</div>
+    {nota && <span className="mt-1 block text-[11px] leading-snug" style={{ color: C.mute }}>{nota}</span>}
+  </label>
 );
 function Toggle({ label, valor, onChange, nota }) {
   return (
@@ -1895,6 +1899,7 @@ function fichaDoVeiculo(v) {
     cor: n(v.cor), combustivel: n(v.combustivel), cambio: n(v.cambio), renavam: n(v.renavam),
     km: n(v.km_atual), kmEntrada: n(v.km_entrada),
     fipe: n(v.fipe_valor), fipeCodigo: n(v.fipe_codigo), por: n(v.valor_por),
+    pedida: n(v.preco_pedido),
     gastos: n(v.gastos_descricao),
     pneus: [cap(v.pneu_de), cap(v.pneu_dd), cap(v.pneu_te), cap(v.pneu_td)],
     leilao: !!v.leilao_sinistro, gnv: !!v.gnv,
@@ -2048,7 +2053,7 @@ const fichaParaBanco = (f) => ({
   tipoVeiculo: f.tipoVeiculo,
   cor: f.cor, combustivel: f.combustivel, cambio: f.cambio, renavam: f.renavam,
   km: f.km, kmEntrada: f.kmEntrada,
-  fipe: f.fipe, fipeCodigo: f.fipeCodigo, por: f.por, gastos: f.gastos,
+  fipe: f.fipe, fipeCodigo: f.fipeCodigo, por: f.por, pedida: f.pedida, gastos: f.gastos,
   pneus: f.pneus, leilao: f.leilao, gnv: f.gnv, opcionais: f.opcionais,
   lataria: f.lataria, mecanica: f.mecanica,
   positivos: f.positivos, ressalvas: f.ressalvas, internas: f.internas,
@@ -5075,6 +5080,14 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                   <Campo label="Renavam"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.renavam} onChange={(e) => set("renavam", e.target.value)} placeholder="do CRLV" /></Campo>
                   <Campo label="FIPE" req><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.fipe} onChange={(e) => set("fipe", e.target.value)} /></Campo>
                   <Campo label="POR" req><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.por} onChange={(e) => set("por", e.target.value)} /></Campo>
+                  {/* A PEDIDA (0053). **Não é o POR.** O POR é o alvo
+                      que se quer ver voltar da rede e vira o "POR" do
+                      descritivo deles; a PEDIDA é o que se pede ao
+                      lojista, e pode estar acima. São dois campos na
+                      ficha do Shinkai, e o de lá ficou R$ 0 em todos os
+                      carros até 17/09/2026 porque este aqui não
+                      existia. */}
+                  <Campo label="Pedida ao lojista"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.pedida} onChange={(e) => set("pedida", e.target.value)} placeholder="o que você pede" /></Campo>
                 </div>
                 {!!f.placa && !f.fipeConferida && (
                   <p className="text-[11px] leading-relaxed" style={{ color: AMARELO.texto }}>
@@ -5086,7 +5099,19 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                     ✓ FIPE conferida na tabela oficial{f.fipeOficialMes ? ` — ${f.fipeOficialMes}` : ""}.
                   </p>
                 )}
-                <Campo label="Gastos / peças" req><input className={inputCls} style={inputSty} value={f.gastos} onChange={(e) => set("gastos", e.target.value)} /></Campo>
+                {/* **Um gasto por linha.** É o formato da ficha do
+                    Shinkai ("1 por linha"), e a API deles quebra o
+                    texto em itens. Num campo de uma linha só, os dois
+                    gastos separados por " / " chegavam lá como uma
+                    linha só. **Não se parte o texto antigo por conta
+                    própria** — barra sem espaço aparece em medida de
+                    pneu ("205/55"), e adivinhar separador em texto que
+                    a pessoa digitou é como este envio quebrou antes. */}
+                <Campo label="Gastos / peças" req nota="Um por linha.">
+                  <textarea rows={3} className={inputCls} style={inputSty} value={f.gastos}
+                    onChange={(e) => set("gastos", e.target.value)}
+                    placeholder={"1 peça\nMotor fumando"} />
+                </Campo>
                 <div>
                   <Rotulo req>Condição dos pneus</Rotulo>
                   <div className="mt-1 grid grid-cols-2 gap-2">

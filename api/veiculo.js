@@ -119,6 +119,9 @@ const FONTE = {
   pontos_positivos: "positivos", ressalvas_lojista: "ressalvas",
   observacoes_internas: "internas",
   gastos_descricao: "gastos", valor_por: "por",
+  // A PEDIDA (0053): o que se pede ao lojista. Não é o `valor_por`,
+  // que é o alvo. Sem entrada aqui, a coluna nunca seria gravada.
+  preco_pedido: "pedida",
 };
 const somenteEnviadas = (linha, f) => {
   const r = {};
@@ -177,6 +180,7 @@ function paraColunas(f) {
 
     gastos_descricao: texto(f.gastos),
     valor_por: decimal(f.por),
+    preco_pedido: decimal(f.pedida),
   };
 }
 
@@ -246,7 +250,7 @@ const base = (tabela) => `${URL_BASE}/rest/v1/${tabela}`;
 // pequenas; o teto da lista continua sendo 300 linhas.
 const CAMPOS_ESTOQUE =
   "*,veiculo(id,placa,chassi,marca_modelo,ano_fabricacao,ano_modelo,cor,combustivel,cambio," +
-  "km_atual,km_entrada,fipe_codigo,fipe_valor,valor_por,gastos_descricao,opcionais," +
+  "km_atual,km_entrada,fipe_codigo,fipe_valor,valor_por,preco_pedido,gastos_descricao,opcionais," +
   "pneu_de,pneu_dd,pneu_te,pneu_td,leilao_sinistro,gnv,detalhes_lataria,detalhes_mecanica," +
   // A foto pende do VEÍCULO, não do estoque: embutida solta aqui o
   // PostgREST responde "could not find a relationship".
