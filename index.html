@@ -1644,7 +1644,13 @@ const VAZIO = {
   cautelarEnviado: false, contratoAssinado: false,
   // A cautelar pode reprovar, e aí a negociação reabre: novo extrato,
   // novo valor, novo pré-contrato. `revisoes` guarda essas voltas.
-  cautelarResultado: "", cautelarLaudo: "", revisoes: [],
+  cautelarResultado: "", cautelarLaudo: "",
+  // Reprovada, o valor pode mudar ou não. "" é ainda não decidido,
+  // "mantido" é o cliente aceitando o mesmo número, "novo" é extrato
+  // refeito. Até 17/09/2026 só existia o caminho do extrato, e a tela
+  // obrigava a refazer mesmo quando o negócio tinha ficado de pé.
+  cautelarValor: "",
+  revisoes: [],
   // E
   avaliacaoGoogle: false, indicacoes: [],
   // documentos gerados: { tipo, rotulo, rodada, protocolo, em, noBanco }
@@ -4550,8 +4556,15 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   // segurava o negócio morreu junto com o laudo.
   const preContratoFeito = docs.some((x) => x.tipo === "pre_contrato");
   const preContratoDaRevisao = docs.some((x) => x.tipo === "pre_contrato" && /revis/i.test(x.rotulo || ""));
+  // **Valor mantido também libera.** A regra antiga — reprovada só
+  // segue com pré-contrato novo — vinha de o valor SEMPRE mudar depois
+  // do laudo. Quando o cliente aceita o mesmo número, o papel que ele
+  // já assinou continua dizendo a verdade, e exigir outro prendia o
+  // negócio numa tela sem saída. Foi o que o Derek relatou em
+  // 17/09/2026.
   const contratoLiberado = f.cautelarResultado === "aprovada"
-    || (f.cautelarResultado === "reprovada" && preContratoDaRevisao);
+    || (f.cautelarResultado === "reprovada"
+        && (preContratoDaRevisao || f.cautelarValor === "mantido"));
   const hhmm = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toTimeString().slice(0, 5); };
   const docsDe = (tipo, rodada) =>
     docs.filter((x) => x.tipo === tipo && (rodada == null || x.rodada === rodada));
@@ -5672,9 +5685,9 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                         style={{ color: f.cautelarResultado === "aprovada" ? C.verde : AMARELO.texto }}>
                         {f.cautelarResultado === "aprovada"
                           ? "Cautelar aprovada — segue para o contrato."
-                          : "Cautelar reprovada — o valor precisa ser refeito."}
+                          : "Cautelar reprovada — o negócio volta para a mesa."}
                       </span>
-                      <button onClick={() => setVarios({ cautelarResultado: "", cautelarLaudo: "" })}
+                      <button onClick={() => setVarios({ cautelarResultado: "", cautelarLaudo: "", cautelarValor: "" })}
                         className="shrink-0 text-[11px] underline" style={{ color: C.mute }}>trocar</button>
                     </div>
 
@@ -5686,28 +5699,85 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                             value={f.cautelarLaudo} onChange={(e) => set("cautelarLaudo", e.target.value)} />
                         </Campo>
 
-                        <div className="rounded-md p-3" style={{ background: "#FBF7FD", border: `1px solid ${C.line}` }}>
-                          <div className="text-[10px] uppercase tracking-[0.13em]" style={{ color: C.roxo }}>
-                            Novo extrato para o cliente
+                        {/* **O laudo nem sempre muda o preço.** A tela
+                            só oferecia o extrato refeito, então um
+                            negócio que ficou de pé no mesmo valor
+                            ficava preso: sem extrato novo não havia
+                            pré-contrato novo, e sem ele o contrato não
+                            abria. Agora a pergunta vem antes da
+                            ferramenta. */}
+                        {!f.cautelarValor ? (
+                          <div className="rounded-md p-3" style={{ background: "#FBF7FD", border: `1px solid ${C.line}` }}>
+                            <div className="text-[10px] uppercase tracking-[0.13em]" style={{ color: C.roxo }}>
+                              O valor muda?
+                            </div>
+                            <p className="mt-1 text-[11px]" style={{ color: C.mute }}>
+                              Com o laudo na mão, ou o cliente aceita o mesmo número ou a rede refaz a oferta.
+                            </p>
+                            <div className="mt-2 grid grid-cols-2 gap-2">
+                              <button
+                                onClick={() => setVarios({
+                                  cautelarValor: "mantido",
+                                  // Fica registrado que o negócio voltou à mesa e o
+                                  // número resistiu. Sem esta linha, "não mudou" e
+                                  // "ninguém decidiu" ficariam iguais no histórico.
+                                  revisoes: [...(f.revisoes || []),
+                                    { valor: String(f.valorFechado || ""), em: new Date().toISOString(), mantido: true }],
+                                })}
+                                className="rounded-md border py-2.5 text-[12px] font-semibold"
+                                style={{ borderColor: C.roxo, color: C.roxo }}>
+                                Continua o mesmo valor
+                              </button>
+                              <button onClick={() => set("cautelarValor", "novo")}
+                                className="rounded-md py-2.5 text-[12px] font-semibold"
+                                style={{ background: C.roxo, color: "#fff" }}>
+                                Mandar novo extrato
+                              </button>
+                            </div>
                           </div>
-                          <p className="mt-1 text-[11px]" style={{ color: C.mute }}>
-                            A rede refaz a oferta com o laudo na mão. Coloque quanto passa a valer e imprima.
-                          </p>
-                          <div className="mt-2">
-                            <SimuladorPropostas
-                              alvoPadrao={f.valorFechado} veiculo={f.modelo} negociador={f.negociador}
-                              rotuloImprimir={`Imprimir o extrato da revisão ${(f.revisoes || []).length + 1}`}
-                              aoImprimir={(r) => {
-                                const n = (f.revisoes || []).length + 1;
-                                setVarios({
-                                  revisoes: [...(f.revisoes || []), { valor: String(r.melhor), em: new Date().toISOString() }],
-                                  valorFechado: String(r.melhor),
-                                });
-                                gerarDocumento("extrato_revisao", `Extrato da revisão ${n}`,
-                                  extratoOfertas(dadosDoc, r, n, "Extrato de ofertas — revisão após a cautelar"), null);
-                              }} />
+                        ) : f.cautelarValor === "mantido" ? (
+                          <div className="rounded-md p-3" style={{ background: "#F0F8F4", border: `1px solid ${C.verde}` }}>
+                            <div className="flex items-baseline justify-between gap-2">
+                              <span className="text-[12px] font-semibold" style={{ color: C.verde }}>
+                                O valor não mudou — {brl(f.valorFechado)}
+                              </span>
+                              <button onClick={() => set("cautelarValor", "")}
+                                className="shrink-0 text-[11px] underline" style={{ color: C.mute }}>trocar</button>
+                            </div>
+                            <p className="mt-1 text-[11px] leading-snug" style={{ color: C.mute }}>
+                              O pré-contrato que o cliente já assinou continua dizendo a verdade, então
+                              o contrato está liberado. Reimprima abaixo se ele quiser um papel com o
+                              laudo citado.
+                            </p>
                           </div>
-                        </div>
+                        ) : (
+                          <div className="rounded-md p-3" style={{ background: "#FBF7FD", border: `1px solid ${C.line}` }}>
+                            <div className="flex items-baseline justify-between gap-2">
+                              <div className="text-[10px] uppercase tracking-[0.13em]" style={{ color: C.roxo }}>
+                                Novo extrato para o cliente
+                              </div>
+                              <button onClick={() => set("cautelarValor", "")}
+                                className="shrink-0 text-[11px] underline" style={{ color: C.mute }}>trocar</button>
+                            </div>
+                            <p className="mt-1 text-[11px]" style={{ color: C.mute }}>
+                              A rede refaz a oferta com o laudo na mão. Coloque quanto passa a valer e imprima.
+                            </p>
+                            <div className="mt-2">
+                              <SimuladorPropostas
+                                alvoPadrao={f.valorFechado} veiculo={f.modelo} negociador={f.negociador}
+                                rotuloImprimir={`Imprimir o extrato da revisão ${(f.revisoes || []).length + 1}`}
+                                aoImprimir={(r) => {
+                                  const n = (f.revisoes || []).length + 1;
+                                  setVarios({
+                                    revisoes: [...(f.revisoes || []), { valor: String(r.melhor), em: new Date().toISOString() }],
+                                    valorFechado: String(r.melhor),
+                                  });
+                                  gerarDocumento("extrato_revisao", `Extrato da revisão ${n}`,
+                                    extratoOfertas(dadosDoc, r, n, "Extrato de ofertas — revisão após a cautelar"), null);
+                                }} />
+                            </div>
+                          </div>
+                        )}
 
                         {!!(f.revisoes || []).length && (
                           <div className="rounded-md p-3" style={{ background: "#FBFAFC", border: `1px solid ${C.line}` }}>
@@ -5728,8 +5798,20 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                                    color: podeImprimir && f.valorFechado ? "#fff" : C.mute }}>
                           Imprimir o novo pré-contrato
                         </button>
+                        {/* **O erro fica ao lado do botão que falhou.**
+                            Ele só existia lá em cima, no bloco do
+                            pré-contrato: aqui embaixo, janela bloqueada
+                            pelo navegador fazia o botão parecer morto —
+                            o negociador clicava e não acontecia nada,
+                            sem uma linha dizendo por quê. O Chrome
+                            bloqueia o segundo pop-up da mesma página
+                            com facilidade, e o extrato já tinha aberto
+                            o primeiro. */}
+                        {erroDoc && <p className="text-[12px]" style={{ color: C.laranja }}>{erroDoc}</p>}
                         <p className="text-[11px]" style={{ color: C.mute }}>
-                          O pré-contrato anterior morreu com o laudo. Este é o que vale, e sai com o valor novo — o contrato só vem depois dele assinado.
+                          {f.cautelarValor === "mantido"
+                            ? "O valor não mudou, então o pré-contrato assinado continua valendo. Reimprimir é opcional."
+                            : "O pré-contrato anterior morreu com o laudo. Este é o que vale, e sai com o valor novo — o contrato só vem depois dele assinado."}
                         </p>
                       </div>
                     )}
