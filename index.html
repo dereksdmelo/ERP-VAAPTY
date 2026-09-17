@@ -5807,6 +5807,23 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                             bloqueia o segundo pop-up da mesma página
                             com facilidade, e o extrato já tinha aberto
                             o primeiro. */}
+                        {/* **Botão apagado tem que dizer por quê.** Aqui
+                            embaixo ele desabilitava em silêncio: o
+                            aviso do CPF só existia no bloco do
+                            pré-contrato, lá em cima, e quem está no fim
+                            da tela não o vê. "Não dá para fazer o
+                            pré-contrato" era isto, e não o laudo. */}
+                        {!podeImprimir && (
+                          <p className="text-[11px]" style={{ color: AMARELO.texto }}>
+                            Falta {faltamCliente.map(([, r]) => r).join(" e ")} do cliente — preencha na
+                            etapa Pesquisa para liberar a impressão.
+                          </p>
+                        )}
+                        {podeImprimir && !f.valorFechado && (
+                          <p className="text-[11px]" style={{ color: AMARELO.texto }}>
+                            Falta o valor fechado, lá no alto desta etapa.
+                          </p>
+                        )}
                         {erroDoc && <p className="text-[12px]" style={{ color: C.laranja }}>{erroDoc}</p>}
                         <p className="text-[11px]" style={{ color: C.mute }}>
                           {f.cautelarValor === "mantido"

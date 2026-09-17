@@ -1045,11 +1045,35 @@ que a casa não tem em mãos não serve quando alguém pede.
 Faltava o passo entre o pré-contrato e o contrato: o laudo. Aprovou,
 segue; reprovou, a negociação reabre.
 
-**Na reprovação o extrato é refeito**, agora com o laudo na mão, e o
-valor impresso vira o novo `valorFechado`. Cada volta fica em
-`revisoes`, com valor e hora — quantas vezes um carro voltou depois da
-cautelar é informação que o gerente vai querer, e ela some se só o
-último valor for guardado.
+**Na reprovação, o valor PODE ser refeito — não precisa.** Até
+17/09/2026 a tela só oferecia o extrato novo e dizia "o valor precisa
+ser refeito". Quando o cliente aceitava o mesmo número, o negócio
+ficava **preso**: sem extrato novo não havia pré-contrato novo, e sem
+ele o contrato não abria. O Derek relatou; a pergunta agora vem antes
+da ferramenta — *continua o mesmo* ou *manda novo extrato*.
+
+**Valor mantido libera o contrato sem pré-contrato novo.** A regra
+antiga vinha de o valor sempre mudar depois do laudo. Quando ele não
+muda, o papel que o cliente já assinou continua dizendo a verdade, e
+exigir outro é atrito sem função. Reimprimir continua disponível, para
+quando ele quiser a folha citando o laudo.
+
+**"Não mudou" e "ninguém decidiu" não podem ficar iguais no
+histórico**, então a escolha também entra em `revisoes`, com
+`mantido: true`. Cada volta fica lá com valor e hora — quantas vezes um
+carro voltou depois da cautelar é informação que o gerente vai querer,
+e ela some se só o último valor for guardado.
+
+**Botão apagado tem que dizer por quê, no lugar onde ele está.** O
+outro sintoma do mesmo relato — *"não dá para fazer o pré-contrato"* —
+não era o laudo: era o CPF do cliente faltando, com o aviso existindo
+só no bloco de cima, e a janela de impressão bloqueada pelo navegador,
+com o `erroDoc` renderizado igualmente longe. Os dois faziam o botão
+parecer morto. **O Chrome bloqueia o segundo pop-up da mesma página com
+facilidade**, e o extrato já tinha aberto o primeiro — então este é o
+lugar mais provável do sistema inteiro para isso acontecer. Agora os
+três avisos (CPF, valor fechado, janela bloqueada) ficam colados no
+botão.
 
 **O pré-contrato sai de novo, com o valor novo.** O anterior morreu com
 o laudo, e a tela diz isso: o contrato só vem depois deste assinado.
