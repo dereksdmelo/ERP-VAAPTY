@@ -1925,7 +1925,9 @@ function fichaDoVeiculo(v) {
     cor: n(v.cor), combustivel: n(v.combustivel), cambio: n(v.cambio), renavam: n(v.renavam),
     km: n(v.km_atual), kmEntrada: n(v.km_entrada),
     fipe: n(v.fipe_valor), fipeCodigo: n(v.fipe_codigo), por: n(v.valor_por),
-    pedida: n(v.preco_pedido),
+    // Ficha antiga pode ter pedida diferente do POR; quem manda agora é o POR, e o próximo
+    // salvamento alinha os dois. Ver o comentário do formulário.
+    pedida: n(v.valor_por) || n(v.preco_pedido),
     gastos: n(v.gastos_descricao),
     pneus: [cap(v.pneu_de), cap(v.pneu_dd), cap(v.pneu_te), cap(v.pneu_td)],
     leilao: !!v.leilao_sinistro, gnv: !!v.gnv,
@@ -2079,7 +2081,10 @@ const fichaParaBanco = (f) => ({
   tipoVeiculo: f.tipoVeiculo,
   cor: f.cor, combustivel: f.combustivel, cambio: f.cambio, renavam: f.renavam,
   km: f.km, kmEntrada: f.kmEntrada,
-  fipe: f.fipe, fipeCodigo: f.fipeCodigo, por: f.por, pedida: f.pedida, gastos: f.gastos,
+  /* `pedida` deixou de ser campo e passou a ser o próprio POR — ver o comentário do formulário.
+   * Ela continua sendo gravada (a coluna existe desde a 0053 e é o que o Shinkai lê) para que o
+   * carro não volte a chegar lá com pedida R$ 0, que foi o defeito que a 0053 corrigiu. */
+  fipe: f.fipe, fipeCodigo: f.fipeCodigo, por: f.por, pedida: f.por, gastos: f.gastos,
   pneus: f.pneus, leilao: f.leilao, gnv: f.gnv, opcionais: f.opcionais,
   lataria: f.lataria, mecanica: f.mecanica,
   positivos: f.positivos, ressalvas: f.ressalvas, internas: f.internas,
@@ -5112,15 +5117,22 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                   <Campo label="Cor"><input className={inputCls} style={inputSty} value={f.cor} onChange={(e) => set("cor", e.target.value)} /></Campo>
                   <Campo label="Renavam"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.renavam} onChange={(e) => set("renavam", e.target.value)} placeholder="do CRLV" /></Campo>
                   <Campo label="FIPE" req><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.fipe} onChange={(e) => set("fipe", e.target.value)} /></Campo>
-                  <Campo label="POR" req><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.por} onChange={(e) => set("por", e.target.value)} /></Campo>
-                  {/* A PEDIDA (0053). **Não é o POR.** O POR é o alvo
-                      que se quer ver voltar da rede e vira o "POR" do
-                      descritivo deles; a PEDIDA é o que se pede ao
-                      lojista, e pode estar acima. São dois campos na
-                      ficha do Shinkai, e o de lá ficou R$ 0 em todos os
-                      carros até 17/09/2026 porque este aqui não
-                      existia. */}
-                  <Campo label="Pedida ao lojista"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.pedida} onChange={(e) => set("pedida", e.target.value)} placeholder="o que você pede" /></Campo>
+                  {/* UM NÚMERO SÓ (19/09/2026 — correção do Derek). Eu tinha
+                      separado POR e "pedida ao lojista" porque a ficha do
+                      Shinkai tem os dois campos, e a documentação deles os
+                      trata como coisas diferentes. Na operação da casa não
+                      são: *"é o mesmo valor que vai pro Shinkai, que é o
+                      mesmo valor que vai pro anúncio no whats"*.
+                      Dois campos para o mesmo número não são redundância
+                      inofensiva — são a chance de o lojista receber um
+                      preço e o grupo do WhatsApp receber outro, e ninguém
+                      descobrir até alguém comparar. O POR continua sendo o
+                      campo; a `pedida` do Shinkai passa a ser preenchida a
+                      partir dele. */}
+                  <Campo label="POR — o valor que vai pro lojista" req
+                    nota="Sai no descritivo do WhatsApp e vai pro Shinkai como POR e como pedida. É um número só.">
+                    <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.por} onChange={(e) => set("por", e.target.value)} />
+                  </Campo>
                 </div>
                 {!!f.placa && !f.fipeConferida && (
                   <p className="text-[11px] leading-relaxed" style={{ color: AMARELO.texto }}>

@@ -348,7 +348,10 @@ async function shinkai(req, res, tok) {
       //
       // Comprado, é o preço pedido do estoque (0019); em avaliação, o
       // da ficha (0053). Mesmo par do `valor_compra`/`valor_por`.
-      pedida: numeroOuNulo(e ? e.preco_pedido : v.preco_pedido) || undefined,
+      // UM NÚMERO SÓ (19/09/2026, correção do Derek): a pedida é o mesmo valor do POR. O campo
+      // separado saiu da tela; o `valor_por` entra como reserva para as fichas gravadas antes
+      // disso, senão elas voltariam a chegar lá com pedida R$ 0 — o defeito que a 0053 corrigiu.
+      pedida: numeroOuNulo(e ? (e.preco_pedido || e.valor_compra) : (v.preco_pedido || v.valor_por)) || undefined,
       // `leilao` e `sinistro` separados também, porque a documentação
       // diz que eles aceitam os dois formatos e o nosso é um só.
       leilao_sinistro: !!v.leilao_sinistro,
