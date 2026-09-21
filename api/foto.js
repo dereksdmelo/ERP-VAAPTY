@@ -187,6 +187,32 @@ const SHINKAI_URL = "https://www.shinkai.com.br/api/public/veiculo";
 const SHINKAI_KEY = process.env.SHINKAI_API_KEY || "";
 const SHINKAI_ORIGEM = process.env.SHINKAI_ORIGEM || "vaapty-joinville";
 
+// Os opcionais sao CHIPS na ficha do Shinkai, e o casamento e pelo
+// NOME EXATO: o que nao bate com um chip deles e descartado em
+// silencio. Esta casa supunha o contrario ate 21/09/2026 -- estava
+// escrito na decisao 36 que opcional sem chip "entra como texto livre
+// e aparece igual". Nao entra: a secao OPCIONAIS da ficha deles sao
+// nove botoes e nao tem campo de texto nenhum.
+//
+// Conferido na ficha do QUI3D81, enviada as 13:35 daquele dia: foram
+// quatro opcionais ("Completo", "Ar condicionado", "Direcao
+// hid./elet.", "Travas eletricas") e a ficha deles mostrou dois.
+//
+// Os nove chips, lidos na tela deles na mesma data: Completo, Ar
+// condicionado, Direcao hidraulica/eletrica, ABS, Som / Multimidia,
+// Sensor de re, Camera de re, Rodas de liga, Bancos em couro. Oito
+// batem letra a letra com os nossos; o nono e abreviado aqui, e e o
+// unico que esta traducao conserta.
+//
+// Mesma forma do `shinkai_nome` (decisao 44): traducao entre dois
+// mundos e CADASTRO, nunca aproximacao. **Quem acrescentar entrada
+// aqui confere o rotulo na ficha deles, nao de memoria** -- chip
+// errado poe na mao do lojista equipamento que o carro nao tem, e o
+// erro e silencioso dos dois lados.
+const OPCIONAL_SHINKAI = {
+  "Direção hid./elét.": "Direção hidráulica/elétrica",
+};
+
 const numeroOuNulo = (v) => {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? n : null;
@@ -382,7 +408,15 @@ async function shinkai(req, res, tok) {
         traseiro_esquerdo: v.pneu_te || undefined,
         traseiro_direito: v.pneu_td || undefined,
       },
-      opcionais: Array.isArray(v.opcionais) && v.opcionais.length ? v.opcionais : undefined,
+      // O que nao tem chip do lado deles continua indo assim mesmo.
+      // Custa nada -- hoje e ignorado -- e no dia em que a lista deles
+      // crescer, o carro passa a chegar inteiro sem precisar de deploy
+      // aqui. Empurrar esses para `pontos_positivos` para "aparecer de
+      // algum jeito" e o erro que a decisao 46 proibe: o campo que o
+      // lojista le nao e lugar de dado que nao coube em outro.
+      opcionais: Array.isArray(v.opcionais) && v.opcionais.length
+        ? v.opcionais.map((o) => OPCIONAL_SHINKAI[o] || o)
+        : undefined,
       gastos: v.gastos_descricao || undefined,
       // Ressalva vai; observação interna NUNCA (decisão 2). O Shinkai
       // é a plataforma da casa, mas o que está nesse campo foi escrito

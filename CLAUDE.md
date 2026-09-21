@@ -129,9 +129,10 @@ Ele pede ao menos um opcional marcado; num carro pelado o negociador
 tinha que marcar algo falso para liberar o descritivo. Pedido do Derek
 em 17/09/2026. **Ele e "Completo" se excluem** (`OPOSTOS`) — carro não
 é completo e básico ao mesmo tempo, e mandar os dois produziria uma
-ficha que se contradiz na mão do lojista. Do lado do Shinkai não quebra
-nada: opcional que não casa com um chip da ficha deles entra como texto
-livre e aparece igual (decisão 36).
+ficha que se contradiz na mão do lojista. **"Básico" não chega ao
+Shinkai** — não há chip para ele lá, e opcional sem chip é descartado em
+silêncio (decisão 47). O par continua valendo aqui, que é onde ele foi
+pedido: ele existe para o gate não empurrar o negociador para a mentira.
 
 **A lição é maior que o chip:** gate que não tem como ser satisfeito
 com a verdade não protege nada — ele treina a equipe a preencher
@@ -2329,11 +2330,14 @@ Então `negociador.shinkai_nome` é escrito uma vez por pessoa, em Equipe
 e metas. Vazio, vai o nome daqui — e o aviso volta listando os nomes
 válidos, que é justamente como se descobre o que escrever ali.
 
-**Pneus e opcionais: o chute estava certo.** `pneus` como objeto por
-posição e `opcionais` como texto livre são exatamente o que a API
-espera; os nossos quatro estados são traduzidos do lado deles
-(`regular` → Médio, `fraco` → Ruim). Opcional que não casa com um chip
-entra como livre e aparece na ficha igual.
+**Pneus: o chute estava certo.** `pneus` como objeto por posição é
+exatamente o que a API espera, e os nossos quatro estados são
+traduzidos do lado deles (`regular` → Médio, `fraco` → Ruim).
+
+**Sobre os opcionais eu estava errado, e a frase que estava aqui era o
+erro:** "opcional que não casa com um chip entra como livre e aparece
+na ficha igual". Não entra — ver a decisão 47, que foi escrita olhando
+a ficha deles em vez de deduzindo.
 
 **O descritivo passou a sair DEPOIS do Shinkai, não antes.** Pedido do
 Derek em 11/09/2026: *"o descritivo deve vir do Shinkai, pois lá tem o
@@ -2501,6 +2505,76 @@ conferência oficial**, porque sem os três códigos não se manda nenhum
 (decisão 36). Isso é conhecido e continua certo — mas soma à sensação
 de ficha pela metade, e é mais um motivo para a conferência FIPE virar
 rotina.
+
+### 47. Os opcionais são chips, e chip que não existe some calado
+
+O Derek viu em 21/09/2026: *"a placa ainda não está indo pro Shinkai!
+… além disso não estão indo os opcionais que estou selecionando"*.
+Fui olhar a ficha do carro no CRM deles antes de mexer em linha
+nenhuma, porque a decisão 46 já tinha custado uma semana por eu ter
+deduzido em vez de conferir.
+
+**A placa chega, e chegava o tempo todo.** Está no campo PLACA da
+ficha do QUI3D81 e no cartão da lista deles. O que o Derek olhou foi o
+**PWA do lojista**, e lá ela não é impressa — decisão de tela deles, a
+mesma que a 46 já tinha registrado sobre o descritivo. **Nada a
+consertar aqui, e é importante não "consertar"**: mandar a placa de
+novo sob outro nome é exatamente o erro que a 46 proíbe.
+
+**Os opcionais chegam pela metade, e essa parte era nossa.** Foram
+quatro no QUI3D81 — Completo, Ar condicionado, Direção hid./elét.,
+Travas elétricas — e a ficha deles mostrou **dois**.
+
+**A seção OPCIONAIS da ficha deles são NOVE BOTÕES e nenhum campo de
+texto**: Completo, Ar condicionado, Direção hidráulica/elétrica, ABS,
+Som / Multimídia, Sensor de ré, Câmera de ré, Rodas de liga, Bancos em
+couro. O casamento é pelo nome exato, e o que não bate **é descartado
+em silêncio** — não vira texto livre, não vira aviso, não vira nada.
+
+**A frase errada estava escrita aqui, na decisão 36**, e foi ela que
+manteve isto invisível: *"opcional que não casa com um chip entra como
+livre e aparece na ficha igual"*. Eu a escrevi por dedução, num dia em
+que os pneus e os opcionais que eu tinha conferido bateram — e
+generalizei do que bateu para o que não tinha olhado. **É a mesma
+família do erro da 46: campo desconhecido ignorado calado, e ninguém
+vê.** A diferença é que desta vez o texto desta casa afirmava o
+contrário, então nem havia o que investigar.
+
+**O que foi consertado:** `OPCIONAL_SHINKAI`, em `api/foto.js`, é a
+tradução dos nossos rótulos para os chips deles. Hoje tem **uma
+entrada** — a nossa direção é abreviada e a deles não —, e os outros
+oito chips batem letra a letra. **Mesma forma do `shinkai_nome`
+(decisão 44): tradução entre dois mundos é cadastro, nunca
+aproximação.** Quem acrescentar entrada confere o rótulo na tela
+deles, não de memória: chip errado põe na mão do lojista equipamento
+que o carro não tem.
+
+**O que não tem chip continua sendo enviado assim mesmo.** Custa nada
+— hoje é ignorado lá — e no dia em que a lista deles crescer, o carro
+passa a chegar inteiro sem deploy aqui. **Empurrar esses para
+`pontos_positivos` para "aparecer de algum jeito" está descartado**: o
+campo que o lojista lê não é depósito do que não coube em outro, e a
+decisão 46 já proíbe mandar o mesmo dado sob nomes diferentes
+esperando que um pegue.
+
+**São 22 dos nossos 31 que ainda não chegam**, e essa conta sai do
+teste em vez de sair de uma leitura à mão:
+
+```bash
+node ferramentas-shinkai.js
+```
+
+Ele lê `OPCIONAIS` do `index.html` e `OPCIONAL_SHINKAI` do
+`api/foto.js` — nada é copiado para dentro dele — e falha quando um
+chip deles deixa de ter origem nossa, quando o mapa aponta para chip
+que não existe, e quando a tradução perde ou duplica item. **A lista
+dos nove chips está no teste com a data em que foi lida da tela**;
+quem mexer confere lá de novo.
+
+**O que sobra é pergunta para o Mateus, não código nosso:** se a lista
+de chips pode crescer, ou se a API pode aceitar opcional fora dela. E
+"Único dono" (decisão 1) é o caso que mais dói — é o primeiro
+argumento que o lojista lê, e hoje não sai daqui.
 
 ### 37. A meta da pré-venda é outra cadeia
 
