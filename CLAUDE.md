@@ -887,7 +887,8 @@ muda o formato da nuvem e o valor médio para de bater com a planilha.**
 
 **O que se digita é a Melhor Proposta, não a referência.** O negociador
 diz quanto quer levar à mesa e o valor de referência é consequência,
-mostrado embaixo. Pela conta da planilha o teto de uma rodada é
+mostrado **acima da folha** — ver "a conta da casa fica fora da folha",
+mais abaixo. Pela conta da planilha o teto de uma rodada é
 `0,918 × referência` — esse é o chute inicial; como cada proposta tem
 sorteio dentro, `simularPorMelhor()` tenta algumas vezes corrigindo pela
 razão e fica com a rodada mais perto. Conferido: alvo 40.600 crava em
@@ -910,7 +911,36 @@ cravando o número pedido em todas as faixas, de R$ 500 a R$ 40.600.
 
 **Não se força a melhor no fim.** Daria o número exato sempre, mas a
 nuvem deixaria de ser a da planilha e a folha mostraria uma proposta que
-a conta não produz. Quando não crava, a tela diz onde o sorteio parou.
+a conta não produz. Quando não crava, a tela diz onde o sorteio parou —
+no bloco reservado, nunca na folha.
+
+**A conta da casa fica FORA da folha, e isso custou um vazamento para
+aprender.** A folha do simulador trazia no rodapé *"Valor de referência
+usado: R$ 50.792"* e, quando o sorteio não cravava o alvo, um aviso
+laranja dizendo que os valores tinham sido sorteados. Em 23/09/2026 um
+**print dessa folha foi parar no WhatsApp de um lojista** com as duas
+coisas dentro. O Derek viu e mandou tirar.
+
+**O aviso do sorteio é o pior dos dois.** A referência entrega a
+margem; o aviso entrega o **método** — e a folha inteira existe para
+ser lida como propostas que vieram da rede. Um número a mais no rodapé
+se explica; "o sorteio parou em R$ 45.500" não se explica.
+
+**O erro de desenho foi juntar dois destinos no mesmo retângulo
+branco.** Aquele fundo é a folha que vai à mesa e é dela que se tira
+print; o resto da tela é o painel de quem conduz. Os dois avisos eram
+do segundo e moravam no primeiro. Agora ficam **acima** da folha, num
+bloco roxo claro marcado *"Só para você — não sai no papel e não pode
+entrar em print"*. Mesma regra do campo `internas` (decisão 2):
+destino diferente, lugar diferente, e o rótulo diz qual.
+
+**O papel impresso nunca teve nenhum dos dois** — `extratoOfertas()`
+foi conferido antes de qualquer mudança, e o vazamento era só da tela.
+Não confunda os dois ao mexer aqui.
+
+**Quem devolver qualquer um deles para dentro do fundo branco
+reintroduz isto**, e o estrago só aparece depois de a folha já ter
+sido mandada.
 
 **A tela imita a planilha**, a pedido do Derek: o logo, o cabeçalho de
 quatro linhas (Veículo, Quant. de propostas, Valor médio das propostas,
