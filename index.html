@@ -7175,6 +7175,40 @@ function SimuladorPropostas({ alvoPadrao, veiculo, negociador, aoImprimir, rotul
         {r ? "Sortear de novo" : "Simular a rodada"}
       </button>
 
+      {/* **A conta da casa fica FORA da folha.** O negociador precisa
+          ver a referência — ele digita a Melhor Proposta e ela é
+          consequência (decisão 16) —, mas a folha branca abaixo é o
+          que vai à mesa, e é dela que se tira print. Em 23/09/2026 um
+          print foi parar no WhatsApp de um lojista com "Valor de
+          referência usado: R$ 50.792" no rodapé, e o aviso do sorteio
+          junto.
+
+          **O aviso do sorteio é o pior dos dois:** ele não entrega um
+          número, entrega que os valores são SORTEADOS — e a folha
+          inteira existe para ser lida como propostas da rede. A
+          referência entrega a margem; esse entrega o método.
+
+          Mesma regra do campo `internas` (decisão 2): destino
+          diferente, lugar diferente, e o rótulo diz qual. **Quem
+          devolver qualquer um dos dois para dentro do fundo branco
+          reintroduz isto**, e o estrago só aparece depois de a folha
+          já ter sido mandada. */}
+      {r && (
+        <div className="mt-3 rounded-md px-3 py-2 text-[11px] leading-relaxed"
+          style={{ background: C.roxoFraco, border: `1px solid ${C.line}`, color: C.mute }}>
+          <span style={{ fontWeight: 700, color: C.roxo }}>Só para você</span> — não sai no papel e não pode entrar em print.
+          <div className="mt-1">
+            Valor de referência usado:{" "}
+            <span style={{ fontFamily: F.mono, color: C.ink }}>{brl(Math.round(r.referencia))}</span>
+            {r.melhor !== numeroBR(alvo) && (
+              <span style={{ color: C.laranja }}>
+                {" "}· o sorteio parou em {brl(r.melhor)}; sorteie de novo para tentar cravar.
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       {r && (
         <div className="mt-3 rounded-md p-4" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
           <div className="flex flex-wrap gap-6">
@@ -7208,15 +7242,6 @@ function SimuladorPropostas({ alvoPadrao, veiculo, negociador, aoImprimir, rotul
                 {caixa("JOINVILLE")}
               </div>
 
-              <div className="mt-4 text-[10px] leading-relaxed" style={{ color: C.mute, maxWidth: 240 }}>
-                Valor de referência usado:{" "}
-                <span style={{ fontFamily: F.mono, color: C.ink }}>{brl(Math.round(r.referencia))}</span>
-                {r.melhor !== numeroBR(alvo) && (
-                  <span style={{ color: C.laranja }}>
-                    {" "}· o sorteio parou em {brl(r.melhor)}; sorteie de novo para tentar cravar.
-                  </span>
-                )}
-              </div>
             </div>
 
             {/* as noventa posições, em três blocos */}
