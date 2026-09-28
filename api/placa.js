@@ -152,8 +152,20 @@ module.exports = async function handler(req, res) {
   }
 
   if (d.codigo !== 1 || !d.informacoes_veiculo) {
-    // 4862 = token vencido, 7771 = sem assinatura
-    return res.status(422).json({ erro: d.msg || "Veículo não encontrado.", codigo: d.codigo });
+    // 4862 = token vencido, 7771 = sem assinatura.
+    //
+    // **Estes dois não são "veículo não encontrado" — são a conta.** A
+    // mensagem que a Placa Fipe devolve manda falar com o suporte
+    // DELES, o que não diz nada ao negociador que está com o cliente
+    // na mesa. `assinatura: true` é o que deixa a tela dizer o que
+    // fazer agora, em vez de repassar um recado que não é para ele.
+    // Aconteceu em 28/09/2026, com a placa MFW8145 na tela.
+    const ASSINATURA = [4862, 7771];
+    return res.status(422).json({
+      erro: d.msg || "Veículo não encontrado.",
+      codigo: d.codigo,
+      assinatura: ASSINATURA.indexOf(Number(d.codigo)) >= 0 || undefined,
+    });
   }
 
   const iv = d.informacoes_veiculo;

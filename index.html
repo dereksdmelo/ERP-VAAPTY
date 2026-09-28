@@ -406,7 +406,14 @@ async function consultarPerfil() {
 async function consultarPlaca(placa) {
   const r = await fetch(`/api/placa?placa=${encodeURIComponent(placa)}`);
   const d = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(d.erro || "Falha na consulta.");
+  if (!r.ok) {
+    const e = new Error(d.erro || "Falha na consulta.");
+    // Assinatura vencida não é erro de digitação nem carro inexistente,
+    // e o atendimento não precisa parar por causa dela — ver o aviso
+    // ao lado do campo.
+    e.assinatura = !!d.assinatura;
+    throw e;
+  }
   return d;
 }
 /* ----------- FIPE oficial, para conferência ----------- */
@@ -3678,6 +3685,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   const [placaBusca, setPlacaBusca] = useState("");
   const [buscando, setBuscando] = useState(false);
   const [erroBusca, setErroBusca] = useState("");
+  const [placaSemAssinatura, setPlacaSemAssinatura] = useState(false);
   const [achado, setAchado] = useState(null);
   const [cambioBusca, setCambioBusca] = useState("");
   const [cota, setCota] = useState(null);
@@ -3874,7 +3882,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   const buscar = async () => {
     setErroBusca(""); setAchado(null); setBuscando(true); setCambioBusca(f.cambio || "");
     try { setAchado(await consultarPlaca(placaBusca)); setCota(await consultarCota()); }
-    catch (e) { setErroBusca(e.message); }
+    catch (e) { setErroBusca(e.message); setPlacaSemAssinatura(!!e.assinatura); }
     setBuscando(false);
   };
   const escolherVersao = (v) => {
@@ -4776,6 +4784,27 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 </button>
               </div>
               {erroBusca && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erroBusca}</p>}
+              {/* **O atendimento não para porque a assinatura venceu.**
+                  A consulta por placa é conveniência: ela preenche o que
+                  está no documento que o cliente tem na mão. O valor
+                  FIPE continua vindo pela tabela oficial (decisão 14),
+                  que é a fonte melhor de qualquer jeito — ela devolve
+                  código de autenticação e não adivinha a versão.
+                  Sem este aviso o negociador lê "fale com o suporte",
+                  que é recado para o Derek, e conclui que travou. */}
+              {placaSemAssinatura && (
+                <div className="mt-2 rounded-md px-3 py-2 text-[12px] leading-relaxed"
+                  style={{ background: C.roxoFraco, border: `1px solid ${C.line}`, color: C.ink }}>
+                  <strong>Isso é a assinatura da consulta por placa, não o carro.</strong>{" "}
+                  O atendimento segue: preencha marca, modelo, ano e chassi pelo documento
+                  do cliente e pegue o valor em <strong>Conferir na tabela FIPE</strong>,
+                  logo abaixo — ela continua no ar e é a fonte melhor, porque devolve o
+                  código de autenticação da FIPE em vez de adivinhar a versão.
+                  <div className="mt-1" style={{ color: C.mute }}>
+                    Avise o Derek para renovar em placafipe.com.br.
+                  </div>
+                </div>
+              )}
 
               {achado && (() => {
                 const lista = filtrarPorCambio(achado.versoes || [], cambioBusca);
