@@ -1,0 +1,43 @@
+# Publica o Worker a cada push na main.
+#
+# Por que existe: na Vercel o deploy vinha de graça pela integração com
+# o GitHub, e ninguém precisava lembrar. No Cloudflare o `wrangler
+# deploy` é manual -- e o modo de falhar é o pior que existe: o código
+# novo entra no repositório, o time acha que publicou, e o que está no
+# ar continua sendo o de duas semanas atrás, sem nenhum aviso.
+#
+# Precisa de UM segredo no GitHub (Settings > Secrets and variables >
+# Actions):
+#   CLOUDFLARE_API_TOKEN  -- criado em dash.cloudflare.com/profile/api-tokens
+#                            com o modelo "Edit Cloudflare Workers"
+#
+# O account id fica no wrangler.jsonc: ele identifica a conta, não abre
+# nada sozinho, e deixá-lo à vista poupa um segredo para manter.
+name: Publicar no Cloudflare
+
+on:
+  push:
+    branches: [main]
+  # Para republicar sem precisar de commit novo (rollback, ou quando um
+  # segredo muda e o Worker precisa reler).
+  workflow_dispatch:
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Os testes que leem o próprio código
+        # Os três leem as funções da fonte em vez de copiá-las, então
+        # falham quando a tela muda e o teste não. Barato: sem
+        # dependência, sem instalar nada.
+        run: |
+          node ferramentas-sincronizacao.js
+          node ferramentas-shinkai.js
+
+      - name: Publicar
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          workingDirectory: worker
