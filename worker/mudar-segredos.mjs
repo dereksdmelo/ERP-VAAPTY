@@ -15,6 +15,30 @@
  * O arquivo de origem e apagado no fim, sempre -- inclusive se algo
  * falhar no meio.
  */
+/* ====================================================================
+ * A ARMADILHA, descoberta em 29/09/2026 e o motivo de este arquivo
+ * conferir o que move.
+ *
+ * **`vercel env pull` NAO devolve o valor de variavel marcada como
+ * Sensitive na Vercel** -- ele escreve um PLACEHOLDER de 11
+ * caracteres, sem avisar. O arquivo fica com a cara certa: o nome
+ * esta la, tem valor entre aspas, o script move sem reclamar e o
+ * `wrangler` aceita.
+ *
+ * O estrago e pior que nao ter movido nada: um placeholder de 11
+ * caracteres **passa** no `if (!token)` dos handlers, entao o sistema
+ * se da por configurado e so falha na hora de falar com o fornecedor
+ * -- com o cliente na mesa.
+ *
+ * Na primeira passada vieram certas so `SUPABASE_URL` e
+ * `SUPABASE_ANON_KEY`, que sao exatamente as duas que NAO sao
+ * secretas (a anon key ja vai para o navegador). As cinco de verdade
+ * vieram falsas.
+ *
+ * Por isso o `suspeito()` abaixo barra o que parece placeholder, e
+ * por isso **este script nao substitui conferir o sistema no ar
+ * depois**: foi um `?acao=cota` devolvendo "Token inválido" que pegou.
+ * ==================================================================== */
 import { readFileSync, unlinkSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
@@ -47,11 +71,19 @@ for (const linha of bruto.split("\n")) {
   if (v) valores.set(m[1], v);
 }
 
-let postos = 0, pulados = [], ruins = [];
+let postos = 0, pulados = [], ruins = [], falsos = [];
 try {
   for (const nome of NOSSAS) {
     const v = valores.get(nome);
     if (!v) { pulados.push(nome); continue; }
+    /* Placeholder da Vercel: curto e sem cara de credencial. Um JWT
+       tem tres partes e passa de 100; token e chave passam de 20. */
+    const jwt = v.split(".").length === 3 && v.length > 100;
+    if (!jwt && v.length <= 20) {
+      falsos.push(nome);
+      console.log("  PULEI " + nome + " — valor de " + v.length + " caracteres, é o placeholder da Vercel, não a chave");
+      continue;
+    }
     const r = spawnSync("npx", ["wrangler", "secret", "put", nome],
       { input: v, cwd: new URL(".", import.meta.url).pathname, encoding: "utf8" });
     const ok = r.status === 0;
@@ -65,5 +97,9 @@ try {
   catch (e) { console.log("\n** APAGUE " + arquivo + " NA MAO: " + e.message + " **"); }
 }
 
-console.log(postos + " no Cloudflare" + (pulados.length ? " · não estavam no arquivo: " + pulados.join(", ") : ""));
+console.log("\n" + postos + " no Cloudflare" + (pulados.length ? " · não estavam no arquivo: " + pulados.join(", ") : ""));
+if (falsos.length) {
+  console.log("\n** A Vercel NAO entregou estas, por serem Sensitive — ponha à mão, uma a uma: **");
+  for (const n of falsos) console.log("   npx wrangler secret put " + n);
+}
 if (ruins.length) { console.log("falharam: " + ruins.join(", ")); process.exit(1); }
