@@ -1,0 +1,23 @@
+{
+  // O ERP da Vaapty no Cloudflare. UM Worker roteia as 12 funcoes que
+  // hoje sao 12 arquivos na Vercel -- por isso o teto de 12 deixa de
+  // existir aqui.
+  //
+  // nodejs_compat e obrigatorio: os handlers leem `process.env`, e sem
+  // o flag ele nao existe no Worker.
+  // **`wrangler dev` NAO roda no Mac do Derek** (macOS 13.3; o workerd
+  // exige 13.5+), nem com `--remote`, que tambem sobe o runtime local.
+  // Testar e por deploy num nome separado:
+  //     npx wrangler deploy --name vaapty-erp-teste
+  // e bater no `.workers.dev` com curl. Mesma limitacao que fez a ponte
+  // do WhatsApp da Camisetas Ja nascer sem Docker.
+  "name": "vaapty-erp",
+  "main": "index.js",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // A pasta e a raiz porque o index.html mora la e e fonte unica
+  // (decisao 7). O que nao pode ser publico esta em `.assetsignore`,
+  // na raiz -- **assets do Cloudflare sao publicos, sem login**.
+  "assets": { "directory": "../", "binding": "ASSETS" },
+  "observability": { "enabled": true }
+}

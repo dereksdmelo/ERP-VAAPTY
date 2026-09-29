@@ -1,0 +1,24 @@
+# O que NAO vai para o mundo.
+#
+# No Cloudflare, `assets` publica a pasta inteira -- e publico de
+# verdade, sem login. A pasta aqui e a raiz do repositorio (para o
+# index.html continuar sendo fonte unica, decisao 7), entao tudo que
+# nao e do navegador precisa ser barrado NOMINALMENTE.
+#
+# **Quem criar arquivo novo na raiz decide aqui se ele e publico.**
+# O padrao errado e o perigoso: esquecer de listar publica.
+.git
+.gitignore
+.DS_Store
+.assetsignore
+CLAUDE.md
+PENDENCIAS.md
+README.md
+api
+supabase
+worker
+vercel.json
+documentos.js
+ferramentas-escopo.js
+ferramentas-shinkai.js
+ferramentas-sincronizacao.js
