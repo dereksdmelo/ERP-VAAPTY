@@ -282,12 +282,37 @@ function corpoDe(req) {
   return c && typeof c === "object" ? c : null;
 }
 
+/**
+ * IP E LUGAR SÃO EVIDÊNCIA (decisão 42), e por isso continuam vindo
+ * da REQUISIÇÃO, nunca do corpo: prova que a parte interessada digita
+ * não é prova.
+ *
+ * As duas funções falam as duas plataformas porque durante a
+ * travessia para o Cloudflare os mesmos handlers rodam nos dois
+ * lados, e uma assinatura colhida em qualquer um deles tem que valer
+ * igual. **Quem tirar um dos caminhos daqui invalida a trilha do lado
+ * que sobrou** — e só se descobre quando alguém pedir o documento.
+ *
+ * Conferido no ar em 29/09/2026, num Worker de teste: o Cloudflare
+ * devolve Joinville, SC, BR pela borda de Curitiba — a mesma coisa
+ * que a Vercel entregava, mais o CEP e o fuso, que ainda não usamos.
+ */
 const ipDe = (req) => {
+  // No Cloudflare este é o autoritativo: o cliente não consegue
+  // forjá-lo, ao contrário do x-forwarded-for, que é uma lista.
+  const cf = String(req.headers["cf-connecting-ip"] || "").trim();
+  if (cf) return cf;
   const x = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
   return x || String(req.headers["x-real-ip"] || "") || "";
 };
 const localDe = (req) => {
-  // A Vercel entrega a geolocalização da borda em cabeçalhos próprios.
+  // Cloudflare: o adaptador do Worker passa o `cf` da requisição
+  // adiante, porque ali a geolocalização não vem em cabeçalho.
+  const c = req.cf;
+  if (c && (c.city || c.country)) {
+    return [c.city, c.regionCode || c.region, c.country].filter(Boolean).join(", ");
+  }
+  // Vercel: cabeçalhos próprios da borda.
   const cidade = decodeURIComponent(String(req.headers["x-vercel-ip-city"] || ""));
   const uf = String(req.headers["x-vercel-ip-country-region"] || "");
   const pais = String(req.headers["x-vercel-ip-country"] || "");

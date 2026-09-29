@@ -97,6 +97,10 @@ export default {
     const req = {
       method: request.method, url: u.pathname + u.search, query, headers,
       body: await corpoDe(request), cookies: {},
+      /* A geolocalização da borda, que no Cloudflare NÃO vem em
+         cabeçalho. É evidência da assinatura eletrônica (decisão 42),
+         e o `localDe` do api/documento.js a lê daqui. */
+      cf: request.cf || null,
     };
 
     const { res, espera } = resposta();
