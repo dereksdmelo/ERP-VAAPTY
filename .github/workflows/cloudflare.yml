@@ -17,7 +17,12 @@ name: Publicar no Cloudflare
 
 on:
   push:
-    branches: [main]
+    # `cloudflare` está aqui porque durante a travessia É ELE que roda
+    # no Worker, enquanto a `main` continua indo para a Vercel pela
+    # integração de lá. **No dia em que a migração fechar, o cloudflare
+    # vira a main e esta linha perde o segundo nome** -- deixá-lo
+    # depois faz um branch antigo publicar por cima da produção.
+    branches: [main, cloudflare]
   # Para republicar sem precisar de commit novo (rollback, ou quando um
   # segredo muda e o Worker precisa reler).
   workflow_dispatch:
