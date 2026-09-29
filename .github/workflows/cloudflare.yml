@@ -46,3 +46,13 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           workingDirectory: worker
+          # **Fixa, e igual à que se usa na mão.** A action instala a
+          # 3.x por padrão, e a 3.90 nem lê `wrangler.jsonc` (suporte a
+          # JSONC só entrou na 3.91): ela procurou um wrangler.toml,
+          # não achou e falhou com "Missing entry-point", que não diz
+          # nada sobre a causa. Foi assim na primeira execução.
+          #
+          # Deixar a versão solta é pior que o erro: um dia a action
+          # passa a instalar outra e o que publica deixa de ser o que
+          # se testou aqui, sem ninguém mexer em nada.
+          wranglerVersion: "4.143.1"
