@@ -12,6 +12,9 @@
   // e bater no `.workers.dev` com curl. Mesma limitacao que fez a ponte
   // do WhatsApp da Camisetas Ja nascer sem Docker.
   "name": "vaapty-erp",
+  // Identifica a conta para o deploy automático (.github/workflows).
+  // Não é segredo: sozinho ele não abre nada.
+  "account_id": "4296797f44db7d27b8bb35212a469309",
   "main": "index.js",
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat"],
