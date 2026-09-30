@@ -464,23 +464,32 @@ async function importar(req, res, tok) {
      * já está tomado por OUTRO documento, quem cede é o nome, que
      * ganha o documento junto para virar único. Perder o CNPJ novo
      * seria perder a única coisa que não muda de grafia. */
-    const nomesQueremos = Array.from(new Set(faltam.map((d) => String(docs[d] || d).toLowerCase())));
+    /* Lê o cadastro INTEIRO e compara em memória, de propósito. O
+     * índice é `lower(nome)` mas a COLUNA guarda o original: procurar
+     * por `nome=in.("departamento de transito de")` nunca acha
+     * "DEPARTAMENTO DE TRANSITO DE", e foi assim que a primeira versão
+     * deste conserto continuou quebrando. PostgREST não tem `in`
+     * que ignore maiúscula, e montar um `or=(nome.ilike...)` com
+     * centenas de nomes vindos do extrato é pedir para escapar errado
+     * um nome com vírgula ou parêntese.
+     *
+     * O cadastro de fornecedores de uma loja tem centenas de linhas,
+     * não milhões -- uma leitura inteira numa importação sai barata. */
     const tomados = {};
-    if (nomesQueremos.length) {
-      const lista = nomesQueremos.map((n) => `"${n.replace(/"/g, '\\"')}"`).join(",");
-      const jaNome = await supa(`${base("fin_favorecido")}?select=id,nome,documento&nome=in.(${encodeURIComponent(lista)})`, { headers: cab(tok) });
-      (jaNome || []).forEach((f) => { tomados[String(f.nome || "").toLowerCase()] = f; });
+    if (faltam.length) {
+      const todos = await supa(`${base("fin_favorecido")}?select=id,nome,documento&limit=10000`, { headers: cab(tok) });
+      (todos || []).forEach((f) => { tomados[String(f.nome || "").trim().toLowerCase()] = f; });
     }
     const novos = [];
     faltam.forEach((d) => {
-      const base_ = String(docs[d] || d);
+      const base_ = String(docs[d] || d).trim();
       const chave = base_.toLowerCase();
       const dono = tomados[chave];
       // Mesmo nome E mesmo documento seria o caso já resolvido acima;
       // aqui o nome bate e o documento não, então desambigua.
       if (dono && !dono.documento) { favPor[d] = dono.id; return; }   // cadastro sem CNPJ: aproveita
       const nome = dono ? `${base_} (${d})` : base_;
-      tomados[nome.toLowerCase()] = { nome, documento: d };            // segura o nome contra o resto DO LOTE
+      tomados[nome.trim().toLowerCase()] = { nome, documento: d };     // segura o nome contra o resto DO LOTE
       novos.push({ nome, documento: d });
     });
     if (novos.length) {
