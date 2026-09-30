@@ -69,7 +69,25 @@ async function supa(url, opcoes) {
   let dado = null;
   try { dado = corpo ? JSON.parse(corpo) : null; } catch (e) {}
   if (!r.ok) {
-    const msg = (dado && (dado.message || dado.hint || dado.details)) || "O banco recusou a operação.";
+    let msg = (dado && (dado.message || dado.hint || dado.details)) || "O banco recusou a operação.";
+    /* **Erro de banco não é mensagem para gente** (decisão 46). Até
+     * 30/09/2026 a tela do financeiro mostrava, em laranja e sem mais
+     * nada, "duplicate key value violates unique constraint
+     * fin_favorecido_nome" -- verdadeiro, inútil, e sem dizer o que
+     * fazer. Quem lê isso não sabe se perdeu o arquivo, se pode tentar
+     * de novo, nem o que quebrou. */
+    const uni = /duplicate key value violates unique constraint "?([a-z_]+)"?/i.exec(String(msg));
+    if (uni) {
+      const ONDE = {
+        fin_favorecido_nome: "já existe um fornecedor com esse nome",
+        fin_favorecido_doc: "já existe um fornecedor com esse CNPJ/CPF",
+        fin_lancamento_chave: "esse movimento do banco já foi importado",
+        fin_orcamento_cat: "essa categoria já foi orçada neste mês",
+        fin_recibo_numero: "esse número de recibo já existe",
+      };
+      msg = (ONDE[uni[1]] || `um registro repetido barrou a gravação (${uni[1]})`) +
+        ". Nada foi gravado nesta chamada; o que já entrou antes continua lá.";
+    }
     const erro = new Error(String(msg));
     erro.status = r.status === 401 ? 401 : 502;
     throw erro;
@@ -429,12 +447,47 @@ async function importar(req, res, tok) {
   if (listaDocs.length) {
     const jaTem = await supa(`${base("fin_favorecido")}?select=id,documento&documento=in.(${listaDocs.join(",")})`, { headers: cab(tok) });
     (jaTem || []).forEach((f) => { favPor[f.documento] = f.id; });
-    const novos = listaDocs.filter((d) => !favPor[d]).map((d) => ({ nome: docs[d], documento: d }));
+    const faltam = listaDocs.filter((d) => !favPor[d]);
+    /* **São DOIS índices únicos, não um.** Além do documento, a 0026
+     * tem `fin_favorecido_nome` em `lower(nome)` -- e esse não é
+     * parcial: vale sempre. Conferir só o documento deixava o insert
+     * estourar no nome e derrubar a importação INTEIRA, com o erro cru
+     * do Postgres na cara de quem estava importando
+     * ("duplicate key value violates unique constraint").
+     *
+     * Acontece porque o extrato do Itaú TRUNCA o nome
+     * ("DEPARTAMENTO DE TRANSITO DE"), então CNPJs diferentes chegam
+     * com o mesmo nome. Num extrato de nove meses isso é certeza, não
+     * azar -- foi assim com os 3.757 movimentos de 30/09/2026.
+     *
+     * O documento continua sendo a chave (decisão 28): quando o nome
+     * já está tomado por OUTRO documento, quem cede é o nome, que
+     * ganha o documento junto para virar único. Perder o CNPJ novo
+     * seria perder a única coisa que não muda de grafia. */
+    const nomesQueremos = Array.from(new Set(faltam.map((d) => String(docs[d] || d).toLowerCase())));
+    const tomados = {};
+    if (nomesQueremos.length) {
+      const lista = nomesQueremos.map((n) => `"${n.replace(/"/g, '\\"')}"`).join(",");
+      const jaNome = await supa(`${base("fin_favorecido")}?select=id,nome,documento&nome=in.(${encodeURIComponent(lista)})`, { headers: cab(tok) });
+      (jaNome || []).forEach((f) => { tomados[String(f.nome || "").toLowerCase()] = f; });
+    }
+    const novos = [];
+    faltam.forEach((d) => {
+      const base_ = String(docs[d] || d);
+      const chave = base_.toLowerCase();
+      const dono = tomados[chave];
+      // Mesmo nome E mesmo documento seria o caso já resolvido acima;
+      // aqui o nome bate e o documento não, então desambigua.
+      if (dono && !dono.documento) { favPor[d] = dono.id; return; }   // cadastro sem CNPJ: aproveita
+      const nome = dono ? `${base_} (${d})` : base_;
+      tomados[nome.toLowerCase()] = { nome, documento: d };            // segura o nome contra o resto DO LOTE
+      novos.push({ nome, documento: d });
+    });
     if (novos.length) {
       // Sem `on_conflict`: o índice de documento é PARCIAL (só onde o
       // documento não é nulo), e o Postgres não infere índice parcial
       // num ON CONFLICT — devolve "no unique or exclusion constraint
-      // matching". A consulta acima já tirou os repetidos.
+      // matching". As duas consultas acima já tiraram os repetidos.
       const criados = await supa(base("fin_favorecido"), {
         method: "POST", headers: cab(tok, REP), body: JSON.stringify(novos),
       });
