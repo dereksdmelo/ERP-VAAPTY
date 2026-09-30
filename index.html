@@ -12480,29 +12480,88 @@ function FinImportar({ contaId, aoTerminar }) {
   const [txt, setTxt] = useState(""); const [ofx, setOfx] = useState(null); const [nomeArq, setNomeArq] = useState("");
   const [indo, setIndo] = useState(false); const [res, setRes] = useState(null); const [erro, setErro] = useState("");
   const [conf, setConf] = useState(null);
+  // "gravando 2 de 3…": arquivo grande vai em lotes, e sem isto a tela
+  // fica parada e a pessoa clica de novo.
+  const [parcial, setParcial] = useState("");
   const previa = modo === "ofx" ? ofx : (txt ? lerExtrato(txt) : null);
 
-  const corpoDe = () => {
-    const corpo = { conta_id: contaId, linhas: previa.dados };
-    if (modo === "ofx" && previa.saldo_final != null) { corpo.saldo_final = previa.saldo_final; corpo.saldo_final_em = previa.saldo_final_em; }
+  /* O servidor aceita 1.500 linhas por chamada -- é o que cabe no
+     tempo de execução de uma função. Um OFX de um ano passa disso com
+     folga (o de 30/09/2026 tinha 3.757 movimentos), e até 30/09/2026 a
+     tela deixava escolher o arquivo, contava os movimentos, oferecia o
+     botão **e só falhava depois do clique**: botão que parece vivo e
+     está morto, que é o que a decisão 20 manda evitar.
+ 
+     Agora ela fatia sozinha. Quem colou um ano não deveria precisar
+     saber que existe um limite de lote do outro lado. */
+  const LOTE = 1500;
+  const lotes = (todas) => {
+    const p = [];
+    for (let i = 0; i < todas.length; i += LOTE) p.push(todas.slice(i, i + LOTE));
+    return p.length ? p : [[]];
+  };
+  const corpoDe = (linhas, ultimo) => {
+    const corpo = { conta_id: contaId, linhas };
+    /* O saldo final só vai no ÚLTIMO lote. Ele fecha a conciliação do
+       período, e mandá-lo junto de um pedaço do meio diria que o mês
+       fechou quando ainda falta extrato para entrar. */
+    if (modo === "ofx" && ultimo && previa.saldo_final != null) {
+      corpo.saldo_final = previa.saldo_final; corpo.saldo_final_em = previa.saldo_final_em;
+    }
     return corpo;
+  };
+  // Soma o que cada lote respondeu, para a tela mostrar UM resultado
+  // em vez de três parciais que ninguém sabe juntar de cabeça.
+  const juntar = (partes) => {
+    const total = {};
+    partes.forEach((r) => {
+      Object.keys(r || {}).forEach((k) => {
+        const v = r[k];
+        if (typeof v === "number") total[k] = (total[k] || 0) + v;
+        else if (Array.isArray(v)) total[k] = (total[k] || []).concat(v);
+        else if (total[k] === undefined) total[k] = v;
+      });
+    });
+    return total;
   };
   // Conferir primeiro: o BPO vê o que vai entrar e o que já está lá
   // ANTES de gravar. Descobrir depois que entrou repetido é o tipo de
   // coisa que se conserta apagando linha a linha.
   const conferir = async () => {
-    setIndo(true); setErro(""); setConf(null);
-    try { setConf(await fin("importar", { acao: "conferir" }, finJson("POST", corpoDe()))); }
-    catch (e) { setErro(e.message); }
-    setIndo(false);
+    setIndo(true); setErro(""); setConf(null); setParcial("");
+    const partes = lotes(previa.dados);
+    try {
+      const rs = [];
+      for (let i = 0; i < partes.length; i++) {
+        if (partes.length > 1) setParcial(`conferindo ${i + 1} de ${partes.length}…`);
+        rs.push(await fin("importar", { acao: "conferir" }, finJson("POST", corpoDe(partes[i], i === partes.length - 1))));
+      }
+      setConf(juntar(rs));
+    } catch (e) { setErro(e.message); }
+    setParcial(""); setIndo(false);
   };
   const enviar = async () => {
-    setIndo(true); setErro("");
-    try { setRes(await fin("importar", null, finJson("POST", corpoDe()))); }
-    catch (e) { setErro(e.message); }
-    setIndo(false);
+    setIndo(true); setErro(""); setParcial("");
+    const partes = lotes(previa.dados);
+    const rs = [];
+    try {
+      for (let i = 0; i < partes.length; i++) {
+        if (partes.length > 1) setParcial(`gravando ${i + 1} de ${partes.length}…`);
+        rs.push(await fin("importar", null, finJson("POST", corpoDe(partes[i], i === partes.length - 1))));
+      }
+      setRes(juntar(rs));
+    } catch (e) {
+      /* Falhar no meio NÃO desfaz o que já entrou -- e o que entrou
+         está protegido contra repetição pela chave do banco (decisão
+         29), então mandar o arquivo inteiro de novo é seguro e só
+         acrescenta o que faltou. A tela diz isso em vez de deixar a
+         pessoa achar que perdeu tudo. */
+      setErro(e.message + (rs.length ? ` — ${rs.length} de ${partes.length} lotes já entraram; pode mandar o arquivo de novo que o resto completa.` : ""));
+      if (rs.length) setRes(juntar(rs));
+    }
+    setParcial(""); setIndo(false);
   };
-  useEffect(() => { setConf(null); }, [txt, ofx, contaId]);
+  useEffect(() => { setConf(null); setParcial(""); }, [txt, ofx, contaId]);
   const escolher = async (arq) => {
     if (!arq) return;
     setNomeArq(arq.name); setErro("");
@@ -12581,12 +12640,12 @@ function FinImportar({ contaId, aoTerminar }) {
             <button onClick={conferir} disabled={indo || !contaId || !previa || !!previa.erro || !previa.dados.length}
               className="w-full rounded-lg border py-2.5 text-[14px] font-semibold"
               style={{ borderColor: C.roxo, color: C.roxo }}>
-              {indo ? "Conferindo…" : `Conferir${previa && !previa.erro ? ` ${previa.dados.length} movimentos` : ""}`}
+              {indo ? (parcial || "Conferindo…") : `Conferir${previa && !previa.erro ? ` ${previa.dados.length} movimentos` : ""}`}
             </button>
           ) : (
             <>
               <BotaoPrimario onClick={enviar} disabled={indo || !conf.entrariam && !conf.casariam} className="flex-1">
-                {indo ? "Importando…" : conf.entrariam || conf.casariam ? `Importar ${conf.entrariam} e baixar ${conf.casariam}` : "Nada para importar"}
+                {indo ? (parcial || "Importando…") : conf.entrariam || conf.casariam ? `Importar ${conf.entrariam} e baixar ${conf.casariam}` : "Nada para importar"}
               </BotaoPrimario>
               <button onClick={() => setConf(null)} className="px-3 text-[13px]" style={{ color: C.mute }}>voltar</button>
             </>
