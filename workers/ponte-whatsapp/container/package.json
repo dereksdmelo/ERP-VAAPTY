@@ -1,0 +1,10 @@
+{
+  "name": "vaapty-ponte-whatsapp-container",
+  "private": true,
+  "type": "module",
+  "main": "servidor.mjs",
+  "dependencies": {
+    "baileys": "7.0.0-rc14",
+    "pino": "^9.0.0"
+  }
+}

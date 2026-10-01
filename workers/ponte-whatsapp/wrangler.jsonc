@@ -1,0 +1,23 @@
+{
+  // A ponte do WhatsApp por QR code. Imagem oficial do Node (sem Docker local); o programa vai
+  // empacotado dentro deste Worker (src/gerado/ponte.txt) e o container baixa ao ligar.
+  // Publicar: npm run empacotar && npx wrangler deploy
+  "name": "vaapty-ponte-whatsapp",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-01",
+  "containers": [
+    { "class_name": "Ponte", "image": "docker.io/library/node:22-slim", "max_instances": 4, "instance_type": "basic" }
+  ],
+  "durable_objects": { "bindings": [{ "name": "PONTE", "class_name": "Ponte" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Ponte"] }],
+  "vars": {
+    "PONTE_URL": "https://vaapty-ponte-whatsapp.dereksdmelo.workers.dev",
+    "ERP_URL": "https://vaapty-erp.dereksdmelo.workers.dev",
+    // Coleta primeiro: a ponte so ESCUTA. Quando houver envio com
+    // opcoes clicaveis, isto volta a valer.
+    "BOTOES": "texto",
+    "BOTOES_NATIVO_PARA": ""
+  },
+  "rules": [{ "type": "Text", "globs": ["**/*.txt"], "fallthrough": true }],
+  "observability": { "enabled": true }
+}

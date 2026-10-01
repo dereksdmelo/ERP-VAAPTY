@@ -1,0 +1,15 @@
+{
+  "name": "vaapty-ponte-whatsapp",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@cloudflare/containers": "0.3.7"
+  },
+  "devDependencies": {
+    "wrangler": "4.138.0",
+    "esbuild": "0.25.10"
+  },
+  "scripts": {
+    "empacotar": "esbuild container/servidor.mjs --bundle --minify --platform=node --format=esm --target=node22 --outfile=src/gerado/ponte.txt --external:sharp --external:jimp --external:link-preview-js --external:qrcode-terminal --external:audio-decode --external:pino-pretty --log-level=warning \"--banner:js=import { createRequire as __cr } from 'module'; const require = __cr(import.meta.url);\""
+  }
+}
