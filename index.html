@@ -8289,12 +8289,38 @@ const STATUS_LEAD = [
  * ponte quebrou.
  */
 const WA_ESTADOS = {
-  conectado:    { rot: "ligado",        cor: "#1D7F58" },
+  conectado:    { rot: "ligado",         cor: "#1D7F58" },
   qr:           { rot: "esperando o QR", cor: "#E1521F" },
-  reconectando: { rot: "reconectando",  cor: "#E1521F" },
-  iniciando:    { rot: "ligando…",      cor: "#6E6879" },
-  desligado:    { rot: "desligado",     cor: "#6E6879" },
+  conectando:   { rot: "conectando…",    cor: "#6E6879" },
+  reconectando: { rot: "reconectando",   cor: "#E1521F" },
+  iniciando:    { rot: "ligando…",       cor: "#6E6879" },
+  desligado:    { rot: "desligado",      cor: "#6E6879" },
+  erro:         { rot: "falhou",         cor: "#E1521F" },
 };
+
+/* "CÓDIGO 408" NÃO É DEFEITO — É O QR QUE VENCEU SEM NINGUÉM LER.
+ *
+ * O Derek passou por isso em 01/10/2026 nos dois números da IA: a tela
+ * ficava em "conectando" um tempão e terminava em "reconectando ·
+ * código 408", que lê como pane. Não é: o WhatsApp derruba o
+ * pareamento que não foi concluído a tempo, a ponte volta sozinha e um
+ * QR novo aparece em seguida.
+ *
+ * **Quem nunca conectou é o que distingue os dois casos.** Sem número
+ * gravado, 408 é código vencido; com número, é uma sessão de verdade
+ * que caiu — e aí é outra conversa. Mostrar o mesmo texto nos dois
+ * casos faz o gerente abandonar um número que estava só esperando.
+ */
+function recadoDoEstado(est) {
+  if (!est) return "";
+  const cod = String(est.erro || "");
+  const jaLigou = !!est.numero;
+  if (/408/.test(cod) && !jaLigou) {
+    return "O código anterior venceu antes de alguém ler. Já tem outro vindo — é normal precisar de duas tentativas.";
+  }
+  if (/408/.test(cod)) return "A sessão caiu por tempo. A ponte está voltando sozinha.";
+  return cod ? `A ponte relatou: ${cod}.` : "";
+}
 
 function QrDesenhado({ texto }) {
   const caixa = useRef(null);
@@ -8443,9 +8469,12 @@ function CartaoCanal({ canal, aoMudar, aoApagar }) {
 
       {/* O erro da ponte fica colado nos botões, não no alto da página:
           botão apagado tem que dizer por quê no lugar onde ele está
-          (decisão 20). */}
-      {(erro || (est && est.erro)) && (
-        <p className="mt-3 text-[13px] leading-snug" style={{ color: C.laranja }}>{erro || est.erro}</p>
+          (decisão 20). E o código cru nunca aparece sozinho — ver
+          `recadoDoEstado`. */}
+      {erro && <p className="mt-3 text-[13px] leading-snug" style={{ color: C.laranja }}>{erro}</p>}
+      {!erro && recadoDoEstado(est) && (
+        <p className="mt-3 text-[13px] leading-snug"
+          style={{ color: est && est.numero ? C.laranja : C.mute }}>{recadoDoEstado(est)}</p>
       )}
 
       <div className="mt-3 flex flex-wrap gap-2">

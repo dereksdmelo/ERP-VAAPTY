@@ -1490,6 +1490,27 @@ de "ligando". **Quem cadastrar número novo confere esse teto.**
 **Número desativado não acorda container.** Ele está fora de serviço, e
 perguntar por ele gastaria uma instância do teto para nada.
 
+**"Código 408" é o QR vencido, não pane — e a tela precisa dizer
+isso.** O Derek bateu nisso em 01/10/2026 nos dois números da IA:
+*"fica conectando um tempão e depois diz que não foi possível conectar
+ao dispositivo"*. O WhatsApp derruba o pareamento que não foi concluído
+a tempo, a ponte volta sozinha e um QR novo aparece — **é normal
+precisar de duas tentativas**. Mostrar `código 408` cru fazia parecer
+defeito, e a conclusão errada é cara: abandonar um número que estava só
+esperando.
+
+**O que separa os dois casos é ter número gravado.** Sem telefone na
+linha, 408 é código vencido; com telefone, é sessão de verdade que
+caiu, e aí é outra conversa. `recadoDoEstado()` olha isso antes de
+escolher o texto — e o `wa_canal.telefone` (0056) é justamente o que
+responde "este número já chegou a ligar alguma vez".
+
+**A primeira conversa real entrou em 01/10/2026**, pelo canal
+`prospeccao-ativa` que o Derek cadastrou sozinho: nome, telefone,
+`primeira_em`/`ultima_em` e duas mensagens com tipo certo — uma mídia e
+um texto, ambas de fora. É o caminho inteiro conferido no ar, da ponte
+até a tabela.
+
 **O que ainda não existe:** a caixa de entrada (todas as conversas num
 lugar só), o envio, e a ligação entre conversa e lead. A ponte **só
 escuta** — e a tela diz isso, em vez de prometer o que não faz.
