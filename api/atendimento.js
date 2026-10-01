@@ -1423,6 +1423,80 @@ module.exports = async function handler(req, res) {
   const tok = tokenDe(req);
   if (!tok) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
 
+  /* A CAIXA DE ENTRADA: TODAS AS CONVERSAS NUM LUGAR SÓ.
+   *
+   * Era o pedido do Derek desde o começo -- seis números de WhatsApp,
+   * e hoje cada um só existe no celular em que está.
+   *
+   * **É da equipe, não do gerente.** A RLS da 0054 abre `wa_conversa`
+   * e `wa_mensagem` para `e_equipe()`: quem atende precisa ver a
+   * conversa. Só o CADASTRO dos números é do gerente (`?recurso=wa`).
+   *
+   * **A lista traz o canal e a última mensagem na mesma consulta**,
+   * pelo embutido do PostgREST. Uma ida ao banco em vez de uma por
+   * linha -- mesma razão da lista do CRM (decisão 10).
+   */
+  if (String(req.query.recurso || "") === "conversas") {
+    const REST_CV = `${URL_BASE}/rest/v1/wa_conversa`;
+    const id = String(req.query.id || "");
+
+    // A conversa aberta: as mensagens, em ordem de relógio.
+    if (RX_UUID.test(id)) {
+      const msgs = await banco(
+        `${URL_BASE}/rest/v1/wa_mensagem?select=*&conversa_id=eq.${id}&order=quando.asc&limit=500`,
+        { headers: cabecalhos(tok) });
+      return res.status(200).json({ mensagens: msgs || [] });
+    }
+
+    const canal = String(req.query.canal || "").replace(/[^\w-]/g, "");
+    // `!inner` quando há filtro de canal: sem ele o PostgREST filtra só
+    // o embutido e devolve TODAS as conversas, com `wa_canal` nulo nas
+    // que não casam -- a lista viria errada parecendo certa.
+    const emb = canal ? "wa_canal!inner(slug,nome,atendente)" : "wa_canal(slug,nome,atendente)";
+    const partes = [
+      `select=id,telefone,nome,ultima_em,primeira_em,ultima_de_fora,respondida_em,anuncio,atendimento_id,lead_id,${emb}`,
+      "order=ultima_em.desc",
+      `limit=${Math.min(200, Number(req.query.limite) || 60)}`,
+    ];
+    if (canal) partes.push(`wa_canal.slug=eq.${encodeURIComponent(canal)}`);
+    const busca = String(req.query.busca || "").trim();
+    if (busca) {
+      // Vírgula e parêntese são sintaxe do `or=` do PostgREST: um nome
+      // com vírgula quebraria a consulta inteira (mesma lição da
+      // decisão 10).
+      const b = busca.replace(/[(),]/g, " ");
+      partes.push(`or=(nome.ilike.*${encodeURIComponent(b)}*,telefone.ilike.*${encodeURIComponent(b)}*)`);
+    }
+    const linhas = await banco(`${REST_CV}?${partes.join("&")}`, { headers: cabecalhos(tok) });
+
+    /* A PRÉVIA VEM NUMA CONSULTA SÓ, não uma por conversa. O PostgREST
+     * não sabe trazer "a última filha de cada mãe", então pegamos as
+     * últimas mensagens DAS CONVERSAS DESTA PÁGINA e ficamos com a
+     * primeira de cada -- elas já vêm em ordem decrescente de relógio. */
+    const ids = (linhas || []).map((l) => l.id);
+    const previa = {};
+    if (ids.length) {
+      const m = await banco(
+        `${URL_BASE}/rest/v1/wa_mensagem?select=conversa_id,eco,tipo,texto,quando&conversa_id=in.(${ids.join(",")})&order=quando.desc&limit=${ids.length * 8}`,
+        { headers: cabecalhos(tok) });
+      for (const x of m || []) if (!previa[x.conversa_id]) previa[x.conversa_id] = x;
+    }
+
+    return res.status(200).json({
+      conversas: (linhas || []).map((l) => {
+        const { wa_canal, ...resto } = l;
+        return {
+          ...resto,
+          canal: wa_canal || null,
+          // "Esperando resposta" é a pergunta de todo dia, e ela é
+          // derivada aqui para a tela não repetir a regra.
+          esperando: !!(l.ultima_de_fora && (!l.respondida_em || l.respondida_em < l.ultima_de_fora)),
+          ultima: previa[l.id] || null,
+        };
+      }),
+    });
+  }
+
   /* A TELA DO QR, E POR QUE ELA NÃO USA O SEGREDO DA PONTE.
    *
    * Tudo no Worker da ponte exige o `PONTE_SEGREDO`, então o navegador

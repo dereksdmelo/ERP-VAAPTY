@@ -21,26 +21,30 @@ Hoje são cinco cadastrados — loja, Ana, Camila, contatos da TV e
 administrativo —, e dá para cadastrar mais na própria tela. No celular:
 WhatsApp → Configurações → Aparelhos conectados → Conectar aparelho.
 
-### A caixa de entrada
-**Depende do item acima.**
-
-"Todos os whats num lugar só" é o pedido. A tela se desenha em cima do
-que a coleta trouxer — quais conversas existem, como elas começam, o
-que o cliente pergunta primeiro. Construí-la antes seria desenhar um
-funil de palpite.
-
 ### Enviar pela ponte
 Hoje ela **só escuta**. Mandar mensagem pede decidir quem manda (pessoa
 ou IA), o que acontece quando as duas respondem, e o registro de quem
 disse o quê. É conversa, não implementação.
+
+### Ligar a conversa ao lead e ao atendimento
+`wa_conversa.atendimento_id` e `lead_id` existem desde a 0054 e
+continuam nulos. É o que fecharia o funil: a conversa que virou visita,
+e a visita que virou venda.
+
+*Destrava com:* casar pelo telefone, que é o que as duas pontas têm. A
+regra de quando casar sozinho e quando perguntar é conversa com o
+Derek — telefone repetido entre cliente e indicação existe.
 
 ### Mídia da conversa
 Foto e áudio não são guardados: o arquivo ficaria no Storage, e escrever
 lá pede a `SUPABASE_SERVICE_KEY` — o terceiro uso que a decisão 9
 proíbe sem conversa. Fica registrado que veio uma foto, não a foto.
 
+**Já doeu no primeiro dia:** entrou um `CRLVE_QIW6H49_2026.pdf` —
+documento de veículo mandado por cliente — e dele ficou só o nome.
+
 *Destrava com:* uma política em `storage.objects` que aceite o token do
-usuário, ou a decisão de abrir a exceção.
+usuário, ou a decisão do Derek de abrir a exceção da chave de serviço.
 
 ---
 

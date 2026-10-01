@@ -1511,9 +1511,43 @@ responde "este número já chegou a ligar alguma vez".
 um texto, ambas de fora. É o caminho inteiro conferido no ar, da ponte
 até a tabela.
 
-**O que ainda não existe:** a caixa de entrada (todas as conversas num
-lugar só), o envio, e a ligação entre conversa e lead. A ponte **só
-escuta** — e a tela diz isso, em vez de prometer o que não faz.
+**A caixa de entrada abre em "esperando resposta", não em "todas".**
+Ela não é um arquivo de conversas: a pergunta de todo dia é quem
+escreveu e ninguém respondeu — o vazamento silencioso desta operação,
+e o mesmo raciocínio do "passou e ninguém marcou" da decisão 27.
+Quem responde é `esperando`, derivado no SERVIDOR comparando
+`ultima_de_fora` com `respondida_em`, para a tela não repetir a regra.
+
+**A prévia de cada conversa vem numa consulta só.** O PostgREST não
+sabe trazer "a última filha de cada mãe", então busca-se as últimas
+mensagens das conversas DAQUELA PÁGINA e fica-se com a primeira de
+cada. Uma consulta por conversa seria sessenta idas ao banco para
+desenhar uma lista (mesma razão do `EMBUTIDO` da decisão 19).
+
+**`!inner` quando há filtro de número.** Filtro em recurso embutido sem
+`!inner` filtra só o embutido: o PostgREST devolveria **todas** as
+conversas, com `wa_canal` nulo nas que não casam — lista errada com
+cara de certa.
+
+**A tela é da EQUIPE; só o cadastro dos números é do gerente.** A RLS
+da 0054 abre `wa_conversa` e `wa_mensagem` para `e_equipe()` — quem
+atende precisa ler a conversa.
+
+**Ela só lê, e diz isso.** O envio não existe (acima), então não há
+campo de digitar: campo que não manda nada é pior que campo nenhum.
+O que existe é "Abrir no WhatsApp", que leva para onde a resposta
+realmente acontece.
+
+**Mídia aparece como linha explicada, não como imagem quebrada.** O
+arquivo não é guardado, e o balão diz qual era o tipo e que ele ficou
+no WhatsApp. **Isto já doeu na primeira hora de uso:** entrou um
+`CRLVE_QIW6H49_2026.pdf` — documento de veículo mandado por cliente —
+e dele só ficou o nome. É a pendência de mídia, com um caso concreto.
+
+**O que ainda não existe:** o envio e a ligação entre conversa e lead
+(`atendimento_id` e `lead_id` existem na 0054 e continuam nulos). A
+ponte **só escuta** — e a tela diz isso, em vez de prometer o que não
+faz.
 
 ## Convenções do código
 

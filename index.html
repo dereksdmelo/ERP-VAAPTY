@@ -785,6 +785,19 @@ async function waCanais() {
   if (!r.ok) throw new Error(d.erro || "Não consegui ler os números.");
   return d.canais || [];
 }
+async function waConversas({ canal, busca } = {}) {
+  const q = comoQuery({ canal: canal || undefined, busca: busca || undefined });
+  const r = await fetchAut(`/api/atendimento?recurso=conversas${q ? `&${q}` : ""}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui carregar as conversas.");
+  return d.conversas || [];
+}
+async function waMensagens(id) {
+  const r = await fetchAut(`/api/atendimento?recurso=conversas&id=${encodeURIComponent(id)}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui abrir a conversa.");
+  return d.mensagens || [];
+}
 async function waCriarCanal(dados) {
   const r = await fetchAut("/api/atendimento?recurso=wa", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
@@ -8272,6 +8285,280 @@ const STATUS_LEAD = [
  * A tabela rola na horizontal dentro da própria caixa. O corpo da
  * página não pode rolar de lado no celular.
  */
+/* ===================== a caixa de entrada =====================
+ *
+ * "Todos os whats num lugar só" — o pedido do Derek. Seis números, e
+ * até aqui cada conversa só existia no celular em que ela caiu.
+ *
+ * **A pergunta que a tela responde é "quem está esperando resposta".**
+ * Não é um arquivo de conversas: é a fila de quem escreveu e ninguém
+ * respondeu ainda, que é o vazamento silencioso desta operação — e é
+ * por isso que ela abre nessa aba, não em "todas".
+ *
+ * **A tela é da EQUIPE.** A RLS da 0054 abre conversa e mensagem para
+ * `e_equipe()`; só o cadastro dos números é do gerente.
+ *
+ * **Ela só lê.** A ponte ainda não envia (decisão 48), e a tela diz
+ * isso em vez de mostrar um campo de digitar que não faria nada.
+ */
+const waQuem = (c) => (c.nome && c.nome.trim()) || foneBonito(c.telefone) || "sem nome";
+
+const foneBonito = (f) => {
+  const d = String(f || "").replace(/\D/g, "").replace(/^55/, "");
+  if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return String(f || "");
+};
+
+// A prévia na lista: mídia e botão não têm texto, e uma linha vazia
+// faria a conversa parecer vazia quando ela não está.
+const resumoMsg = (m) => {
+  if (!m) return "";
+  if (m.tipo === "midia") return m.texto ? `📎 ${m.texto}` : "📎 mandou um arquivo";
+  if (m.tipo === "botao") return `☑ ${m.texto || "respondeu um botão"}`;
+  if (m.tipo === "reacao") return "reagiu a uma mensagem";
+  return m.texto || "";
+};
+
+function Balao({ m }) {
+  const meu = !!m.eco;
+  const anexo = m.anexo || {};
+  return (
+    <div className={`flex ${meu ? "justify-end" : "justify-start"}`}>
+      <div className="max-w-[78%] rounded-xl px-3 py-2"
+        style={{ background: meu ? C.roxoFraco : C.paper, border: `1px solid ${C.line}` }}>
+        {m.tipo === "midia" && (
+          /* O ARQUIVO NÃO ESTÁ AQUI, e a tela diz isso em vez de
+             mostrar um retângulo quebrado. Guardar mídia pediria a
+             chave de serviço no Storage — decisão 9, e está em
+             PENDENCIAS.md como escolha do Derek. */
+          <div className="mb-1 text-[12.5px]" style={{ color: C.mute }}>
+            📎 {anexo.tipo === "audio" ? (anexo.voz ? "áudio de voz" : "áudio")
+              : anexo.tipo === "image" ? "foto"
+              : anexo.tipo === "video" ? "vídeo"
+              : anexo.tipo === "document" ? (anexo.nome || "documento")
+              : "arquivo"} — fica no WhatsApp, não é guardado aqui
+          </div>
+        )}
+        {m.tipo === "reacao" && (
+          <div className="text-[15px]">{(m.anexo && m.anexo.emoji) || "reagiu"}</div>
+        )}
+        {!!m.texto && <div className="whitespace-pre-wrap text-[14.5px] leading-snug">{m.texto}</div>}
+        <div className="mt-1 flex items-center justify-end gap-1.5 text-[11px]" style={{ color: C.mute }}>
+          {horaCurta(m.quando)}
+          {meu && m.estado && <span>{m.estado === "lida" ? "✓✓" : m.estado === "entregue" ? "✓✓" : "✓"}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Conversa({ conversa, aoVoltar }) {
+  const [msgs, setMsgs] = useState(null);
+  const [erro, setErro] = useState("");
+  const fim = useRef(null);
+
+  // De 8 em 8 segundos, e só com a aba à vista — mesma régua da
+  // decisão 44: rodar escondido gasta o 4G da loja atualizando tela
+  // que ninguém olha.
+  useEffect(() => {
+    let vivo = true, t = null;
+    const volta = async () => {
+      if (!vivo) return;
+      if (document.visibilityState !== "visible") { t = setTimeout(volta, 8000); return; }
+      try { const d = await waMensagens(conversa.id); if (vivo) { setMsgs(d); setErro(""); } }
+      catch (e) { if (vivo) setErro(e.message); }
+      if (vivo) t = setTimeout(volta, 8000);
+    };
+    setMsgs(null); volta();
+    return () => { vivo = false; clearTimeout(t); };
+  }, [conversa.id]);
+
+  // O fim é o que interessa: quem abre uma conversa quer o que foi
+  // dito agora, não o começo (mesma razão do quadro ao vivo, 45).
+  useEffect(() => { if (fim.current) fim.current.scrollIntoView({ block: "end" }); }, [msgs && msgs.length]);
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-start justify-between gap-3 border-b pb-3" style={{ borderColor: C.line }}>
+        <div className="min-w-0">
+          <h3 className="truncate text-[17px]" style={{ fontFamily: F.disp, fontWeight: 700 }}>{waQuem(conversa)}</h3>
+          <p className="mt-0.5 text-[13px]" style={{ color: C.mute }}>
+            {foneBonito(conversa.telefone)}
+            {conversa.canal && ` · chegou em ${conversa.canal.nome}`}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <a href={zap(conversa.telefone)} target="_blank" rel="noopener noreferrer"
+            className="rounded-lg border px-3 py-2 text-[13px] font-semibold"
+            style={{ borderColor: C.line, color: C.ink }}>Abrir no WhatsApp</a>
+          {aoVoltar && (
+            <button onClick={aoVoltar} className="rounded-lg border px-3 py-2 text-[13px] font-semibold lg:hidden"
+              style={{ borderColor: C.line, color: C.mute }}>Voltar</button>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-3 flex-1 space-y-2 overflow-y-auto pr-1" style={{ maxHeight: "60vh" }}>
+        {erro && <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+        {!msgs && !erro && <p className="text-[13.5px]" style={{ color: C.mute }}>carregando…</p>}
+        {msgs && !msgs.length && (
+          <p className="text-[13.5px]" style={{ color: C.mute }}>
+            Nada registrado ainda. A ponte guarda do momento em que o número foi ligado
+            para frente — o que é mais antigo que isso continua só no celular.
+          </p>
+        )}
+        {(msgs || []).map((m) => <Balao key={m.id} m={m} />)}
+        <div ref={fim} />
+      </div>
+
+      <p className="mt-3 border-t pt-3 text-[12.5px] leading-snug" style={{ borderColor: C.line, color: C.mute }}>
+        Daqui só dá para ler. Responder é no WhatsApp do número — o envio pela ponte
+        ainda não existe.
+      </p>
+    </div>
+  );
+}
+
+function TelaConversas() {
+  const [lista, setLista] = useState(null);
+  const [erro, setErro] = useState("");
+  const [canais, setCanais] = useState([]);
+  const [canal, setCanal] = useState("");
+  const [busca, setBusca] = useState("");
+  const [digitado, setDigitado] = useState("");
+  const [aba, setAba] = useState("esperando");
+  const [aberta, setAberta] = useState(null);
+
+  // A lista de números vem do mesmo lugar que a tela do gerente, mas
+  // aqui ela é só um filtro: quem não é gerente leva 403 e fica sem o
+  // seletor, em vez de ver um erro.
+  useEffect(() => { waCanais().then(setCanais).catch(() => setCanais([])); }, []);
+
+  useEffect(() => {
+    let vivo = true, t = null;
+    const volta = async () => {
+      if (!vivo) return;
+      if (document.visibilityState !== "visible") { t = setTimeout(volta, 20000); return; }
+      try { const d = await waConversas({ canal, busca }); if (vivo) { setLista(d); setErro(""); } }
+      catch (e) { if (vivo) setErro(e.message); }
+      // Vinte segundos: é um mural, e cinco seria pagar por movimento
+      // que ninguém está olhando (mesma conta da decisão 45).
+      if (vivo) t = setTimeout(volta, 20000);
+    };
+    volta();
+    return () => { vivo = false; clearTimeout(t); };
+  }, [canal, busca]);
+
+  const esperando = (lista || []).filter((c) => c.esperando);
+  const mostradas = aba === "esperando" ? esperando : (lista || []);
+
+  // A conversa aberta é reencontrada na lista nova a cada volta: sem
+  // isto, o cartão continuaria mostrando o estado de quando foi
+  // clicado.
+  const abertaViva = aberta && (lista || []).find((c) => c.id === aberta.id) || aberta;
+
+  return (
+    <div>
+      <Cabecalho titulo="Conversas"
+        sub={lista ? `${esperando.length} esperando resposta · ${lista.length} no total`
+                   : "Tudo que chega nos números da loja, num lugar só."} />
+
+      {erro && <p className="mb-4 text-[14px]" style={{ color: C.laranja }}>{erro}</p>}
+
+      <div className="mb-4 grid gap-3 lg:grid-cols-[1fr_auto]">
+        <div className="flex gap-2">
+          <input className={inputCls} style={inputSty} placeholder="Nome ou telefone"
+            value={digitado} onChange={(e) => setDigitado(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") setBusca(digitado.trim()); }} />
+          <button onClick={() => setBusca(digitado.trim())}
+            className="shrink-0 rounded-lg border px-4 text-[14px] font-semibold"
+            style={{ borderColor: C.line, color: C.ink }}>Buscar</button>
+        </div>
+        {!!canais.length && (
+          <select className={inputCls} style={inputSty} value={canal} onChange={(e) => setCanal(e.target.value)}>
+            <option value="">Todos os números</option>
+            {canais.map((c) => <option key={c.slug} value={c.slug}>{c.nome}</option>)}
+          </select>
+        )}
+      </div>
+
+      <div className="mb-4 flex flex-wrap gap-2">
+        {[["esperando", `Esperando resposta${esperando.length ? ` (${esperando.length})` : ""}`], ["todas", "Todas"]].map(([id, rot]) => (
+          <button key={id} onClick={() => setAba(id)}
+            className="rounded-full px-3.5 py-1.5 text-[13.5px] font-semibold"
+            style={aba === id ? { background: C.roxo, color: "#fff" } : { background: C.paper, color: C.mute, border: `1px solid ${C.line}` }}>
+            {rot}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
+        <div className={`${abertaViva ? "hidden lg:block" : ""}`}>
+          {!lista && !erro && <p className="text-[14px]" style={{ color: C.mute }}>carregando…</p>}
+          {lista && !mostradas.length && (
+            <Bloco titulo={aba === "esperando" ? "Ninguém esperando" : "Nenhuma conversa ainda"}>
+              <p className="text-[13.5px] leading-relaxed" style={{ color: C.mute }}>
+                {aba === "esperando"
+                  ? "Toda mensagem que chegou já foi respondida."
+                  : "As conversas entram sozinhas assim que alguém escreve para um dos números ligados. Se nenhum estiver ligado, nada chega — isso se resolve em Números do WhatsApp."}
+              </p>
+            </Bloco>
+          )}
+          <div className="space-y-2">
+            {mostradas.map((c) => (
+              <button key={c.id} onClick={() => setAberta(c)}
+                className="block w-full rounded-xl p-3 text-left"
+                style={{ background: C.paper,
+                  border: `1px solid ${abertaViva && abertaViva.id === c.id ? C.roxo : C.line}` }}>
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="truncate text-[15px] font-semibold">{waQuem(c)}</span>
+                  <span className="shrink-0 text-[11.5px]" style={{ color: C.mute }}>{horaCurta(c.ultima_em)}</span>
+                </div>
+                <div className="mt-0.5 flex items-center gap-1.5">
+                  {c.esperando && (
+                    <span className="shrink-0 rounded-full px-1.5 py-0.5 text-[10.5px] font-bold"
+                      style={{ background: C.laranja + "1C", color: C.laranja }}>esperando</span>
+                  )}
+                  <span className="truncate text-[13px]" style={{ color: C.mute }}>
+                    {c.ultima && c.ultima.eco ? "você: " : ""}{resumoMsg(c.ultima) || foneBonito(c.telefone)}
+                  </span>
+                </div>
+                {c.canal && (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]" style={{ color: C.mute }}>
+                    <span className="rounded px-1.5 py-0.5" style={{ background: C.roxoFraco, color: C.roxo }}>{c.canal.nome}</span>
+                    {/* De qual anúncio veio, quando a primeira mensagem
+                        trouxe o clique-para-WhatsApp. É o que vai casar
+                        marketing com venda sem ninguém digitar origem. */}
+                    {c.anuncio && <span style={{ color: C.verde }}>veio de anúncio</span>}
+                  </div>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          {abertaViva ? (
+            <section className="rounded-xl p-4 lg:p-5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+              <Conversa conversa={abertaViva} aoVoltar={() => setAberta(null)} />
+            </section>
+          ) : (
+            <div className="hidden lg:block">
+              <Bloco titulo="Escolha uma conversa" sub="Ela abre aqui do lado." >
+                <p className="text-[13.5px] leading-relaxed" style={{ color: C.mute }}>
+                  A ponte guarda do momento em que cada número foi ligado para frente.
+                  O que é mais antigo que isso continua só no celular.
+                </p>
+              </Bloco>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ===================== os números do WhatsApp =====================
  *
  * A tela de ligar cada número por QR code. **Ela é a porta de entrada
@@ -15943,6 +16230,11 @@ function destinosPara(perfil) {
     // tela que ele abre de manhã e volta nela o dia inteiro.
     { id: "meudia", rot: "Meu dia", curto: "Meu dia", principal: true },
     { id: "prevendas", rot: "Pré-vendas", curto: "Pré-v.", principal: true },
+    // A caixa de entrada é de todo dia para quem atende, então entra na
+    // barra do polegar, ao lado da pré-venda. É da EQUIPE: a RLS da
+    // 0054 abre conversa e mensagem para `e_equipe()` -- só o cadastro
+    // dos números é do gerente.
+    { id: "conversas", rot: "Conversas", curto: "Conversas", principal: true },
     { id: "atendimentos", rot: "Atendimentos", curto: "Atend.", principal: true },
     { id: "estoque", rot: "Estoque", curto: "Estoque", principal: true },
     { id: "painel", rot: "Painel do mês", curto: "Painel" },
@@ -17480,6 +17772,7 @@ function App() {
       {tela === "gestor" && <PainelGestor perfil={perfil} comp={compOuAtual} />}
       {tela === "adm" && <TelaADM perfil={perfil} comp={compOuAtual} mes={mes} />}
       {tela === "gestao" && <TelaGestao perfil={perfil} comp={compOuAtual} />}
+      {tela === "conversas" && <TelaConversas />}
       {tela === "whatsapp" && perfil && perfil.papel === "gerente" && <TelaWhatsApp />}
       {tela === "financeiro" && <TelaFinanceiro perfil={perfil} comp={compOuAtual} mes={mes} />}
       {tela === "lojistas" && podeGestao && <TelaVendaLojistas perfil={perfil} />}
