@@ -785,6 +785,28 @@ async function waCanais() {
   if (!r.ok) throw new Error(d.erro || "Não consegui ler os números.");
   return d.canais || [];
 }
+async function waCriarCanal(dados) {
+  const r = await fetchAut("/api/atendimento?recurso=wa", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui cadastrar o número.");
+  return d.canal;
+}
+async function waMudarCanal(slug, mud) {
+  const r = await fetchAut(`/api/atendimento?recurso=wa&canal=${encodeURIComponent(slug)}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(mud),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui mudar o número.");
+  return d.canal;
+}
+async function waApagarCanal(slug) {
+  const r = await fetchAut(`/api/atendimento?recurso=wa&canal=${encodeURIComponent(slug)}`, { method: "DELETE" });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui apagar o número.");
+  return true;
+}
 async function waEstado(canal, acao) {
   const r = await fetchAut(`/api/atendimento?recurso=wa&canal=${encodeURIComponent(canal)}&acao=${acao || "estado"}`,
     acao && acao !== "estado" ? { method: "POST" } : undefined);
@@ -8295,10 +8317,13 @@ function QrDesenhado({ texto }) {
   return <div ref={caixa} className="inline-block rounded-lg bg-white p-3" style={{ border: `1px solid ${C.line}` }} />;
 }
 
-function CartaoCanal({ canal }) {
+function CartaoCanal({ canal, aoMudar, aoApagar }) {
   const [est, setEst] = useState(null);
   const [erro, setErro] = useState("");
   const [ocupado, setOcupado] = useState("");
+  const [editando, setEditando] = useState(false);
+  const [nome, setNome] = useState(canal.nome || "");
+  const [atendente, setAtendente] = useState(canal.atendente || "humano");
 
   // De três em três segundos: é mais ou menos o tempo que o WhatsApp
   // deixa um QR de pé. Parar quando a aba some evita gastar o 4G da
@@ -8307,6 +8332,10 @@ function CartaoCanal({ canal }) {
     let vivo = true, t = null;
     const volta = async () => {
       if (!vivo) return;
+      // Número desativado não acorda container: ele está fora de
+      // serviço, e perguntar por ele gastaria uma instância do teto
+      // (`max_instances`) para nada.
+      if (!canal.ativo) return;
       if (document.visibilityState !== "visible") { t = setTimeout(volta, 3000); return; }
       try { const d = await waEstado(canal.slug); if (vivo) { setEst(d); setErro(""); } }
       catch (e) { if (vivo) setErro(e.message); }
@@ -8314,7 +8343,7 @@ function CartaoCanal({ canal }) {
     };
     volta();
     return () => { vivo = false; clearTimeout(t); };
-  }, [canal.slug]);
+  }, [canal.slug, canal.ativo]);
 
   const agir = async (acao) => {
     setOcupado(acao);
@@ -8323,18 +8352,77 @@ function CartaoCanal({ canal }) {
     setOcupado("");
   };
 
+  const salvar = async () => {
+    setOcupado("salvar");
+    try { await aoMudar(canal.slug, { nome, atendente }); setEditando(false); setErro(""); }
+    catch (x) { setErro(x.message); }
+    setOcupado("");
+  };
+  const virar = async () => {
+    setOcupado("ativo");
+    try { await aoMudar(canal.slug, { ativo: !canal.ativo }); setErro(""); }
+    catch (x) { setErro(x.message); }
+    setOcupado("");
+  };
+  const apagar = async () => {
+    if (!confirm(`Apagar "${canal.nome}"? Só dá para apagar número que nunca recebeu conversa.`)) return;
+    setOcupado("apagar");
+    try { await aoApagar(canal.slug); }
+    catch (x) { setErro(x.message); }
+    setOcupado("");
+  };
+
   const e = (est && est.estado) || "iniciando";
   const info = WA_ESTADOS[e] || WA_ESTADOS.iniciando;
-  const ligado = e === "conectado";
+  const ligado = canal.ativo && e === "conectado";
 
   return (
     <Bloco titulo={canal.nome || canal.slug}
-      sub={canal.atendente === "ia" ? "número que a IA atende" : "número que a equipe atende"}>
+      sub={(canal.atendente === "ia" ? "número que a IA atende" : "número que a equipe atende") + ` · apelido ${canal.slug}`}>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="rounded-full px-2.5 py-1 text-[12px] font-semibold"
-          style={{ background: info.cor + "18", color: info.cor }}>{info.rot}</span>
+        {canal.ativo ? (
+          <span className="rounded-full px-2.5 py-1 text-[12px] font-semibold"
+            style={{ background: info.cor + "18", color: info.cor }}>{info.rot}</span>
+        ) : (
+          <span className="rounded-full px-2.5 py-1 text-[12px] font-semibold"
+            style={{ background: C.line, color: C.mute }}>desativado</span>
+        )}
         {est && est.numero && <span className="text-[13px]" style={{ color: C.mute, fontFamily: F.mono }}>{est.numero}</span>}
+        {!!canal.conversas && (
+          <span className="text-[12.5px]" style={{ color: C.mute }}>
+            {canal.conversas} conversa{canal.conversas > 1 ? "s" : ""}
+          </span>
+        )}
       </div>
+
+      {!canal.ativo && (
+        <p className="mt-3 text-[13px] leading-snug" style={{ color: C.mute }}>
+          Fora de serviço: o que chegar neste número não é registrado. O que já
+          foi guardado continua aqui.
+        </p>
+      )}
+
+      {editando && (
+        <div className="mt-3 grid gap-3">
+          <Campo label="Nome" nota="É como ele aparece aqui e na caixa de entrada.">
+            <input className={inputCls} style={inputSty} value={nome} onChange={(x) => setNome(x.target.value)} />
+          </Campo>
+          <Campo label="Quem atende">
+            <select className={inputCls} style={inputSty} value={atendente} onChange={(x) => setAtendente(x.target.value)}>
+              <option value="humano">A equipe</option>
+              <option value="ia">A IA</option>
+            </select>
+          </Campo>
+          <div className="flex gap-2">
+            <button onClick={salvar} disabled={!!ocupado}
+              className="rounded-lg px-3 py-2 text-[13.5px] font-semibold text-white"
+              style={{ background: C.roxo, opacity: ocupado ? 0.5 : 1 }}>Salvar</button>
+            <button onClick={() => { setNome(canal.nome || ""); setAtendente(canal.atendente || "humano"); setEditando(false); }}
+              className="rounded-lg border px-3 py-2 text-[13.5px] font-semibold"
+              style={{ borderColor: C.line, color: C.mute }}>Cancelar</button>
+          </div>
+        </div>
+      )}
 
       {est && est.estado === "qr" && est.qr && (
         <div className="mt-3">
@@ -8361,10 +8449,22 @@ function CartaoCanal({ canal }) {
       )}
 
       <div className="mt-3 flex flex-wrap gap-2">
-        <button onClick={() => agir("reiniciar")} disabled={!!ocupado}
+        {canal.ativo && (
+          <button onClick={() => agir("reiniciar")} disabled={!!ocupado}
+            className="rounded-lg border px-3 py-2 text-[13.5px] font-semibold"
+            style={{ borderColor: C.line, color: C.ink, opacity: ocupado ? 0.5 : 1 }}>
+            {ocupado === "reiniciar" ? "reiniciando…" : "Reiniciar"}
+          </button>
+        )}
+        {!editando && (
+          <button onClick={() => setEditando(true)} disabled={!!ocupado}
+            className="rounded-lg border px-3 py-2 text-[13.5px] font-semibold"
+            style={{ borderColor: C.line, color: C.ink, opacity: ocupado ? 0.5 : 1 }}>Editar</button>
+        )}
+        <button onClick={virar} disabled={!!ocupado}
           className="rounded-lg border px-3 py-2 text-[13.5px] font-semibold"
-          style={{ borderColor: C.line, color: C.ink, opacity: ocupado ? 0.5 : 1 }}>
-          {ocupado === "reiniciar" ? "reiniciando…" : "Reiniciar"}
+          style={{ borderColor: C.line, color: canal.ativo ? C.laranja : C.verde, opacity: ocupado ? 0.5 : 1 }}>
+          {canal.ativo ? "Desativar" : "Reativar"}
         </button>
         {ligado && (
           <button onClick={() => { if (confirm("Desligar este número? Para voltar, alguém precisa ler o QR de novo.")) agir("sair"); }}
@@ -8374,6 +8474,79 @@ function CartaoCanal({ canal }) {
             Desligar
           </button>
         )}
+        {/* Apagar só aparece onde ele é seguro: número que nunca
+            recebeu nada. Com conversa guardada, apagar levaria o
+            histórico junto (cascade da 0054) -- e o servidor recusa
+            de qualquer jeito. */}
+        {!canal.conversas && (
+          <button onClick={apagar} disabled={!!ocupado}
+            className="rounded-lg px-3 py-2 text-[13.5px] font-semibold"
+            style={{ color: C.mute, opacity: ocupado ? 0.5 : 1 }}>Apagar</button>
+        )}
+      </div>
+    </Bloco>
+  );
+}
+
+/* O APELIDO SAI DO NOME, e isso não é enfeite: ele vira o nome do
+ * container na ponte e viaja na URL, então não aceita espaço nem
+ * acento. Pedir que a pessoa invente um segundo nome obedecendo a uma
+ * regra que ela não vê seria atrito à toa -- ela digita "Contatos da
+ * TV" e sai `contatos-da-tv`. Continua editável para quem quiser
+ * escolher. */
+const apelidoDe = (nome) =>
+  String(nome || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+
+function NovoCanal({ aoCriar, aoFechar }) {
+  const [nome, setNome] = useState("");
+  const [slug, setSlug] = useState("");
+  const [tocouSlug, setTocouSlug] = useState(false);
+  const [atendente, setAtendente] = useState("humano");
+  const [erro, setErro] = useState("");
+  const [salvando, setSalvando] = useState(false);
+
+  const apelido = tocouSlug ? slug : apelidoDe(nome);
+  const podeSalvar = !!nome.trim() && /^[a-z0-9_-]{2,40}$/.test(apelido);
+
+  const salvar = async () => {
+    setSalvando(true); setErro("");
+    try {
+      await aoCriar({ nome: nome.trim(), slug: apelido, atendente });
+      aoFechar();
+    } catch (e) { setErro(e.message); }
+    setSalvando(false);
+  };
+
+  return (
+    <Bloco titulo="Número novo" sub="Depois de cadastrar, leia o QR com o aparelho desse número.">
+      <div className="grid gap-3">
+        <Campo label="Nome" req nota="Como ele aparece aqui: “Contatos da TV”, “Administrativo”.">
+          <input className={inputCls} style={inputSty} value={nome} autoFocus
+            onChange={(x) => setNome(x.target.value)}
+            onKeyDown={(x) => { if (x.key === "Enter" && podeSalvar) salvar(); }} />
+        </Campo>
+        <Campo label="Apelido" nota="Vira o endereço interno do número. Sai do nome sozinho; mude se quiser.">
+          <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} value={apelido}
+            onChange={(x) => { setTocouSlug(true); setSlug(x.target.value.toLowerCase()); }} />
+        </Campo>
+        <Campo label="Quem atende" nota="É o que vai separar, no funil, o que a IA fez do que a equipe fez.">
+          <select className={inputCls} style={inputSty} value={atendente} onChange={(x) => setAtendente(x.target.value)}>
+            <option value="humano">A equipe</option>
+            <option value="ia">A IA</option>
+          </select>
+        </Campo>
+        {erro && <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+        <div className="flex gap-2">
+          <button onClick={salvar} disabled={!podeSalvar || salvando}
+            className="rounded-lg px-4 py-2.5 text-[14px] font-semibold text-white"
+            style={{ background: C.roxo, opacity: !podeSalvar || salvando ? 0.5 : 1 }}>
+            {salvando ? "cadastrando…" : "Cadastrar"}
+          </button>
+          <button onClick={aoFechar}
+            className="rounded-lg border px-4 py-2.5 text-[14px] font-semibold"
+            style={{ borderColor: C.line, color: C.mute }}>Cancelar</button>
+        </div>
       </div>
     </Bloco>
   );
@@ -8382,16 +8555,46 @@ function CartaoCanal({ canal }) {
 function TelaWhatsApp() {
   const [canais, setCanais] = useState(null);
   const [erro, setErro] = useState("");
+  const [cadastrando, setCadastrando] = useState(false);
   useEffect(() => { waCanais().then(setCanais).catch((e) => setErro(e.message)); }, []);
+
+  const criar = async (dados) => {
+    const novo = await waCriarCanal(dados);
+    setCanais((ls) => [...(ls || []), novo].sort((a, b) => a.slug.localeCompare(b.slug)));
+  };
+  // A linha é trocada pela que o servidor devolveu, não pela que a tela
+  // supôs: assim um campo que o banco normalizou aparece normalizado.
+  const mudar = async (slug, mud) => {
+    const novo = await waMudarCanal(slug, mud);
+    setCanais((ls) => (ls || []).map((c) => (c.slug === slug ? { ...c, ...novo } : c)));
+  };
+  const apagar = async (slug) => {
+    await waApagarCanal(slug);
+    setCanais((ls) => (ls || []).filter((c) => c.slug !== slug));
+  };
+
+  const ligados = (canais || []).filter((c) => c.ativo).length;
 
   return (
     <div>
       <Cabecalho titulo="Números do WhatsApp"
-        sub="Ligue cada número uma vez. A partir daí as conversas entram sozinhas." />
+        sub={canais ? `${ligados} em serviço · ligue cada um uma vez, e as conversas entram sozinhas.`
+                    : "Ligue cada número uma vez. A partir daí as conversas entram sozinhas."}
+        acao={canais && !cadastrando ? (
+          <button onClick={() => setCadastrando(true)}
+            className="rounded-lg px-4 py-2.5 text-[14px] font-semibold text-white" style={{ background: C.roxo }}>
+            Cadastrar número
+          </button>
+        ) : null} />
       {erro && <p className="mb-4 text-[14px]" style={{ color: C.laranja }}>{erro}</p>}
       {!canais && !erro && <p className="text-[14px]" style={{ color: C.mute }}>carregando…</p>}
+      {cadastrando && (
+        <div className="mb-4">
+          <NovoCanal aoCriar={criar} aoFechar={() => setCadastrando(false)} />
+        </div>
+      )}
       <div className="grid gap-4 lg:grid-cols-2">
-        {(canais || []).map((c) => <CartaoCanal key={c.slug} canal={c} />)}
+        {(canais || []).map((c) => <CartaoCanal key={c.slug} canal={c} aoMudar={mudar} aoApagar={apagar} />)}
       </div>
       <div className="mt-4">
         <Pendente>

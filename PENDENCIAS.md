@@ -16,9 +16,10 @@ A ponte está no ar e a tela está pronta em **Números do WhatsApp**
 (menu do gerente). Enquanto ninguém ler o QR, nenhuma conversa entra e
 não há funil para ler.
 
-*Destrava com:* o Derek abrindo a tela e lendo o QR com cada aparelho —
-o principal da loja, a Ana e a Camila. No celular: WhatsApp →
-Configurações → Aparelhos conectados → Conectar aparelho.
+*Destrava com:* o Derek abrindo a tela e lendo o QR com cada aparelho.
+Hoje são cinco cadastrados — loja, Ana, Camila, contatos da TV e
+administrativo —, e dá para cadastrar mais na própria tela. No celular:
+WhatsApp → Configurações → Aparelhos conectados → Conectar aparelho.
 
 ### A caixa de entrada
 **Depende do item acima.**

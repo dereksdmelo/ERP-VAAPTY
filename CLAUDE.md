@@ -1463,6 +1463,33 @@ que não perdoa — esquecer de listar publica.** Agora `*` barra tudo e
 cada `!` é uma decisão explícita. Conferido no ar: `api/`, `CLAUDE.md`,
 `.github/` e o programa da ponte dão 404; só as seis telas respondem.
 
+**O número é cadastro, não lista fixa.** O Derek pediu em 01/10/2026:
+*"eu tenho tambem numero que eu recebo ctt da TV, tem numero do adm da
+loja... preciso poder cadastrar conforme a necessidade"*. A tela
+cadastra, edita, desativa e apaga, e quem decide é a RLS da 0054
+(`wa_canal_gere`, do gerente).
+
+**O apelido sai do nome.** Ele vira o nome do container e viaja na URL,
+então não aceita espaço nem acento — pedir um segundo nome obedecendo a
+uma regra que a pessoa não vê seria atrito à toa. "Contatos da TV" vira
+`contatos-da-tv`, e o campo continua editável.
+
+**APAGAR LEVA A CONVERSA JUNTO, e por isso quase nunca é o que se
+quer.** O `canal_id` da 0054 é `on delete cascade`: apagar o número
+apaga toda a conversa e toda a mensagem dele, e isso não se desfaz. O
+servidor conta antes e recusa com 409 quando há conversa — a tela nem
+mostra o botão. O caminho normal é **desativar**: `wa_receber()` recusa
+canal inativo, e o histórico fica de pé. Conferido em 01/10/2026 com um
+canal descartável: com uma conversa dentro, a recusa veio; vazio, saiu.
+
+**Um container por número, então `max_instances` é o teto de números
+ligados ao mesmo tempo.** Estava em 4 — com a loja, as duas IAs, a TV e
+o administrativo já estourava, e o sintoma seria um canal que nunca sai
+de "ligando". **Quem cadastrar número novo confere esse teto.**
+
+**Número desativado não acorda container.** Ele está fora de serviço, e
+perguntar por ele gastaria uma instância do teto para nada.
+
 **O que ainda não existe:** a caixa de entrada (todas as conversas num
 lugar só), o envio, e a ligação entre conversa e lead. A ponte **só
 escuta** — e a tela diz isso, em vez de prometer o que não faz.

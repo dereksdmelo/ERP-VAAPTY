@@ -6,7 +6,12 @@
   "main": "src/index.js",
   "compatibility_date": "2026-09-01",
   "containers": [
-    { "class_name": "Ponte", "image": "docker.io/library/node:22-slim", "max_instances": 4, "instance_type": "basic" }
+    // UM CONTAINER POR NÚMERO, e por isso o teto é o teto de números que
+    // a loja consegue ligar ao mesmo tempo. Estava em 4 -- com a loja, as
+    // duas IAs, o número da TV e o do administrativo já estourava, e o
+    // sintoma seria um canal que nunca sai de "ligando". **Quem cadastrar
+    // número novo confere este número.**
+    { "class_name": "Ponte", "image": "docker.io/library/node:22-slim", "max_instances": 12, "instance_type": "basic" }
   ],
   "durable_objects": { "bindings": [{ "name": "PONTE", "class_name": "Ponte" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Ponte"] }],

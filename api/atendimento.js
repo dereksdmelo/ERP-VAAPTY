@@ -1453,11 +1453,100 @@ module.exports = async function handler(req, res) {
     }
 
     const canal = String(req.query.canal || "").replace(/[^\w-]/g, "").slice(0, 60);
+    const REST_C = `${URL_BASE}/rest/v1/wa_canal`;
+
+    /* O CADASTRO DOS NÚMEROS.
+     *
+     * Quem decide é a RLS da 0054 (`wa_canal_gere`, do gerente) -- a
+     * conferência de papel aí em cima é a mesma de sempre: conveniência
+     * para a mensagem sair legível, não controle.
+     */
     if (req.method === "GET" && !canal) {
-      const canais = await banco(`${URL_BASE}/rest/v1/wa_canal?select=*&order=slug`, { headers: cabecalhos(tok) });
-      return res.status(200).json({ canais: canais || [] });
+      // A contagem vem embutida: sem ela seria uma consulta por número
+      // só para saber se dá para apagar.
+      const canais = await banco(`${REST_C}?select=*,wa_conversa(count)&order=slug`, { headers: cabecalhos(tok) });
+      return res.status(200).json({
+        canais: (canais || []).map((c) => {
+          const n = Array.isArray(c.wa_conversa) ? ((c.wa_conversa[0] || {}).count || 0) : 0;
+          const { wa_conversa, ...resto } = c;
+          return { ...resto, conversas: n };
+        }),
+      });
     }
+
+    if (req.method === "POST" && !canal) {
+      const c2 = (req.body && typeof req.body === "object") ? req.body : {};
+      // O slug vira o nome do container e viaja na URL, então ele é
+      // apertado de propósito -- e a mensagem diz a regra, em vez de
+      // devolver o erro cru do check do banco.
+      const slug = String(c2.slug || "").trim().toLowerCase();
+      if (!/^[a-z0-9_-]{2,40}$/.test(slug)) {
+        return res.status(400).json({ erro: "O apelido aceita letras minúsculas, números, hífen e _, de 2 a 40 caracteres." });
+      }
+      const nome = String(c2.nome || "").trim();
+      if (!nome) return res.status(400).json({ erro: "Falta o nome do número." });
+      const atendente = c2.atendente === "ia" ? "ia" : "humano";
+      try {
+        const r = await banco(REST_C, {
+          method: "POST",
+          headers: json(tok, { Prefer: "return=representation" }),
+          body: JSON.stringify({ slug, nome, atendente }),
+        });
+        const linha = (Array.isArray(r) ? r[0] : r) || null;
+        if (!linha) return res.status(403).json({ erro: "Só o gerente cadastra número." });
+        return res.status(200).json({ canal: { ...linha, conversas: 0 } });
+      } catch (e) {
+        const t = String((e && e.message) || e);
+        if (/duplicate key|already exists/i.test(t)) return res.status(409).json({ erro: `Já existe um número com o apelido "${slug}".` });
+        throw e;
+      }
+    }
+
     if (!canal) return res.status(400).json({ erro: "faltou o canal" });
+
+    if (req.method === "PATCH") {
+      const c2 = (req.body && typeof req.body === "object") ? req.body : {};
+      const mud = {};
+      if (typeof c2.nome === "string" && c2.nome.trim()) mud.nome = c2.nome.trim();
+      if (c2.atendente === "ia" || c2.atendente === "humano") mud.atendente = c2.atendente;
+      if (typeof c2.ativo === "boolean") mud.ativo = c2.ativo;
+      if (!Object.keys(mud).length) return res.status(400).json({ erro: "nada para mudar" });
+      const r = await banco(`${REST_C}?slug=eq.${encodeURIComponent(canal)}`, {
+        method: "PATCH",
+        headers: json(tok, { Prefer: "return=representation" }),
+        body: JSON.stringify(mud),
+      });
+      // Lista vazia é a RLS recusando, não "não achei" -- o PostgREST
+      // responde 200 com nada (mesma tradução da decisão 10).
+      const linha = (Array.isArray(r) ? r[0] : r) || null;
+      if (!linha) return res.status(403).json({ erro: "Só o gerente muda número." });
+      return res.status(200).json({ canal: linha });
+    }
+
+    if (req.method === "DELETE") {
+      /* APAGAR LEVA A CONVERSA JUNTO. O `canal_id` da 0054 é
+       * `on delete cascade`: apagar o número apaga toda a conversa e
+       * toda a mensagem dele, e isso não se desfaz. Então só sai o
+       * número que nunca recebeu nada -- apelido digitado errado. Para
+       * o resto existe DESATIVAR, que é o que a loja quer dizer quando
+       * diz "tira esse número": `wa_receber()` recusa canal inativo, e
+       * o histórico fica de pé. */
+      const tem = await banco(`${REST_C}?select=id,wa_conversa(count)&slug=eq.${encodeURIComponent(canal)}`, { headers: cabecalhos(tok) });
+      const linha = (tem || [])[0];
+      if (!linha) return res.status(404).json({ erro: "número não encontrado" });
+      const n = Array.isArray(linha.wa_conversa) ? ((linha.wa_conversa[0] || {}).count || 0) : 0;
+      if (n > 0) {
+        return res.status(409).json({
+          erro: `Este número já tem ${n} conversa${n > 1 ? "s" : ""} guardada${n > 1 ? "s" : ""}. Apagar levaria tudo junto — desative em vez de apagar.`,
+        });
+      }
+      const r = await banco(`${REST_C}?slug=eq.${encodeURIComponent(canal)}`, {
+        method: "DELETE",
+        headers: json(tok, { Prefer: "return=representation" }),
+      });
+      if (!((Array.isArray(r) ? r[0] : r) || null)) return res.status(403).json({ erro: "Só o gerente apaga número." });
+      return res.status(200).json({ ok: true });
+    }
 
     const acao = String(req.query.acao || "estado");
     const CAMINHO = { estado: "/estado", reiniciar: "/_reiniciar", sair: "/sair" };
