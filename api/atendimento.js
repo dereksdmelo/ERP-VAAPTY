@@ -1312,13 +1312,169 @@ async function mensagem(req, res, tok) {
   return res.status(405).json({ erro: "Use GET, POST ou PATCH." });
 }
 
+/* ===================== A PONTE DO WHATSAPP =====================
+ *
+ * Quem chama aqui é o container do Baileys, não um navegador: **não há
+ * usuário e não há token**, então isto vem ANTES da checagem de sessão
+ * -- como o webhook do ZapSign em api/documento.js.
+ *
+ * A porta é um segredo compartilhado (`PONTE_SEGREDO`), o mesmo dos
+ * dois lados. E a escrita passa pelas funções estreitas da 0055, não
+ * pela chave de serviço: se este segredo vazar, o estrago é gravar
+ * conversa, não ler a tabela `atendimento` com CPF de cliente dentro
+ * (decisões 9 e 42).
+ *
+ * Mora em api/atendimento.js porque **o teto de 12 funções da Vercel
+ * está cheio** e porque a conversa existe para virar lead e
+ * atendimento, que é o assunto deste arquivo (mesma razão da
+ * decisão 27).
+ */
+async function ponte(req, res) {
+  const segredo = process.env.PONTE_SEGREDO || "";
+  if (!segredo || req.headers["x-ponte-segredo"] !== segredo) {
+    return res.status(401).json({ ok: false, erro: "sem permissão" });
+  }
+  if (req.method !== "POST") { res.setHeader("Allow", "POST"); return res.status(405).json({ ok: false }); }
+
+  const c = (req.body && typeof req.body === "object") ? req.body : {};
+  const canal = String(c.canal || "").trim();
+  const acao = String(req.query.acao || "");
+
+  // `fetch` direto na RPC: estas funções são o único caminho de
+  // escrita da ponte, e chamá-las pela chave anônima é o que mantém a
+  // de serviço fora daqui.
+  const rpc = async (nome, corpo) => {
+    const r = await fetch(`${URL_BASE}/rest/v1/rpc/${nome}`, {
+      method: "POST",
+      headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, "Content-Type": "application/json" },
+      body: JSON.stringify(corpo),
+    });
+    const txt = await r.text();
+    if (!r.ok) { const e = new Error(txt.slice(0, 200)); e.status = r.status; throw e; }
+    try { return txt ? JSON.parse(txt) : null; } catch (x) { return null; }
+  };
+
+  if (acao === "entrada") {
+    const tipo = ["texto", "midia", "botao", "reacao"].indexOf(String(c.tipo)) >= 0 ? String(c.tipo) : null;
+    if (!tipo) return res.status(200).json({ ok: true, pulado: "tipo não tratado" });
+    // Botão e mídia viajam inteiros em `anexo`: o formato é da ponte e
+    // pode crescer sem migration nova.
+    const anexo = c.tipo === "midia" ? (c.midia || null) : c.tipo === "botao" ? (c.botao || null) : c.tipo === "reacao" ? (c.reacao || null) : null;
+    const texto = c.tipo === "texto" ? String(c.texto || "")
+      : c.tipo === "botao" ? String((c.botao && c.botao.title) || "")
+      : c.tipo === "midia" ? String((c.midia && c.midia.legenda) || "") : "";
+    try {
+      const id = await rpc("wa_receber", {
+        p_canal: canal, p_telefone: String(c.fone || ""), p_nome: String(c.nome || ""),
+        p_wa_id: String(c.id || ""), p_eco: !!c.eco, p_tipo: tipo, p_texto: texto,
+        p_anexo: anexo, p_quando: new Date(Number(c.quando) || Date.now()).toISOString(),
+        p_anuncio: c.referral || null,
+      });
+      // `novo: false` = a ponte reentregou algo que já estava aqui.
+      return res.status(200).json({ ok: true, novo: !!id });
+    } catch (e) { return res.status(200).json({ ok: false, erro: String(e.message || e).slice(0, 180) }); }
+  }
+
+  if (acao === "status") {
+    try {
+      const ok = await rpc("wa_estado", {
+        p_canal: canal, p_telefone: String(c.fone || ""),
+        p_wa_id: String(c.id || ""), p_estado: String(c.status || ""),
+      });
+      return res.status(200).json({ ok: !!ok });
+    } catch (e) { return res.status(200).json({ ok: false }); }
+  }
+
+  if (acao === "estado") {
+    // Guarda o número assim que o QR é lido -- antes disso ninguém
+    // sabe qual número aquele canal virou.
+    const fone = String(c.numero || "").replace(/\D/g, "");
+    // Pela função da 0056, não por PATCH: a RLS da 0054 recusaria a
+    // chave anônima com 0 linhas e silêncio, e a coluna ficaria vazia
+    // para sempre sem ninguém saber por quê.
+    if (fone && canal) {
+      try { await rpc("wa_numero", { p_canal: canal, p_telefone: fone }); } catch (e) {}
+    }
+    return res.status(200).json({ ok: true });
+  }
+
+  /* COLETA NÃO GUARDA ARQUIVO, e isso é decisão, não esquecimento.
+   * Guardar mídia pediria a chave de serviço no Storage -- um terceiro
+   * uso que a decisão 9 proíbe sem conversa. A mensagem fica
+   * registrada com tipo, mime, nome e legenda; o arquivo em si
+   * continua no WhatsApp. Quando a mídia for necessária, isto vira
+   * assunto próprio. */
+  if (acao === "midia") return res.status(200).json({ ok: true, chave: "" });
+
+  return res.status(400).json({ ok: false, erro: "ação desconhecida" });
+}
+
 module.exports = async function handler(req, res) {
   if (!URL_BASE || !ANON) {
     return res.status(500).json({ erro: "SUPABASE_URL ou SUPABASE_ANON_KEY não configurados." });
   }
 
+  // Antes da checagem de sessão: quem chama é servidor, não gente.
+  if (String(req.query.recurso || "") === "ponte") {
+    try { return await ponte(req, res); }
+    catch (e) { return res.status(200).json({ ok: false, erro: "falhou" }); }
+  }
+
   const tok = tokenDe(req);
   if (!tok) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
+
+  /* A TELA DO QR, E POR QUE ELA NÃO USA O SEGREDO DA PONTE.
+   *
+   * Tudo no Worker da ponte exige o `PONTE_SEGREDO`, então o navegador
+   * não alcança o QR sozinho -- e não deve: segredo que chega ao
+   * navegador deixou de ser segredo (decisão 9). Quem fala com a ponte
+   * é esta função, com o token do GERENTE na entrada e o segredo só na
+   * saída. Ligar um número da loja é ato de gerente, não de equipe.
+   */
+  if (String(req.query.recurso || "") === "wa") {
+    // No Cloudflare quem fala com a ponte é o BINDING (`req.ponte`),
+    // porque fetch de Worker para Worker pelo endereço workers.dev não
+    // chega. `PONTE_URL` fica como caminho de quem roda em servidor
+    // comum, onde o endereço funciona.
+    const base = process.env.PONTE_URL || "";
+    const segredo = process.env.PONTE_SEGREDO || "";
+    if ((!req.ponte && !base) || !segredo) {
+      return res.status(503).json({ erro: "A ponte do WhatsApp não está configurada." });
+    }
+    // Pelo id DO TOKEN, nunca por `limit=1`: a RLS deixa o gerente ler
+    // a equipe inteira, então a primeira linha pode ser de outra
+    // pessoa -- e foi isso que recusou o próprio dono na primeira
+    // abertura da tela.
+    const meuId = donoDoToken(tok);
+    if (!meuId) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
+    const eu = await banco(`${URL_BASE}/rest/v1/perfil?select=papel&id=eq.${meuId}`, { headers: cabecalhos(tok) });
+    if (((eu || [])[0] || {}).papel !== "gerente") {
+      return res.status(403).json({ erro: "Só o gerente liga e desliga os números." });
+    }
+
+    const canal = String(req.query.canal || "").replace(/[^\w-]/g, "").slice(0, 60);
+    if (req.method === "GET" && !canal) {
+      const canais = await banco(`${URL_BASE}/rest/v1/wa_canal?select=*&order=slug`, { headers: cabecalhos(tok) });
+      return res.status(200).json({ canais: canais || [] });
+    }
+    if (!canal) return res.status(400).json({ erro: "faltou o canal" });
+
+    const acao = String(req.query.acao || "estado");
+    const CAMINHO = { estado: "/estado", reiniciar: "/_reiniciar", sair: "/sair" };
+    if (!CAMINHO[acao]) return res.status(400).json({ erro: "ação desconhecida" });
+    try {
+      const alvo = `${base || "https://ponte.invalido"}${CAMINHO[acao]}?canal=${encodeURIComponent(canal)}`;
+      const pedido = { method: acao === "estado" ? "GET" : "POST", headers: { "x-ponte-segredo": segredo } };
+      const r = req.ponte ? await req.ponte.fetch(alvo, pedido) : await fetch(alvo, pedido);
+      const d = await r.json().catch(() => ({}));
+      // 503 é a ponte LIGANDO, não erro: o container leva uns segundos
+      // na primeira pergunta, e a tela precisa saber esperar em vez de
+      // dizer que falhou.
+      return res.status(r.ok ? 200 : r.status === 503 ? 200 : r.status).json(d);
+    } catch (e) {
+      return res.status(502).json({ erro: "a ponte não respondeu" });
+    }
+  }
 
   try {
     if (String(req.query.recurso || "") === "tatica") {

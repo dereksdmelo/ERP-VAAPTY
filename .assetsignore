@@ -1,24 +1,23 @@
-# O que NAO vai para o mundo.
+# O QUE VAI PARA O MUNDO -- e a lista é de PERMISSÃO, não de exclusão.
 #
-# No Cloudflare, `assets` publica a pasta inteira -- e publico de
-# verdade, sem login. A pasta aqui e a raiz do repositorio (para o
-# index.html continuar sendo fonte unica, decisao 7), entao tudo que
-# nao e do navegador precisa ser barrado NOMINALMENTE.
+# No Cloudflare, `assets` publica a pasta inteira, pública de verdade,
+# sem login. A pasta aqui é a raiz do repositório, para o index.html
+# continuar sendo fonte única (decisão 7).
 #
-# **Quem criar arquivo novo na raiz decide aqui se ele e publico.**
-# O padrao errado e o perigoso: esquecer de listar publica.
-.git
-.gitignore
-.DS_Store
-.assetsignore
-CLAUDE.md
-PENDENCIAS.md
-README.md
-api
-supabase
-worker
-vercel.json
-documentos.js
-ferramentas-escopo.js
-ferramentas-shinkai.js
-ferramentas-sincronizacao.js
+# ISTO JÁ FOI UMA LISTA DE EXCLUSÃO, e ela falhou duas vezes em uma
+# semana: `workers/` nasceu depois dela e entrou na fila para ser
+# publicada com `node_modules` e o programa da ponte dentro; e
+# `.env.local` nunca esteve listado. Lista de exclusão erra para o lado
+# que não perdoa -- **esquecer de listar publica.**
+#
+# Agora o `*` barra tudo e cada linha `!` é uma decisão explícita de
+# tornar um arquivo público. **Quem precisar servir arquivo novo
+# acrescenta um `!` aqui, e só então ele existe para o navegador.**
+*
+
+!index.html
+!assinar.html
+!verificar.html
+!testemunhais.json
+!apresentacao
+!apresentacao.pdf

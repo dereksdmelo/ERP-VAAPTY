@@ -19,7 +19,8 @@ import pino from "pino";
 
 const SEGREDO = process.env.PONTE_SEGREDO || "";
 const PONTE_URL = process.env.PONTE_URL || "";     // o Worker da ponte (guarda a sessao)
-const ERP_URL = process.env.ERP_URL || "";         // o Worker do ERP (recebe as mensagens)
+const ERP_URL = process.env.ERP_URL || "";
+const GUARDA_MIDIA = process.env.GUARDA_MIDIA === "1";         // o Worker do ERP (recebe as mensagens)
 const log = pino({ level: process.env.LOG || "warn" });
 const BOTOES_COMO = process.env.BOTOES || "texto";   // "nativo" = botoes pra todo mundo
 // numeros que ja recebem os botoes nativos (teste antes de ligar pra todos)
@@ -87,16 +88,27 @@ async function estadoDeAuth() {
   };
 }
 
-/* ---------- o que chega vai pro ERP ---------- */
+/* ---------- o que chega vai pro ERP ----------
+ *
+ * NO ERP DA VAAPTY NÃO EXISTE /ponte/*, e não vai existir: o teto de 12
+ * funções da Vercel está cheio (um 13º arquivo em api/ derruba o build
+ * inteiro). O receptor mora em api/atendimento.js sob
+ * `?recurso=ponte&acao=`, e `rota()` é a tradução -- um lugar só, para
+ * que o resto deste arquivo continue falando em /ponte/entrada como no
+ * ERP da Camisetas Já.
+ */
+const rota = (caminho) =>
+  "/api/atendimento?recurso=ponte&acao=" + String(caminho).replace("/ponte/", "");
+
 async function proErp(caminho, corpo) {
   try {
-    const r = await fetch(ERP_URL + caminho, { method: "POST", headers: H(), body: JSON.stringify(Object.assign({ canal: CANAL }, corpo)) });
+    const r = await fetch(ERP_URL + rota(caminho), { method: "POST", headers: H(), body: JSON.stringify(Object.assign({ canal: CANAL }, corpo)) });
     return await r.json().catch(() => ({}));
   } catch (e) { log.error({ e: String(e), caminho }, "ERP não respondeu"); return {}; }
 }
 async function subirMidia(buf, mime, nome) {
   try {
-    const r = await fetch(ERP_URL + "/ponte/midia?canal=" + encodeURIComponent(CANAL) + "&nome=" + encodeURIComponent(nome || "arquivo"),
+    const r = await fetch(ERP_URL + rota("/ponte/midia") + "&canal=" + encodeURIComponent(CANAL) + "&nome=" + encodeURIComponent(nome || "arquivo"),
       { method: "POST", headers: { "x-ponte-segredo": SEGREDO, "content-type": mime || "application/octet-stream" }, body: buf });
     const d = await r.json(); return d && d.ok ? d.chave : "";
   } catch (e) { return ""; }
@@ -179,7 +191,15 @@ async function traduzir(msg) {
     if (!m[campo]) continue;
     const x = m[campo], mime = String(x.mimetype || "").split(";")[0];
     let chave = "";
-    try { const buf = await downloadMediaMessage(msg, "buffer", {}, { logger: log, reuploadRequest: sock.updateMediaMessage }); chave = await subirMidia(buf, mime, x.fileName || tipo); } catch (e) { log.warn({ e: String(e) }, "mídia não baixou"); }
+    /* NA COLETA O ARQUIVO NÃO É GUARDADO (ver api/atendimento.js,
+     * ?recurso=ponte): guardar pediria a chave de serviço no Storage, um
+     * terceiro uso que a decisão 9 proíbe sem conversa. Enquanto o ERP
+     * devolve chave vazia, baixar o vídeo para jogar fora é só banda e
+     * memória -- então nem se baixa. `GUARDA_MIDIA=1` religa quando o
+     * outro lado souber guardar. */
+    if (GUARDA_MIDIA) {
+      try { const buf = await downloadMediaMessage(msg, "buffer", {}, { logger: log, reuploadRequest: sock.updateMediaMessage }); chave = await subirMidia(buf, mime, x.fileName || tipo); } catch (e) { log.warn({ e: String(e) }, "mídia não baixou"); }
+    }
     return Object.assign(base, { tipo: "midia", midia: { tipo, mime, nome: x.fileName || "", legenda: x.caption || "", voz: !!x.ptt, chave } });
   }
   return null;

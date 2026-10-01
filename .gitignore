@@ -6,3 +6,7 @@
 .vercel
 .DS_Store
 .env*
+
+# A ponte do WhatsApp instala Baileys para EMPACOTAR; nada disso roda
+# aqui nem vai para o repositório.
+node_modules/

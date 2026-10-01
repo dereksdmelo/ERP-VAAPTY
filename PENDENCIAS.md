@@ -7,6 +7,42 @@ que acumula item resolvido para de ser lida.
 
 ---
 
+## A coleta do WhatsApp
+
+### Ler o QR dos três números
+**É o que falta para a coleta começar.**
+
+A ponte está no ar e a tela está pronta em **Números do WhatsApp**
+(menu do gerente). Enquanto ninguém ler o QR, nenhuma conversa entra e
+não há funil para ler.
+
+*Destrava com:* o Derek abrindo a tela e lendo o QR com cada aparelho —
+o principal da loja, a Ana e a Camila. No celular: WhatsApp →
+Configurações → Aparelhos conectados → Conectar aparelho.
+
+### A caixa de entrada
+**Depende do item acima.**
+
+"Todos os whats num lugar só" é o pedido. A tela se desenha em cima do
+que a coleta trouxer — quais conversas existem, como elas começam, o
+que o cliente pergunta primeiro. Construí-la antes seria desenhar um
+funil de palpite.
+
+### Enviar pela ponte
+Hoje ela **só escuta**. Mandar mensagem pede decidir quem manda (pessoa
+ou IA), o que acontece quando as duas respondem, e o registro de quem
+disse o quê. É conversa, não implementação.
+
+### Mídia da conversa
+Foto e áudio não são guardados: o arquivo ficaria no Storage, e escrever
+lá pede a `SUPABASE_SERVICE_KEY` — o terceiro uso que a decisão 9
+proíbe sem conversa. Fica registrado que veio uma foto, não a foto.
+
+*Destrava com:* uma política em `storage.objects` que aceite o token do
+usuário, ou a decisão de abrir a exceção.
+
+---
+
 ## Esperando terceiro
 
 ### API da tabela AutoAvaliar

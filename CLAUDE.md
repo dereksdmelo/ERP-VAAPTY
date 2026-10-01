@@ -33,6 +33,9 @@ api/funil.js                     GET  — a aba PIPELINE: fluxo → venda por or
 api/importar.js                  POST — traz a planilha do CRM para o banco
 api/fipe.js                      GET  — tabela FIPE oficial, para conferência
 api/checklist.js                 GET/PUT — o check list digital do negócio
+                                 ?recurso=ponte — o que a ponte do WhatsApp manda (sem login)
+                                 ?recurso=wa — a tela do QR, pelo token do gerente
+workers/ponte-whatsapp/          a ponte do WhatsApp: Worker + container com Baileys
 documentos.js                    CÓPIA MORTA: o que roda é o bloco colado no index.html
 supabase/migrations/*.sql        esquema do banco, versionado
 PENDENCIAS.md                    o que está em aberto e o que destrava cada coisa
@@ -72,6 +75,7 @@ e um `.env` local para o `vercel dev`):
 | `IA_JANELA` | opcional; padrão 2500 caracteres do fim da conversa. É o que se paga por leitura |
 | `SHINKAI_API_KEY` | `api/foto.js?recurso=shinkai` — sem ela o envio ao Shinkai fica desligado e a tela cai no JSON copiado |
 | `SHINKAI_ORIGEM` | opcional; padrão `vaapty-joinville` |
+| `PONTE_SEGREDO` | `api/atendimento.js?recurso=ponte` e o Worker da ponte — **o mesmo valor dos dois lados**; sem ele a ponte não entra e a tela do QR não abre |
 | `TURN_URL`, `TURN_USUARIO`, `TURN_SENHA` | opcionais; o retransmissor de áudio para quando a conexão direta do "ouvir a mesa" não fecha (decisão 45). Sem elas vai só o STUN, que resolve a maioria das redes — e a tela diz quando não resolveu |
 
 **Nenhuma delas, fora a anônima, pode chegar ao navegador** — é essa a razão de as
@@ -1380,6 +1384,88 @@ pelo que ainda não chegou.
 **Nada mudou na RLS.** Quem lê a `negociacao_viva` continua sendo o
 gerente e o dono do atendimento (0033) — ler a mesa do colega segue
 fora.
+
+### 48. O WhatsApp entra pela ponte, e a coleta vem antes da tela
+
+O Derek pediu em 30/09/2026 a área da pré-venda, e o primeiro passo é
+dele: *"comecar a coleta de dados. entao é conectar os whatsapp via QR
+code pra comecar a ler as conversas"* — três números, **todos num
+lugar só**: o principal da loja e os dois que a IA atende.
+
+**Construir funil em cima de palpite é o jeito caro de errar.** A tela
+da caixa de entrada só sabe o que mostrar depois que existir conversa
+registrada, então a ordem é: ponte, receptor, tabelas — e a tela
+depois, em cima do que realmente chegou.
+
+**A ponte é a mesma da Camisetas Já**, copiada e renomeada: container
+no Cloudflare rodando Baileys, sessão guardada no Durable Object, um
+container por canal. O programa vai **empacotado dentro do Worker**
+(`src/gerado/ponte.txt`) e é baixado ao ligar, porque não há Docker na
+máquina do Derek. **Publicar é `npm run empacotar && wrangler
+deploy`** — publicar sem empacotar deixa o container rodando a versão
+velha, sem aviso.
+
+**A ponte escreve sem a chave de serviço.** Ela é servidor falando com
+servidor: não há usuário, logo não há token para a RLS julgar. O
+caminho óbvio seria a `SUPABASE_SERVICE_KEY`, e seria o **terceiro**
+uso dela, contra a decisão 9. Em vez disso, funções `security definer`
+estreitas (0055): `wa_receber()` e `wa_estado()`, que só sabem gravar
+conversa. Se o segredo da ponte vazar, o estrago é escrever mensagem —
+não ler a tabela `atendimento`, que tem CPF e telefone de cliente.
+Mesmo remédio da decisão 42.
+
+**O receptor mora em `api/atendimento.js?recurso=ponte`**, porque o
+teto de 12 funções está cheio — e porque a conversa existe para virar
+lead e atendimento, que é o assunto do arquivo (mesma costura da
+decisão 27). **Ele vem ANTES da checagem de sessão**, como o webhook do
+ZapSign: quem chama não tem login, e sim o `PONTE_SEGREDO`.
+
+**O QR é desenhado no navegador.** A ponte devolve a string de
+pareamento crua; mandá-la a um serviço de imagem de terceiro entregaria
+a credencial que liga o WhatsApp da loja. A tela carrega um gerador de
+QR do CDN só nela — **o que viaja é o script, nunca a string.**
+
+**A tela é do gerente, e o segredo nunca chega ao navegador.** Quem
+fala com a ponte é `?recurso=wa`, com o token do gerente na entrada e o
+`PONTE_SEGREDO` só na saída. Ligar um número da loja é ato de gerente.
+
+**O papel é conferido pelo id DO TOKEN, não por `limit=1`.** A RLS
+deixa o gerente ler a equipe inteira, então a primeira linha pode ser
+de outra pessoa — e foi exatamente isso que recusou o próprio dono na
+primeira abertura da tela, com "só o gerente" na cara de quem é
+gerente.
+
+**Worker não chama Worker por endereço.** O ERP buscava a ponte em
+`https://vaapty-ponte-whatsapp.*.workers.dev` e levava **404 sem a
+outra ponta ver nada** — conferido em 01/10/2026 com o `tail` do outro
+lado em silêncio enquanto o `curl` de fora respondia 200. O caminho é
+*service binding* (`env.PONTE`), e o adaptador do Worker o entrega ao
+handler em `req.ponte`. **Quem trocar o binding por URL reintroduz um
+404 que não deixa rastro em lugar nenhum.**
+
+**Na coleta a mídia não é guardada, e a ponte nem baixa.** Guardar
+arquivo pediria a chave de serviço no Storage — o tal terceiro uso. A
+mensagem fica registrada com tipo, mime, nome e legenda; o arquivo
+continua no WhatsApp. `GUARDA_MIDIA=1` religa o download no dia em que
+este lado souber guardar.
+
+**Os três canais são cadastro (0056).** `wa_receber()` recusa canal que
+não existe, de propósito: a ponte não inventa canal. E o número que
+cada um virou só se sabe depois do QR — vem da ponte, que não tem
+token, então o PATCH pela chave anônima bateria na RLS e voltaria **0
+linhas em silêncio**. Daí `wa_numero()`, estreita como as outras.
+
+**A lista do `.assetsignore` virou de PERMISSÃO.** Ela era de exclusão
+e falhou duas vezes na mesma semana: `workers/` nasceu depois dela e
+entrou na fila para ser publicado com `node_modules` dentro, e
+`.env.local` nunca esteve listado. **Lista de exclusão erra para o lado
+que não perdoa — esquecer de listar publica.** Agora `*` barra tudo e
+cada `!` é uma decisão explícita. Conferido no ar: `api/`, `CLAUDE.md`,
+`.github/` e o programa da ponte dão 404; só as seis telas respondem.
+
+**O que ainda não existe:** a caixa de entrada (todas as conversas num
+lugar só), o envio, e a ligação entre conversa e lead. A ponte **só
+escuta** — e a tela diz isso, em vez de prometer o que não faz.
 
 ## Convenções do código
 

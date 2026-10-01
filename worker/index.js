@@ -101,6 +101,14 @@ export default {
          cabeçalho. É evidência da assinatura eletrônica (decisão 42),
          e o `localDe` do api/documento.js a lê daqui. */
       cf: request.cf || null,
+      /* A PONTE DO WHATSAPP VIAJA COMO BINDING, NÃO COMO ENDEREÇO.
+         Worker chamando outro Worker pelo `*.workers.dev` **não sai da
+         borda**: o Cloudflare resolve internamente e devolve 404 sem
+         que a outra ponta veja a requisição -- conferido em
+         01/10/2026, com o tail do outro lado em silêncio enquanto o
+         curl de fora respondia 200. O service binding é o caminho
+         oficial, e de quebra não passa pela internet. */
+      ponte: env.PONTE || null,
     };
 
     const { res, espera } = resposta();

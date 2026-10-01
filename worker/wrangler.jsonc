@@ -22,5 +22,8 @@
   // (decisao 7). O que nao pode ser publico esta em `.assetsignore`,
   // na raiz -- **assets do Cloudflare sao publicos, sem login**.
   "assets": { "directory": "../", "binding": "ASSETS" },
+  // A ponte do WhatsApp, por binding. **Não por URL**: fetch de Worker
+  // para Worker pelo endereço `workers.dev` não chega do outro lado.
+  "services": [{ "binding": "PONTE", "service": "vaapty-ponte-whatsapp" }],
   "observability": { "enabled": true }
 }

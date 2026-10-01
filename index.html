@@ -774,6 +774,25 @@ async function listarIndicacoes(status) {
   if (!r.ok) throw new Error(d.erro || "Não consegui carregar os leads.");
   return d.indicacoes || [];
 }
+/* A PONTE DO WHATSAPP, VISTA DAQUI.
+ *
+ * O `PONTE_SEGREDO` nunca chega ao navegador (decisão 9): quem fala
+ * com a ponte é o servidor, e o que a tela manda é o token do gerente.
+ */
+async function waCanais() {
+  const r = await fetchAut("/api/atendimento?recurso=wa");
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui ler os números.");
+  return d.canais || [];
+}
+async function waEstado(canal, acao) {
+  const r = await fetchAut(`/api/atendimento?recurso=wa&canal=${encodeURIComponent(canal)}&acao=${acao || "estado"}`,
+    acao && acao !== "estado" ? { method: "POST" } : undefined);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "A ponte não respondeu.");
+  return d;
+}
+
 async function enviarIndicacoes(lista) {
   const r = await fetchAut("/api/atendimento?recurso=indicacoes", {
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -8231,6 +8250,161 @@ const STATUS_LEAD = [
  * A tabela rola na horizontal dentro da própria caixa. O corpo da
  * página não pode rolar de lado no celular.
  */
+/* ===================== os números do WhatsApp =====================
+ *
+ * A tela de ligar cada número por QR code. **Ela é a porta de entrada
+ * da coleta** (01/10/2026): enquanto nenhum número está ligado, nenhuma
+ * conversa chega, e não há funil para ler.
+ *
+ * **O QR é desenhado AQUI, no navegador.** A ponte devolve a string de
+ * pareamento crua; transformá-la em imagem num serviço de terceiro
+ * mandaria para fora a credencial que liga o WhatsApp da loja. A
+ * biblioteca vem do CDN e só nesta tela -- o que viaja é o script,
+ * nunca a string.
+ *
+ * **O QR vence em segundos**, então a tela pergunta de três em três e
+ * redesenha sozinha. Quem fica olhando um QR vencido conclui que a
+ * ponte quebrou.
+ */
+const WA_ESTADOS = {
+  conectado:    { rot: "ligado",        cor: "#1D7F58" },
+  qr:           { rot: "esperando o QR", cor: "#E1521F" },
+  reconectando: { rot: "reconectando",  cor: "#E1521F" },
+  iniciando:    { rot: "ligando…",      cor: "#6E6879" },
+  desligado:    { rot: "desligado",     cor: "#6E6879" },
+};
+
+function QrDesenhado({ texto }) {
+  const caixa = useRef(null);
+  useEffect(() => {
+    let vivo = true;
+    const desenhar = () => {
+      if (!vivo || !caixa.current || !window.QRCode) return;
+      caixa.current.innerHTML = "";
+      new window.QRCode(caixa.current, { text: texto, width: 232, height: 232, correctLevel: window.QRCode.CorrectLevel.L });
+    };
+    if (window.QRCode) desenhar();
+    else {
+      const sc = document.createElement("script");
+      sc.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js";
+      sc.onload = desenhar;
+      document.head.appendChild(sc);
+    }
+    return () => { vivo = false; };
+  }, [texto]);
+  return <div ref={caixa} className="inline-block rounded-lg bg-white p-3" style={{ border: `1px solid ${C.line}` }} />;
+}
+
+function CartaoCanal({ canal }) {
+  const [est, setEst] = useState(null);
+  const [erro, setErro] = useState("");
+  const [ocupado, setOcupado] = useState("");
+
+  // De três em três segundos: é mais ou menos o tempo que o WhatsApp
+  // deixa um QR de pé. Parar quando a aba some evita gastar o 4G da
+  // loja atualizando tela que ninguém olha (mesma régua da decisão 44).
+  useEffect(() => {
+    let vivo = true, t = null;
+    const volta = async () => {
+      if (!vivo) return;
+      if (document.visibilityState !== "visible") { t = setTimeout(volta, 3000); return; }
+      try { const d = await waEstado(canal.slug); if (vivo) { setEst(d); setErro(""); } }
+      catch (e) { if (vivo) setErro(e.message); }
+      if (vivo) t = setTimeout(volta, 3000);
+    };
+    volta();
+    return () => { vivo = false; clearTimeout(t); };
+  }, [canal.slug]);
+
+  const agir = async (acao) => {
+    setOcupado(acao);
+    try { await waEstado(canal.slug, acao); setEst(null); }
+    catch (e) { setErro(e.message); }
+    setOcupado("");
+  };
+
+  const e = (est && est.estado) || "iniciando";
+  const info = WA_ESTADOS[e] || WA_ESTADOS.iniciando;
+  const ligado = e === "conectado";
+
+  return (
+    <Bloco titulo={canal.nome || canal.slug}
+      sub={canal.atendente === "ia" ? "número que a IA atende" : "número que a equipe atende"}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="rounded-full px-2.5 py-1 text-[12px] font-semibold"
+          style={{ background: info.cor + "18", color: info.cor }}>{info.rot}</span>
+        {est && est.numero && <span className="text-[13px]" style={{ color: C.mute, fontFamily: F.mono }}>{est.numero}</span>}
+      </div>
+
+      {est && est.estado === "qr" && est.qr && (
+        <div className="mt-3">
+          <QrDesenhado texto={est.qr} />
+          <p className="mt-2 max-w-[260px] text-[12.5px] leading-snug" style={{ color: C.mute }}>
+            No celular: WhatsApp → Configurações → Aparelhos conectados → Conectar aparelho.
+            O código vence em segundos e esta tela troca sozinha.
+          </p>
+        </div>
+      )}
+
+      {ligado && (
+        <p className="mt-3 text-[13px] leading-snug" style={{ color: C.mute }}>
+          Está lendo as conversas deste número. O celular pode ficar guardado — quem
+          mantém a sessão de pé é a ponte, não o aparelho.
+        </p>
+      )}
+
+      {/* O erro da ponte fica colado nos botões, não no alto da página:
+          botão apagado tem que dizer por quê no lugar onde ele está
+          (decisão 20). */}
+      {(erro || (est && est.erro)) && (
+        <p className="mt-3 text-[13px] leading-snug" style={{ color: C.laranja }}>{erro || est.erro}</p>
+      )}
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button onClick={() => agir("reiniciar")} disabled={!!ocupado}
+          className="rounded-lg border px-3 py-2 text-[13.5px] font-semibold"
+          style={{ borderColor: C.line, color: C.ink, opacity: ocupado ? 0.5 : 1 }}>
+          {ocupado === "reiniciar" ? "reiniciando…" : "Reiniciar"}
+        </button>
+        {ligado && (
+          <button onClick={() => { if (confirm("Desligar este número? Para voltar, alguém precisa ler o QR de novo.")) agir("sair"); }}
+            disabled={!!ocupado}
+            className="rounded-lg border px-3 py-2 text-[13.5px] font-semibold"
+            style={{ borderColor: C.line, color: C.laranja, opacity: ocupado ? 0.5 : 1 }}>
+            Desligar
+          </button>
+        )}
+      </div>
+    </Bloco>
+  );
+}
+
+function TelaWhatsApp() {
+  const [canais, setCanais] = useState(null);
+  const [erro, setErro] = useState("");
+  useEffect(() => { waCanais().then(setCanais).catch((e) => setErro(e.message)); }, []);
+
+  return (
+    <div>
+      <Cabecalho titulo="Números do WhatsApp"
+        sub="Ligue cada número uma vez. A partir daí as conversas entram sozinhas." />
+      {erro && <p className="mb-4 text-[14px]" style={{ color: C.laranja }}>{erro}</p>}
+      {!canais && !erro && <p className="text-[14px]" style={{ color: C.mute }}>carregando…</p>}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {(canais || []).map((c) => <CartaoCanal key={c.slug} canal={c} />)}
+      </div>
+      <div className="mt-4">
+        <Pendente>
+          Por enquanto a ponte só ESCUTA: ela registra o que chega e o que a loja
+          responde, e não manda mensagem. A tela da caixa de entrada — todas as
+          conversas num lugar só — vem em seguida, em cima do que estiver
+          registrado aqui.
+        </Pendente>
+      </div>
+    </div>
+  );
+}
+
 function LeadsIndicacao() {
   const aberto = true;   // é uma página agora
   const [lista, setLista] = useState(null);
@@ -15551,6 +15725,9 @@ function destinosPara(perfil) {
     { id: "leads", rot: "Leads de indicação", curto: "Leads" },
     adm ? { id: "adm", rot: "Administrativo", curto: "Adm." } : null,
     gerente ? { id: "gestao", rot: "Equipe e metas", curto: "Equipe" } : null,
+    // Ligar um número da loja é ato de gerente — e o servidor confere
+    // de novo, porque esconder o item é conveniência, não controle.
+    gerente ? { id: "whatsapp", rot: "Números do WhatsApp", curto: "WhatsApp" } : null,
     // Área restrita: só quem tem o sinalizador no perfil (0021). A tela
     // esconde o destino; quem protege de verdade é a RLS.
     (perfil && (perfil.financeiro || gerente)) ? { id: "financeiro", rot: "Financeiro", curto: "Financ." } : null,
@@ -17071,6 +17248,7 @@ function App() {
       {tela === "gestor" && <PainelGestor perfil={perfil} comp={compOuAtual} />}
       {tela === "adm" && <TelaADM perfil={perfil} comp={compOuAtual} mes={mes} />}
       {tela === "gestao" && <TelaGestao perfil={perfil} comp={compOuAtual} />}
+      {tela === "whatsapp" && perfil && perfil.papel === "gerente" && <TelaWhatsApp />}
       {tela === "financeiro" && <TelaFinanceiro perfil={perfil} comp={compOuAtual} mes={mes} />}
       {tela === "lojistas" && podeGestao && <TelaVendaLojistas perfil={perfil} />}
     </Shell>
