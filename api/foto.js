@@ -733,9 +733,94 @@ async function apagarDoc(caminho) {
   } catch (e) { /* já não existe é sucesso */ }
 }
 
+/* O ANEXO DO LOJISTA, QUE CHEGA SEM LOGIN.
+ *
+ * CNH, comprovante de residência e a ATPV já preenchida. O lojista não
+ * tem conta aqui, então este é o segundo caminho público do sistema —
+ * o primeiro é o assinador (decisão 42).
+ *
+ * **Mora neste arquivo porque é onde a chave de serviço já está**
+ * (decisão 9): escrever no Storage exige ela, e espalhá-la seria
+ * desfazer aquela decisão. A LINHA no banco, essa não usa a chave:
+ * vai pela função estreita `dut_anexar()` da 0057, que só grava anexo
+ * e só para quem apresentar o token daquele pedido.
+ *
+ * **O que segura uma rota pública que escreve arquivo**, em ordem:
+ * o token do pedido (32 bytes, guardado em hash), a janela de duas
+ * horas, o teto de 10 MB e os quatro tipos que o bucket aceita. Sem o
+ * token não se sobe nada — não é uma porta aberta para o bucket.
+ */
+async function dutAnexo(req, res) {
+  if (req.method !== "POST") { res.setHeader("Allow", "POST"); return res.status(405).json({ erro: "método" }); }
+  const id = String(req.query.id || "");
+  const token = String(req.query.token || "");
+  if (!RX_UUID.test(id) || !token) return res.status(400).json({ erro: "pedido inválido" });
+
+  /* O ARQUIVO VEM EM BASE64 DENTRO DE JSON, como o anexo que já
+   * existe — e não como corpo binário cru. **No Cloudflare o corpo é
+   * lido como TEXTO** pelo adaptador do Worker, então binário cru
+   * chegaria corrompido sem erro nenhum: o arquivo subiria quebrado e
+   * só se descobriria ao abrir o PDF. */
+  let c = req.body;
+  if (c && typeof Buffer !== "undefined" && Buffer.isBuffer(c)) c = c.toString("utf8");
+  if (typeof c === "string") { try { c = JSON.parse(c); } catch (e) { c = null; } }
+  if (!c || typeof c !== "object") return res.status(400).json({ erro: "Envio inválido." });
+
+  const tipo = String(c.tipo || "").split(";")[0].trim();
+  const ext = TIPOS_DOC[tipo];
+  if (!ext) return res.status(415).json({ erro: "Aceito PDF, JPG, PNG ou WebP." });
+
+  let cru = String(c.arquivo_base64 || "").trim();
+  if (cru.slice(0, 5) === "data:") { const v = cru.indexOf(","); cru = v < 0 ? "" : cru.slice(v + 1); }
+  cru = cru.replace(/\s/g, "");
+  if (!cru || !/^[A-Za-z0-9+/]+={0,2}$/.test(cru)) return res.status(400).json({ erro: "Arquivo inválido." });
+  const buf = Buffer.from(cru, "base64");
+  if (!buf.length) return res.status(400).json({ erro: "Arquivo vazio." });
+  if (buf.length > MAX_DOC) return res.status(413).json({ erro: "O arquivo passa de 10 MB." });
+
+  const rotulo = String(c.rotulo || "Outro").slice(0, 60);
+  const nome = String(c.nome || `arquivo.${ext}`).slice(0, 120);
+  const caminho = `dut/${id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+
+  // `arquivos()` LANÇA quando o Storage recusa; não devolve `ok`.
+  try {
+    await arquivos(`${STORAGE()}/object/${BUCKET_DOC}/${paraURL(caminho)}`, {
+      method: "POST",
+      headers: hArquivo({ "Content-Type": tipo, "Cache-Control": "3600", "x-upsert": "false" }),
+      body: buf,
+    });
+  } catch (e) { return res.status(502).json({ erro: "Não consegui guardar o arquivo." }); }
+
+  const r = await fetch(`${URL_BASE}/rest/v1/rpc/dut_anexar`, {
+    method: "POST",
+    headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      p_id: id, p_token_hash: require("crypto").createHash("sha256").update(token).digest("hex"),
+      p_caminho: caminho, p_nome: nome, p_tipo: tipo, p_bytes: buf.length, p_rotulo: rotulo,
+    }),
+  });
+  const ok = await r.json().catch(() => false);
+  if (!r.ok || ok !== true) {
+    /* NADA FICA ÓRFÃO: se a linha não entrou, o arquivo sai do bucket
+     * antes de devolver o erro — a mesma ordem da decisão 6. Sem isso,
+     * token errado deixaria lixo no Storage que ninguém sabe apagar. */
+    try {
+      await arquivos(`${STORAGE()}/object/${BUCKET_DOC}/${paraURL(caminho)}`, { method: "DELETE", headers: hArquivo() });
+    } catch (e) {}
+    return res.status(403).json({ erro: "Este envio não está mais válido." });
+  }
+  return res.status(200).json({ ok: true });
+}
+
 module.exports = async function handler(req, res) {
   if (!URL_BASE || !CHAVE || !ANON) {
     return res.status(500).json({ erro: "SUPABASE_URL, SUPABASE_ANON_KEY ou SUPABASE_SERVICE_KEY não configurados." });
+  }
+
+  // O lojista chega sem login: antes da checagem de sessão.
+  if (String(req.query.recurso || "") === "dut-anexo") {
+    try { return await dutAnexo(req, res); }
+    catch (e) { return res.status(500).json({ erro: "Não consegui guardar o arquivo." }); }
   }
 
   const tok = tokenDe(req);

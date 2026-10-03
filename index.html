@@ -785,6 +785,22 @@ async function waCanais() {
   if (!r.ok) throw new Error(d.erro || "Não consegui ler os números.");
   return d.canais || [];
 }
+async function dutFila({ situacao, q } = {}) {
+  const qs = comoQuery({ situacao: situacao || undefined, q: q || undefined });
+  const r = await fetchAut(`/api/checklist?recurso=dut${qs ? `&${qs}` : ""}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui carregar a fila do DUT.");
+  return d.pedidos || [];
+}
+async function dutMudar(id, mud) {
+  const r = await fetchAut(`/api/checklist?recurso=dut&id=${encodeURIComponent(id)}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(mud),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui salvar.");
+  return d.pedido;
+}
+
 async function waConversas({ canal, busca } = {}) {
   const q = comoQuery({ canal: canal || undefined, busca: busca || undefined });
   const r = await fetchAut(`/api/atendimento?recurso=conversas${q ? `&${q}` : ""}`);
@@ -15673,11 +15689,243 @@ function VenderCarro({ e, aoVender, aoFechar }) {
   );
 }
 
+/* ===================== A FILA DO DUT =====================
+ *
+ * O lojista pede pela página pública (`dut.html`) e o administrativo
+ * trabalha aqui. Antes isso era um formulário do Google com 1.278
+ * respostas onde o acompanhamento eram DOIS comentários de célula —
+ * ninguém sabia responder "o meu já saiu?" sem abrir a planilha e
+ * procurar a linha.
+ *
+ * **A fila abre no que dá trabalho**, não em tudo: entregue junto do
+ * pendente obriga a procurar o que falta fazer. Mesma régua do
+ * "esperando resposta" da caixa de entrada.
+ *
+ * **Os passos são do servidor**, que carimba quem e quando a partir
+ * do token — "preenchido por quem" é a pergunta que importa quando o
+ * cartório devolve o papel errado (0008).
+ */
+const DUT_SITUACAO = {
+  recebido:    { rot: "recebido",    cor: "#6D1B9E" },
+  pendente:    { rot: "falta algo",  cor: "#E1521F" },
+  preenchido:  { rot: "preenchido",  cor: "#8E4FC0" },
+  reconhecido: { rot: "reconhecido", cor: "#4A9E7A" },
+  entregue:    { rot: "entregue",    cor: "#1D7F58" },
+  cancelado:   { rot: "cancelado",   cor: "#6E6879" },
+};
+
+// O que vem depois, por situação — e "reconhecer" pula o
+// preenchimento, porque o lojista já mandou a ATPV pronta.
+const proximoPasso = (p) => {
+  if (p.situacao === "recebido" || p.situacao === "pendente") {
+    return p.tipo === "reconhecer"
+      ? { para: "reconhecido", rot: "Voltou do cartório" }
+      : { para: "preenchido", rot: "Preenchi o documento" };
+  }
+  if (p.situacao === "preenchido") return { para: "reconhecido", rot: "Voltou do cartório" };
+  if (p.situacao === "reconhecido") return { para: "entregue", rot: p.entrega === "envio" ? "Enviei" : "Entreguei" };
+  return null;
+};
+
+function CartaoDut({ p, aoMudar }) {
+  const [aberto, setAberto] = useState(false);
+  const [ocupado, setOcupado] = useState(false);
+  const [erro, setErro] = useState("");
+  const [pend, setPend] = useState(p.pendencia || "");
+  const [rast, setRast] = useState(p.rastreio || "");
+
+  const info = DUT_SITUACAO[p.situacao] || DUT_SITUACAO.recebido;
+  const passo = proximoPasso(p);
+  const anexos = Array.isArray(p.dut_anexo) ? p.dut_anexo : [];
+
+  const agir = async (mud) => {
+    setOcupado(true);
+    try { await aoMudar(p.id, mud); setErro(""); }
+    catch (e) { setErro(e.message); }
+    setOcupado(false);
+  };
+
+  return (
+    <section className="rounded-xl p-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[15px] font-bold" style={{ fontFamily: F.mono }}>{p.placa}</span>
+            <span className="rounded-full px-2 py-0.5 text-[11.5px] font-semibold"
+              style={{ background: info.cor + "18", color: info.cor }}>{info.rot}</span>
+            {p.tipo === "reconhecer" && (
+              <span className="rounded-full px-2 py-0.5 text-[11.5px]"
+                style={{ background: C.bg, color: C.mute }}>só reconhecer</span>
+            )}
+          </div>
+          <p className="mt-0.5 text-[12.5px]" style={{ color: C.mute }}>
+            <span style={{ fontFamily: F.mono }}>{p.protocolo}</span>
+            {p.lojista_nome && ` · ${p.lojista_nome}`}
+            {` · ${diaBR(p.criado_em)}`}
+          </p>
+        </div>
+        {p.lojista_whats && (
+          <a href={zap(p.lojista_whats, `Olá! Sobre o DUT ${p.protocolo} (placa ${p.placa}):`)}
+            target="_blank" rel="noopener noreferrer"
+            className="shrink-0 rounded-lg border px-3 py-1.5 text-[12.5px] font-semibold"
+            style={{ borderColor: C.line, color: C.ink }}>WhatsApp</a>
+        )}
+      </div>
+
+      {p.pendencia && p.situacao === "pendente" && (
+        <p className="mt-2 rounded-lg px-3 py-2 text-[13px]" style={{ background: "#FFF6F0", color: C.laranja }}>
+          Falta: {p.pendencia}
+        </p>
+      )}
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {passo && (
+          <button onClick={() => agir({ situacao: passo.para })} disabled={ocupado}
+            className="rounded-lg px-3 py-2 text-[13.5px] font-semibold text-white"
+            style={{ background: C.roxo, opacity: ocupado ? 0.5 : 1 }}>{passo.rot}</button>
+        )}
+        <button onClick={() => setAberto(!aberto)}
+          className="rounded-lg border px-3 py-2 text-[13.5px] font-semibold"
+          style={{ borderColor: C.line, color: C.ink }}>{aberto ? "Fechar" : "Abrir"}</button>
+      </div>
+
+      {erro && <p className="mt-2 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+
+      {aberto && (
+        <div className="mt-3 space-y-3 border-t pt-3" style={{ borderColor: C.line }}>
+          <div className="grid gap-x-5 gap-y-1 text-[13px] sm:grid-cols-2">
+            {[["Veículo", p.veiculo], ["Nome a preencher", p.comprador_nome],
+              ["CPF/CNPJ", p.comprador_doc], ["RG", p.comprador_rg],
+              ["Endereço", p.comprador_endereco],
+              ["Valor da venda", p.valor_venda != null ? brl(p.valor_venda) : null],
+              ["KM", p.km], ["Data da venda", p.data_venda ? diaBR(p.data_venda) : null],
+              ["Entrega", p.entrega === "envio" ? "enviar" : "retira na loja"],
+              ["Endereço de envio", p.endereco_envio]].filter(([, v]) => v).map(([r, v]) => (
+              <div key={r}>
+                <div className="text-[10px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>{r}</div>
+                <div className="leading-snug">{v}</div>
+              </div>
+            ))}
+          </div>
+
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>Anexos do lojista</div>
+            {anexos.length ? (
+              <div className="mt-1 flex flex-wrap gap-2">
+                {anexos.map((a) => (
+                  <span key={a.id} className="rounded-lg px-2.5 py-1 text-[12.5px]"
+                    style={{ background: C.bg, color: C.ink }}>{a.rotulo || a.nome || "arquivo"}</span>
+                ))}
+              </div>
+            ) : (
+              /* Sem anexo é informação, não espaço em branco: o lojista
+                 pode ter mandado pelo WhatsApp, e é isso que se cobra. */
+              <p className="mt-1 text-[12.5px]" style={{ color: C.laranja }}>
+                Nenhum arquivo chegou com o pedido.
+              </p>
+            )}
+          </div>
+
+          <Campo label="O que falta" nota="Escrito aqui, aparece para o lojista na consulta do protocolo.">
+            <input className={inputCls} style={inputSty} value={pend} onChange={(e) => setPend(e.target.value)} />
+          </Campo>
+          {p.entrega === "envio" && (
+            <Campo label="Rastreio">
+              <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} value={rast} onChange={(e) => setRast(e.target.value)} />
+            </Campo>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => agir({ pendencia: pend, rastreio: rast, situacao: pend ? "pendente" : undefined })}
+              disabled={ocupado} className="rounded-lg border px-3 py-2 text-[13.5px] font-semibold"
+              style={{ borderColor: C.line, color: C.ink }}>Salvar</button>
+            {p.situacao !== "recebido" && (
+              <button onClick={() => agir({ situacao: "recebido", pendencia: "" })} disabled={ocupado}
+                className="rounded-lg px-3 py-2 text-[13.5px] font-semibold"
+                style={{ color: C.mute }}>Voltar para a fila</button>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function FilaDut() {
+  const [lista, setLista] = useState(null);
+  const [erro, setErro] = useState("");
+  const [situacao, setSituacao] = useState("abertos");
+  const [q, setQ] = useState("");
+  const [busca, setBusca] = useState("");
+
+  const carregar = () => dutFila({ situacao, q: busca }).then(setLista).catch((e) => setErro(e.message));
+  useEffect(() => { setLista(null); setErro(""); carregar(); }, [situacao, busca]);
+
+  const mudar = async (id, mud) => {
+    const novo = await dutMudar(id, mud);
+    setLista((ls) => (ls || []).map((x) => (x.id === id ? { ...x, ...novo } : x)));
+  };
+
+  const conta = (s) => (lista || []).filter((x) => x.situacao === s).length;
+
+  return (
+    <div>
+      <div className="mb-3 flex gap-2">
+        <input className={inputCls} style={inputSty} placeholder="Placa, protocolo ou lojista"
+          value={q} onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") setBusca(q.trim()); }} />
+        <button onClick={() => setBusca(q.trim())} className="shrink-0 rounded-lg border px-4 text-[14px] font-semibold"
+          style={{ borderColor: C.line, color: C.ink }}>Buscar</button>
+      </div>
+
+      <div className="mb-4 flex flex-wrap gap-1.5">
+        {[["abertos", "Em aberto"], ["recebido", "Recebidos"], ["pendente", "Falta algo"],
+          ["preenchido", "No cartório"], ["reconhecido", "Prontos para entregar"], ["entregue", "Entregues"]].map(([v, r]) => (
+          <button key={v} onClick={() => setSituacao(v)}
+            className="rounded-full px-3 py-1.5 text-[13px] font-semibold"
+            style={situacao === v ? { background: C.roxo, color: "#fff" }
+                                  : { background: C.paper, color: C.mute, border: `1px solid ${C.line}` }}>{r}</button>
+        ))}
+      </div>
+
+      {erro && <p className="mb-3 text-[14px]" style={{ color: C.laranja }}>{erro}</p>}
+      {!lista && !erro && <p className="text-[14px]" style={{ color: C.mute }}>carregando…</p>}
+
+      {lista && !lista.length && (
+        <Bloco titulo={situacao === "abertos" ? "Nada em aberto" : "Nenhum pedido aqui"}>
+          <p className="text-[13.5px] leading-relaxed" style={{ color: C.mute }}>
+            {situacao === "abertos"
+              ? "Todo pedido de DUT está entregue."
+              : "Os pedidos entram sozinhos quando o lojista envia pela página."}
+          </p>
+        </Bloco>
+      )}
+
+      {!!(lista || []).length && situacao === "abertos" && (
+        <p className="mb-3 text-[12.5px]" style={{ color: C.mute }}>
+          {conta("recebido")} para preencher · {conta("preenchido")} no cartório ·{" "}
+          {conta("reconhecido")} prontos para entregar
+          {conta("pendente") ? ` · ${conta("pendente")} esperando o lojista` : ""}
+        </p>
+      )}
+
+      <div className="grid gap-3 lg:grid-cols-2">
+        {(lista || []).map((p) => <CartaoDut key={p.id} p={p} aoMudar={mudar} />)}
+      </div>
+
+      <p className="mt-4 text-[12.5px] leading-relaxed" style={{ color: C.mute }}>
+        O lojista pede em <span style={{ fontFamily: F.mono }}>/dut.html</span> e acompanha pelo
+        protocolo. O que você escreve em “o que falta” é o que ele lê lá.
+      </p>
+    </div>
+  );
+}
+
 function TelaADM({ perfil, comp, mes }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
   const [foco, setFoco] = useState(null);      // atendimento aberto
   const [aba, setAba] = useState("negocio");
+  const [secao, setSecao] = useState("negocios");
   const [cl, setCl] = useState(null);
   const [indo, setIndo] = useState(false);
   const [salvo, setSalvo] = useState(false);
@@ -15817,10 +16065,26 @@ function TelaADM({ perfil, comp, mes }) {
 
   return (
     <div>
-      <Cabecalho titulo="Administrativo" mes={mes}
-        sub={lista ? `${lista.length} fechados · ${pendentes} esperando conferência` : "Carregando…"} />
+      <Cabecalho titulo="Administrativo" mes={secao === "negocios" ? mes : null}
+        sub={secao === "dut" ? "Os pedidos de DUT dos lojistas, do recebimento à entrega."
+          : lista ? `${lista.length} fechados · ${pendentes} esperando conferência` : "Carregando…"} />
 
-      <div className="space-y-2">
+      {/* Dois trabalhos diferentes no mesmo setor: conferir o negócio
+          que a loja fechou, e preencher o DUT do carro que o lojista
+          comprou. O segundo tem fila própria porque a contraparte é
+          outra -- a rede, não o cliente. */}
+      <div className="mb-4 flex flex-wrap gap-1.5">
+        {[["negocios", "Negócios fechados"], ["dut", "DUT dos lojistas"]].map(([v, r]) => (
+          <button key={v} onClick={() => setSecao(v)}
+            className="rounded-full px-3.5 py-1.5 text-[13px] font-semibold"
+            style={secao === v ? { background: C.roxo, color: "#fff" }
+                               : { background: C.paper, color: C.ink, border: `1px solid ${C.line}` }}>{r}</button>
+        ))}
+      </div>
+
+      {secao === "dut" && <FilaDut />}
+
+      <div className="space-y-2" style={{ display: secao === "negocios" ? "block" : "none" }}>
         {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
 
         {lista && !lista.length && (

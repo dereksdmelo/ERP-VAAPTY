@@ -1672,6 +1672,77 @@ retorno. Não há categoria de marketing no financeiro; enquanto não
 houver, não se calcula ROI — e inventar o custo seria pior que não ter
 o número.
 
+### 50. O DUT: o lojista pede numa página nossa, o administrativo acompanha
+
+A Vaapty preenche o DUT/ATPV do carro que o lojista comprou e manda
+reconhecer firma em cartório. Isso vivia num formulário do Google com
+**1.278 respostas**, e o acompanhamento eram **dois comentários de
+célula** — na prática, não existia: ninguém respondia "o meu já saiu?"
+sem abrir a planilha e procurar a linha.
+
+**São dois pedidos diferentes no mesmo formulário**, e é por isso que
+`tipo` existe (0057): ou o lojista manda os dados e a Vaapty
+**preenche**, ou ele manda a ATPV já preenchida e quer só o
+**reconhecimento**. O segundo pula a etapa de preenchimento inteira —
+tratar os dois como um só faria metade da fila parecer atrasada, e a
+trilha do lojista mostraria um passo parado que nunca vai acontecer.
+
+**O protocolo é o que se dita no WhatsApp.** `DUT-2026-0184` se fala
+ao telefone; um hash de timestamp não. Sequencial por ano, com índice
+único e laço de repetição — `max + 1` sozinho daria dois pedidos com o
+mesmo número quando dois lojistas enviam no mesmo segundo, e sequência
+do Postgres não serve porque o número zera a cada ano (mesma conta do
+recibo, decisão 40).
+
+**O lojista não tem login e nunca vai ter** — são dezenas de lojas.
+`dut.html` é estática, como as páginas de assinatura (decisão 42), e o
+POST público vem **antes da checagem de sessão**, como o webhook do
+ZapSign e a ponte do WhatsApp. **Nada disso usa a chave de serviço:**
+`dut_criar()`, `dut_anexar()` e `dut_estado()` são funções estreitas
+da 0057. Numa rota pública, a chave abriria o banco inteiro a quem
+descobrisse a URL — é a decisão 9 inteira em jogo.
+
+**O arquivo é a exceção, e por isso mora no `api/foto.js`.** Escrever
+no Storage exige a chave de serviço, e aquele arquivo é onde ela já
+está confinada; levá-la para outro lugar seria espalhá-la. A LINHA do
+anexo, essa não usa a chave — vai pela função estreita. **O que segura
+uma rota pública que escreve arquivo**, em ordem: o token do pedido
+(32 bytes, guardado em hash), a janela de duas horas, o teto de 10 MB
+e os quatro tipos que o bucket aceita. Sem token não sobe nada.
+
+**O bucket é o `documentos-veiculo` que já existe** (0008), que aceita
+PDF e imagem até 10 MB. Bucket novo significaria política nova de
+Storage e mais um lugar para o arquivo se perder (decisão 23).
+
+**O arquivo vai em base64 dentro de JSON, nunca como corpo binário.**
+O adaptador do Worker lê corpo como TEXTO: binário cru chegaria
+corrompido **sem erro nenhum**, e só se descobriria ao abrir o PDF
+meses depois. É o mesmo formato do anexo que já existia.
+
+**Nada fica órfão:** token errado apaga o arquivo do bucket antes de
+devolver o erro — a mesma ordem da decisão 6.
+
+**A consulta pública mostra o MÍNIMO.** Quem tem um protocolo vê o
+estado e as datas; nome, CPF, endereço e os arquivos ficam fora —
+protocolo não pode ler o cadastro do comprador de outra pessoa. Mesma
+régua da verificação da assinatura (decisão 42).
+
+**Os passos são carimbados pelo servidor**, a partir do token de quem
+marcou: "preenchido por quem" é a pergunta que importa quando o
+cartório devolve o papel errado (0008). E **desfazer um passo apaga o
+carimbo junto** — data de preenchimento num pedido que voltou para a
+fila é mentira que ninguém vê.
+
+**A fila abre no que dá trabalho**, não em tudo: entregue junto do
+pendente obriga a procurar o que falta fazer. E **"o que falta" é o
+mesmo texto que o lojista lê** na consulta do protocolo — sem isso,
+"pendente" não diz o que cobrar.
+
+**O que ficou de fora:** as 1.278 respostas antigas não foram
+importadas. Elas estão fechadas (o papel já circulou), e trazê-las
+encheria a fila de trabalho que ninguém vai fazer. Se o histórico for
+necessário, o caminho é o mesmo do CRM: colar a planilha (decisão 13).
+
 ## Convenções do código
 
 - **Português no domínio.** Estado, funções e rótulos em pt-BR

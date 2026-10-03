@@ -58,6 +58,33 @@ usuário, ou a decisão do Derek de abrir a exceção da chave de serviço.
 
 ---
 
+## O DUT
+
+### Avisar a rede do link novo
+A página está no ar em `/dut.html` e o formulário do Google continua
+recebendo. Enquanto os dois existirem, os pedidos chegam em dois
+lugares.
+
+*Destrava com:* o Derek mandando o link à rede e desligando o Forms —
+ou deixando no Forms uma resposta automática com o endereço novo.
+
+### As 1.278 respostas antigas
+Não foram importadas: estão fechadas, e trazê-las encheria a fila de
+trabalho que ninguém vai fazer. O histórico continua na planilha.
+
+*Destrava com:* colar a planilha, se o histórico passar a ser
+necessário — o mesmo caminho da importação do CRM.
+
+### Avisar o lojista sozinho
+Hoje o administrativo aperta o passo e o lojista só sabe se consultar o
+protocolo. O botão de WhatsApp no cartão abre a conversa escrita, mas
+quem manda é a pessoa.
+
+*Destrava com:* o envio pela ponte do WhatsApp, que ainda não existe
+(decisão 48) — aí o aviso sai sozinho a cada passo.
+
+---
+
 ## Esperando terceiro
 
 ### API da tabela AutoAvaliar

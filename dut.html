@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="robots" content="noindex, nofollow" />
+<meta name="referrer" content="no-referrer" />
+<title>Preenchimento de DUT — Vaapty Joinville</title>
+<!--
+  O pedido de DUT do lojista.
+
+  **Estática, como assinar.html e verificar.html** (decisão 42): o
+  lojista não tem login e nunca vai ter — são dezenas de lojas da rede.
+
+  **Substitui o formulário do Google** que acumulou 1.278 respostas e
+  onde o acompanhamento eram dois comentários de célula. O que muda de
+  verdade não é o formulário: é o protocolo que volta na tela, e que o
+  lojista dita no WhatsApp para saber onde o papel dele está.
+
+  **Nada aqui usa a chave de serviço.** O pedido entra por
+  `dut_criar()` e o anexo por `dut_anexar()`, funções estreitas da
+  0057 — e o arquivo sobe pelo `api/foto.js`, que é o único lugar com
+  a chave (decisão 9). Quem trocar isso por uma rota com a chave de
+  serviço abre o banco inteiro a quem descobrir a URL.
+
+  **O token volta uma vez e serve só para os anexos**, por duas horas.
+  O banco guarda o hash: vazamento não entrega nenhum token, e token
+  perdido não se recupera — faz-se outro pedido.
+-->
+<style>
+  :root{
+    --roxo:#6D1B9E; --tinta:#1B1725; --mute:#6B6478; --linha:#E6E2EC;
+    --papel:#FFFFFF; --fundo:#F7F5FA; --verde:#1D7F58; --laranja:#EA5423;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--fundo);color:var(--tinta);
+       font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+       -webkit-text-size-adjust:100%}
+  .caixa{max-width:640px;margin:0 auto;padding:16px 14px 48px}
+  .marca{display:flex;align-items:center;gap:8px;padding:14px 0}
+  .logo{width:30px;height:30px;border-radius:8px;background:var(--roxo);color:#fff;
+        display:grid;place-items:center;font-weight:800}
+  .cartao{background:var(--papel);border:1px solid var(--linha);border-radius:14px;padding:16px;margin-bottom:14px}
+  h1{font-size:21px;margin:0 0 4px}
+  h2{font-size:15px;margin:0 0 2px}
+  .sub{color:var(--mute);font-size:13px;margin:0}
+  label{display:block;margin-top:11px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute)}
+  input,textarea,select{width:100%;margin-top:3px;padding:11px 12px;border:1px solid var(--linha);border-radius:9px;
+        font-size:16px;background:#fff;color:var(--tinta);font-family:inherit}
+  textarea{min-height:72px;resize:vertical}
+  input:focus,textarea:focus,select:focus{outline:2px solid var(--roxo);outline-offset:-1px}
+  .duas{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .escolha{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:4px}
+  .op{border:1px solid var(--linha);border-radius:11px;padding:12px;background:#fff;text-align:left;
+       cursor:pointer;color:var(--tinta);font-weight:400;font-size:14px;margin:0;width:auto}
+  .op.on{border-color:var(--roxo);background:#F6EEFB}
+  .op b{display:block;font-size:14px;margin-bottom:2px;font-weight:700;color:var(--tinta)}
+  .op span{font-size:12px;color:var(--mute);line-height:1.4}
+  .arq{margin-top:10px;border:1px dashed var(--linha);border-radius:10px;padding:12px;background:#fff}
+  .arq b{font-size:13px}
+  .arq .sub{font-size:12px;margin-top:2px}
+  .arq input[type=file]{border:0;padding:8px 0 0;font-size:13px}
+  .nomearq{font-size:12px;color:var(--verde);margin-top:4px;word-break:break-all}
+  button{width:100%;padding:14px;border:0;border-radius:10px;background:var(--roxo);color:#fff;
+         font-size:15px;font-weight:700;margin-top:16px;cursor:pointer}
+  button:disabled{opacity:.4;cursor:default}
+  .erro{color:var(--laranja);font-size:13.5px;margin-top:10px}
+  .aviso{background:#FFF6E0;color:#8A6100;border-radius:9px;padding:10px 12px;font-size:12.5px;line-height:1.45;margin-top:10px}
+  .fim{text-align:center;padding:22px 8px}
+  .cod{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700;letter-spacing:.04em}
+  .fim .cod{font-size:26px;color:var(--roxo);display:block;margin:12px 0}
+  .passo{color:var(--mute);font-size:12.5px;margin-top:14px;line-height:1.5}
+  .linha{height:1px;background:var(--linha);margin:16px 0}
+  .consulta{display:flex;gap:8px;margin-top:6px}
+  .consulta input{margin:0}
+  .consulta button{width:auto;margin:0;padding:11px 16px;font-size:14px}
+  .estado{margin-top:12px;font-size:14px}
+  .estado b{color:var(--roxo)}
+  .trilha{list-style:none;padding:0;margin:10px 0 0}
+  .trilha li{padding:5px 0 5px 22px;position:relative;font-size:13.5px;color:var(--mute)}
+  .trilha li.ok{color:var(--tinta)}
+  .trilha li::before{content:"○";position:absolute;left:0;color:var(--linha)}
+  .trilha li.ok::before{content:"●";color:var(--verde)}
+</style>
+</head>
+<body>
+<div class="caixa">
+  <div class="marca"><div class="logo">V</div><strong>Vaapty Joinville</strong></div>
+
+  <div id="app"></div>
+
+  <div class="cartao" id="consultar">
+    <h2>Já pediu? Veja onde está</h2>
+    <p class="sub">Digite o protocolo que recebeu.</p>
+    <div class="consulta">
+      <input id="prot" placeholder="DUT-2026-0001" autocapitalize="characters" />
+      <button type="button" onclick="consultar()">Ver</button>
+    </div>
+    <div id="estado"></div>
+  </div>
+</div>
+
+<script>
+const API = "/api/checklist?recurso=dut-publico";
+const el = (id) => document.getElementById(id);
+let tipo = "preencher";
+const arquivos = {};
+
+function desenhar() {
+  el("app").innerHTML = `
+    <div class="cartao">
+      <h1>Preenchimento de DUT</h1>
+      <p class="sub">Mande os dados uma vez. Você recebe um protocolo para acompanhar.</p>
+      <div class="escolha" style="margin-top:14px">
+        <button type="button" class="op ${tipo === "preencher" ? "on" : ""}" onclick="trocar('preencher')">
+          <b>Preencher o DUT</b><span>Mando os dados e a Vaapty preenche e reconhece</span>
+        </button>
+        <button type="button" class="op ${tipo === "reconhecer" ? "on" : ""}" onclick="trocar('reconhecer')">
+          <b>Só reconhecer firma</b><span>Já preenchi a ATPV, quero só o reconhecimento</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="cartao">
+      <h2>O veículo</h2>
+      <label>Placa *</label>
+      <input id="placa" autocapitalize="characters" placeholder="ABC1D23" />
+      <label>Modelo, ano e cor</label>
+      <input id="veiculo" placeholder="Fiat Punto Essence 2010/2011 prata" />
+    </div>
+
+    <div id="dados" style="display:${tipo === "preencher" ? "block" : "none"}">
+      <div class="cartao">
+        <h2>Quem vai constar no documento</h2>
+        <label>Nome a ser preenchido</label>
+        <input id="comprador_nome" />
+        <div class="duas">
+          <div><label>CPF ou CNPJ</label><input id="comprador_doc" inputmode="numeric" /></div>
+          <div><label>RG</label><input id="comprador_rg" /></div>
+        </div>
+        <label>Endereço completo</label>
+        <textarea id="comprador_endereco"></textarea>
+        <div class="duas">
+          <div><label>Valor da venda</label><input id="valor_venda" inputmode="decimal" placeholder="29.900" /></div>
+          <div><label>KM</label><input id="km" inputmode="numeric" /></div>
+        </div>
+        <label>Data da venda</label>
+        <input id="data_venda" type="date" />
+      </div>
+    </div>
+
+    <div class="cartao">
+      <h2>Documentos</h2>
+      <p class="sub">Foto nítida, com os dados legíveis. PDF, JPG ou PNG, até 10 MB cada.</p>
+      ${tipo === "preencher" ? `
+        ${campoArquivo("cnh", "CNH de quem vai constar", "Frente e verso, ou o documento aberto")}
+        ${campoArquivo("residencia", "Comprovante de residência", "Conta recente, no nome ou com o endereço")}
+        ${campoArquivo("atpv", "ATPV já preenchida (opcional)", "Se já preencheu, agiliza — vai direto ao cartório")}
+      ` : `
+        ${campoArquivo("atpv", "ATPV preenchida *", "É o documento que vai ao cartório")}
+      `}
+    </div>
+
+    <div class="cartao">
+      <h2>Entrega do documento reconhecido</h2>
+      <div class="escolha" style="margin-top:8px">
+        <button type="button" class="op ${entrega === "retirada" ? "on" : ""}" onclick="trocarEntrega('retirada')">
+          <b>Retiro na loja</b><span>Passo na Vaapty quando ficar pronto</span>
+        </button>
+        <button type="button" class="op ${entrega === "envio" ? "on" : ""}" onclick="trocarEntrega('envio')">
+          <b>Enviar para mim</b><span>Mando o endereço com CEP</span>
+        </button>
+      </div>
+      <div id="envio" style="display:${entrega === "envio" ? "block" : "none"}">
+        <label>Endereço completo com CEP</label>
+        <textarea id="endereco_envio"></textarea>
+      </div>
+    </div>
+
+    <div class="cartao">
+      <h2>Quem está pedindo</h2>
+      <label>Seu nome ou o da loja</label>
+      <input id="lojista_nome" />
+      <label>WhatsApp</label>
+      <input id="lojista_whats" inputmode="tel" placeholder="47 99999-9999" />
+      <p class="aviso">É por aqui que avisamos quando o documento ficar pronto.</p>
+    </div>
+
+    <button id="enviar" onclick="enviar()">Enviar pedido</button>
+    <div id="erro" class="erro"></div>
+    <p class="passo">Ao enviar, você recebe um protocolo. Guarde-o: é com ele que dá
+    para saber se o documento já foi preenchido e se já voltou do cartório.</p>
+  `;
+}
+
+let entrega = "retirada";
+function campoArquivo(id, titulo, dica) {
+  return `<div class="arq">
+    <b>${titulo}</b><div class="sub">${dica}</div>
+    <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onchange="pegar('${id}', this)" />
+    <div class="nomearq" id="n_${id}"></div>
+  </div>`;
+}
+function trocar(t) { tipo = t; desenhar(); }
+function trocarEntrega(e) { entrega = e; desenhar(); }
+
+/* O ARQUIVO VIRA BASE64 AQUI, no navegador. O corpo do POST é JSON
+   porque o Worker do Cloudflare lê corpo como texto — binário cru
+   chegaria corrompido do outro lado, sem erro nenhum, e só se
+   descobriria ao abrir o PDF meses depois. */
+function pegar(id, input) {
+  const f = input.files && input.files[0];
+  if (!f) { delete arquivos[id]; el("n_" + id).textContent = ""; return; }
+  if (f.size > 10 * 1024 * 1024) { el("n_" + id).textContent = "Esse arquivo passa de 10 MB."; input.value = ""; return; }
+  const r = new FileReader();
+  r.onload = () => {
+    arquivos[id] = { nome: f.name, tipo: f.type || "application/pdf", base64: String(r.result).split(",")[1] };
+    el("n_" + id).textContent = f.name;
+  };
+  r.readAsDataURL(f);
+}
+
+const ROTULO = { cnh: "CNH", residencia: "Comprovante de residência", atpv: "ATPV preenchida" };
+
+async function enviar() {
+  const b = el("enviar"); const erro = el("erro");
+  erro.textContent = "";
+  const placa = (el("placa").value || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  if (placa.length < 7) { erro.textContent = "Confira a placa."; return; }
+  if (tipo === "reconhecer" && !arquivos.atpv) { erro.textContent = "Anexe a ATPV preenchida."; return; }
+
+  b.disabled = true; b.textContent = "enviando…";
+  const v = (id) => { const e = el(id); return e ? (e.value || "").trim() : ""; };
+  try {
+    const r = await fetch(API, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tipo, placa, veiculo: v("veiculo"),
+        comprador_nome: v("comprador_nome"), comprador_doc: v("comprador_doc"),
+        comprador_rg: v("comprador_rg"), comprador_endereco: v("comprador_endereco"),
+        valor_venda: v("valor_venda"), km: v("km"), data_venda: v("data_venda"),
+        entrega, endereco_envio: v("endereco_envio"),
+        lojista_nome: v("lojista_nome"), lojista_whats: v("lojista_whats"),
+      }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.erro || "Não consegui enviar.");
+
+    // Os anexos vão em seguida, com o token que só volta uma vez.
+    // Falha de anexo não perde o pedido: ele já existe, e a tela diz o
+    // que não subiu para o lojista mandar pelo WhatsApp.
+    const faltaram = [];
+    for (const id of Object.keys(arquivos)) {
+      const a = arquivos[id];
+      try {
+        const ra = await fetch(`/api/foto?recurso=dut-anexo&id=${d.id}&token=${encodeURIComponent(d.token)}`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ arquivo_base64: a.base64, nome: a.nome, tipo: a.tipo, rotulo: ROTULO[id] || "Outro" }),
+        });
+        if (!ra.ok) faltaram.push(ROTULO[id] || id);
+      } catch (e) { faltaram.push(ROTULO[id] || id); }
+    }
+    pronto(d.protocolo, faltaram);
+  } catch (e) {
+    erro.textContent = e.message || "Não consegui enviar.";
+    b.disabled = false; b.textContent = "Enviar pedido";
+  }
+}
+
+function pronto(protocolo, faltaram) {
+  el("app").innerHTML = `<div class="cartao fim">
+    <h1>Pedido recebido</h1>
+    <p class="sub">Guarde o protocolo — é com ele que você acompanha.</p>
+    <span class="cod">${protocolo}</span>
+    ${faltaram && faltaram.length
+      ? `<div class="aviso">Não consegui anexar: ${faltaram.join(", ")}. Mande pelo WhatsApp
+         citando o protocolo — o pedido já está na fila.</div>`
+      : `<p class="sub">Avisamos no WhatsApp quando ficar pronto.</p>`}
+  </div>`;
+  el("prot").value = protocolo;
+  window.scrollTo(0, 0);
+  consultar();
+}
+
+const PASSOS = [
+  ["recebido", "Recebido"],
+  ["preenchido", "Documento preenchido"],
+  ["reconhecido", "Reconhecido em cartório"],
+  ["entregue", "Entregue"],
+];
+async function consultar() {
+  const p = (el("prot").value || "").trim();
+  const alvo = el("estado");
+  if (!p) { alvo.innerHTML = ""; return; }
+  alvo.innerHTML = '<div class="estado">consultando…</div>';
+  try {
+    const r = await fetch(`${API}&acao=estado&protocolo=${encodeURIComponent(p)}`);
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.erro || "Não achei.");
+    const x = d.pedido;
+    // "Só reconhecer" pula o preenchimento: mostrar aquele passo
+    // apagado faria o pedido parecer travado quando ele está em dia.
+    const passos = PASSOS.filter((s) => !(x.tipo === "reconhecer" && s[0] === "preenchido"));
+    const feito = { recebido: true, preenchido: !!x.preenchido_em, reconhecido: !!x.reconhecido_em, entregue: !!x.entregue_em };
+    alvo.innerHTML = `<div class="estado">
+      <b>${x.protocolo}</b> · placa ${x.placa}
+      ${x.pendencia ? `<div class="aviso">Falta: ${x.pendencia}</div>` : ""}
+      <ul class="trilha">${passos.map((s) => `<li class="${feito[s[0]] ? "ok" : ""}">${s[1]}</li>`).join("")}</ul>
+      ${x.rastreio ? `<p class="sub">Rastreio: <span class="cod">${x.rastreio}</span></p>` : ""}
+    </div>`;
+  } catch (e) {
+    alvo.innerHTML = `<div class="erro">${e.message || "Não achei esse protocolo."}</div>`;
+  }
+}
+
+desenhar();
+</script>
+</body>
+</html>

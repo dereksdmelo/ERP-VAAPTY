@@ -283,12 +283,170 @@ async function documentos(req, res, tok) {
   return res.status(405).json({ erro: "Use GET, PUT ou DELETE." });
 }
 
+/* ===================== O DUT =====================
+ *
+ * O lojista pede o preenchimento (ou só o reconhecimento de firma) e o
+ * administrativo acompanha. Vivia num formulário do Google com 1.278
+ * respostas, onde o acompanhamento eram dois comentários de célula.
+ *
+ * **Mora aqui** porque é a conferência de documento do administrativo,
+ * que é o assunto deste arquivo (decisão 30) — e porque arquivo novo
+ * em `api/` tem teto.
+ *
+ * **O lojista não tem login e nunca vai ter** — são dezenas de lojas
+ * da rede. Por isso o POST público vem ANTES da checagem de sessão e
+ * passa pelas funções estreitas da 0057, nunca pela chave de serviço
+ * (decisões 9 e 42).
+ */
+const crypto = require("crypto");
+const hashDe = (t) => crypto.createHash("sha256").update(String(t)).digest("hex");
+const REST_DUT = `${URL_BASE}/rest/v1/dut_pedido`;
+
+const rpcPub = async (nome, corpo) => {
+  const r = await fetch(`${URL_BASE}/rest/v1/rpc/${nome}`, {
+    method: "POST",
+    headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, "Content-Type": "application/json" },
+    body: JSON.stringify(corpo),
+  });
+  const t = await r.text();
+  if (!r.ok) { const e = new Error(t.slice(0, 200)); e.status = r.status; throw e; }
+  try { return t ? JSON.parse(t) : null; } catch (x) { return null; }
+};
+
+async function dutPublico(req, res) {
+  const acao = String(req.query.acao || "");
+
+  // "Cadê o meu?" — só o estado, nunca o cadastro do comprador.
+  if (acao === "estado" && req.method === "GET") {
+    const prot = String(req.query.protocolo || "").trim();
+    if (!prot) return res.status(400).json({ erro: "Informe o protocolo." });
+    const r = await rpcPub("dut_estado", { p_protocolo: prot });
+    const linha = Array.isArray(r) ? r[0] : r;
+    if (!linha) return res.status(404).json({ erro: "Não achei esse protocolo." });
+    return res.status(200).json({ pedido: linha });
+  }
+
+  if (req.method !== "POST") { res.setHeader("Allow", "POST"); return res.status(405).json({ erro: "método" }); }
+
+  const c = (req.body && typeof req.body === "object") ? req.body : {};
+  const placa = String(c.placa || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  if (placa.length < 7) return res.status(400).json({ erro: "Confira a placa." });
+
+  /* O TIPO SAI DO QUE FOI PEDIDO, não de um botão a mais. Quem manda a
+   * ATPV já preenchida quer só o reconhecimento — e esse pedido pula a
+   * etapa de preenchimento inteira. Tratar os dois como um só faria
+   * metade da fila parecer atrasada. */
+  const tipo = c.tipo === "reconhecer" ? "reconhecer" : "preencher";
+  const token = crypto.randomBytes(32).toString("base64url");
+
+  const r = await rpcPub("dut_criar", {
+    p_token_hash: hashDe(token), p_tipo: tipo, p_placa: placa,
+    p_veiculo: texto(c.veiculo), p_nome: texto(c.comprador_nome),
+    p_doc: texto(c.comprador_doc), p_rg: texto(c.comprador_rg),
+    p_endereco: texto(c.comprador_endereco),
+    p_valor: decimal(c.valor_venda), p_km: Number(String(c.km || "").replace(/\D/g, "")) || null,
+    p_data: /^\d{4}-\d{2}-\d{2}$/.test(String(c.data_venda || "")) ? c.data_venda : null,
+    p_entrega: c.entrega === "envio" ? "envio" : "retirada",
+    p_envio: texto(c.endereco_envio), p_lojista: texto(c.lojista_nome), p_whats: texto(c.lojista_whats),
+  });
+  const linha = Array.isArray(r) ? r[0] : r;
+  if (!linha || !linha.id) return res.status(502).json({ erro: "Não consegui registrar o pedido." });
+  // O token volta UMA vez, para os anexos subirem em seguida. Ele não
+  // é recuperável: o banco guarda só o hash (0057).
+  return res.status(200).json({ id: linha.id, protocolo: linha.protocolo, token });
+}
+
+/* A FILA DO ADMINISTRATIVO. Quem decide é a RLS da 0057 — ler é da
+ * equipe (o negociador também ouve "cadê o DUT?" na mesa), escrever é
+ * de quem é administrativo ou gerente. */
+async function dutFila(req, res, tok) {
+  const id = String(req.query.id || "");
+
+  if (req.method === "GET") {
+    if (RX_UUID.test(id)) {
+      const r = await fetch(`${REST_DUT}?select=*,dut_anexo(*)&id=eq.${id}`, { headers: cabecalhos(tok) });
+      const linha = (await r.json().catch(() => []))[0];
+      if (!linha) return res.status(404).json({ erro: "Pedido não encontrado." });
+      return res.status(200).json({ pedido: linha });
+    }
+    const f = [];
+    const sit = String(req.query.situacao || "");
+    if (["recebido", "pendente", "preenchido", "reconhecido", "entregue", "cancelado"].indexOf(sit) >= 0) {
+      f.push(`situacao=eq.${sit}`);
+    } else if (sit === "abertos") {
+      // O padrão é o que ainda dá trabalho: fila que mostra os
+      // entregues junto obriga a procurar o que falta fazer.
+      f.push("situacao=in.(recebido,pendente,preenchido,reconhecido)");
+    }
+    const q = String(req.query.q || "").trim().replace(/[(),*]/g, " ").trim();
+    if (q) f.push(`or=(placa.ilike.*${q}*,protocolo.ilike.*${q}*,lojista_nome.ilike.*${q}*,comprador_nome.ilike.*${q}*)`);
+    const lim = Math.min(300, Math.max(1, Number(req.query.limite) || 80));
+    const r = await fetch(`${REST_DUT}?select=*,dut_anexo(id,rotulo,nome,tipo)&order=criado_em.desc&limit=${lim}${f.length ? `&${f.join("&")}` : ""}`,
+      { headers: cabecalhos(tok) });
+    if (!r.ok) return res.status(r.status === 401 ? 401 : 502).json({ erro: "Não consegui ler a fila." });
+    return res.status(200).json({ pedidos: await r.json().catch(() => []) });
+  }
+
+  if (req.method === "PATCH" && RX_UUID.test(id)) {
+    const c = (req.body && typeof req.body === "object") ? req.body : {};
+    const mud = { atualizado_em: new Date().toISOString() };
+    const eu = donoDoToken(tok);
+
+    /* O CARIMBO É DO SERVIDOR, não da tela. "Preenchido por quem" é a
+     * pergunta que importa quando o cartório devolve o papel errado —
+     * e deixar a tela escolher o nome esvazia a resposta (0008). */
+    const PASSOS = { preenchido: "preenchido", reconhecido: "reconhecido", entregue: "entregue" };
+    if (PASSOS[c.situacao]) {
+      mud.situacao = c.situacao;
+      mud[`${PASSOS[c.situacao]}_em`] = new Date().toISOString();
+      if (eu) mud[`${PASSOS[c.situacao]}_por`] = eu;
+    } else if (c.situacao === "pendente" || c.situacao === "cancelado" || c.situacao === "recebido") {
+      mud.situacao = c.situacao;
+    }
+    // Desfazer um passo apaga o carimbo junto: data de preenchimento
+    // num pedido que voltou para a fila é mentira que ninguém vê.
+    if (c.situacao === "recebido" || c.situacao === "pendente") {
+      mud.preenchido_em = null; mud.preenchido_por = null;
+      mud.reconhecido_em = null; mud.reconhecido_por = null;
+      mud.entregue_em = null; mud.entregue_por = null;
+    }
+    if (typeof c.pendencia === "string") mud.pendencia = texto(c.pendencia);
+    if (typeof c.observacoes === "string") mud.observacoes = texto(c.observacoes);
+    if (typeof c.rastreio === "string") mud.rastreio = texto(c.rastreio);
+    if (c.entrega === "envio" || c.entrega === "retirada") mud.entrega = c.entrega;
+
+    const r = await fetch(`${REST_DUT}?id=eq.${id}`, {
+      method: "PATCH", headers: json(tok, { Prefer: "return=representation" }), body: JSON.stringify(mud),
+    });
+    const linha = (await r.json().catch(() => []))[0];
+    // Lista vazia é a RLS recusando, não "não achei" (mesma tradução
+    // da decisão 10).
+    if (!linha) return res.status(403).json({ erro: "Só o administrativo mexe na fila do DUT." });
+    return res.status(200).json({ pedido: linha });
+  }
+
+  return res.status(400).json({ erro: "Requisição inválida." });
+}
+
 module.exports = async function handler(req, res) {
   if (!URL_BASE || !ANON) {
     return res.status(500).json({ erro: "SUPABASE_URL ou SUPABASE_ANON_KEY não configurados." });
   }
+
+  // O lojista chega sem login: isto vem antes da checagem de sessão,
+  // como o webhook do ZapSign e a ponte do WhatsApp.
+  if (String(req.query.recurso || "") === "dut-publico") {
+    try { return await dutPublico(req, res); }
+    catch (e) { return res.status(e.status || 502).json({ erro: "Não consegui registrar o pedido." }); }
+  }
+
   const tok = tokenDe(req);
   if (!tok) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
+
+  if (String(req.query.recurso || "") === "dut") {
+    try { return await dutFila(req, res, tok); }
+    catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Falhou." }); }
+  }
 
   const aid = String(req.query.atendimento_id || "");
   if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
