@@ -1549,6 +1549,83 @@ e dele só ficou o nome. É a pendência de mídia, com um caso concreto.
 ponte **só escuta** — e a tela diz isso, em vez de prometer o que não
 faz.
 
+### 49. Os canais da pré-venda: o número de WhatsApp é o canal
+
+O Derek pediu em 03/10/2026 métricas de sucesso e resultado **de cada
+canal comercial** — e precisou corrigir o alvo: *"aqui é uma coisa
+diferente… é da equipe de PRÉ-VENDAS… não estou falando sobre os
+negociadores"*. Canal, aqui, é o NÚMERO DE WHATSAPP: o da TV, o da
+prospecção ativa, o da loja, os dois que a IA atende.
+
+**É outro funil, e a cadeia é a da decisão 37** — conversas →
+agendamento → cliente na loja —, que até aqui só existia como meta
+digitada. Agora é medida, em `api/funil.js?recurso=prevendas`.
+
+**IA contra pessoa é a leitura que justifica a coluna `atendente`**,
+escrita na 0054 com essa intenção e nunca lida até aqui. Os dois
+blocos no topo da aba são isso.
+
+**O vínculo é calculado na leitura, não gravado em rotina.**
+`wa_conversa.lead_id` existe desde a 0054 e estava nulo; preenchê-lo
+por varredura pediria um trabalho que ninguém roda e que envelhece
+calado. O telefone é o que as duas pontas têm — mesma razão pela qual
+o "Meu dia" mescla agenda e atendimento ao desenhar em vez de copiar
+(decisão 41).
+
+**O telefone não vem igual dos dois lados.** O WhatsApp manda
+`554792331281`; o lead guarda `47996241555`. `chaveFone()` corta o 55 e
+compara **DDD + os oito últimos** — o nono dígito é justamente o que
+varia conforme quem digitou, e casar pela string inteira perderia os
+números antigos, que são os do cliente que já ligou antes.
+
+**O caminho curto existe e é o mais usado.** O uso real mostrou
+atendimento aberto DIRETO da conversa, sem lead no meio — um de
+03/10/2026 com prospector "IA – CAMILA". Medir só pelo lead diria que
+a Camila não traz ninguém, no dia em que ela trouxe. Cliente na mesa é
+cliente na mesa, por qualquer caminho, e os dois são contados.
+
+**O achado foi que não havia o que medir.** Eram **205 conversas e
+seis leads** no sistema inteiro, nenhum da última semana — a conversa
+morria no WhatsApp. Um painel de zeros teria parecido "os canais não
+convertem", que é a leitura errada mais cara possível: desliga-se um
+canal que estava funcionando.
+
+**Daí o botão "Virar lead", e não um relatório melhor.** Ele cria o
+lead com nome, telefone e a **origem derivada do canal** — anúncio na
+primeira mensagem ganha do canal, porque diz de ONDE a pessoa veio e
+não só por onde entrou. Pedir que a pré-venda redigite o que já está
+na tela é exatamente como o registro deixa de ser feito (a mesma
+lição do "chegou" da decisão 27). É idempotente, como ele.
+
+**E a tela diz quando o zero é falta de registro, não falta de
+resultado.** A tarja aparece enquanto menos de um décimo das conversas
+virou registro, e some sozinha quando o hábito pega. Um décimo e não
+zero: com 205 conversas para UM registro, exigir zero esconderia o
+aviso justamente onde ele importa.
+
+**A margem por canal do NEGOCIADOR foi feita no mesmo dia, e é outra
+coisa.** O funil atribuía dinheiro por negociador e deixava a origem
+só com contagem — volume alto com margem baixa parecia sucesso. Agora
+`por_origem` traz `valor_vendido`, `carros_vendidos` e
+`por_atendimento`. Em agosto–setembro: Google R$ 1.717 por
+atendimento, TV R$ 1.775, Facebook **R$ 219** com 175 atendimentos —
+quase metade do fluxo pelo pior retorno.
+
+**O `meio_alcance` importado está sujo e é casado por PREFIXO ASCII.**
+Vinte grafias para oito canais: "INDICAÇÃO" e "INDICA√á√ÉO" são o
+mesmo canal (UTF-8 lido como MacRoman em algum ponto da planilha),
+"FACHADA DA LOJA" e "FACHADA LOJA" também, e há "J√Å √â CLINETE" com o
+erro de digitação dentro. O pedaço estragado fica sempre DEPOIS da
+parte que distingue, então comparar o começo atravessa a sujeira sem
+listar cada grafia errada — e sobrevive à próxima. O que não casa vai
+para `outro` e **volta em `sem_canal`**, para a tela mostrar o que
+está amontoado ali.
+
+**Custo por canal não existe no sistema**, então isto é resultado, não
+retorno. Não há categoria de marketing no financeiro; enquanto não
+houver, não se calcula ROI — e inventar o custo seria pior que não ter
+o número.
+
 ## Convenções do código
 
 - **Português no domínio.** Estado, funções e rótulos em pt-BR

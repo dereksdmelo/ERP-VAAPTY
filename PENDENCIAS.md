@@ -26,14 +26,23 @@ Hoje ela **só escuta**. Mandar mensagem pede decidir quem manda (pessoa
 ou IA), o que acontece quando as duas respondem, e o registro de quem
 disse o quê. É conversa, não implementação.
 
-### Ligar a conversa ao lead e ao atendimento
-`wa_conversa.atendimento_id` e `lead_id` existem desde a 0054 e
-continuam nulos. É o que fecharia o funil: a conversa que virou visita,
-e a visita que virou venda.
+### O registro da conversa, que é o que falta medir
+A medição por canal está pronta (decisão 49), e o que a enche é o
+hábito: em 03/10/2026 eram 205 conversas para um registro. O botão
+"Virar lead" existe em Conversas, e abrir o atendimento direto também
+conta.
 
-*Destrava com:* casar pelo telefone, que é o que as duas pontas têm. A
-regra de quando casar sozinho e quando perguntar é conversa com o
-Derek — telefone repetido entre cliente e indicação existe.
+*Destrava com:* a equipe usando. A aba **Canais**, na Pré-vendas, avisa
+enquanto o registro não acontece.
+
+### Custo por canal, para virar retorno em vez de resultado
+Hoje dá para dizer quanto cada canal PRODUZIU, não quanto ele custou —
+não há categoria de marketing no financeiro. Sem isso não existe ROI, e
+TV com poucos contatos caros pode parecer melhor ou pior do que é.
+
+*Destrava com:* uma categoria de mídia por canal no financeiro, ou o
+gasto mensal digitado por canal. É decisão do Derek de onde vem o
+número.
 
 ### Mídia da conversa
 Foto e áudio não são guardados: o arquivo ficaria no Storage, e escrever

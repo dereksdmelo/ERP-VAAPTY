@@ -1440,6 +1440,68 @@ module.exports = async function handler(req, res) {
     const REST_CV = `${URL_BASE}/rest/v1/wa_conversa`;
     const id = String(req.query.id || "");
 
+    /* "VIRAR LEAD": o elo que faltava, e sem redigitar nada.
+     *
+     * Em 03/10/2026 havia 205 conversas e SEIS leads no sistema
+     * inteiro, nenhum da última semana. Não é que o canal não
+     * converta: é que a conversa nunca vira registro, então não há o
+     * que medir por canal (decisão 37). Pedir que a pré-venda digite
+     * de novo um nome e um telefone que já estão na tela é como esse
+     * registro deixa de ser feito -- a mesma lição do "chegou" da
+     * decisão 27.
+     *
+     * **A ligação é gravada aqui**, em `wa_conversa.lead_id`. O funil
+     * também casa por telefone, para alcançar lead criado por outro
+     * caminho; isto é o vínculo explícito, que não depende de o
+     * telefone ter sido digitado igual.
+     *
+     * **Idempotente**: conversa que já tem lead devolve o mesmo, como
+     * o "chegou". Dois toques no botão não criam duas fichas.
+     */
+    if (RX_UUID.test(id) && req.method === "POST" && String(req.query.acao || "") === "lead") {
+      const atual = (await banco(`${REST_CV}?select=id,telefone,nome,lead_id,anuncio,wa_canal(slug,nome)&id=eq.${id}`,
+        { headers: cabecalhos(tok) }) || [])[0];
+      if (!atual) return res.status(404).json({ erro: "Conversa não encontrada." });
+      if (atual.lead_id) return res.status(200).json({ lead_id: atual.lead_id, ja_existia: true });
+
+      const ca = Array.isArray(atual.wa_canal) ? atual.wa_canal[0] : atual.wa_canal;
+      /* A ORIGEM SAI DO CANAL, que é o que esta tela toda existe para
+       * medir. Anúncio na primeira mensagem ganha do canal: ele diz de
+       * onde a pessoa veio, enquanto o canal diz só por onde ela
+       * entrou. O que não se sabe vira `outro` em vez de um palpite --
+       * origem errada estraga o funil inteiro. */
+      const DO_CANAL = { "prospeccao-ativa": "prospeccao", tv: "tv", loja: "fluxo_loja", "administrativo-da-loja": "fluxo_loja" };
+      const c2 = (req.body && typeof req.body === "object") ? req.body : {};
+      const origem = ORIGENS.indexOf(String(c2.origem || "")) >= 0 ? String(c2.origem)
+        : atual.anuncio ? "facebook"
+        : (DO_CANAL[(ca && ca.slug) || ""] || "outro");
+
+      // O telefone entra como o lead guarda: sem o 55 do país, que é
+      // coisa do WhatsApp (ver `chaveFone` no api/funil.js).
+      const fone = String(atual.telefone || "").replace(/\D/g, "").replace(/^55(?=\d{10,11}$)/, "");
+      const r = await banco(REST("lead"), {
+        method: "POST",
+        headers: json(tok, { Prefer: "return=representation" }),
+        body: JSON.stringify({
+          nome: String(c2.nome || atual.nome || "").trim() || fone,
+          telefone: fone, origem, status: "novo",
+          carro: String(c2.carro || "").trim() || null,
+          observacoes: `Veio do WhatsApp${ca && ca.nome ? ` — ${ca.nome}` : ""}.`,
+        }),
+      });
+      const lead = (Array.isArray(r) ? r[0] : r) || null;
+      if (!lead) return res.status(403).json({ erro: "Não consegui criar o lead." });
+      // Falhar aqui não perde o lead: ele existe, e o funil ainda o
+      // alcança pelo telefone. Por isso o PATCH não derruba a resposta.
+      try {
+        await banco(`${REST_CV}?id=eq.${id}`, {
+          method: "PATCH", headers: json(tok, { Prefer: "return=minimal" }),
+          body: JSON.stringify({ lead_id: lead.id }),
+        });
+      } catch (e) {}
+      return res.status(200).json({ lead_id: lead.id, lead });
+    }
+
     // A conversa aberta: as mensagens, em ordem de relógio.
     if (RX_UUID.test(id)) {
       const msgs = await banco(

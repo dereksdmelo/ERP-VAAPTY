@@ -792,6 +792,20 @@ async function waConversas({ canal, busca } = {}) {
   if (!r.ok) throw new Error(d.erro || "Não consegui carregar as conversas.");
   return d.conversas || [];
 }
+async function waVirarLead(id, dados) {
+  const r = await fetchAut(`/api/atendimento?recurso=conversas&id=${encodeURIComponent(id)}&acao=lead`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados || {}),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui criar o lead.");
+  return d;
+}
+async function preVendasPorCanal(de, ate) {
+  const r = await fetchAut(`/api/funil?recurso=prevendas&de=${de}&ate=${ate}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui carregar os canais.");
+  return d;
+}
 async function waMensagens(id) {
   const r = await fetchAut(`/api/atendimento?recurso=conversas&id=${encodeURIComponent(id)}`);
   const d = await r.json().catch(() => ({}));
@@ -8285,6 +8299,151 @@ const STATUS_LEAD = [
  * A tabela rola na horizontal dentro da própria caixa. O corpo da
  * página não pode rolar de lado no celular.
  */
+/* ============ OS CANAIS DA PRÉ-VENDA ============
+ *
+ * A pergunta do Derek em 03/10/2026: métricas de sucesso e resultado
+ * de **cada canal comercial** — e canal aqui é o NÚMERO DE WHATSAPP da
+ * equipe de pré-venda, não a origem do negociador.
+ *
+ * A cadeia é a da decisão 37, que até aqui só existia como meta
+ * digitada: conversas → agendamento → cliente na loja. Agora é medida.
+ *
+ * **IA contra pessoa é a leitura que justifica a coluna `atendente`**
+ * da 0054, escrita lá com essa intenção e nunca lida até aqui.
+ *
+ * **A tela diz quando o número é zero por falta de registro, não por
+ * falta de resultado.** É a diferença entre "este canal não converte"
+ * e "ninguém marcou", e confundir as duas faria desligar um canal que
+ * estava funcionando.
+ */
+function BarraFunil({ c }) {
+  const etapas = [
+    ["conversas", c.conversas, C.roxo],
+    ["viraram lead", c.leads, "#7A4FB5"],
+    ["agendados", c.agendados, "#B08BD6"],
+    ["na loja", c.compareceram, C.verde],
+  ];
+  const topo = Math.max(1, c.conversas);
+  return (
+    <div className="mt-3 space-y-1.5">
+      {etapas.map(([rot, n, cor]) => (
+        <div key={rot} className="flex items-center gap-2">
+          <span className="w-[86px] shrink-0 text-[11.5px]" style={{ color: C.mute }}>{rot}</span>
+          <div className="h-[18px] flex-1 overflow-hidden rounded" style={{ background: C.bg }}>
+            <div className="h-full rounded" style={{ width: `${Math.round((n / topo) * 100)}%`, background: cor, minWidth: n ? 3 : 0 }} />
+          </div>
+          <span className="w-[34px] shrink-0 text-right text-[12.5px]" style={{ fontFamily: F.mono }}>{n}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TelaCanaisPreVenda({ comp }) {
+  const [d, setD] = useState(null);
+  const [erro, setErro] = useState("");
+
+  const { de, ate } = faixaDoMes(comp || competenciaDe(hojeEmSP()));
+
+  useEffect(() => {
+    // Mesma guarda do Funil: trocar de mês rápido faz duas consultas
+    // correrem juntas, e a velha não pode aterrissar depois da nova.
+    let vivo = true;
+    setD(null); setErro("");
+    preVendasPorCanal(de, ate).then((x) => { if (vivo) setD(x); }).catch((e) => { if (vivo) setErro(e.message); });
+    return () => { vivo = false; };
+  }, [de, ate]);
+
+  const comConversa = (d && d.por_canal || []).filter((c) => c.conversas > 0);
+  const semConversa = (d && d.por_canal || []).filter((c) => !c.conversas);
+  /* Quase nenhum lead casado quer dizer que o elo não está sendo
+   * feito -- não que o canal não converte. É a distinção que a tela
+   * precisa deixar impossível de confundir, e o aviso some sozinho
+   * quando o registro vira hábito.
+   *
+   * Um décimo, e não zero: em 03/10/2026 eram 205 conversas para UM
+   * registro, e exigir zero esconderia o aviso justamente aí. */
+  const semRegistro = !!d && d.total.conversas >= 10 && d.total.leads < d.total.conversas / 10;
+
+  return (
+    <div>
+      {erro && <p className="mb-4 text-[14px]" style={{ color: C.laranja }}>{erro}</p>}
+      {!d && !erro && <p className="text-[14px]" style={{ color: C.mute }}>carregando…</p>}
+
+      {semRegistro && (
+        <div className="mb-4 rounded-xl p-4" style={{ background: "#FFF6F0", border: `1px solid ${C.laranja}` }}>
+          <p className="text-[14px] font-semibold" style={{ color: C.laranja }}>
+            {d.total.conversas} conversas e {d.total.leads === 0 ? "nenhuma virou registro" :
+              d.total.leads === 1 ? "só uma virou registro" : `só ${d.total.leads} viraram registro`} — por isso a cadeia está quase zerada.
+          </p>
+          <p className="mt-1.5 text-[13.5px] leading-relaxed" style={{ color: C.ink }}>
+            Isto não quer dizer que os canais não convertem: quer dizer que a conversa
+            está morrendo no WhatsApp sem virar registro, então não há o que medir. Em
+            <strong> Conversas</strong>, o botão <strong>“Virar lead”</strong> cria o lead já com
+            nome, telefone e a origem do número — a partir daí esta tela enche sozinha.
+            Abrir o atendimento direto da conversa também conta, e já está contado aqui.
+          </p>
+        </div>
+      )}
+
+      {d && (
+        <div className="mb-4 grid gap-4 lg:grid-cols-2">
+          {[["A equipe atende", d.humano, C.roxo], ["A IA atende", d.ia, "#1D7F58"]].map(([rot, x, cor]) => (
+            <section key={rot} className="rounded-xl p-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+              <div className="flex items-baseline justify-between gap-2">
+                <h3 className="text-[15px]" style={{ fontFamily: F.disp, fontWeight: 700, color: cor }}>{rot}</h3>
+                <span className="text-[12.5px]" style={{ color: C.mute }}>{x.conversas} conversas</span>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-[13px]">
+                <span><strong style={{ fontFamily: F.mono }}>{x.compareceram}</strong> na loja</span>
+                <span style={{ color: C.mute }}>
+                  ponta a ponta {x.conv_total != null ? `${x.conv_total}%` : "—"}
+                </span>
+                {!!x.esperando && (
+                  <span style={{ color: C.laranja }}>{x.esperando} esperando resposta</span>
+                )}
+              </div>
+            </section>
+          ))}
+        </div>
+      )}
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        {comConversa.map((c) => (
+          <Bloco key={c.slug} titulo={c.nome}
+            sub={`${c.atendente === "ia" ? "a IA atende" : "a equipe atende"}${c.esperando ? ` · ${c.esperando} esperando resposta` : ""}`}>
+            <BarraFunil c={c} />
+            <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 border-t pt-3 text-[12.5px]" style={{ borderColor: C.line, color: C.mute }}>
+              <span>agendou {c.conv_agendamento != null ? `${c.conv_agendamento}%` : "—"}</span>
+              <span>compareceu {c.conv_comparecimento != null ? `${c.conv_comparecimento}%` : "—"}</span>
+              <span style={{ color: c.conv_total ? C.verde : C.mute, fontWeight: 600 }}>
+                ponta a ponta {c.conv_total != null ? `${c.conv_total}%` : "—"}
+              </span>
+              {!!c.nao_compareceram && <span style={{ color: C.laranja }}>{c.nao_compareceram} não vieram</span>}
+            </div>
+          </Bloco>
+        ))}
+      </div>
+
+      {!!semConversa.length && (
+        <p className="mt-4 text-[13px] leading-relaxed" style={{ color: C.mute }}>
+          Sem conversa no período: {semConversa.map((c) => c.nome).join(", ")}.
+          {semConversa.some((c) => c.ativo) && " Número ligado e sem movimento é diferente de número desligado — confira em Números do WhatsApp."}
+        </p>
+      )}
+
+      {d && (
+        <p className="mt-3 text-[12.5px] leading-relaxed" style={{ color: C.mute }}>
+          A coleta das conversas começou em {diaBR(d.coleta_desde)}; antes disso nada foi
+          registrado, então período anterior aparece vazio por falta de ponte, não por
+          falta de movimento. O agendamento e o comparecimento vêm do lead, ligado à
+          conversa pelo botão “Virar lead” ou pelo telefone.
+        </p>
+      )}
+    </div>
+  );
+}
+
 /* ===================== a caixa de entrada =====================
  *
  * "Todos os whats num lugar só" — o pedido do Derek. Seis números, e
@@ -8353,10 +8512,18 @@ function Balao({ m }) {
   );
 }
 
-function Conversa({ conversa, aoVoltar }) {
+function Conversa({ conversa, aoVoltar, aoVirarLead }) {
   const [msgs, setMsgs] = useState(null);
   const [erro, setErro] = useState("");
+  const [virando, setVirando] = useState(false);
   const fim = useRef(null);
+
+  const virarLead = async () => {
+    setVirando(true);
+    try { const d = await waVirarLead(conversa.id); if (aoVirarLead) aoVirarLead(conversa.id, d.lead_id); setErro(""); }
+    catch (e) { setErro(e.message); }
+    setVirando(false);
+  };
 
   // De 8 em 8 segundos, e só com a aba à vista — mesma régua da
   // decisão 44: rodar escondido gasta o 4G da loja atualizando tela
@@ -8389,6 +8556,21 @@ function Conversa({ conversa, aoVoltar }) {
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {/* O ELO QUE FALTAVA. Sem ele a conversa morre no WhatsApp e
+              o canal não tem o que medir — em 03/10/2026 eram 205
+              conversas para seis leads. Pedir para redigitar nome e
+              telefone que já estão na tela é como o registro deixa de
+              ser feito (decisão 27). */}
+          {conversa.lead_id ? (
+            <span className="rounded-lg px-3 py-2 text-[13px] font-semibold"
+              style={{ background: C.verde + "18", color: C.verde }}>já é lead</span>
+          ) : (
+            <button onClick={virarLead} disabled={!!virando}
+              className="rounded-lg px-3 py-2 text-[13px] font-semibold text-white"
+              style={{ background: C.roxo, opacity: virando ? 0.5 : 1 }}>
+              {virando ? "criando…" : "Virar lead"}
+            </button>
+          )}
           <a href={zap(conversa.telefone)} target="_blank" rel="noopener noreferrer"
             className="rounded-lg border px-3 py-2 text-[13px] font-semibold"
             style={{ borderColor: C.line, color: C.ink }}>Abrir no WhatsApp</a>
@@ -8541,7 +8723,8 @@ function TelaConversas() {
         <div>
           {abertaViva ? (
             <section className="rounded-xl p-4 lg:p-5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-              <Conversa conversa={abertaViva} aoVoltar={() => setAberta(null)} />
+              <Conversa conversa={abertaViva} aoVoltar={() => setAberta(null)}
+                aoVirarLead={(id, leadId) => setLista((ls) => (ls || []).map((x) => (x.id === id ? { ...x, lead_id: leadId } : x)))} />
             </section>
           ) : (
             <div className="hidden lg:block">
@@ -11680,19 +11863,22 @@ function Agendador({ lead, equipe, aoFechar, aoAgendar }) {
   );
 }
 
-function TelaPreVendas({ perfil, aoAbrirAtendimento }) {
+function TelaPreVendas({ perfil, aoAbrirAtendimento, mes, comp }) {
   const [aba, setAba] = useState("funil");
   const [equipe, setEquipe] = useState([]);
   useEffect(() => { listarNegociadores().then(setEquipe).catch(() => {}); }, []);
   return (
     <div>
-      <Cabecalho titulo="Pré-vendas" sub="Do telefone tocando ao cliente sentado na mesa." />
+      <Cabecalho titulo="Pré-vendas" sub="Do telefone tocando ao cliente sentado na mesa."
+        mes={aba === "canais" ? mes : null} />
       <div className="mb-4 flex flex-wrap gap-1.5">
         {/* Três filas, e a terceira existe porque perdido não pode
             simplesmente sumir: é onde se confere se o cliente foi
             mesmo embora — vendeu fora ou não tem interesse — e de onde
             ele volta se mudar de ideia. */}
-        {[["funil", "Leads"], ["agenda", "Agendamentos"], ["perdidos", "Perdidos"]].map(([v, r]) => (
+        {/* "Canais" é a quarta porque é leitura, não fila: as três
+            primeiras são trabalho do dia. */}
+        {[["funil", "Leads"], ["agenda", "Agendamentos"], ["perdidos", "Perdidos"], ["canais", "Canais"]].map(([v, r]) => (
           <button key={v} onClick={() => setAba(v)} className="rounded-full px-3.5 py-1.5 text-[13px] font-semibold"
             style={{ background: aba === v ? C.roxo : C.paper, color: aba === v ? "#fff" : C.ink, border: `1px solid ${aba === v ? C.roxo : C.line}` }}>{r}</button>
         ))}
@@ -11700,6 +11886,7 @@ function TelaPreVendas({ perfil, aoAbrirAtendimento }) {
       {aba === "funil" && <FunilLeads perfil={perfil} equipe={equipe} />}
       {aba === "agenda" && <Agendamentos perfil={perfil} equipe={equipe} aoAbrirAtendimento={aoAbrirAtendimento} />}
       {aba === "perdidos" && <LeadsPerdidos perfil={perfil} />}
+      {aba === "canais" && <TelaCanaisPreVenda comp={comp} />}
     </div>
   );
 }
@@ -17760,7 +17947,7 @@ function App() {
           aparece onde a pessoa estiver, e não só no "Meu dia". */}
       {pedeLembrete && <LembreteDoDia perfil={perfil} />}
       {tela === "meudia" && <TelaMeuDia perfil={perfil} />}
-      {tela === "prevendas" && <TelaPreVendas perfil={perfil} aoAbrirAtendimento={abrir} />}
+      {tela === "prevendas" && <TelaPreVendas perfil={perfil} aoAbrirAtendimento={abrir} mes={mes} comp={compOuAtual} />}
       {tela === "atendimentos" && <CRM perfil={perfil} aoAbrir={abrir} mes={{ ...mes, todos: true }} />}
       {tela === "estoque" && <TelaEstoque perfil={perfil} comp={compOuAtual} mes={mes} />}
       {/* A rota confere de novo: esconder o item do menu é conveniência,
