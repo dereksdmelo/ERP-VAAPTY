@@ -32,8 +32,9 @@ hábito: em 03/10/2026 eram 205 conversas para um registro. O botão
 "Virar lead" existe em Conversas, e abrir o atendimento direto também
 conta.
 
-*Destrava com:* a equipe usando. A aba **Canais**, na Pré-vendas, avisa
-enquanto o registro não acontece.
+*Destrava com:* a equipe usando o botão **Agendar** na conversa — ele
+cria o lead no caminho, não é preciso cadastrar nada antes. A aba
+**Canais**, na Pré-vendas, avisa enquanto a hora marcada não aparece.
 
 ### Custo por canal, para virar retorno em vez de resultado
 Hoje dá para dizer quanto cada canal PRODUZIU, não quanto ele custou —

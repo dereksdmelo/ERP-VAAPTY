@@ -1590,12 +1590,33 @@ morria no WhatsApp. Um painel de zeros teria parecido "os canais não
 convertem", que é a leitura errada mais cara possível: desliga-se um
 canal que estava funcionando.
 
-**Daí o botão "Virar lead", e não um relatório melhor.** Ele cria o
-lead com nome, telefone e a **origem derivada do canal** — anúncio na
-primeira mensagem ganha do canal, porque diz de ONDE a pessoa veio e
-não só por onde entrou. Pedir que a pré-venda redigite o que já está
-na tela é exatamente como o registro deixa de ser feito (a mesma
-lição do "chegou" da decisão 27). É idempotente, como ele.
+**A CONVERSA É O LEAD, e "Virar lead" era um passo artificial.** O
+Derek corrigiu no mesmo dia: *"não tem nenhum sinal de que a conversa
+(que na verdade é LEAD) virou um agendamento pelo menos"*. Duas coisas
+erradas de uma vez — a fila não mostrava o que já tinha acontecido com
+cada conversa, e pedia um cadastro antes de deixar marcar a hora.
+
+**Agora o estágio viaja com a conversa** (sem contato, novo, em
+contato, agendado com dia e hora, veio à loja, não veio, perdido) e
+aparece no cartão e no topo do diálogo. Fila que não diz o que já foi
+resolvido obriga a pessoa a abrir uma por uma para descobrir.
+Conversa sem lead nenhum é "sem contato" — **lead NOVO que ninguém
+tocou**, não ausência de coisa alguma; chamá-la de vazia esconderia
+justamente a fila que precisa de trabalho.
+
+**E o botão virou "Agendar", em um gesto só:** o lead nasce no
+caminho, com nome, telefone e a **origem derivada do canal** (anúncio
+na primeira mensagem ganha do canal, porque diz de ONDE a pessoa veio
+e não só por onde entrou), e o agendador de três toques da decisão 27
+abre em seguida. Quem está com o cliente na linha quer marcar a hora,
+não cadastrar uma ficha antes — cada passo a mais é como o registro
+deixa de ser feito. A criação é idempotente, como o "chegou".
+
+**"Viraram lead" saiu da corrente do funil** pelo mesmo motivo: media
+cadastro, não negócio, e punha um degrau artificial entre quem
+escreveu e quem foi agendado. A cadeia é **conversas → agendados → na
+loja → fechou**, e a tarja de alerta passou a olhar o AGENDAMENTO: é a
+hora marcada que separa a conversa que andou da que parou.
 
 **E a tela diz quando o zero é falta de registro, não falta de
 resultado.** A tarja aparece enquanto menos de um décimo das conversas

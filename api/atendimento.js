@@ -1544,12 +1544,50 @@ module.exports = async function handler(req, res) {
       for (const x of m || []) if (!previa[x.conversa_id]) previa[x.conversa_id] = x;
     }
 
+    /* O ESTÁGIO VIAJA COM A CONVERSA.
+     *
+     * O Derek em 03/10/2026: *"não tem nenhum sinal de que a conversa
+     * (que na verdade é LEAD) virou um agendamento pelo menos"*. Tem
+     * razão nas duas pontas — a conversa **é** o lead, e a caixa de
+     * entrada não mostrava nada do que aconteceu depois dela. Uma fila
+     * que não diz o que já foi resolvido obriga a pessoa a abrir cada
+     * uma para descobrir.
+     *
+     * O lead é alcançado pelo vínculo gravado e, quando não há, pelo
+     * telefone — a mesma dupla do `api/funil.js`. São poucos leads e
+     * uma página de conversas, então vêm numa consulta só em vez de
+     * uma por linha.
+     */
+    const fones = {};
+    const chave = (f) => {
+      let d = String(f || "").replace(/\D/g, "");
+      if (d.length > 11 && d.slice(0, 2) === "55") d = d.slice(2);
+      return d.length < 10 ? null : d.slice(0, 2) + d.slice(-8);
+    };
+    let porId = {};
+    try {
+      const leads = await banco(
+        `${URL_BASE}/rest/v1/lead?select=id,nome,telefone,status,agendado_para,atendimento_id&limit=1000`,
+        { headers: cabecalhos(tok) }) || [];
+      const ORDEM = { perdido: 0, novo: 1, em_contato: 2, nao_compareceu: 3, agendado: 4, confirmado: 5, compareceu: 6 };
+      leads.forEach((l) => {
+        porId[l.id] = l;
+        const k = chave(l.telefone);
+        if (!k) return;
+        // O mais adiantado manda: a mesma pessoa pode ter voltado, e
+        // mostrar o retorno como "não veio" apagaria a visita que houve.
+        if (!fones[k] || (ORDEM[l.status] || 0) >= (ORDEM[fones[k].status] || 0)) fones[k] = l;
+      });
+    } catch (e) { porId = {}; }
+
     return res.status(200).json({
       conversas: (linhas || []).map((l) => {
         const { wa_canal, ...resto } = l;
+        const lead = (l.lead_id && porId[l.lead_id]) || fones[chave(l.telefone)] || null;
         return {
           ...resto,
           canal: wa_canal || null,
+          lead: lead ? { id: lead.id, status: lead.status, agendado_para: lead.agendado_para, atendimento_id: lead.atendimento_id } : null,
           // "Esperando resposta" é a pergunta de todo dia, e ela é
           // derivada aqui para a tela não repetir a regra.
           esperando: !!(l.ultima_de_fora && (!l.respondida_em || l.respondida_em < l.ultima_de_fora)),

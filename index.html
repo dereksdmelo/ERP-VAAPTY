@@ -8317,10 +8317,13 @@ const STATUS_LEAD = [
  * estava funcionando.
  */
 function BarraFunil({ c }) {
+  /* "VIROU LEAD" SAIU DA CORRENTE. A conversa **é** o lead (o Derek,
+   * 03/10/2026), então aquela barra media o cadastro, não o negócio —
+   * e colocava um degrau artificial entre quem escreveu e quem foi
+   * agendado. O primeiro sucesso da pré-venda é o AGENDAMENTO. */
   const etapas = [
     ["conversas", c.conversas, C.roxo],
-    ["viraram lead", c.leads, "#7A4FB5"],
-    ["agendados", c.agendados, "#B08BD6"],
+    ["agendados", c.agendados, "#8E4FC0"],
     ["na loja", c.compareceram, "#4A9E7A"],
     // A corrente não para em "sentou na mesa": duas IAs podem trazer o
     // mesmo tanto de gente e uma trazer quem fecha.
@@ -8366,7 +8369,9 @@ function TelaCanaisPreVenda({ comp }) {
    *
    * Um décimo, e não zero: em 03/10/2026 eram 205 conversas para UM
    * registro, e exigir zero esconderia o aviso justamente aí. */
-  const semRegistro = !!d && d.total.conversas >= 10 && d.total.leads < d.total.conversas / 10;
+  // Mede AGENDAMENTO, não cadastro: a conversa já é o lead, e o que
+  // diz se a pré-venda trabalhou é a hora marcada.
+  const semRegistro = !!d && d.total.conversas >= 10 && d.total.agendados < d.total.conversas / 10;
 
   /* A fileira de comparação: cada IA sozinha, mais a equipe. Um número
    * de IA sem conversa no período fica de fora — cartão zerado ao lado
@@ -8386,15 +8391,15 @@ function TelaCanaisPreVenda({ comp }) {
       {semRegistro && (
         <div className="mb-4 rounded-xl p-4" style={{ background: "#FFF6F0", border: `1px solid ${C.laranja}` }}>
           <p className="text-[14px] font-semibold" style={{ color: C.laranja }}>
-            {d.total.conversas} conversas e {d.total.leads === 0 ? "nenhuma virou registro" :
-              d.total.leads === 1 ? "só uma virou registro" : `só ${d.total.leads} viraram registro`} — por isso a cadeia está quase zerada.
+            {d.total.conversas} conversas e {d.total.agendados === 0 ? "nenhum agendamento" :
+              d.total.agendados === 1 ? "um agendamento" : `${d.total.agendados} agendamentos`} — por isso a cadeia está quase zerada.
           </p>
           <p className="mt-1.5 text-[13.5px] leading-relaxed" style={{ color: C.ink }}>
-            Isto não quer dizer que os canais não convertem: quer dizer que a conversa
-            está morrendo no WhatsApp sem virar registro, então não há o que medir. Em
-            <strong> Conversas</strong>, o botão <strong>“Virar lead”</strong> cria o lead já com
-            nome, telefone e a origem do número — a partir daí esta tela enche sozinha.
-            Abrir o atendimento direto da conversa também conta, e já está contado aqui.
+            Isto não quer dizer que os canais não convertem: quer dizer que a hora marcada
+            não está sendo registrada, e é ela que separa a conversa que andou da que
+            parou. Em <strong>Conversas</strong>, o botão <strong>“Agendar”</strong> marca o dia
+            e a hora direto da conversa — não é preciso cadastrar nada antes. Abrir o
+            atendimento direto também conta, e já está contado aqui.
           </p>
         </div>
       )}
@@ -8515,6 +8520,33 @@ function TelaCanaisPreVenda({ comp }) {
  */
 const waQuem = (c) => (c.nome && c.nome.trim()) || foneBonito(c.telefone) || "sem nome";
 
+/* O ESTÁGIO DA CONVERSA, que é o estágio do lead — porque a conversa
+ * **é** o lead (o Derek, 03/10/2026). Sem este sinal a fila não diz o
+ * que já foi resolvido, e quem trabalha nela abre uma por uma para
+ * descobrir.
+ *
+ * A conversa sem lead nenhum não é "nada": é lead NOVO que ninguém
+ * tocou ainda. Chamá-la de vazia esconderia justamente a fila que
+ * precisa de trabalho. */
+const ESTAGIO = {
+  novo:           { rot: "novo",        cor: "#6E6879" },
+  em_contato:     { rot: "em contato",  cor: "#6D1B9E" },
+  agendado:       { rot: "agendado",    cor: "#1D7F58" },
+  confirmado:     { rot: "confirmado",  cor: "#1D7F58" },
+  compareceu:     { rot: "veio à loja", cor: "#1D7F58" },
+  nao_compareceu: { rot: "não veio",    cor: "#E1521F" },
+  perdido:        { rot: "perdido",     cor: "#6E6879" },
+};
+const estagioDe = (c) => {
+  const l = c.lead;
+  if (!l) return { rot: "sem contato", cor: "#6E6879", novo: true };
+  const e = ESTAGIO[l.status] || ESTAGIO.novo;
+  if (l.agendado_para && (l.status === "agendado" || l.status === "confirmado")) {
+    return { ...e, rot: `${e.rot} ${diaBR(l.agendado_para)} ${horaBR(l.agendado_para)}` };
+  }
+  return e;
+};
+
 const foneBonito = (f) => {
   const d = String(f || "").replace(/\D/g, "").replace(/^55/, "");
   if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
@@ -8565,27 +8597,49 @@ function Balao({ m }) {
   );
 }
 
-function Conversa({ conversa, aoVoltar, aoVirarLead }) {
+function Conversa({ conversa, aoVoltar, aoVirarLead, equipe }) {
   const [msgs, setMsgs] = useState(null);
   const [erro, setErro] = useState("");
   const [virando, setVirando] = useState(false);
+  const [agendando, setAgendando] = useState(null);
   const fim = useRef(null);
 
-  const virarLead = async () => {
+  /* AGENDAR É UM GESTO SÓ, e o lead nasce no caminho.
+   *
+   * "Virar lead" era um passo artificial: a conversa **já é** o lead.
+   * Quem está com o cliente na linha quer marcar a hora, não cadastrar
+   * uma ficha antes — e cada passo a mais é como o registro deixa de
+   * ser feito (a mesma lição do "chegou" da decisão 27).
+   */
+  const abrirAgenda = async () => {
     setVirando(true);
-    try { const d = await waVirarLead(conversa.id); if (aoVirarLead) aoVirarLead(conversa.id, d.lead_id); setErro(""); }
-    catch (e) { setErro(e.message); }
+    try {
+      let id = conversa.lead && conversa.lead.id;
+      if (!id) { const d = await waVirarLead(conversa.id); id = d.lead_id; if (aoVirarLead) aoVirarLead(conversa.id, d.lead || { id }); }
+      setAgendando({ id, nome: waQuem(conversa), telefone: conversa.telefone,
+        agendado_para: conversa.lead && conversa.lead.agendado_para });
+      setErro("");
+    } catch (e) { setErro(e.message); }
     setVirando(false);
+  };
+
+  const salvarAgenda = async (mud) => {
+    try {
+      const l = await atualizarLead(agendando.id, { ...mud, status: "agendado" });
+      if (aoVirarLead) aoVirarLead(conversa.id, l);
+      setAgendando(null); setErro("");
+    } catch (e) { setErro(e.message); setAgendando(null); }
   };
 
   // De 8 em 8 segundos, e só com a aba à vista — mesma régua da
   // decisão 44: rodar escondido gasta o 4G da loja atualizando tela
   // que ninguém olha.
   useEffect(() => {
-    let vivo = true, t = null;
+    let vivo = true, t = null, primeira = true;
     const volta = async () => {
       if (!vivo) return;
-      if (document.visibilityState !== "visible") { t = setTimeout(volta, 8000); return; }
+      if (!primeira && document.visibilityState !== "visible") { t = setTimeout(volta, 8000); return; }
+      primeira = false;
       try { const d = await waMensagens(conversa.id); if (vivo) { setMsgs(d); setErro(""); } }
       catch (e) { if (vivo) setErro(e.message); }
       if (vivo) t = setTimeout(volta, 8000);
@@ -8607,6 +8661,10 @@ function Conversa({ conversa, aoVoltar, aoVirarLead }) {
             {foneBonito(conversa.telefone)}
             {conversa.canal && ` · chegou em ${conversa.canal.nome}`}
           </p>
+          <span className="mt-1.5 inline-block rounded-full px-2 py-0.5 text-[11.5px] font-semibold"
+            style={{ background: estagioDe(conversa).cor + "18", color: estagioDe(conversa).cor }}>
+            {estagioDe(conversa).rot}
+          </span>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {/* O ELO QUE FALTAVA. Sem ele a conversa morre no WhatsApp e
@@ -8614,16 +8672,11 @@ function Conversa({ conversa, aoVoltar, aoVirarLead }) {
               conversas para seis leads. Pedir para redigitar nome e
               telefone que já estão na tela é como o registro deixa de
               ser feito (decisão 27). */}
-          {conversa.lead_id ? (
-            <span className="rounded-lg px-3 py-2 text-[13px] font-semibold"
-              style={{ background: C.verde + "18", color: C.verde }}>já é lead</span>
-          ) : (
-            <button onClick={virarLead} disabled={!!virando}
-              className="rounded-lg px-3 py-2 text-[13px] font-semibold text-white"
-              style={{ background: C.roxo, opacity: virando ? 0.5 : 1 }}>
-              {virando ? "criando…" : "Virar lead"}
-            </button>
-          )}
+          <button onClick={abrirAgenda} disabled={!!virando}
+            className="rounded-lg px-3 py-2 text-[13px] font-semibold text-white"
+            style={{ background: C.roxo, opacity: virando ? 0.5 : 1 }}>
+            {virando ? "abrindo…" : conversa.lead && conversa.lead.agendado_para ? "Remarcar" : "Agendar"}
+          </button>
           <a href={zap(conversa.telefone)} target="_blank" rel="noopener noreferrer"
             className="rounded-lg border px-3 py-2 text-[13px] font-semibold"
             style={{ borderColor: C.line, color: C.ink }}>Abrir no WhatsApp</a>
@@ -8651,6 +8704,11 @@ function Conversa({ conversa, aoVoltar, aoVirarLead }) {
         Daqui só dá para ler. Responder é no WhatsApp do número — o envio pela ponte
         ainda não existe.
       </p>
+
+      {agendando && (
+        <Agendador lead={agendando} equipe={equipe || []}
+          aoFechar={() => setAgendando(null)} aoAgendar={salvarAgenda} />
+      )}
     </div>
   );
 }
@@ -8659,6 +8717,7 @@ function TelaConversas() {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
   const [canais, setCanais] = useState([]);
+  const [equipe, setEquipe] = useState([]);
   const [canal, setCanal] = useState("");
   const [busca, setBusca] = useState("");
   const [digitado, setDigitado] = useState("");
@@ -8669,12 +8728,18 @@ function TelaConversas() {
   // aqui ela é só um filtro: quem não é gerente leva 403 e fica sem o
   // seletor, em vez de ver um erro.
   useEffect(() => { waCanais().then(setCanais).catch(() => setCanais([])); }, []);
+  // Para o agendador oferecer o negociador, como na Pré-vendas.
+  useEffect(() => { listarNegociadores().then(setEquipe).catch(() => setEquipe([])); }, []);
 
   useEffect(() => {
-    let vivo = true, t = null;
+    let vivo = true, t = null, primeira = true;
     const volta = async () => {
       if (!vivo) return;
-      if (document.visibilityState !== "visible") { t = setTimeout(volta, 20000); return; }
+      // A PRIMEIRA SEMPRE ACONTECE. Esperar a aba aparecer para a volta
+      // seguinte poupa dado; esperar para a PRIMEIRA deixa quem abriu
+      // em segundo plano olhando para "carregando…" por vinte segundos.
+      if (!primeira && document.visibilityState !== "visible") { t = setTimeout(volta, 20000); return; }
+      primeira = false;
       try { const d = await waConversas({ canal, busca }); if (vivo) { setLista(d); setErro(""); } }
       catch (e) { if (vivo) setErro(e.message); }
       // Vinte segundos: é um mural, e cinco seria pagar por movimento
@@ -8759,15 +8824,19 @@ function TelaConversas() {
                     {c.ultima && c.ultima.eco ? "você: " : ""}{resumoMsg(c.ultima) || foneBonito(c.telefone)}
                   </span>
                 </div>
-                {c.canal && (
-                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]" style={{ color: C.mute }}>
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]" style={{ color: C.mute }}>
+                  {/* O estágio vem primeiro: numa fila, o que importa
+                      é o que já foi feito, não de onde veio. */}
+                  <span className="rounded px-1.5 py-0.5 font-semibold"
+                    style={{ background: estagioDe(c).cor + "18", color: estagioDe(c).cor }}>{estagioDe(c).rot}</span>
+                  {c.canal && (
                     <span className="rounded px-1.5 py-0.5" style={{ background: C.roxoFraco, color: C.roxo }}>{c.canal.nome}</span>
+                  )}
                     {/* De qual anúncio veio, quando a primeira mensagem
                         trouxe o clique-para-WhatsApp. É o que vai casar
                         marketing com venda sem ninguém digitar origem. */}
-                    {c.anuncio && <span style={{ color: C.verde }}>veio de anúncio</span>}
-                  </div>
-                )}
+                  {c.anuncio && <span style={{ color: C.verde }}>veio de anúncio</span>}
+                </div>
               </button>
             ))}
           </div>
@@ -8776,8 +8845,9 @@ function TelaConversas() {
         <div>
           {abertaViva ? (
             <section className="rounded-xl p-4 lg:p-5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-              <Conversa conversa={abertaViva} aoVoltar={() => setAberta(null)}
-                aoVirarLead={(id, leadId) => setLista((ls) => (ls || []).map((x) => (x.id === id ? { ...x, lead_id: leadId } : x)))} />
+              <Conversa conversa={abertaViva} aoVoltar={() => setAberta(null)} equipe={equipe}
+                aoVirarLead={(id, lead) => setLista((ls) => (ls || []).map((x) =>
+                  (x.id === id ? { ...x, lead_id: (lead && lead.id) || x.lead_id, lead: lead || x.lead } : x)))} />
             </section>
           ) : (
             <div className="hidden lg:block">
@@ -8878,14 +8948,15 @@ function CartaoCanal({ canal, aoMudar, aoApagar }) {
   // deixa um QR de pé. Parar quando a aba some evita gastar o 4G da
   // loja atualizando tela que ninguém olha (mesma régua da decisão 44).
   useEffect(() => {
-    let vivo = true, t = null;
+    let vivo = true, t = null, primeira = true;
     const volta = async () => {
       if (!vivo) return;
       // Número desativado não acorda container: ele está fora de
       // serviço, e perguntar por ele gastaria uma instância do teto
       // (`max_instances`) para nada.
       if (!canal.ativo) return;
-      if (document.visibilityState !== "visible") { t = setTimeout(volta, 3000); return; }
+      if (!primeira && document.visibilityState !== "visible") { t = setTimeout(volta, 3000); return; }
+      primeira = false;
       try { const d = await waEstado(canal.slug); if (vivo) { setEst(d); setErro(""); } }
       catch (e) { if (vivo) setErro(e.message); }
       if (vivo) t = setTimeout(volta, 3000);
