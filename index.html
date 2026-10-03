@@ -8321,7 +8321,10 @@ function BarraFunil({ c }) {
     ["conversas", c.conversas, C.roxo],
     ["viraram lead", c.leads, "#7A4FB5"],
     ["agendados", c.agendados, "#B08BD6"],
-    ["na loja", c.compareceram, C.verde],
+    ["na loja", c.compareceram, "#4A9E7A"],
+    // A corrente não para em "sentou na mesa": duas IAs podem trazer o
+    // mesmo tanto de gente e uma trazer quem fecha.
+    ["fechou", c.fecharam, C.verde],
   ];
   const topo = Math.max(1, c.conversas);
   return (
@@ -8365,6 +8368,16 @@ function TelaCanaisPreVenda({ comp }) {
    * registro, e exigir zero esconderia o aviso justamente aí. */
   const semRegistro = !!d && d.total.conversas >= 10 && d.total.leads < d.total.conversas / 10;
 
+  /* A fileira de comparação: cada IA sozinha, mais a equipe. Um número
+   * de IA sem conversa no período fica de fora — cartão zerado ao lado
+   * de dois cheios lê como "essa IA é ruim", quando ela só não estava
+   * ligada. */
+  const ias = (d && d.por_canal || []).filter((c) => c.atendente === "ia" && c.conversas > 0);
+  const comparar = !d ? [] : [
+    ...ias.map((c) => ({ ...c, chave: c.slug, rot: c.nome, cor: "#1D7F58", destaque: true })),
+    { ...d.humano, chave: "__equipe", rot: "A equipe", cor: C.roxo, destaque: false },
+  ];
+
   return (
     <div>
       {erro && <p className="mb-4 text-[14px]" style={{ color: C.laranja }}>{erro}</p>}
@@ -8386,40 +8399,78 @@ function TelaCanaisPreVenda({ comp }) {
         </div>
       )}
 
-      {d && (
-        <div className="mb-4 grid gap-4 lg:grid-cols-2">
-          {[["A equipe atende", d.humano, C.roxo], ["A IA atende", d.ia, "#1D7F58"]].map(([rot, x, cor]) => (
-            <section key={rot} className="rounded-xl p-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+      {/* UMA IA DE CADA VEZ, lado a lado — pedido do Derek em
+          03/10/2026. Somadas num bloco só, a que trabalha carrega a
+          que não trabalha, e a decisão de manter ou trocar um número
+          fica sem base. A equipe entra na mesma fileira porque é
+          contra ela que a IA se compara. */}
+      {d && !!comparar.length && (
+        <div className="mb-4 grid gap-4 lg:grid-cols-3">
+          {comparar.map((x) => (
+            <section key={x.chave} className="rounded-xl p-4"
+              style={{ background: C.paper, border: `1px solid ${x.destaque ? x.cor : C.line}` }}>
               <div className="flex items-baseline justify-between gap-2">
-                <h3 className="text-[15px]" style={{ fontFamily: F.disp, fontWeight: 700, color: cor }}>{rot}</h3>
-                <span className="text-[12.5px]" style={{ color: C.mute }}>{x.conversas} conversas</span>
+                <h3 className="truncate text-[15px]" style={{ fontFamily: F.disp, fontWeight: 700, color: x.cor }}>{x.rot}</h3>
+                <span className="shrink-0 text-[12.5px]" style={{ color: C.mute }}>{x.conversas} conv.</span>
               </div>
-              <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-[13px]">
-                <span><strong style={{ fontFamily: F.mono }}>{x.compareceram}</strong> na loja</span>
-                <span style={{ color: C.mute }}>
-                  ponta a ponta {x.conv_total != null ? `${x.conv_total}%` : "—"}
-                </span>
-                {!!x.esperando && (
-                  <span style={{ color: C.laranja }}>{x.esperando} esperando resposta</span>
-                )}
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                {[["na loja", x.compareceram], ["fechou", x.fecharam], ["margem", x.resultado ? brl(x.resultado) : "—"]].map(([r, v]) => (
+                  <div key={r}>
+                    <div className="text-[10px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>{r}</div>
+                    <div className="text-[15px]" style={{ fontFamily: F.mono, fontWeight: 700 }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12.5px]" style={{ color: C.mute }}>
+                <span><strong>{x.conv_total != null ? `${x.conv_total}%` : "—"}</strong> da conversa à mesa</span>
+                <span>{x.conv_venda != null ? `${x.conv_venda}%` : "—"} da mesa à venda</span>
+                {!!x.esperando && <span style={{ color: C.laranja }}>{x.esperando} esperando</span>}
               </div>
             </section>
           ))}
         </div>
       )}
 
+      <p className="mb-3 text-[12.5px] leading-relaxed" style={{ color: C.mute }}>
+        Cada número é lido em duas metades: até o cliente sentar na mesa é trabalho da
+        pré-venda; dali em diante é do negociador. Separar as duas é o que distingue o
+        canal que traz muita gente que não compra do que traz pouca gente que compra.
+      </p>
       <div className="grid gap-4 lg:grid-cols-2">
         {comConversa.map((c) => (
           <Bloco key={c.slug} titulo={c.nome}
             sub={`${c.atendente === "ia" ? "a IA atende" : "a equipe atende"}${c.esperando ? ` · ${c.esperando} esperando resposta` : ""}`}>
             <BarraFunil c={c} />
-            <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 border-t pt-3 text-[12.5px]" style={{ borderColor: C.line, color: C.mute }}>
-              <span>agendou {c.conv_agendamento != null ? `${c.conv_agendamento}%` : "—"}</span>
-              <span>compareceu {c.conv_comparecimento != null ? `${c.conv_comparecimento}%` : "—"}</span>
-              <span style={{ color: c.conv_total ? C.verde : C.mute, fontWeight: 600 }}>
-                ponta a ponta {c.conv_total != null ? `${c.conv_total}%` : "—"}
-              </span>
-              {!!c.nao_compareceram && <span style={{ color: C.laranja }}>{c.nao_compareceram} não vieram</span>}
+            {/* DUAS NOTAS, DUAS EQUIPES. "A métrica de sucesso do
+                pré-vendas é trazer o cliente na loja; a do negociador
+                é transformar essa visita em venda" — o Derek, em
+                03/10/2026. Juntas numa linha só, um canal que traz
+                muita gente que não compra fica indistinguível de um
+                que traz pouca gente que compra toda. */}
+            <div className="mt-3 grid gap-2 border-t pt-3 sm:grid-cols-2" style={{ borderColor: C.line }}>
+              <div>
+                <div className="text-[10px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>Pré-venda · até a loja</div>
+                <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-[12.5px]" style={{ color: C.mute }}>
+                  <span>agendou {c.conv_agendamento != null ? `${c.conv_agendamento}%` : "—"}</span>
+                  <span>veio {c.conv_comparecimento != null ? `${c.conv_comparecimento}%` : "—"}</span>
+                  {!!c.nao_compareceram && <span style={{ color: C.laranja }}>{c.nao_compareceram} não vieram</span>}
+                </div>
+                <div className="mt-0.5 text-[13px]" style={{ color: c.conv_total ? C.verde : C.mute, fontWeight: 700 }}>
+                  {c.conv_total != null ? `${c.conv_total}%` : "—"} da conversa à mesa
+                </div>
+              </div>
+              <div className="sm:border-l sm:pl-3" style={{ borderColor: C.line }}>
+                <div className="text-[10px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>Negociador · da loja em diante</div>
+                <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-[12.5px]" style={{ color: C.mute }}>
+                  <span>{c.compareceram} na mesa</span>
+                  <span>{c.fecharam} fechou</span>
+                  {!!c.carros && <span>{c.carros} carro{c.carros > 1 ? "s" : ""}</span>}
+                </div>
+                <div className="mt-0.5 text-[13px]" style={{ color: c.conv_venda ? C.verde : C.mute, fontWeight: 700 }}>
+                  {c.conv_venda != null ? `${c.conv_venda}%` : "—"} da mesa à venda
+                  {!!c.resultado && <span style={{ fontWeight: 400, color: C.mute }}> · {brl(c.resultado)} de margem</span>}
+                </div>
+              </div>
             </div>
           </Bloco>
         ))}
@@ -8437,7 +8488,9 @@ function TelaCanaisPreVenda({ comp }) {
           A coleta das conversas começou em {diaBR(d.coleta_desde)}; antes disso nada foi
           registrado, então período anterior aparece vazio por falta de ponte, não por
           falta de movimento. O agendamento e o comparecimento vêm do lead, ligado à
-          conversa pelo botão “Virar lead” ou pelo telefone.
+          conversa pelo botão “Virar lead” ou pelo telefone.{" "}
+          <strong>Margem só existe com o carro revendido</strong> — o que está no pátio
+          ainda não produziu, e aparece em “carros” sem entrar no resultado.
         </p>
       )}
     </div>

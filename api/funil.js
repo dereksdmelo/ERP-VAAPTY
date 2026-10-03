@@ -147,6 +147,9 @@ const chaveFone = (f) => {
 const vazioPre = () => ({
   conversas: 0, esperando: 0, respondidas: 0,
   leads: 0, agendados: 0, compareceram: 0, nao_compareceram: 0, perdidos: 0,
+  // A ponta do dinheiro: o Derek pediu o resultado de cada IA
+  // separadamente, e "na loja" não é resultado -- é meio do caminho.
+  fecharam: 0, carros: 0, resultado: 0,
 });
 
 async function preVendas(req, res, tok, de, ate) {
@@ -170,8 +173,36 @@ async function preVendas(req, res, tok, de, ate) {
      * pelo lead diria que a Camila não traz ninguém, quando ela acabou
      * de trazer. Cliente na loja é cliente na loja, por qualquer
      * caminho. */
-    puxar(`${URL_BASE}/rest/v1/atendimento?select=cliente_telefone,data&data=gte.${de}&data=lte.${ate}&limit=${TETO}`),
+    puxar(`${URL_BASE}/rest/v1/atendimento?select=id,cliente_telefone,status,data&data=gte.${de}&data=lte.${ate}&limit=${TETO}`),
   ]);
+
+  /* O CARRO QUE SAIU DE CADA CONVERSA.
+   *
+   * O atendimento liga a conversa ao carro, e o carro à margem. Sem
+   * esta perna a tela parava em "sentou na mesa" -- que é meio do
+   * caminho, não resultado: duas IAs podem trazer o mesmo tanto de
+   * gente e uma delas trazer quem fecha.
+   *
+   * Falha em silêncio porque é a parte mais frágil da corrente: só 26
+   * dos 135 carros de hoje têm `atendimento_id`, e o que vier daqui
+   * para frente terá. Sem ela a cadeia continua até "na loja", que já
+   * é a pergunta principal. */
+  let porAtendimento = {};
+  const idsAt = ats.map((a) => a.id).filter(Boolean);
+  if (idsAt.length) {
+    try {
+      const car = await puxar(`${URL_BASE}/rest/v1/estoque?select=atendimento_id,valor_compra,valor_venda,situacao,` +
+        `estoque_custo(tipo,previsto,realizado)&atendimento_id=in.(${idsAt.join(",")})&limit=${TETO}`);
+      car.forEach((e) => {
+        if (!e.atendimento_id) return;
+        const x = porAtendimento[e.atendimento_id] || (porAtendimento[e.atendimento_id] = { carros: 0, margem: 0 });
+        x.carros += 1;
+        // Só carro revendido tem margem: o que está no pátio ainda não
+        // produziu nada, e somar a compra daria prejuízo em todo canal.
+        if (e.situacao === "vendido") x.margem += liquidaDe(e);
+      });
+    } catch (e) { porAtendimento = {}; }
+  }
 
   // O lead mais adiantado de cada telefone manda: a mesma pessoa pode
   // ter voltado, e contar o retorno como "não compareceu" esconderia a
@@ -187,9 +218,10 @@ async function preVendas(req, res, tok, de, ate) {
     if (!atual || (ORDEM[l.status] || 0) >= (ORDEM[atual.status] || 0)) porFone[k] = l;
   });
 
-  // Telefones que viraram atendimento no período.
+  // Telefones que viraram atendimento no período, com o atendimento
+  // junto: é por ele que se chega ao carro e à margem.
   const naLoja = {};
-  ats.forEach((a) => { const k = chaveFone(a.cliente_telefone); if (k) naLoja[k] = true; });
+  ats.forEach((a) => { const k = chaveFone(a.cliente_telefone); if (k) naLoja[k] = a; });
 
   const por = {};
   const caixa = (c) => por[c] || (por[c] = { ...vazioPre() });
@@ -216,8 +248,14 @@ async function preVendas(req, res, tok, de, ate) {
     const l = (c.lead_id && porId[c.lead_id]) || porFone[k];
     // Sentou na mesa, por qualquer caminho: o lead que compareceu, ou
     // o atendimento aberto direto da conversa.
-    const sentou = !!(naLoja[k] || (l && (l.status === "compareceu" || l.atendimento_id)));
+    const at = naLoja[k] || null;
+    const sentou = !!(at || (l && (l.status === "compareceu" || l.atendimento_id)));
     if (sentou) x.compareceram += 1;
+
+    const atId = (at && at.id) || (l && l.atendimento_id) || null;
+    if (at && at.status === "fechado") x.fecharam += 1;
+    const carro = atId ? porAtendimento[atId] : null;
+    if (carro) { x.carros += carro.carros; x.resultado += carro.margem; }
     if (!l) {
       // Virou atendimento sem nunca ter sido lead: conta como na loja,
       // e também como lead -- senão a conversão de agendamento ficaria
@@ -240,7 +278,23 @@ async function preVendas(req, res, tok, de, ate) {
     conv_comparecimento: pct(x.compareceram, x.agendados),
     // Ponta a ponta: de cada cem que escreveram, quantos sentaram na
     // mesa. É o número que compara canal com canal.
+    // ATÉ AQUI É DA PRÉ-VENDA. O Derek fechou a régua em 03/10/2026:
+    // "a métrica de sucesso do pré-vendas é trazer o cliente na loja,
+    // a métrica do negociador é transformar essa visita em venda".
+    // Por isso `conv_total` -- conversa até a mesa -- é a nota da
+    // pré-venda, e não se mistura com a de baixo.
     conv_total: pct(x.compareceram, x.conversas),
+    // **DAQUI PARA BAIXO É DO NEGOCIADOR**: de quem chegou, quantos
+    // fecharam. Canal que traz muita gente que não compra é problema
+    // do canal; canal que traz pouca gente que compra toda é problema
+    // de volume -- e só separando dá para saber qual dos dois.
+    conv_venda: pct(x.fecharam, x.compareceram),
+    // **O número que compara uma IA com a outra**: quanto cada
+    // conversa daquele número acabou valendo. Volume alto sem fechar
+    // deixa de parecer sucesso -- a mesma régua do `por_atendimento`
+    // dos canais do negociador.
+    por_conversa: x.conversas ? Math.round(x.resultado / x.conversas) : null,
+    margem_media: x.carros ? Math.round(x.resultado / x.carros) : null,
   })).sort((a, b) => b.conversas - a.conversas);
 
   // Pessoa contra IA, somado — era a razão de `atendente` existir na
@@ -251,7 +305,11 @@ async function preVendas(req, res, tok, de, ate) {
   }, { ...vazioPre() });
   const sofre = (lista) => {
     const t = juntar(lista);
-    return { ...t, conv_agendamento: pct(t.agendados, t.conversas), conv_comparecimento: pct(t.compareceram, t.agendados), conv_total: pct(t.compareceram, t.conversas) };
+    return { ...t, conv_agendamento: pct(t.agendados, t.conversas), conv_comparecimento: pct(t.compareceram, t.agendados),
+      conv_total: pct(t.compareceram, t.conversas),
+      conv_venda: pct(t.fecharam, t.compareceram),
+      por_conversa: t.conversas ? Math.round(t.resultado / t.conversas) : null,
+      margem_media: t.carros ? Math.round(t.resultado / t.carros) : null };
   };
 
   return res.status(200).json({

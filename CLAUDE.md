@@ -1621,6 +1621,31 @@ listar cada grafia errada — e sobrevive à próxima. O que não casa vai
 para `outro` e **volta em `sem_canal`**, para a tela mostrar o que
 está amontoado ali.
 
+**Cada IA é lida sozinha, não somada.** O Derek pediu em 03/10/2026 o
+resultado de cada uma separadamente — e tem razão: num bloco só, a que
+trabalha carrega a que não trabalha, e a decisão de manter ou trocar um
+número fica sem base. A fileira de comparação é uma IA por cartão mais
+a equipe, que é contra quem elas se comparam. **Número de IA sem
+conversa no período fica de fora**: cartão zerado ao lado de dois
+cheios lê como "essa IA é ruim", quando ela só não estava ligada.
+
+**A corrente não para em "sentou na mesa".** Duas IAs podem trazer o
+mesmo tanto de gente e uma trazer quem fecha, então cada canal vai até
+o carro e a margem — pelo `atendimento_id` do estoque. **Só carro
+revendido tem margem**: o que está no pátio ainda não produziu, e somar
+a compra daria prejuízo em todo canal. Essa perna falha em silêncio por
+ser a mais frágil da corrente (26 dos 135 carros têm o vínculo); sem
+ela a cadeia continua até "na loja", que é a pergunta principal.
+
+**DUAS NOTAS, DUAS EQUIPES, e essa é a régua do Derek:** *"a métrica de
+sucesso do pré-vendas é trazer o cliente na loja, a métrica do
+negociador é transformar essa visita em venda"*. Por isso o cartão é
+partido ao meio: `conv_total` (da conversa à mesa) é a nota da
+pré-venda; `conv_venda` (da mesa à venda) é a do negociador. **Juntas
+numa linha só, um canal que traz muita gente que não compra fica
+indistinguível de um que traz pouca gente que compra toda** — e são
+problemas opostos, um de qualidade do canal e outro de volume.
+
 **Custo por canal não existe no sistema**, então isto é resultado, não
 retorno. Não há categoria de marketing no financeiro; enquanto não
 houver, não se calcula ROI — e inventar o custo seria pior que não ter
