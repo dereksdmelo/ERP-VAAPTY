@@ -40,6 +40,7 @@ jobs:
         run: |
           node ferramentas-sincronizacao.js
           node ferramentas-shinkai.js
+          node ferramentas-agendamento.js
 
       - name: Publicar
         uses: cloudflare/wrangler-action@v3

@@ -12183,7 +12183,8 @@ function TelaPreVendas({ perfil, aoAbrirAtendimento, aoVerConversa, mes, comp })
   return (
     <div>
       <Cabecalho titulo="Pré-vendas" sub="Do telefone tocando ao cliente sentado na mesa."
-        mes={aba === "canais" ? mes : null} />
+        mes={aba === "canais" || (aba === "funil" && vista === "quadro")
+          ? { ...mes, todos: true } : null} />
       <div className="mb-4 flex flex-wrap gap-1.5">
         {/* Três filas, e a terceira existe porque perdido não pode
             simplesmente sumir: é onde se confere se o cliente foi
@@ -12212,7 +12213,7 @@ function TelaPreVendas({ perfil, aoAbrirAtendimento, aoVerConversa, mes, comp })
             ))}
           </div>
           {vista === "quadro"
-            ? <QuadroLeads perfil={perfil} equipe={equipe} aoVerConversa={aoVerConversa} />
+            ? <QuadroLeads perfil={perfil} equipe={equipe} aoVerConversa={aoVerConversa} comp={comp} />
             : <FunilLeads perfil={perfil} equipe={equipe} aoVerConversa={aoVerConversa} />}
         </div>
       )}
@@ -12604,7 +12605,7 @@ function CartaoLead({ l, onAbrir, onArrastar, onVeio }) {
   );
 }
 
-function QuadroLeads({ perfil, equipe, aoVerConversa }) {
+function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
   const [arrastando, setArrastando] = useState(null);
@@ -12660,7 +12661,24 @@ function QuadroLeads({ perfil, equipe, aoVerConversa }) {
     mexer(l, { status: st, ...limpa });
   };
 
-  const porColuna = (id) => (lista || []).filter((l) => colunaDe(l) === id);
+  /* O MÊS FILTRA PELA ENTRADA, não pela data marcada.
+   *
+   * O funil é de coorte: "dos que entraram em outubro, quantos
+   * sentaram na mesa". Filtrar por `agendado_para` misturaria o lead
+   * de setembro que foi agendado agora com os de outubro, e a
+   * conversão do mês deixaria de fechar.
+   *
+   * **"Todos os meses" existe porque a fila não acaba no dia 31**:
+   * lead de setembro ainda em AGENDAR continua sendo trabalho de
+   * hoje, e escondê-lo seria perdê-lo (mesma razão da decisão 22).
+   */
+  const noMes = (l) => {
+    if (!comp) return true;
+    const f = faixaDoMes(comp);
+    const d = String(l.criado_em || "").slice(0, 10);
+    return d >= f.de && d <= f.ate;
+  };
+  const porColuna = (id) => (lista || []).filter((l) => colunaDe(l) === id && noMes(l));
 
   return (
     <div>

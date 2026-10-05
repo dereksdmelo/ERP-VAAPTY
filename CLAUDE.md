@@ -1842,16 +1842,39 @@ olhando as mensagens da Ana e da Camila:
 | Agendado → **Compareceu / Reagendar** | alguém aperta "veio?" no dia |
 | qualquer → **Já vendeu** | só à mão — o sistema não tem como saber |
 
-**Procura-se data e hora, não um molde de frase.** A Ana manda um
-texto fixo; **a Camila escreve algo completamente diferente, e as duas
-sempre confirmam uma data e uma hora**. Casar o molde quebraria no dia
-em que alguém reescrevesse o texto da IA — e quebraria em silêncio.
+**ACHAR DATA E HORA NÃO BASTA — e isso só ficou claro lendo as
+mensagens reais.** O Derek perguntou por que não aparecia nada da Ana,
+e ao ler 22 mensagens dela e da Camila no banco a resposta apareceu:
+**a maior parte do que fala em hora é PROPOSTA, não confirmação.**
 
-**As duas são obrigatórias, e é isso que evita agendamento
-inventado.** Hora sozinha aparece o tempo todo ("abrimos às 9h",
-"ligo às 10h"); data sozinha também ("o carro é 05/10/2019"). Conferido
-contra doze casos, incluindo "Fiat Punto 2010/2011" e "29.900", que
-não podem virar hora marcada.
+> "Tenho quarta-feira às 9h ou às 10h. Qual horário fica melhor?"
+> "Já liberei seu horário das 15:30. Quer deixar marcado pra amanhã?"
+> "Sábado às 10h é sua preferência. O horário ainda não está confirmado."
+
+As três viram agendamento falso num leitor que só procura data e hora
+— e **agendamento falso é pior que nenhum**: põe na agenda da semana
+gente que não vai aparecer, e a pré-venda deixa de ligar para quem
+ainda não marcou. **O erro que se prefere é o de deixar passar.**
+
+**São três travas, e todas precisam passar:**
+
+1. **UMA hora só.** "às 9h ou às 10h" é escolha, não marcação — e
+   "das 08:30 às 12:30" é horário de funcionamento.
+2. **Uma palavra de fechamento** (confirmado, agendado, combinou, te
+   espero, fechado…). É **vocabulário de intenção, não molde de
+   frase**: a Ana e a Camila escrevem diferente e as duas o usam.
+3. **Nenhuma palavra que desmarca** — "ainda não", "qual horário",
+   "prefere", "tenho vaga". Esta ganha da 2, porque "confirmado"
+   aparece também em *"ainda não está confirmado"*.
+
+**A data vem de cinco formas**, porque as duas usam todas:
+`07/10/2026`, `06/10`, "dia 7", "hoje", "amanhã" e o dia da semana.
+Faltavam as duas últimas, e era isso que deixava a Ana de fora.
+
+**`ferramentas-agendamento.js` guarda os 25 casos**, que são mensagens
+REAIS colhidas do banco — não exemplos inventados. A função é lida do
+`api/atendimento.js`, não copiada: cópia dentro de teste envelhece
+calada, e aí o teste passa enquanto o sistema erra.
 
 **Só o que SAIU daqui conta.** O cliente propondo "pode ser dia 7 às
 15h?" não é agendamento; agendamento é a loja confirmando.

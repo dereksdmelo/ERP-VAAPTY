@@ -1405,61 +1405,112 @@ const MESES_TXT = {
   jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6,
   jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12,
 };
+const SEMANA_TXT = { domingo: 0, segunda: 1, terca: 2, quarta: 3, quinta: 4, sexta: 5, sabado: 6 };
+
+/* CONFIRMAR NÃO É PROPOR, e essa é a distinção inteira.
+ *
+ * Lendo 22 mensagens reais da Ana e da Camila ficou claro que a maior
+ * parte das que falam em hora é **proposta**, não confirmação:
+ *
+ *   "Tenho quarta-feira às 9h ou às 10h. Qual horário fica melhor?"
+ *   "Já liberei seu horário das 15:30. Quer deixar marcado pra amanhã?"
+ *   "Perfeito! Sábado às 10h é sua preferência. Ainda não está confirmado."
+ *
+ * Achar data e hora não basta — **essas três viram agendamento falso**,
+ * e agendamento falso é pior que nenhum: põe na agenda da semana gente
+ * que não vai aparecer, e a pré-venda deixa de ligar para quem ainda
+ * não marcou.
+ *
+ * Então são três travas, e todas precisam passar:
+ *
+ *  1. **UMA hora só.** "às 9h ou às 10h" é escolha, não marcação.
+ *  2. **Uma palavra de fechamento** (confirmado, agendado, combinado,
+ *     te espero, fechado…). É vocabulário de intenção, não molde de
+ *     frase: a Ana e a Camila escrevem diferente e as duas usam essas
+ *     palavras.
+ *  3. **Nenhuma palavra que desmarca** — "ainda não", "qual horário",
+ *     "prefere", "tenho vaga". Elas ganham da trava 2, porque
+ *     "confirmado" aparece também em "ainda não está confirmado".
+ *
+ * **O erro que se prefere é o de deixar passar.** Lead que fica em
+ * AGENDAR quando já tinha hora marcada custa uma conferência; lead que
+ * vai para AGENDADO sem ter hora custa um horário vazio na loja.
+ */
+const FECHA = /confirmad|agendad|combin(?:ad|ou|amos|ei)|te espero|te aguardo|esperamos voc|fechado|deixei tudo certo|marcad[oa]\s+(?:pra|para)|ficou agendada|j[aá] est[aá] marcad/i;
+const DESMARCA = /ainda n[aã]o|n[aã]o est[aá] confirmad|sujeito a|preciso confirmar|qual (?:hor[aá]rio|desses|dia|fica)|fica melhor|prefere|gostaria|quer aproveitar|ficaria bom|hor[aá]rio livre|tenho vaga|tenho dispon[ií]vel|liberei|posso te (?:oferecer|dar)|op[cç][oõ]es/i;
 
 function dataHoraConfirmada(texto, base) {
   const t = String(texto || "");
   if (!t) return null;
-  // Sem acento e em minúsculas: "às" e "as", "terça" e "terca".
   const limpo = t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
-  // A HORA: "10:00", "10h", "10 h", "as 10". Minuto é opcional.
-  const mh = limpo.match(/(?:as|às|\bhorario\b[^\d]{0,12}|\bhora\b[^\d]{0,12}|\b)(\d{1,2})\s*(?::|h)\s*(\d{2})?\b/);
-  if (!mh) return null;
-  const hora = Number(mh[1]);
-  const min = mh[2] == null ? 0 : Number(mh[2]);
-  if (!(hora >= 0 && hora <= 23) || !(min >= 0 && min <= 59)) return null;
-  // "10h" ou "10:00" tudo bem; "10" solto não — sem o h nem os dois
-  // pontos, qualquer número da frase viraria hora.
-  if (!/[:h]/.test(mh[0])) return null;
+  if (!FECHA.test(limpo)) return null;
+  if (DESMARCA.test(limpo)) return null;
+
+  // TODAS as horas do texto: duas ou mais e é proposta.
+  const horas = [];
+  const rxH = /\b(\d{1,2})\s*(?::|h)\s*(\d{2})?\b/g;
+  let m;
+  while ((m = rxH.exec(limpo))) {
+    const h = Number(m[1]), mi = m[2] == null ? 0 : Number(m[2]);
+    if (h > 23 || mi > 59) continue;
+    // "das 08:30 às 12:30" é horário de funcionamento, não marcação —
+    // e aparece como duas horas, que a regra abaixo já recusa.
+    const chave = `${h}:${mi}`;
+    if (horas.indexOf(chave) < 0) horas.push(chave);
+  }
+  if (horas.length !== 1) return null;
+  const [hora, min] = horas[0].split(":").map(Number);
 
   const ref = base ? new Date(base) : new Date();
+  // O dia de hoje em Joinville, que é o que "amanhã" quer dizer.
+  const hojeAqui = new Date(ref.getTime() - 3 * 3600000);
   let ano = null, mes = null, dia = null;
 
-  // "05/10/2026" ou "05/10". O ano de dois dígitos vira 20xx.
   const md = limpo.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+  const mx = limpo.match(/\b(\d{1,2})\s+de\s+([a-z]{3})/);
+  const mdia = limpo.match(/\bdia\s+(\d{1,2})\b(?!\s*\/)/);
+  const msem = limpo.match(/\b(domingo|segunda|terca|quarta|quinta|sexta|sabado)(?:-feira)?\b/);
+
   if (md) {
     dia = Number(md[1]); mes = Number(md[2]);
     if (md[3]) { ano = Number(md[3]); if (ano < 100) ano += 2000; }
-  } else {
-    // "dia 7 de outubro", "7 de out"
-    const mx = limpo.match(/\b(\d{1,2})\s+de\s+([a-z]{3})/);
-    if (mx && MESES_TXT[mx[2]]) { dia = Number(mx[1]); mes = MESES_TXT[mx[2]]; }
-    else if (/\bamanha\b/.test(limpo)) {
-      const d = new Date(ref.getTime() + 86400000);
-      ano = d.getUTCFullYear(); mes = d.getUTCMonth() + 1; dia = d.getUTCDate();
-    } else if (/\bhoje\b/.test(limpo)) {
-      ano = ref.getUTCFullYear(); mes = ref.getUTCMonth() + 1; dia = ref.getUTCDate();
-    } else return null;
-  }
+  } else if (mx && MESES_TXT[mx[2]]) {
+    dia = Number(mx[1]); mes = MESES_TXT[mx[2]];
+  } else if (/\bamanha\b/.test(limpo)) {
+    const d = new Date(hojeAqui.getTime() + 86400000);
+    ano = d.getUTCFullYear(); mes = d.getUTCMonth() + 1; dia = d.getUTCDate();
+  } else if (/\bhoje\b/.test(limpo)) {
+    ano = hojeAqui.getUTCFullYear(); mes = hojeAqui.getUTCMonth() + 1; dia = hojeAqui.getUTCDate();
+  } else if (mdia) {
+    // "dia 7" sem mês: o mês corrente, e o seguinte se o dia já passou.
+    dia = Number(mdia[1]);
+    ano = hojeAqui.getUTCFullYear(); mes = hojeAqui.getUTCMonth() + 1;
+    if (dia < hojeAqui.getUTCDate()) { mes += 1; if (mes > 12) { mes = 1; ano += 1; } }
+  } else if (msem) {
+    // "sábado" é o próximo sábado; hoje mesmo não, porque quem marca
+    // para hoje escreve "hoje".
+    const alvo = SEMANA_TXT[msem[1]];
+    const d = new Date(hojeAqui);
+    const falta = ((alvo - d.getUTCDay()) + 7) % 7 || 7;
+    d.setUTCDate(d.getUTCDate() + falta);
+    ano = d.getUTCFullYear(); mes = d.getUTCMonth() + 1; dia = d.getUTCDate();
+  } else return null;
+
   if (!(dia >= 1 && dia <= 31) || !(mes >= 1 && mes <= 12)) return null;
   if (ano == null) {
-    // Sem ano na frase: o ano da mensagem, e o seguinte quando a data
-    // já passou — "dia 05/01" em dezembro é janeiro que vem.
-    ano = ref.getUTCFullYear();
-    const tentativa = Date.UTC(ano, mes - 1, dia);
-    if (tentativa < ref.getTime() - 7 * 86400000) ano += 1;
+    ano = hojeAqui.getUTCFullYear();
+    if (Date.UTC(ano, mes - 1, dia) < hojeAqui.getTime() - 7 * 86400000) ano += 1;
   }
 
-  /* O RELÓGIO É O DE JOINVILLE, não o de Greenwich. "às 10:00" na
-   * mensagem quer dizer 10 da manhã aqui; guardar como UTC puro
-   * jogaria o compromisso para as 7h na agenda (mesma armadilha que
-   * sumiu com o mês inteiro na decisão 22). UTC−3 o ano todo: o
-   * horário de verão acabou em 2019. */
+  /* O RELÓGIO É O DE JOINVILLE. "às 10:00" na mensagem quer dizer 10
+   * da manhã aqui; guardar como UTC puro jogaria o compromisso para as
+   * 7h na agenda (mesma armadilha da decisão 22). UTC−3 o ano todo. */
   const quando = new Date(Date.UTC(ano, mes - 1, dia, hora + 3, min, 0));
   if (isNaN(quando.getTime())) return null;
   const agora = ref.getTime();
-  if (quando.getTime() < agora - 2 * 3600000) return null;          // já passou
-  if (quando.getTime() > agora + 120 * 86400000) return null;       // longe demais
+  if (quando.getTime() < agora - 2 * 3600000) return null;
+  if (quando.getTime() > agora + 120 * 86400000) return null;
   return quando.toISOString();
 }
 
