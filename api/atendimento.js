@@ -1628,6 +1628,136 @@ module.exports = async function handler(req, res) {
   const tok = tokenDe(req);
   if (!tok) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
 
+  /* ===================== AS AÇÕES =====================
+   *
+   * Pedido do Derek em 05/10/2026: *"tarefas para o meu pré-vendas
+   * fazer de acordo com certas situações. como se fosse uma
+   * programação de automação, mas feita manualmente através de listas
+   * de ação"*. O exemplo dele é a primeira regra: cliente há três dias
+   * em AGENDAR que ainda não agendou.
+   *
+   * **O quadro mostra onde cada um está; as ações dizem em quem
+   * encostar hoje.** São perguntas diferentes: o quadro é o estado, e
+   * olhar estado não diz quem está parado há tempo demais. Sem isto,
+   * o lead que ninguém tocou continua no mesmo lugar para sempre e
+   * ninguém percebe — é o vazamento silencioso que a decisão 27 já
+   * descreve no agendamento que passou.
+   *
+   * **As regras são calculadas, não gravadas.** Nada de uma tabela de
+   * tarefas que precisa ser criada, marcada como feita e limpa: a
+   * lista é consequência do estado, então ela se esvazia sozinha
+   * quando o trabalho é feito — e volta a encher sozinha. Marcar
+   * "feito" sem mudar o lead seria mentira que o quadro desmente.
+   *
+   * **A ordem das listas é a ordem de urgência**, porque é a ordem em
+   * que elas devem ser trabalhadas: primeiro quem está na loja hoje,
+   * depois quem está esperando resposta agora, e por último quem
+   * esfriou.
+   */
+  if (String(req.query.recurso || "") === "acoes") {
+    const dias = Math.min(60, Math.max(1, Number(req.query.dias) || 3));
+    const agora = Date.now();
+    const atras = (n) => new Date(agora - n * 86400000).toISOString();
+
+    const [leads, convs] = await Promise.all([
+      banco(`${REST("lead")}?select=${CAMPOS_LEAD}&excluido_em=is.null&limit=1000`, { headers: cabecalhos(tok) }),
+      banco(`${URL_BASE}/rest/v1/wa_conversa?select=telefone,lead_id,ultima_de_fora,respondida_em,ultima_em,wa_canal(slug,nome,comercial)&limit=1000`,
+        { headers: cabecalhos(tok) }).catch(() => []),
+    ]);
+
+    // Quem está esperando resposta, pelo mesmo cálculo da caixa de
+    // entrada — uma régua só para as duas telas.
+    const esperando = {};
+    (convs || []).forEach((c) => {
+      const ca = Array.isArray(c.wa_canal) ? c.wa_canal[0] : c.wa_canal;
+      if (!ca || ca.comercial === false) return;
+      if (!c.ultima_de_fora) return;
+      if (c.respondida_em && c.respondida_em >= c.ultima_de_fora) return;
+      if (c.lead_id) esperando[c.lead_id] = c.ultima_de_fora;
+    });
+
+    const hoje = hojeAqui();
+    const todos = leads || [];
+    const vivo = (l) => ["compareceu", "perdido"].indexOf(l.status) < 0;
+
+    const listas = [
+      {
+        id: "hoje",
+        titulo: "Na loja hoje",
+        porque: "Confirme que vêm, e marque quem chegou.",
+        cor: "verde",
+        leads: todos.filter((l) => ["agendado", "confirmado"].indexOf(l.status) >= 0 &&
+          String(l.agendado_para || "").slice(0, 10) === hoje),
+      },
+      {
+        id: "passou",
+        titulo: "Passou a hora e ninguém marcou",
+        porque: "Diga se veio ou não — sem isso o lead fica parado e o funil não fecha.",
+        cor: "laranja",
+        leads: todos.filter((l) => ["agendado", "confirmado"].indexOf(l.status) >= 0 &&
+          l.agendado_para && l.agendado_para < new Date(agora - 2 * 3600000).toISOString()),
+      },
+      {
+        id: "amanha",
+        titulo: "Amanhã, ainda sem confirmar",
+        porque: "A confirmação da véspera é o que separa agendado de comparecido.",
+        cor: "roxo",
+        leads: todos.filter((l) => l.status === "agendado" && !l.confirmado_em &&
+          String(l.agendado_para || "").slice(0, 10) ===
+            new Date(Date.parse(`${hoje}T12:00:00Z`) + 86400000).toISOString().slice(0, 10)),
+      },
+      {
+        id: "esperando",
+        titulo: "Escreveram e ninguém respondeu",
+        porque: "O cliente está esperando agora. É o que esfria mais rápido.",
+        cor: "laranja",
+        leads: todos.filter((l) => vivo(l) && esperando[l.id]),
+      },
+      {
+        id: "parado",
+        titulo: `Há ${dias} dias em Agendar, sem marcar`,
+        porque: "Já falaram com a loja e não marcaram. É a fila que mais paga ligação.",
+        cor: "roxo",
+        leads: todos.filter((l) => l.status === "em_contato" && String(l.atualizado_em || l.criado_em) < atras(dias)),
+      },
+      {
+        id: "novo",
+        titulo: "Novos que ninguém tocou",
+        porque: "Entraram e ninguém falou com eles ainda.",
+        cor: "roxo",
+        leads: todos.filter((l) => l.status === "novo" && String(l.criado_em) < atras(1)),
+      },
+      {
+        id: "remarcar",
+        titulo: "Não vieram e não foram remarcados",
+        porque: "Quem não veio é justamente quem precisa de ligação (decisão 27).",
+        cor: "laranja",
+        leads: todos.filter((l) => l.status === "nao_compareceu" &&
+          String(l.atualizado_em || l.criado_em) < atras(dias)),
+      },
+      {
+        id: "voltar",
+        titulo: "Perdidos de seis meses atrás",
+        porque: "Quem não quis naquele dia pode querer agora — enquanto tem carro, é lead.",
+        cor: "cinza",
+        leads: todos.filter((l) => l.status === "perdido" && String(l.atualizado_em || l.criado_em) < atras(180)),
+      },
+    ];
+
+    // Lista vazia não aparece: painel cheio de zeros ensina a ignorar
+    // o painel.
+    return res.status(200).json({
+      dias,
+      listas: listas.filter((x) => x.leads.length).map((x) => ({
+        ...x,
+        leads: x.leads
+          .sort((a, b) => String(a.agendado_para || a.atualizado_em || "").localeCompare(String(b.agendado_para || b.atualizado_em || "")))
+          .slice(0, 60),
+        total: x.leads.length,
+      })),
+    });
+  }
+
   /* A CAIXA DE ENTRADA: TODAS AS CONVERSAS NUM LUGAR SÓ.
    *
    * Era o pedido do Derek desde o começo -- seis números de WhatsApp,

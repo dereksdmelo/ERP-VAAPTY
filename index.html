@@ -11875,6 +11875,13 @@ async function criarLead(dados) {
   if (!r.ok) throw new Error(d.erro || "Não consegui gravar o lead.");
   return d.lead;
 }
+async function listarAcoes(dias) {
+  const r = await fetchAut(`/api/atendimento?recurso=acoes${dias ? `&dias=${dias}` : ""}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui montar as ações.");
+  return d;
+}
+
 async function excluirLead(id, motivo) {
   const r = await fetchAut(`/api/atendimento?recurso=lead&id=${encodeURIComponent(id)}&acao=excluir`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ motivo }),
@@ -12175,6 +12182,155 @@ function LeadsExcluidos() {
   );
 }
 
+/* ===================== AS AÇÕES =====================
+ *
+ * "Tarefas para o meu pré-vendas fazer de acordo com certas
+ * situações — como se fosse uma programação de automação, mas feita
+ * manualmente através de listas de ação" (o Derek, 05/10/2026).
+ *
+ * **O quadro mostra onde cada um está; aqui diz em quem encostar
+ * hoje.** São perguntas diferentes, e olhar estado não revela quem
+ * está parado há tempo demais.
+ *
+ * **As listas se esvaziam sozinhas**, porque são consequência do
+ * estado e não uma tabela de tarefas. Não há "marcar como feito": o
+ * feito é o lead ter mudado — marcar sem mudar seria mentira que o
+ * quadro desmente.
+ *
+ * **Lista vazia não aparece.** Painel cheio de zeros ensina a ignorar
+ * o painel.
+ */
+const COR_ACAO = { verde: "#1D7F58", laranja: "#E1521F", roxo: "#6D1B9E", cinza: "#6E6879" };
+
+function TelaAcoes({ equipe, aoVerConversa }) {
+  const [d, setD] = useState(null);
+  const [erro, setErro] = useState("");
+  const [dias, setDias] = useState(3);
+  const [aberta, setAberta] = useState(null);
+  const [ligando, setLigando] = useState(null);
+  const [agendando, setAgendando] = useState(null);
+
+  const carregar = () => listarAcoes(dias).then((x) => { setD(x); setErro(""); }).catch((e) => setErro(e.message));
+  useEffect(() => { setD(null); carregar(); }, [dias]);
+
+  const mexer = async (l, mud) => {
+    try { await atualizarLead(l.id, mud); carregar(); }
+    catch (e) { setErro(e.message); }
+  };
+
+  const listas = (d && d.listas) || [];
+  const total = listas.reduce((t, x) => t + x.total, 0);
+
+  return (
+    <div>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[13.5px]" style={{ color: C.mute }}>
+          {d ? (total ? `${total} ${total > 1 ? "clientes esperando alguma coisa" : "cliente esperando alguma coisa"}`
+                      : "Nada parado. A fila está em dia.")
+             : "montando as listas…"}
+        </p>
+        <label className="flex items-center gap-2 text-[12.5px]" style={{ color: C.mute }}>
+          parado há
+          <select className="rounded-lg border px-2 py-1 text-[13px]" style={inputSty}
+            value={dias} onChange={(e) => setDias(Number(e.target.value))}>
+            {[1, 2, 3, 5, 7, 14].map((n) => <option key={n} value={n}>{n} dia{n > 1 ? "s" : ""}</option>)}
+          </select>
+        </label>
+      </div>
+
+      {erro && <p className="mb-3 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+
+      <div className="space-y-3">
+        {listas.map((x) => {
+          const cor = COR_ACAO[x.cor] || C.roxo;
+          const abertaAgora = aberta === x.id;
+          return (
+            <section key={x.id} className="rounded-xl" style={{ background: C.paper, border: `1px solid ${abertaAgora ? cor : C.line}` }}>
+              <button onClick={() => setAberta(abertaAgora ? null : x.id)}
+                className="flex w-full items-center justify-between gap-3 p-4 text-left">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-full px-2 py-0.5 text-[12px] font-bold"
+                      style={{ background: cor + "18", color: cor, fontFamily: F.mono }}>{x.total}</span>
+                    <span className="text-[15px]" style={{ fontFamily: F.disp, fontWeight: 700 }}>{x.titulo}</span>
+                  </div>
+                  <p className="mt-1 text-[12.5px] leading-snug" style={{ color: C.mute }}>{x.porque}</p>
+                </div>
+                <span className="shrink-0 text-[13px]" style={{ color: C.mute }}>{abertaAgora ? "fechar" : "abrir"}</span>
+              </button>
+
+              {abertaAgora && (
+                <div className="border-t" style={{ borderColor: C.line }}>
+                  {x.leads.map((l) => (
+                    <div key={l.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b px-4 py-2.5 text-[13px]"
+                      style={{ borderColor: C.line }}>
+                      <span className="min-w-0 flex-1">
+                        <span className="font-semibold">{l.nome}</span>
+                        {l.carro && <span style={{ color: C.mute }}> · {l.carro}</span>}
+                        {l.agendado_para && (
+                          <span style={{ color: cor }}> · {diaBR(l.agendado_para)} {horaBR(l.agendado_para)}</span>
+                        )}
+                        {l.origem && <span className="text-[11.5px]" style={{ color: C.mute }}> · {rotulo(ORIGENS, l.origem)}</span>}
+                      </span>
+                      {/* As ações de sempre, na própria linha: quem
+                          trabalha esta fila está no telefone e não
+                          pode trocar de tela a cada nome. */}
+                      {l.telefone && (
+                        <button onClick={() => setLigando(l)} style={{ color: C.verde, fontWeight: 700 }}>ligar</button>
+                      )}
+                      {l.telefone && (
+                        <a href={zap(l.telefone, `Olá ${l.nome}! Aqui é da Vaapty Joinville.`)} target="_blank" rel="noreferrer"
+                          style={{ color: C.verde, fontWeight: 600 }}>zap</a>
+                      )}
+                      {l.telefone && aoVerConversa && (
+                        <button onClick={() => aoVerConversa(l.telefone)} style={{ color: C.roxo, fontWeight: 600 }}>conversa</button>
+                      )}
+                      {/* "Veio?" só onde a pergunta cabe — na lista de
+                          hoje e na de quem passou da hora. */}
+                      {(x.id === "hoje" || x.id === "passou") ? (
+                        <span className="flex gap-1.5">
+                          <button onClick={() => mexer(l, { status: "compareceu" })}
+                            className="rounded px-2 py-1 text-[12px] font-bold text-white" style={{ background: C.verde }}>veio</button>
+                          <button onClick={() => mexer(l, { status: "nao_compareceu", agendado_para: null, confirmado_em: null })}
+                            className="rounded border px-2 py-1 text-[12px] font-bold"
+                            style={{ borderColor: C.laranja, color: C.laranja }}>não veio</button>
+                        </span>
+                      ) : (
+                        <button onClick={() => setAgendando(l)} className="rounded-md px-2.5 py-1 text-[12px] font-semibold"
+                          style={{ background: C.roxo, color: "#fff" }}>Agendar</button>
+                      )}
+                    </div>
+                  ))}
+                  {x.total > x.leads.length && (
+                    <p className="px-4 py-2 text-[12px]" style={{ color: C.mute }}>
+                      mostrando {x.leads.length} de {x.total} — trabalhe estes e a lista recarrega.
+                    </p>
+                  )}
+                </div>
+              )}
+            </section>
+          );
+        })}
+      </div>
+
+      {d && !listas.length && (
+        <Bloco titulo="Nada parado">
+          <p className="text-[13.5px] leading-relaxed" style={{ color: C.mute }}>
+            Ninguém está esperando resposta, ninguém está parado além do prazo e não há
+            agendamento sem desfecho. Quando algo esfriar, aparece aqui sozinho.
+          </p>
+        </Bloco>
+      )}
+
+      {ligando && <Ligar para={ligando.telefone} nome={ligando.nome} aoFechar={() => setLigando(null)} />}
+      {agendando && (
+        <Agendador lead={agendando} equipe={equipe || []} aoFechar={() => setAgendando(null)}
+          aoAgendar={async (mud) => { await mexer(agendando, { ...mud, status: "agendado" }); setAgendando(null); }} />
+      )}
+    </div>
+  );
+}
+
 function TelaPreVendas({ perfil, aoAbrirAtendimento, aoVerConversa, mes, comp }) {
   const [aba, setAba] = useState("funil");
   const [vista, setVista] = useState("quadro");
@@ -12192,7 +12348,10 @@ function TelaPreVendas({ perfil, aoAbrirAtendimento, aoVerConversa, mes, comp })
             ele volta se mudar de ideia. */}
         {/* "Canais" é a quarta porque é leitura, não fila: as três
             primeiras são trabalho do dia. */}
-        {[["funil", "Leads"], ["agenda", "Agendamentos"], ["perdidos", "Perdidos"],
+        {/* "Ações" vem primeiro porque é por onde o dia começa: o
+            quadro mostra onde cada um está, as ações dizem em quem
+            encostar agora. */}
+        {[["acoes", "Ações"], ["funil", "Leads"], ["agenda", "Agendamentos"], ["perdidos", "Perdidos"],
           ["canais", "Canais"], ["excluidos", "Excluídos"]].map(([v, r]) => (
           <button key={v} onClick={() => setAba(v)} className="rounded-full px-3.5 py-1.5 text-[13px] font-semibold"
             style={{ background: aba === v ? C.roxo : C.paper, color: aba === v ? "#fff" : C.ink, border: `1px solid ${aba === v ? C.roxo : C.line}` }}>{r}</button>
@@ -12221,6 +12380,7 @@ function TelaPreVendas({ perfil, aoAbrirAtendimento, aoVerConversa, mes, comp })
       {aba === "perdidos" && <LeadsPerdidos perfil={perfil} />}
       {aba === "canais" && <TelaCanaisPreVenda comp={comp} />}
       {aba === "excluidos" && <LeadsExcluidos />}
+      {aba === "acoes" && <TelaAcoes equipe={equipe} aoVerConversa={aoVerConversa} />}
     </div>
   );
 }

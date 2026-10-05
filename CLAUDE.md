@@ -1974,6 +1974,51 @@ o botão ficou em `FunilLeads` — exatamente o caso da decisão 7, que
 transpila sem reclamar e quebra na tela. O teste acusou "chama
 setLigando() sem declarar o estado" antes de qualquer clique.
 
+### 53. As ações: o quadro mostra o estado, a lista diz em quem encostar
+
+O Derek pediu em 05/10/2026 uma aba de **ações** — *"tarefas para o
+meu pré-vendas fazer de acordo com certas situações, como se fosse uma
+programação de automação, mas feita manualmente através de listas de
+ação"*. O exemplo dele virou a primeira regra: cliente há três dias em
+AGENDAR que ainda não agendou.
+
+**São perguntas diferentes, e é por isso que são duas telas.** O
+quadro responde "onde cada um está"; olhar estado **não revela quem
+está parado há tempo demais**. Sem a lista, o lead que ninguém tocou
+fica no mesmo lugar para sempre e ninguém percebe — o mesmo vazamento
+silencioso que a decisão 27 descreve no agendamento que passou.
+
+**As regras são CALCULADAS, não gravadas, e isso é a decisão
+principal.** Não existe tabela de tarefas para criar, marcar como
+feita e limpar: a lista é consequência do estado, então **ela se
+esvazia sozinha quando o trabalho é feito** — e volta a encher
+sozinha. Um "marcar como feito" que não mudasse o lead seria mentira
+que o quadro desmente na tela ao lado.
+
+**A ordem das listas é a ordem de urgência**, porque é a ordem em que
+devem ser trabalhadas: quem está na loja hoje, quem passou da hora sem
+desfecho, a confirmação de amanhã, quem escreveu e espera agora, quem
+parou em Agendar, os novos intocados, quem não veio, e por último os
+perdidos de seis meses atrás — que voltam porque **enquanto a pessoa
+tem um carro para vender, é lead** (decisão 27).
+
+**Lista vazia não aparece.** Painel cheio de zeros ensina a ignorar o
+painel, e aí o dia em que algo encher passa batido.
+
+**A ação acontece NA LINHA** — ligar, zap, abrir a conversa, agendar,
+e o "veio / não veio" onde a pergunta cabe. Quem trabalha essa fila
+está com o telefone na orelha e não pode trocar de tela a cada nome
+(mesma régua da barra de captura, decisão 27).
+
+**"Parado há N dias" é ajustável na tela**, de 1 a 14. Três é o padrão
+porque foi o número que o Derek deu, mas o ritmo da casa muda e a
+régua não devia exigir deploy.
+
+**O que ainda não existe:** regra escrita pelo gerente. As oito são
+código, e acrescentar uma pede uma linha em `?recurso=acoes`. Um
+editor de regras só se paga quando a lista das oito deixar de servir —
+e aí o pedido virá com o caso que falta.
+
 ## Convenções do código
 
 - **Português no domínio.** Estado, funções e rótulos em pt-BR
