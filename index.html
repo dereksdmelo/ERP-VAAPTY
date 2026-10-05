@@ -8753,7 +8753,7 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe }) {
   );
 }
 
-function TelaConversas() {
+function TelaConversas({ alvo, aoConsumirAlvo }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
   const [canais, setCanais] = useState([]);
@@ -8763,11 +8763,38 @@ function TelaConversas() {
   const [digitado, setDigitado] = useState("");
   const [aba, setAba] = useState("esperando");
   const [aberta, setAberta] = useState(null);
+  const [abrirPrimeira, setAbrirPrimeira] = useState(false);
 
   // A lista de números vem do mesmo lugar que a tela do gerente, mas
   // aqui ela é só um filtro: quem não é gerente leva 403 e fica sem o
   // seletor, em vez de ver um erro.
   useEffect(() => { waCanais().then(setCanais).catch(() => setCanais([])); }, []);
+
+  /* ABERTA DE DENTRO DO LEAD.
+   *
+   * Busca pelos OITO ÚLTIMOS dígitos: a conversa guarda o telefone com
+   * o 55 do país e o lead sem, e o nono dígito aparece num e falta no
+   * outro conforme quem digitou — a mesma chave do `chaveFone()` do
+   * funil. Procurar pela string inteira não acharia justamente os
+   * números antigos. */
+  useEffect(() => {
+    if (!alvo) return;
+    const d = String(alvo).replace(/\D/g, "");
+    setCanal(""); setAba("todas");
+    setBusca(d.length >= 8 ? d.slice(-8) : d);
+    setAberta(null);
+    setAbrirPrimeira(true);
+    if (aoConsumirAlvo) aoConsumirAlvo();
+  }, [alvo]);
+
+  // Abre sozinha quando o resultado chega — e só uma vez, senão o
+  // relógio da lista reabriria a conversa a cada volta, por cima do
+  // que a pessoa tivesse escolhido depois.
+  useEffect(() => {
+    if (!abrirPrimeira || !lista) return;
+    if (lista.length) setAberta(lista[0]);
+    setAbrirPrimeira(false);
+  }, [abrirPrimeira, lista]);
   // Para o agendador oferecer o negociador, como na Pré-vendas.
   useEffect(() => { listarNegociadores().then(setEquipe).catch(() => setEquipe([])); }, []);
 
@@ -8836,7 +8863,16 @@ function TelaConversas() {
       <div className="grid gap-4 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
         <div className={`${abertaViva ? "hidden lg:block" : ""}`}>
           {!lista && !erro && <p className="text-[14px]" style={{ color: C.mute }}>carregando…</p>}
-          {lista && !mostradas.length && (
+              {lista && !mostradas.length && busca && (
+            <Bloco titulo="Nenhuma conversa com esse número">
+              <p className="text-[13.5px] leading-relaxed" style={{ color: C.mute }}>
+                Este lead não chegou pelo WhatsApp, ou chegou antes de o número
+                ser ligado — a ponte guarda do momento em que cada um foi ligado
+                para frente.
+              </p>
+            </Bloco>
+          )}
+      {lista && !mostradas.length && (
             <Bloco titulo={aba === "esperando" ? "Ninguém esperando" : "Nenhuma conversa ainda"}>
               <p className="text-[13.5px] leading-relaxed" style={{ color: C.mute }}>
                 {aba === "esperando"
@@ -11839,6 +11875,21 @@ async function criarLead(dados) {
   if (!r.ok) throw new Error(d.erro || "Não consegui gravar o lead.");
   return d.lead;
 }
+async function excluirLead(id, motivo) {
+  const r = await fetchAut(`/api/atendimento?recurso=lead&id=${encodeURIComponent(id)}&acao=excluir`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ motivo }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui excluir.");
+  return d.lead;
+}
+async function restaurarLead(id) {
+  const r = await fetchAut(`/api/atendimento?recurso=lead&id=${encodeURIComponent(id)}&acao=restaurar`, { method: "POST" });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui restaurar.");
+  return d.lead;
+}
+
 async function atualizarLead(id, dados) {
   const r = await fetchAut(`/api/atendimento?recurso=lead&id=${encodeURIComponent(id)}`, {
     method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
@@ -12064,7 +12115,67 @@ function Agendador({ lead, equipe, aoFechar, aoAgendar }) {
   );
 }
 
-function TelaPreVendas({ perfil, aoAbrirAtendimento, mes, comp }) {
+/* A LISTA OCULTA DOS EXCLUÍDOS.
+ *
+ * "Oculta" quer dizer fora das filas de trabalho, não secreta: quem
+ * procurar acha, com o motivo e com quem excluiu. **Lead apagado de
+ * verdade levaria junto a conversão do canal** — e número que muda
+ * sozinho, sem ninguém saber por quê, é número que deixa de ser lido.
+ *
+ * Ela existe por dois motivos práticos: desfazer engano, e responder
+ * "o que a equipe anda excluindo". Se a resposta for "cliente
+ * difícil", o problema não é a lista.
+ */
+function LeadsExcluidos() {
+  const [lista, setLista] = useState(null);
+  const [erro, setErro] = useState("");
+  const carregar = () => listarLeads({ fila: "excluidos" }).then(setLista).catch((e) => setErro(e.message));
+  useEffect(carregar, []);
+
+  const voltar = async (l) => {
+    setLista((ls) => (ls || []).filter((x) => x.id !== l.id));
+    try { await restaurarLead(l.id); } catch (e) { setErro(e.message); carregar(); }
+  };
+
+  return (
+    <div>
+      {erro && <p className="mb-3 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+      {lista === null && <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>}
+      {lista && !lista.length && (
+        <Bloco titulo="Nada excluído">
+          <p className="text-[13.5px] leading-relaxed" style={{ color: C.mute }}>
+            O que for excluído das filas aparece aqui, com o motivo e com quem excluiu —
+            e dá para trazer de volta.
+          </p>
+        </Bloco>
+      )}
+      <div className="space-y-2">
+        {(lista || []).map((l) => (
+          <div key={l.id} className="rounded-xl p-3" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-[14.5px] font-semibold">{l.nome}</div>
+                <div className="text-[12.5px]" style={{ color: C.mute }}>
+                  {l.telefone ? telBR(l.telefone) : "sem telefone"}
+                  {l.carro ? ` · ${l.carro}` : ""}
+                  {l.origem ? ` · ${rotulo(ORIGENS, l.origem)}` : ""}
+                </div>
+                <div className="mt-1 text-[12.5px]" style={{ color: C.laranja }}>
+                  {l.excluido_motivo || "sem motivo registrado"}
+                  <span style={{ color: C.mute }}> · {diaBR(l.excluido_em)}</span>
+                </div>
+              </div>
+              <button onClick={() => voltar(l)} className="shrink-0 rounded-lg border px-3 py-2 text-[13px] font-semibold"
+                style={{ borderColor: C.roxo, color: C.roxo }}>Trazer de volta</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TelaPreVendas({ perfil, aoAbrirAtendimento, aoVerConversa, mes, comp }) {
   const [aba, setAba] = useState("funil");
   const [vista, setVista] = useState("quadro");
   const [equipe, setEquipe] = useState([]);
@@ -12080,7 +12191,8 @@ function TelaPreVendas({ perfil, aoAbrirAtendimento, mes, comp }) {
             ele volta se mudar de ideia. */}
         {/* "Canais" é a quarta porque é leitura, não fila: as três
             primeiras são trabalho do dia. */}
-        {[["funil", "Leads"], ["agenda", "Agendamentos"], ["perdidos", "Perdidos"], ["canais", "Canais"]].map(([v, r]) => (
+        {[["funil", "Leads"], ["agenda", "Agendamentos"], ["perdidos", "Perdidos"],
+          ["canais", "Canais"], ["excluidos", "Excluídos"]].map(([v, r]) => (
           <button key={v} onClick={() => setAba(v)} className="rounded-full px-3.5 py-1.5 text-[13px] font-semibold"
             style={{ background: aba === v ? C.roxo : C.paper, color: aba === v ? "#fff" : C.ink, border: `1px solid ${aba === v ? C.roxo : C.line}` }}>{r}</button>
         ))}
@@ -12100,13 +12212,14 @@ function TelaPreVendas({ perfil, aoAbrirAtendimento, mes, comp }) {
             ))}
           </div>
           {vista === "quadro"
-            ? <QuadroLeads perfil={perfil} equipe={equipe} />
-            : <FunilLeads perfil={perfil} equipe={equipe} />}
+            ? <QuadroLeads perfil={perfil} equipe={equipe} aoVerConversa={aoVerConversa} />
+            : <FunilLeads perfil={perfil} equipe={equipe} aoVerConversa={aoVerConversa} />}
         </div>
       )}
       {aba === "agenda" && <Agendamentos perfil={perfil} equipe={equipe} aoAbrirAtendimento={aoAbrirAtendimento} />}
       {aba === "perdidos" && <LeadsPerdidos perfil={perfil} />}
       {aba === "canais" && <TelaCanaisPreVenda comp={comp} />}
+      {aba === "excluidos" && <LeadsExcluidos />}
     </div>
   );
 }
@@ -12222,6 +12335,56 @@ function LeadsPerdidos({ perfil }) {
  * quantos a loja perdeu para a concorrência — que é a única dessas
  * quatro respostas que cobra alguma coisa da equipe.
  */
+/* EXCLUIR PEDE MOTIVO ESCRITO, não um "tem certeza?".
+ *
+ * Confirmação só pergunta se a pessoa quis; motivo pergunta POR QUE —
+ * e é a segunda que separa limpeza de faxina. Sem ele, "excluir" vira
+ * o botão que se aperta para tirar da tela, e ninguém consegue
+ * responder depois se o que sumiu era engano de digitação ou cliente
+ * difícil. Mesma lição do motivo de "perdido" (decisão 27).
+ */
+function PorQueExcluir({ nome, aoExcluir, aoFechar }) {
+  const [motivo, setMotivo] = useState("");
+  const [indo, setIndo] = useState(false);
+  const PRONTOS = ["Número errado", "Duplicado", "Teste", "Não é cliente (fornecedor, lojista)"];
+  const vai = async (t) => {
+    const m = String(t || motivo).trim();
+    if (m.length < 3) return;
+    setIndo(true);
+    try { await aoExcluir(m); } finally { setIndo(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center"
+      style={{ background: "rgba(24,20,32,0.45)" }} onClick={aoFechar}>
+      <div className="w-full max-w-[420px] rounded-xl p-4" onClick={(e) => e.stopPropagation()}
+        style={{ background: C.paper, border: `1px solid ${C.line}`, boxShadow: "0 18px 50px rgba(24,20,32,0.28)" }}>
+        <div className="text-[15px]" style={{ fontFamily: F.disp, fontWeight: 800 }}>Excluir {nome}</div>
+        <p className="mt-1 text-[12.5px] leading-snug" style={{ color: C.mute }}>
+          Ele sai das filas e vai para a lista de excluídos. Nada é apagado — dá para
+          trazer de volta.
+        </p>
+        <div className="mt-3 grid gap-2">
+          {PRONTOS.map((t) => (
+            <button key={t} onClick={() => vai(t)} disabled={indo}
+              className="rounded-lg border px-3 py-2.5 text-left text-[13.5px] font-semibold"
+              style={{ borderColor: C.line, color: C.ink }}>{t}</button>
+          ))}
+        </div>
+        <Campo label="Ou escreva o motivo">
+          <input className={inputCls} style={inputSty} value={motivo} autoFocus
+            onChange={(e) => setMotivo(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") vai(); }} />
+        </Campo>
+        <button onClick={() => vai()} disabled={indo || motivo.trim().length < 3}
+          className="mt-3 w-full rounded-lg px-4 py-3 text-[14px] font-bold text-white"
+          style={{ background: C.laranja, opacity: indo || motivo.trim().length < 3 ? 0.4 : 1 }}>
+          {indo ? "excluindo…" : "Excluir"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function PorQuePerdeu({ aoEscolher, aoFechar }) {
   const MOTIVOS = [
     ["Vendeu fora", "Tinha o carro e fechou com outro comprador."],
@@ -12441,7 +12604,7 @@ function CartaoLead({ l, onAbrir, onArrastar, onVeio }) {
   );
 }
 
-function QuadroLeads({ perfil, equipe }) {
+function QuadroLeads({ perfil, equipe, aoVerConversa }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
   const [arrastando, setArrastando] = useState(null);
@@ -12451,6 +12614,7 @@ function QuadroLeads({ perfil, equipe }) {
   const [perdendo, setPerdendo] = useState(null);
   const [criando, setCriando] = useState(false);
   const [ligando, setLigando] = useState(null);
+  const [excluindo, setExcluindo] = useState(null);
   const [novo, setNovo] = useState({ nome: "", telefone: "", carro: "", origem: "fluxo_loja" });
 
   const carregar = () => {
@@ -12598,6 +12762,17 @@ function QuadroLeads({ perfil, equipe }) {
                   style={{ borderColor: C.line, color: C.ink }}>Mensagem</a>
               </div>
             )}
+            {/* A CONVERSA ORIGINAL, dentro do ERP. O histórico é o que
+                diz o que já foi prometido ao cliente — ligar sem ele é
+                recomeçar a conversa do zero na frente dele. */}
+            {menu.telefone && aoVerConversa && (
+              <button onClick={() => { const t = menu.telefone; setMenu(null); aoVerConversa(t); }}
+                className="mt-2 w-full rounded-lg border px-3 py-2.5 text-[13.5px] font-semibold"
+                style={{ borderColor: C.line, color: C.roxo }}>Ver a conversa no sistema</button>
+            )}
+            <button onClick={() => { setExcluindo(menu); setMenu(null); }}
+              className="mt-2 w-full rounded-lg px-3 py-2.5 text-[13px] font-semibold"
+              style={{ color: C.laranja }}>Excluir da lista</button>
             <div className="mt-3 text-[10px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>Mover para</div>
             <div className="mt-1.5 grid grid-cols-2 gap-2">
               {COLUNAS_LEAD.filter((c) => c.id !== colunaDe(menu)).map((c) => (
@@ -12612,6 +12787,14 @@ function QuadroLeads({ perfil, equipe }) {
 
       {ligando && (
         <Ligar para={ligando.telefone} nome={ligando.nome} aoFechar={() => setLigando(null)} />
+      )}
+      {excluindo && (
+        <PorQueExcluir nome={excluindo.nome} aoFechar={() => setExcluindo(null)}
+          aoExcluir={async (motivo) => {
+            await excluirLead(excluindo.id, motivo);
+            setLista((ls) => (ls || []).filter((x) => x.id !== excluindo.id));
+            setExcluindo(null);
+          }} />
       )}
       {agendando && (
         <Agendador lead={agendando} equipe={equipe || []} aoFechar={() => setAgendando(null)}
@@ -12631,7 +12814,7 @@ function QuadroLeads({ perfil, equipe }) {
   );
 }
 
-function FunilLeads({ perfil, equipe }) {
+function FunilLeads({ perfil, equipe, aoVerConversa }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
   const [busca, setBusca] = useState("");
@@ -12781,6 +12964,9 @@ function FunilLeads({ perfil, equipe }) {
               {l.telefone && (
                 <button onClick={() => setLigando(l)} style={{ color: C.verde, fontWeight: 700 }}>ligar</button>
               )}
+              {l.telefone && aoVerConversa && (
+                <button onClick={() => aoVerConversa(l.telefone)} style={{ color: C.roxo, fontWeight: 600 }}>conversa</button>
+              )}
               {l.telefone && (
                 <a href={zap(l.telefone, `Olá ${l.nome}! Aqui é da Vaapty Joinville. Tudo bem?`)}
                   target="_blank" rel="noreferrer" style={{ color: C.verde, fontWeight: 600 }}>zap</a>
@@ -12891,6 +13077,7 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
   const [ligando, setLigando] = useState(null);
   const [agendando, setAgendando] = useState(null);
   const [voltando, setVoltando] = useState(null);
+  const [desloc, setDesloc] = useState(0);
   const [indo, setIndo] = useState("");
 
   const carregar = () => {
@@ -12920,6 +13107,33 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
     const d = String(l.agendado_para || "").slice(0, 10);
     (grupos[d] = grupos[d] || []).push(l);
   });
+
+  /* A SEMANA, DE SEGUNDA A SÁBADO — pedido do Derek em 05/10/2026.
+   *
+   * A lista por dia responde "o que tem hoje"; a semana responde
+   * "como está minha semana", que é outra pergunta e a que se faz na
+   * segunda de manhã. **O buraco é a informação**: um dia vazio no
+   * meio da semana é o que se vê na grade e não se vê numa lista, que
+   * só mostra os dias que têm algo — a mesma razão da grade do "Meu
+   * dia" (decisão 41).
+   *
+   * Domingo fica de fora porque a loja não abre; agendamento que caia
+   * lá aparece na lista de baixo, não some.
+   */
+  const semanaDe = (iso) => {
+    const d = new Date(`${iso}T12:00:00`);
+    // getDay: 0 domingo … 6 sábado. Segunda é o começo.
+    const recuo = (d.getDay() + 6) % 7;
+    d.setDate(d.getDate() - recuo + desloc * 7);
+    return Array.from({ length: 6 }, (_, i) => {
+      const x = new Date(d);
+      x.setDate(d.getDate() + i);
+      return x.toLocaleDateString("en-CA");
+    });
+  };
+  const semana = semanaDe(hoje);
+  // Fora da semana à vista, nada some: a lista de baixo continua
+  // mostrando tudo o que está em aberto.
   const dias = Object.keys(grupos).sort();
   const rotuloDia = (d) => {
     const p = proximosDias(2);
@@ -12932,6 +13146,61 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
     <div className="space-y-4">
       {erro && <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
       {lista === null && <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>}
+      {/* A SEMANA À VISTA. O vazio é o que ela mostra e a lista não:
+          dia sem ninguém marcado é o buraco que se preenche na segunda
+          de manhã. */}
+      {lista && (
+        <div>
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-[13px] font-bold uppercase tracking-[0.06em]" style={{ color: C.ink }}>
+              {desloc === 0 ? "Esta semana" : desloc === 1 ? "Semana que vem"
+                : desloc === -1 ? "Semana passada" : `${diaBR(semana[0])} a ${diaBR(semana[5])}`}
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button onClick={() => setDesloc(desloc - 1)} className="rounded-lg border px-2.5 py-1 text-[13px]"
+                style={{ borderColor: C.line, color: C.ink }}>‹</button>
+              {desloc !== 0 && (
+                <button onClick={() => setDesloc(0)} className="rounded-lg border px-2.5 py-1 text-[12px] font-semibold"
+                  style={{ borderColor: C.line, color: C.roxo }}>hoje</button>
+              )}
+              <button onClick={() => setDesloc(desloc + 1)} className="rounded-lg border px-2.5 py-1 text-[13px]"
+                style={{ borderColor: C.line, color: C.ink }}>›</button>
+            </div>
+          </div>
+          <div className="rolar overflow-x-auto pb-1">
+            <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(6, minmax(130px, 1fr))" }}>
+              {semana.map((d) => {
+                const doDia = (grupos[d] || []).slice().sort((x, y) => String(x.agendado_para).localeCompare(String(y.agendado_para)));
+                const eHoje = d === hoje;
+                return (
+                  <div key={d} className="rounded-xl p-2"
+                    style={{ background: eHoje ? C.roxoFraco : C.bg, border: `1px solid ${eHoje ? C.roxo : "transparent"}` }}>
+                    <div className="mb-1.5 px-0.5">
+                      <div className="text-[10px] uppercase tracking-[0.07em]" style={{ color: C.mute }}>{diaDaSemana(d).slice(0, 3)}</div>
+                      <div className="text-[13px] font-bold" style={{ color: eHoje ? C.roxo : C.ink }}>{diaBR(d).slice(0, 5)}</div>
+                    </div>
+                    <div className="space-y-1.5">
+                      {doDia.map((l) => (
+                        <div key={l.id} className="rounded-lg px-2 py-1.5"
+                          style={{ background: C.paper, border: `1px solid ${l.status === "confirmado" ? C.verde : C.line}` }}>
+                          <div className="text-[11.5px] font-bold" style={{ fontFamily: F.mono, color: l.status === "confirmado" ? C.verde : C.ink }}>
+                            {horaBR(l.agendado_para)}
+                          </div>
+                          <div className="truncate text-[12px]">{l.nome}</div>
+                        </div>
+                      ))}
+                      {!doDia.length && (
+                        <div className="py-2 text-center text-[11px]" style={{ color: C.mute }}>livre</div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
       {lista && !lista.length && (
         <div className="rounded-xl px-4 py-8 text-center" style={{ background: C.paper, border: `1px dashed ${C.line}` }}>
           <p className="text-[15px] font-semibold">Nenhum agendamento em aberto.</p>
@@ -18677,6 +18946,13 @@ function App() {
   // A página atual e o mês. O mês mora aqui porque vale para mais de
   // uma página — a lista de atendimentos e o painel medem o mesmo mês.
   const [tela, setTela] = useState("atendimentos");
+  /* A CONVERSA ORIGINAL, aberta de dentro do lead.
+   *
+   * O alvo mora no App porque quem pede está na Pré-vendas e quem
+   * mostra está em Conversas — duas telas da casca. Guardá-lo dentro
+   * de uma delas obrigaria a outra a adivinhar. */
+  const [conversaAlvo, setConversaAlvo] = useState(null);
+  const verConversa = (telefone) => { setConversaAlvo(String(telefone || "")); setTela("conversas"); };
   const [comp, setComp] = useState(() => competenciaDe(hojeEmSP()));
   const MESES = useMemo(() => mesesRecentes(18), []);
   // Chegou pelo link do "esqueci minha senha": a sessão vem no
@@ -18765,7 +19041,8 @@ function App() {
           aparece onde a pessoa estiver, e não só no "Meu dia". */}
       {pedeLembrete && <LembreteDoDia perfil={perfil} />}
       {tela === "meudia" && <TelaMeuDia perfil={perfil} />}
-      {tela === "prevendas" && <TelaPreVendas perfil={perfil} aoAbrirAtendimento={abrir} mes={mes} comp={compOuAtual} />}
+      {tela === "prevendas" && <TelaPreVendas perfil={perfil} aoAbrirAtendimento={abrir}
+        aoVerConversa={verConversa} mes={mes} comp={compOuAtual} />}
       {tela === "atendimentos" && <CRM perfil={perfil} aoAbrir={abrir} mes={{ ...mes, todos: true }} />}
       {tela === "estoque" && <TelaEstoque perfil={perfil} comp={compOuAtual} mes={mes} />}
       {/* A rota confere de novo: esconder o item do menu é conveniência,
@@ -18777,7 +19054,9 @@ function App() {
       {tela === "gestor" && <PainelGestor perfil={perfil} comp={compOuAtual} />}
       {tela === "adm" && <TelaADM perfil={perfil} comp={compOuAtual} mes={mes} />}
       {tela === "gestao" && <TelaGestao perfil={perfil} comp={compOuAtual} />}
-      {tela === "conversas" && <TelaConversas />}
+      {tela === "conversas" && (
+        <TelaConversas alvo={conversaAlvo} aoConsumirAlvo={() => setConversaAlvo(null)} />
+      )}
       {tela === "whatsapp" && perfil && perfil.papel === "gerente" && <TelaWhatsApp />}
       {tela === "financeiro" && <TelaFinanceiro perfil={perfil} comp={compOuAtual} mes={mes} />}
       {tela === "lojistas" && podeGestao && <TelaVendaLojistas perfil={perfil} />}

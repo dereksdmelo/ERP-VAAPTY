@@ -1789,6 +1789,37 @@ de captura: quem atende telefone grava sem procurar botão (decisão
 27). O quadro responde "onde ponho a mão"; a lista responde "acabei de
 desligar, preciso gravar".
 
+**A conversa original abre dentro do ERP**, do cartão ou da lista. O
+histórico é o que diz o que já foi prometido ao cliente — ligar sem ele
+é recomeçar a conversa do zero na frente dele. A busca é pelos **oito
+últimos dígitos**: a conversa guarda o telefone com o 55 do país e o
+lead sem, e o nono dígito aparece num e falta no outro (a mesma chave
+do `chaveFone()`). Lead que não veio do WhatsApp diz isso, em vez de
+abrir uma tela vazia.
+
+**EXCLUIR ESCONDE, NÃO APAGA (0060).** Lead é a origem do funil: linha
+que some leva junto a conversão do canal e o histórico de quem já
+falou com a loja — e número que muda sozinho, sem ninguém saber por
+quê, é número que deixa de ser lido. O excluído sai de todas as filas
+e vive numa aba própria, de onde volta inteiro.
+
+**A justificativa é obrigatória, e é ela que separa limpeza de
+faxina.** Confirmação só pergunta se a pessoa quis; motivo pergunta
+POR QUE. Sem ele, "excluir" vira o botão que se aperta para tirar da
+tela, e ninguém responde depois se o que sumiu era engano de digitação
+ou cliente difícil — a mesma lição do motivo de "perdido" (decisão
+27). **"Oculta" quer dizer fora das filas de trabalho, não secreta:**
+quem procurar acha, com o motivo e com quem excluiu, carimbado pelo
+servidor.
+
+**A agenda mostra a semana, de segunda a sábado.** A lista por dia
+responde "o que tem hoje"; a semana responde "como está minha semana",
+que é a pergunta da segunda de manhã. **O buraco é a informação** —
+dia vazio no meio da semana aparece na grade e não aparece numa lista,
+que só mostra os dias que têm algo (mesma razão da grade do "Meu dia",
+decisão 41). Domingo fica de fora porque a loja não abre, e
+agendamento que caia lá continua na lista de baixo.
+
 **A lista diz a etapa com o MESMO nome do quadro.** "Em contato" na
 lista e "Agendar" no quadro eram a mesma coisa com dois nomes, e quem
 lê as duas telas traduzia na cabeça. `etapaDoLead()` é o lugar único.

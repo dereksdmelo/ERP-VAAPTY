@@ -640,16 +640,68 @@ async function leads(req, res, tok) {
     // sumia do sistema com o cliente ainda por atender. O Derek viu em
     // 15/09/2026. Quem não veio é justamente quem precisa de ligação.
     else if (fila === "funil" && !f.length) f.push("status=in.(novo,em_contato,nao_compareceu)");
+    /* O EXCLUÍDO SAI DE TODA FILA, menos da dele.
+     *
+     * **Esconder, não apagar** (0060): lead é a origem do funil, e
+     * linha que some leva junto a conversão do canal e o histórico de
+     * quem já falou com a loja. Número que muda sozinho, sem ninguém
+     * saber por quê, é número que deixa de ser lido. */
+    if (fila === "excluidos") f.push("excluido_em=not.is.null");
+    else f.push("excluido_em=is.null");
     const de = data(req.query.de), ate = data(req.query.ate);
     if (de) f.push(`agendado_para=gte.${de}T00:00:00`);
     if (ate) f.push(`agendado_para=lte.${ate}T23:59:59`);
     const q = String(req.query.q || "").trim().replace(/[(),*]/g, " ").trim();
     if (q) f.push(`or=(nome.ilike.*${q}*,telefone.ilike.*${q}*,carro.ilike.*${q}*)`);
     if (/^\d{4}-\d{2}-\d{2}$/.test(proximo)) f.push(`proximo_contato=eq.${proximo}`);
-    const ordem = fila === "agenda" ? "agendado_para.asc" : "criado_em.desc";
+    const ordem = fila === "agenda" ? "agendado_para.asc"
+      : fila === "excluidos" ? "excluido_em.desc" : "criado_em.desc";
     const url = `${base}?select=${CAMPOS_LEAD}&order=${ordem}&limit=300${f.length ? `&${f.join("&")}` : ""}`;
     const lista = await banco(url, { headers: cabecalhos(tok) });
     return res.status(200).json({ leads: lista || [] });
+  }
+
+  /* EXCLUIR E DESFAZER.
+   *
+   * **A justificativa é obrigatória**, e é ela que separa limpeza de
+   * faxina: sem motivo escrito, "excluir" vira o botão que se aperta
+   * para tirar da tela — a mesma armadilha que o motivo de "perdido"
+   * evita (decisão 27). Com o motivo, dá para responder depois se o
+   * que se exclui é engano de digitação ou cliente difícil.
+   *
+   * **Quem excluiu é carimbado pelo servidor**, do token: a tela não
+   * escolhe o nome (mesma regra da 0008).
+   */
+  if (req.method === "POST" && String(req.query.acao || "") === "excluir") {
+    const id = String(req.query.id || "");
+    if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido." });
+    const c2 = (req.body && typeof req.body === "object") ? req.body : {};
+    const motivo = String(c2.motivo || "").trim();
+    if (motivo.length < 3) return res.status(400).json({ erro: "Escreva por que está excluindo." });
+    const r = await banco(`${base}?id=eq.${id}`, {
+      method: "PATCH", headers: json(tok, { Prefer: "return=representation" }),
+      body: JSON.stringify({
+        excluido_em: new Date().toISOString(), excluido_por: donoDoToken(tok),
+        excluido_motivo: motivo.slice(0, 400),
+      }),
+    });
+    const linha = (Array.isArray(r) ? r[0] : r) || null;
+    if (!linha) return res.status(403).json({ erro: "Não consegui excluir." });
+    return res.status(200).json({ lead: linha });
+  }
+
+  if (req.method === "POST" && String(req.query.acao || "") === "restaurar") {
+    const id = String(req.query.id || "");
+    if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido." });
+    // O motivo fica: ele conta por que a linha saiu e voltou, e apagar
+    // junto seria perder metade da história.
+    const r = await banco(`${base}?id=eq.${id}`, {
+      method: "PATCH", headers: json(tok, { Prefer: "return=representation" }),
+      body: JSON.stringify({ excluido_em: null, excluido_por: null }),
+    });
+    const linha = (Array.isArray(r) ? r[0] : r) || null;
+    if (!linha) return res.status(403).json({ erro: "Não consegui restaurar." });
+    return res.status(200).json({ lead: linha });
   }
 
   if (req.method === "POST" && String(req.query.acao || "") === "compareceu") {
