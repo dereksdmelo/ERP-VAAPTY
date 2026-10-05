@@ -160,13 +160,16 @@ async function preVendas(req, res, tok, de, ate) {
   };
 
   const [convs, leads, canais, ats] = await Promise.all([
-    puxar(`${URL_BASE}/rest/v1/wa_conversa?select=telefone,nome,lead_id,primeira_em,ultima_em,ultima_de_fora,respondida_em,anuncio,wa_canal(slug,nome,atendente)` +
+    puxar(`${URL_BASE}/rest/v1/wa_conversa?select=telefone,nome,lead_id,primeira_em,ultima_em,ultima_de_fora,respondida_em,anuncio,wa_canal(slug,nome,atendente,comercial)` +
           `&primeira_em=gte.${de}&primeira_em=lte.${ate}T23:59:59&limit=${TETO}`),
     // O lead é procurado numa janela MAIOR que o período: quem escreveu
     // no dia 30 costuma ser agendado em seguida, e cortar no último dia
     // do mês faria o canal parecer que não converte.
     puxar(`${URL_BASE}/rest/v1/lead?select=id,telefone,status,origem,agendado_para,atendimento_id,criado_em&limit=${TETO}`),
-    puxar(`${URL_BASE}/rest/v1/wa_canal?select=slug,nome,atendente,ativo&order=slug`),
+    // Só os COMERCIAIS: o administrativo atende lojista e cartório, e
+    // contá-lo aqui derrubaria a conversão de um número que nunca teve
+    // a intenção de converter (0058).
+    puxar(`${URL_BASE}/rest/v1/wa_canal?select=slug,nome,atendente,ativo,comercial&comercial=is.true&order=slug`),
     /* O CAMINHO CURTO, que o uso real revelou: a equipe abre o
      * ATENDIMENTO direto da conversa, sem passar pelo lead -- há
      * atendimento de 03/10/2026 com prospector "IA – CAMILA". Medir só
@@ -231,6 +234,7 @@ async function preVendas(req, res, tok, de, ate) {
   convs.forEach((c) => {
     const ca = Array.isArray(c.wa_canal) ? c.wa_canal[0] : c.wa_canal;
     if (!ca) { semCanal += 1; return; }
+    if (ca.comercial === false) return;   // número de operação, fora do funil
     const x = caixa(ca.slug);
     x.slug = x.slug || ca.slug; x.nome = x.nome || ca.nome; x.atendente = x.atendente || ca.atendente;
     x.conversas += 1;

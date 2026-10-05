@@ -8677,10 +8677,16 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe }) {
             {foneBonito(conversa.telefone)}
             {conversa.canal && ` · chegou em ${conversa.canal.nome}`}
           </p>
-          <span className="mt-1.5 inline-block rounded-full px-2 py-0.5 text-[11.5px] font-semibold"
-            style={{ background: estagioDe(conversa).cor + "18", color: estagioDe(conversa).cor }}>
-            {estagioDe(conversa).rot}
-          </span>
+          {conversa.canal && conversa.canal.comercial === false ? (
+            <span className="mt-1.5 inline-block text-[12px]" style={{ color: C.mute }}>
+              Número de operação — não entra no funil da pré-venda.
+            </span>
+          ) : (
+            <span className="mt-1.5 inline-block rounded-full px-2 py-0.5 text-[11.5px] font-semibold"
+              style={{ background: estagioDe(conversa).cor + "18", color: estagioDe(conversa).cor }}>
+              {estagioDe(conversa).rot}
+            </span>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {/* O ELO QUE FALTAVA. Sem ele a conversa morre no WhatsApp e
@@ -8688,11 +8694,16 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe }) {
               conversas para seis leads. Pedir para redigitar nome e
               telefone que já estão na tela é como o registro deixa de
               ser feito (decisão 27). */}
-          <button onClick={abrirAgenda} disabled={!!virando}
-            className="rounded-lg px-3 py-2 text-[13px] font-semibold text-white"
-            style={{ background: C.roxo, opacity: virando ? 0.5 : 1 }}>
-            {virando ? "abrindo…" : conversa.lead && conversa.lead.agendado_para ? "Remarcar" : "Agendar"}
-          </button>
+          {/* Número de operação não vira lead (0058): o administrativo
+              atende lojista, cartório e despachante. O botão some, e o
+              servidor recusa de qualquer jeito. */}
+          {!(conversa.canal && conversa.canal.comercial === false) && (
+            <button onClick={abrirAgenda} disabled={!!virando}
+              className="rounded-lg px-3 py-2 text-[13px] font-semibold text-white"
+              style={{ background: C.roxo, opacity: virando ? 0.5 : 1 }}>
+              {virando ? "abrindo…" : conversa.lead && conversa.lead.agendado_para ? "Remarcar" : "Agendar"}
+            </button>
+          )}
           <a href={zap(conversa.telefone)} target="_blank" rel="noopener noreferrer"
             className="rounded-lg border px-3 py-2 text-[13px] font-semibold"
             style={{ borderColor: C.line, color: C.ink }}>Abrir no WhatsApp</a>
@@ -8843,8 +8854,10 @@ function TelaConversas() {
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]" style={{ color: C.mute }}>
                   {/* O estágio vem primeiro: numa fila, o que importa
                       é o que já foi feito, não de onde veio. */}
-                  <span className="rounded px-1.5 py-0.5 font-semibold"
-                    style={{ background: estagioDe(c).cor + "18", color: estagioDe(c).cor }}>{estagioDe(c).rot}</span>
+                  {!(c.canal && c.canal.comercial === false) && (
+                    <span className="rounded px-1.5 py-0.5 font-semibold"
+                      style={{ background: estagioDe(c).cor + "18", color: estagioDe(c).cor }}>{estagioDe(c).rot}</span>
+                  )}
                   {c.canal && (
                     <span className="rounded px-1.5 py-0.5" style={{ background: C.roxoFraco, color: C.roxo }}>{c.canal.nome}</span>
                   )}
@@ -8959,6 +8972,7 @@ function CartaoCanal({ canal, aoMudar, aoApagar }) {
   const [editando, setEditando] = useState(false);
   const [nome, setNome] = useState(canal.nome || "");
   const [atendente, setAtendente] = useState(canal.atendente || "humano");
+  const [comercial, setComercial] = useState(canal.comercial !== false);
 
   // De três em três segundos: é mais ou menos o tempo que o WhatsApp
   // deixa um QR de pé. Parar quando a aba some evita gastar o 4G da
@@ -8990,7 +9004,7 @@ function CartaoCanal({ canal, aoMudar, aoApagar }) {
 
   const salvar = async () => {
     setOcupado("salvar");
-    try { await aoMudar(canal.slug, { nome, atendente }); setEditando(false); setErro(""); }
+    try { await aoMudar(canal.slug, { nome, atendente, comercial }); setEditando(false); setErro(""); }
     catch (x) { setErro(x.message); }
     setOcupado("");
   };
@@ -9014,7 +9028,9 @@ function CartaoCanal({ canal, aoMudar, aoApagar }) {
 
   return (
     <Bloco titulo={canal.nome || canal.slug}
-      sub={(canal.atendente === "ia" ? "número que a IA atende" : "número que a equipe atende") + ` · apelido ${canal.slug}`}>
+      sub={(canal.comercial === false ? "número de operação — fora do funil"
+            : canal.atendente === "ia" ? "número que a IA atende" : "número que a equipe atende")
+           + ` · apelido ${canal.slug}`}>
       <div className="flex flex-wrap items-center gap-2">
         {canal.ativo ? (
           <span className="rounded-full px-2.5 py-1 text-[12px] font-semibold"
@@ -9049,6 +9065,8 @@ function CartaoCanal({ canal, aoMudar, aoApagar }) {
               <option value="ia">A IA</option>
             </select>
           </Campo>
+          <Toggle label="É canal comercial" valor={comercial} onChange={setComercial}
+            nota="Ligado, as conversas entram no funil da pré-venda e podem virar lead. Desligue para número de operação — administrativo, cartório, despachante." />
           <div className="flex gap-2">
             <button onClick={salvar} disabled={!!ocupado}
               className="rounded-lg px-3 py-2 text-[13.5px] font-semibold text-white"
@@ -12005,6 +12023,7 @@ function Agendador({ lead, equipe, aoFechar, aoAgendar }) {
 
 function TelaPreVendas({ perfil, aoAbrirAtendimento, mes, comp }) {
   const [aba, setAba] = useState("funil");
+  const [vista, setVista] = useState("quadro");
   const [equipe, setEquipe] = useState([]);
   useEffect(() => { listarNegociadores().then(setEquipe).catch(() => {}); }, []);
   return (
@@ -12023,7 +12042,25 @@ function TelaPreVendas({ perfil, aoAbrirAtendimento, mes, comp }) {
             style={{ background: aba === v ? C.roxo : C.paper, color: aba === v ? "#fff" : C.ink, border: `1px solid ${aba === v ? C.roxo : C.line}` }}>{r}</button>
         ))}
       </div>
-      {aba === "funil" && <FunilLeads perfil={perfil} equipe={equipe} />}
+      {aba === "funil" && (
+        <div>
+          {/* Quadro primeiro: é a leitura que o Derek pediu, e a que
+              responde "onde ponho a mão agora". A lista fica porque é
+              ela que tem a barra de captura — quem atende telefone
+              precisa gravar sem procurar botão (decisão 27). */}
+          <div className="mb-3 flex gap-1.5">
+            {[["quadro", "Quadro"], ["lista", "Lista"]].map(([v, r]) => (
+              <button key={v} onClick={() => setVista(v)}
+                className="rounded-full px-3 py-1.5 text-[12.5px] font-semibold"
+                style={vista === v ? { background: C.roxo, color: "#fff" }
+                                   : { background: C.paper, color: C.mute, border: `1px solid ${C.line}` }}>{r}</button>
+            ))}
+          </div>
+          {vista === "quadro"
+            ? <QuadroLeads perfil={perfil} equipe={equipe} />
+            : <FunilLeads perfil={perfil} equipe={equipe} />}
+        </div>
+      )}
       {aba === "agenda" && <Agendamentos perfil={perfil} equipe={equipe} aoAbrirAtendimento={aoAbrirAtendimento} />}
       {aba === "perdidos" && <LeadsPerdidos perfil={perfil} />}
       {aba === "canais" && <TelaCanaisPreVenda comp={comp} />}
@@ -12223,6 +12260,187 @@ function ordenarFila(lista) {
     // Sem data (e empates): o mais antigo primeiro.
     return String(a.criado_em || "") < String(b.criado_em || "") ? -1 : 1;
   });
+}
+
+/* ===================== O QUADRO DA PRÉ-VENDA =====================
+ *
+ * Pedido do Derek em 05/10/2026, com as colunas nas palavras dele:
+ * NOVO, AGENDAR, AGENDADO, REAGENDAR, COMPARECEU, JÁ VENDEU.
+ *
+ * **As colunas são o que falta fazer, não o que já aconteceu** — e foi
+ * ele quem corrigiu isso: "1º contato" virou "AGENDAR". Quem olha o
+ * quadro quer saber onde pôr a mão, e uma coluna chamada pelo passado
+ * obriga a traduzir mentalmente a cada leitura.
+ *
+ * **Nenhum status novo foi criado.** As seis colunas são os estados
+ * que o lead já tinha (0022); o quadro é leitura, não um segundo
+ * cadastro — duas verdades sobre o mesmo lead seria o problema que a
+ * decisão 41 evita.
+ *
+ * **Arrastar é do computador; tocar é de todo lugar.** O arrasto do
+ * HTML não existe no toque, então o cartão também abre um menu. Quem
+ * trabalha essa fila está com o telefone na orelha, muitas vezes no
+ * celular.
+ */
+const COLUNAS_LEAD = [
+  { id: "novo",        rot: "Novo",       status: ["novo"],                   cor: "#6D1B9E" },
+  { id: "agendar",     rot: "Agendar",    status: ["em_contato"],             cor: "#8E4FC0" },
+  { id: "agendado",    rot: "Agendado",   status: ["agendado", "confirmado"], cor: "#4A9E7A" },
+  { id: "reagendar",   rot: "Reagendar",  status: ["nao_compareceu"],         cor: "#E1521F" },
+  { id: "compareceu",  rot: "Compareceu", status: ["compareceu"],             cor: "#1D7F58" },
+  { id: "perdido",     rot: "Já vendeu",  status: ["perdido"],                cor: "#6E6879" },
+];
+const colunaDe = (l) => (COLUNAS_LEAD.find((c) => c.status.indexOf(l.status) >= 0) || COLUNAS_LEAD[0]).id;
+
+function CartaoLead({ l, onAbrir, onArrastar }) {
+  const atrasado = l.agendado_para && Date.parse(l.agendado_para) < Date.now();
+  return (
+    <div draggable onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; onArrastar(l); }}
+      onClick={() => onAbrir(l)}
+      className="cursor-pointer rounded-lg p-2.5"
+      style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+      <div className="truncate text-[13.5px] font-semibold">{l.nome}</div>
+      {l.carro && <div className="truncate text-[12px]" style={{ color: C.mute }}>{l.carro}</div>}
+      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]" style={{ color: C.mute }}>
+        {l.origem && <span>{rotulo(ORIGENS, l.origem)}</span>}
+        {l.agendado_para && (
+          <span style={{ color: atrasado ? C.laranja : C.verde }}>
+            {diaBR(l.agendado_para)} {horaBR(l.agendado_para)}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function QuadroLeads({ perfil, equipe }) {
+  const [lista, setLista] = useState(null);
+  const [erro, setErro] = useState("");
+  const [arrastando, setArrastando] = useState(null);
+  const [sobre, setSobre] = useState("");
+  const [menu, setMenu] = useState(null);
+  const [agendando, setAgendando] = useState(null);
+  const [perdendo, setPerdendo] = useState(null);
+
+  const carregar = () => {
+    setErro("");
+    // `fila` fora das três conhecidas não filtra status nenhum — é
+    // assim que o quadro vê as seis colunas de uma vez.
+    listarLeads({ fila: "quadro" }).then(setLista).catch((e) => setErro(e.message));
+  };
+  useEffect(carregar, []);
+
+  const mexer = async (l, mud) => {
+    setLista((ls) => (ls || []).map((x) => (x.id === l.id ? { ...x, ...mud } : x)));
+    try { await atualizarLead(l.id, mud); }
+    catch (e) { setErro(e.message); carregar(); }
+  };
+
+  /* MOVER PARA UMA COLUNA NÃO É SÓ TROCAR O STATUS.
+   *
+   * "Agendado" sem data não existe — então a coluna abre o agendador
+   * em vez de gravar um estado que mente. E "já vendeu" pergunta o
+   * motivo, que é o que salva a fila de virar lixeira (decisão 27):
+   * sem ele, perdido vira o botão que se aperta para tirar da tela. */
+  const mover = (l, col) => {
+    setMenu(null);
+    if (col === colunaDe(l)) return;
+    if (col === "agendado") { setAgendando(l); return; }
+    if (col === "perdido") { setPerdendo(l); return; }
+    const ALVO = { novo: "novo", agendar: "em_contato", reagendar: "nao_compareceu", compareceu: "compareceu" };
+    const st = ALVO[col];
+    if (!st) return;
+    // Sair de "agendado" devolve a data: hora marcada num lead que
+    // voltou para a fila é compromisso que ninguém vai cumprir.
+    const limpa = (col === "novo" || col === "agendar") ? { agendado_para: null, confirmado_em: null } : {};
+    mexer(l, { status: st, ...limpa });
+  };
+
+  const porColuna = (id) => (lista || []).filter((l) => colunaDe(l) === id);
+
+  return (
+    <div>
+      {erro && <p className="mb-3 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+      {lista === null && <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>}
+
+      <div className="rolar overflow-x-auto pb-2">
+        <div className="flex gap-3" style={{ minWidth: "min-content" }}>
+          {COLUNAS_LEAD.map((c) => {
+            const itens = porColuna(c.id);
+            return (
+              <div key={c.id} className="w-[220px] shrink-0 rounded-xl p-2"
+                onDragOver={(e) => { e.preventDefault(); setSobre(c.id); }}
+                onDragLeave={() => setSobre((x) => (x === c.id ? "" : x))}
+                onDrop={(e) => { e.preventDefault(); setSobre(""); if (arrastando) mover(arrastando, c.id); setArrastando(null); }}
+                style={{ background: sobre === c.id ? c.cor + "14" : C.bg,
+                         border: `1px dashed ${sobre === c.id ? c.cor : "transparent"}` }}>
+                <div className="mb-2 flex items-center justify-between px-1">
+                  <span className="text-[11px] font-bold uppercase tracking-[0.07em]" style={{ color: c.cor }}>{c.rot}</span>
+                  <span className="text-[11px]" style={{ color: C.mute, fontFamily: F.mono }}>{itens.length}</span>
+                </div>
+                <div className="space-y-2">
+                  {itens.map((l) => (
+                    <CartaoLead key={l.id} l={l} onArrastar={setArrastando} onAbrir={setMenu} />
+                  ))}
+                  {!itens.length && (
+                    <div className="rounded-lg p-3 text-center text-[11.5px]" style={{ color: C.mute }}>vazio</div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <p className="mt-2 text-[12px]" style={{ color: C.mute }}>
+        Arraste o cartão entre as colunas, ou toque nele para mover e ligar.
+      </p>
+
+      {/* O menu do cartão: mover, agendar e ligar num lugar só. No
+          celular ele é o único caminho — o arrasto do HTML não existe
+          no toque. */}
+      {menu && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center"
+          style={{ background: "rgba(24,20,32,0.45)" }} onClick={() => setMenu(null)}>
+          <div className="w-full max-w-[400px] rounded-xl p-4" onClick={(e) => e.stopPropagation()}
+            style={{ background: C.paper, border: `1px solid ${C.line}`, boxShadow: "0 18px 50px rgba(24,20,32,0.28)" }}>
+            <div className="text-[15px]" style={{ fontFamily: F.disp, fontWeight: 800 }}>{menu.nome}</div>
+            <div className="mt-0.5 text-[12.5px]" style={{ color: C.mute }}>
+              {menu.carro ? `${menu.carro} · ` : ""}{menu.telefone || "sem telefone"}
+            </div>
+            {menu.telefone && (
+              <a href={zap(menu.telefone)} target="_blank" rel="noopener noreferrer"
+                className="mt-3 block rounded-lg border px-3 py-2.5 text-center text-[14px] font-semibold"
+                style={{ borderColor: C.line, color: C.ink }}>Abrir no WhatsApp</a>
+            )}
+            <div className="mt-3 text-[10px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>Mover para</div>
+            <div className="mt-1.5 grid grid-cols-2 gap-2">
+              {COLUNAS_LEAD.filter((c) => c.id !== colunaDe(menu)).map((c) => (
+                <button key={c.id} onClick={() => mover(menu, c.id)}
+                  className="rounded-lg border px-3 py-2.5 text-[13.5px] font-semibold"
+                  style={{ borderColor: C.line, color: c.cor }}>{c.rot}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {agendando && (
+        <Agendador lead={agendando} equipe={equipe || []} aoFechar={() => setAgendando(null)}
+          aoAgendar={async (mud) => { await mexer(agendando, { ...mud, status: "agendado" }); setAgendando(null); }} />
+      )}
+      {perdendo && (
+        <PorQuePerdeu aoFechar={() => setPerdendo(null)}
+          aoEscolher={async (motivo) => {
+            await mexer(perdendo, {
+              status: "perdido",
+              observacoes: [perdendo.observacoes, `${diaBR(hojeEmSP())}: saiu da fila — ${motivo}`].filter(Boolean).join("\n"),
+            });
+            setPerdendo(null);
+          }} />
+      )}
+    </div>
+  );
 }
 
 function FunilLeads({ perfil, equipe }) {

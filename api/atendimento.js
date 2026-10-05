@@ -1459,12 +1459,23 @@ module.exports = async function handler(req, res) {
      * o "chegou". Dois toques no botão não criam duas fichas.
      */
     if (RX_UUID.test(id) && req.method === "POST" && String(req.query.acao || "") === "lead") {
-      const atual = (await banco(`${REST_CV}?select=id,telefone,nome,lead_id,anuncio,wa_canal(slug,nome)&id=eq.${id}`,
+      const atual = (await banco(`${REST_CV}?select=id,telefone,nome,lead_id,anuncio,wa_canal(slug,nome,comercial)&id=eq.${id}`,
         { headers: cabecalhos(tok) }) || [])[0];
       if (!atual) return res.status(404).json({ erro: "Conversa não encontrada." });
       if (atual.lead_id) return res.status(200).json({ lead_id: atual.lead_id, ja_existia: true });
 
       const ca = Array.isArray(atual.wa_canal) ? atual.wa_canal[0] : atual.wa_canal;
+      /* NEM TODO NÚMERO É CANAL COMERCIAL (0058). O administrativo
+       * atende lojista, cartório e despachante: quem escreve ali não é
+       * cliente querendo vender carro, e virar lead sujaria as duas
+       * pontas do funil — infla o volume e derruba a conversão de um
+       * número que nunca teve a intenção de converter.
+       *
+       * A recusa é aqui e não só na tela: esconder o botão é
+       * conveniência, não controle. */
+      if (ca && ca.comercial === false) {
+        return res.status(409).json({ erro: `"${ca.nome}" não é canal comercial — conversa dele não vira lead.` });
+      }
       /* A ORIGEM SAI DO CANAL, que é o que esta tela toda existe para
        * medir. Anúncio na primeira mensagem ganha do canal: ele diz de
        * onde a pessoa veio, enquanto o canal diz só por onde ela
@@ -1514,7 +1525,7 @@ module.exports = async function handler(req, res) {
     // `!inner` quando há filtro de canal: sem ele o PostgREST filtra só
     // o embutido e devolve TODAS as conversas, com `wa_canal` nulo nas
     // que não casam -- a lista viria errada parecendo certa.
-    const emb = canal ? "wa_canal!inner(slug,nome,atendente)" : "wa_canal(slug,nome,atendente)";
+    const emb = canal ? "wa_canal!inner(slug,nome,atendente,comercial)" : "wa_canal(slug,nome,atendente,comercial)";
     const partes = [
       `select=id,telefone,nome,ultima_em,primeira_em,ultima_de_fora,respondida_em,anuncio,atendimento_id,lead_id,${emb}`,
       "order=ultima_em.desc",
@@ -1684,6 +1695,7 @@ module.exports = async function handler(req, res) {
       if (typeof c2.nome === "string" && c2.nome.trim()) mud.nome = c2.nome.trim();
       if (c2.atendente === "ia" || c2.atendente === "humano") mud.atendente = c2.atendente;
       if (typeof c2.ativo === "boolean") mud.ativo = c2.ativo;
+      if (typeof c2.comercial === "boolean") mud.comercial = c2.comercial;
       if (!Object.keys(mud).length) return res.status(400).json({ erro: "nada para mudar" });
       const r = await banco(`${REST_C}?slug=eq.${encodeURIComponent(canal)}`, {
         method: "PATCH",

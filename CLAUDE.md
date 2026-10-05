@@ -1544,10 +1544,20 @@ no WhatsApp. **Isto já doeu na primeira hora de uso:** entrou um
 `CRLVE_QIW6H49_2026.pdf` — documento de veículo mandado por cliente —
 e dele só ficou o nome. É a pendência de mídia, com um caso concreto.
 
-**O que ainda não existe:** o envio e a ligação entre conversa e lead
-(`atendimento_id` e `lead_id` existem na 0054 e continuam nulos). A
-ponte **só escuta** — e a tela diz isso, em vez de prometer o que não
-faz.
+**NEM TODO NÚMERO É CANAL COMERCIAL (0058).** O Derek viu um lead que
+veio do "Administrativo da loja" e disse o óbvio: aquele número não
+vira lead. Ele atende lojista, cartório e despachante — quem escreve
+ali não é cliente querendo vender carro, e contar essas conversas
+sujaria as duas pontas do funil: **infla o volume e derruba a
+conversão de um número que nunca teve a intenção de converter.**
+
+É um sinalizador por canal, não uma lista no código: a loja cadastra
+número novo sem pedir deploy, e quem cadastra é quem sabe para que ele
+serve. O botão some na tela e **o servidor recusa com 409** — esconder
+o botão é conveniência, não controle.
+
+**O que ainda não existe:** o envio. A ponte **só escuta** — e a tela
+diz isso, em vez de prometer o que não faz.
 
 ### 49. Os canais da pré-venda: o número de WhatsApp é o canal
 
@@ -1742,6 +1752,42 @@ mesmo texto que o lojista lê** na consulta do protocolo — sem isso,
 importadas. Elas estão fechadas (o papel já circulou), e trazê-las
 encheria a fila de trabalho que ninguém vai fazer. Se o histórico for
 necessário, o caminho é o mesmo do CRM: colar a planilha (decisão 13).
+
+### 51. O quadro da pré-venda: as colunas são o que falta fazer
+
+O Derek pediu em 05/10/2026 a visualização em kanban do funil de
+pré-vendas, e corrigiu as colunas no mesmo dia: **Novo, Agendar,
+Agendado, Reagendar, Compareceu, Já vendeu**.
+
+**A correção é a decisão.** A primeira lista dele dizia "1º contato";
+a segunda trocou por "Agendar". A diferença é que a coluna passou a
+nomear **o que falta fazer**, não o que já aconteceu — quem olha o
+quadro quer saber onde pôr a mão, e coluna nomeada pelo passado obriga
+a traduzir mentalmente a cada leitura.
+
+**Nenhum status novo foi criado.** As seis colunas são os estados que
+o lead já tinha (0022): `novo`, `em_contato`, `agendado`+`confirmado`,
+`nao_compareceu`, `compareceu`, `perdido`. O quadro é leitura, não um
+segundo cadastro — duas verdades sobre o mesmo lead é o que a decisão
+41 evita.
+
+**Mover para uma coluna não é só trocar o status.** "Agendado" sem
+data não existe, então a coluna abre o agendador em vez de gravar um
+estado que mente; e "Já vendeu" pergunta o motivo (decisão 27), que é
+o que salva a fila de virar lixeira. **Sair de agendado devolve a
+data**: hora marcada num lead que voltou para a fila é compromisso que
+ninguém vai cumprir.
+
+**Arrastar é do computador; tocar é de todo lugar.** O arrasto do HTML
+não existe no toque, então o cartão também abre um menu com as
+colunas e o WhatsApp. Quem trabalha essa fila está com o telefone na
+orelha, muitas vezes no celular — e um quadro que só funciona no
+desktop não serve para ela.
+
+**A lista continua ao lado do quadro**, porque é ela que tem a barra
+de captura: quem atende telefone grava sem procurar botão (decisão
+27). O quadro responde "onde ponho a mão"; a lista responde "acabei de
+desligar, preciso gravar".
 
 ## Convenções do código
 
