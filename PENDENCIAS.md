@@ -346,6 +346,16 @@ o microfone ligar. O que ficou:
   ressalva apagada aqui continua na ficha do lojista. Manter assim
   protege o que o operador deles digitou à mão; mudar protege contra
   ressalva que deixou de valer. **Decisão do Derek.**
+- **Duas perguntas para o Mateus, do 05/10/2026 (decisão 54).** (1) O
+  envio de um carro que **já existe** no Shinkai volta `fotos: 0` e não
+  acrescenta as fotos novas — conferido no MJA5B27, que ficou com 3 de
+  11. Enquanto for assim, as que faltam entram pelo painel deles
+  (Editar → Adicionar foto). (2) O `comprador_responsavel` chega — o
+  Editar da ficha mostra "André Bruno" — mas o **cartão** da lista não
+  imprime "Responsável" para os carros que vêm pela API, e imprime para
+  os cadastrados no painel. Parece ler outro campo.
+- **O Veracruz MJA5B27 está com 3 fotos lá.** As outras 8 precisam
+  entrar pelo painel do Shinkai até a resposta do Mateus.
 
 - **O microfone de verdade ainda não foi testado.** O "ouvir a mesa"
   (decisão 45) foi conferido no ar com dois navegadores e um tom no

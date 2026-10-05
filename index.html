@@ -1731,6 +1731,11 @@ const VAZIO = {
   // O carro na rede: o envio ao Shinkai é o que libera o descritivo,
   // porque é lá que estão as fotos que o lojista abre.
   shinkaiEm: null, shinkaiStatus: "", shinkaiUrl: "",
+  // O que o Shinkai respondeu do ultimo envio: quantas fotos ELE
+  // registrou e os avisos. Ficava so no estado da tela e sumia no
+  // recarregar -- e foi assim que um carro passou a tarde la com 3
+  // fotos de 11 sem ninguem ver (05/10/2026, MJA5B27).
+  shinkaiFotos: null, shinkaiAvisos: [],
   // espera
   esperaIniciadaEm: null, notasEspera: "",
   // escuta: só liga depois do consentimento, e guarda quando ele foi dado
@@ -4268,6 +4273,13 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
 
   const enviadas = useMemo(() => fotos.filter((p) => p.estado === "ok"), [fotos]);
   const subindo = fotos.some((p) => p.estado === "enviando");
+  // Foto que ainda nao chegou ao servidor nao vai ao Shinkai: o envio
+  // le a tabela `foto`, nao o aparelho. O MJA5B27 foi mandado em
+  // 05/10/2026 com as fotos AINDA SUBINDO (uma a cada 2 s) e chegou la
+  // com 3 de 11 -- e o reenvio nao acrescenta foto num carro que ja
+  // existe la. Entao o botao espera.
+  const fotosPendentes = fotos.filter((p) => p.estado === "aguardando" || p.estado === "enviando").length;
+  const fotosFalhas = fotos.filter((p) => p.estado === "erro").length;
   const faltas = useMemo(() => faltando(f, enviadas), [f, enviadas]);
   const liberado = faltas.length === 0;
   // A ficha precisa ir ao banco antes das fotos: é o id dela que dá
@@ -5346,20 +5358,38 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 </p>
               ) : (
                 <>
-                  <button disabled={!liberado || !veiculoId || indoShinkai}
+                  <button disabled={!liberado || !veiculoId || indoShinkai || fotosPendentes > 0}
                     onClick={async () => {
                       setIndoShinkai(true); setRespShinkai(null);
                       try {
                         const d = await enviarAoShinkai2(veiculoId);
                         setRespShinkai(d);
-                        setVarios({ shinkaiEm: new Date().toISOString(), shinkaiStatus: d.status || "", shinkaiUrl: d.url || "" });
+                        setVarios({
+                          shinkaiEm: new Date().toISOString(), shinkaiStatus: d.status || "", shinkaiUrl: d.url || "",
+                          shinkaiFotos: typeof d.fotos === "number" ? d.fotos : null,
+                          shinkaiAvisos: Array.isArray(d.avisos) ? d.avisos : [],
+                        });
                       } catch (ex) { setRespShinkai({ erro: ex.message || "Não consegui enviar." }); }
                       setIndoShinkai(false);
                     }}
                     className="mt-3 w-full rounded-md py-2.5 text-[13px] font-semibold"
-                    style={{ background: liberado && veiculoId && !indoShinkai ? C.roxo : C.line, color: "#fff" }}>
-                    {indoShinkai ? "Enviando ao Shinkai…" : f.shinkaiEm ? "Enviar de novo ao Shinkai" : "Enviar ao Shinkai"}
+                    style={{ background: liberado && veiculoId && !indoShinkai && !fotosPendentes ? C.roxo : C.line, color: "#fff" }}>
+                    {indoShinkai ? "Enviando ao Shinkai…"
+                      : fotosPendentes > 0 ? `Esperando as fotos subirem (${enviadas.length} de ${fotos.length})…`
+                      : f.shinkaiEm ? "Enviar de novo ao Shinkai" : "Enviar ao Shinkai"}
                   </button>
+                  {veiculoId && fotosPendentes > 0 && (
+                    <p className="mt-1.5 text-[11px] leading-snug" style={{ color: C.mute }}>
+                      O Shinkai leva só o que já está no servidor. Mandar agora deixaria o carro lá
+                      com {enviadas.length} foto{enviadas.length === 1 ? "" : "s"} — e o reenvio não acrescenta as outras.
+                    </p>
+                  )}
+                  {veiculoId && !fotosPendentes && fotosFalhas > 0 && (
+                    <p className="mt-1.5 text-[11px] leading-snug" style={{ color: C.laranja }}>
+                      {fotosFalhas} foto{fotosFalhas === 1 ? " falhou" : "s falharam"} ao subir e não vai{fotosFalhas === 1 ? "" : "ão"} junto.
+                      Use o <b>Tentar</b> nela{fotosFalhas === 1 ? "" : "s"} antes de enviar.
+                    </p>
+                  )}
                   {!veiculoId && (
                     <p className="mt-1.5 text-[11px]" style={{ color: C.mute }}>
                       Salve a ficha no banco antes — é ela que leva as fotos junto.
@@ -5387,13 +5417,36 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                   {f.shinkaiEm && !(respShinkai && respShinkai.erro) && (
                     <p className="mt-2 text-[12px] leading-snug" style={{ color: C.verde }}>
                       No Shinkai{f.shinkaiStatus ? ` como ${f.shinkaiStatus}` : ""} às {new Date(f.shinkaiEm).toTimeString().slice(0, 5)}.
+                      {respShinkai && typeof respShinkai.fotos_enviadas === "number" && (
+                        ` ${respShinkai.fotos_enviadas} foto${respShinkai.fotos_enviadas === 1 ? "" : "s"} enviada${respShinkai.fotos_enviadas === 1 ? "" : "s"}`
+                        + (typeof respShinkai.fotos === "number" ? ` · o Shinkai registrou ${respShinkai.fotos}.` : ".")
+                      )}
                     </p>
                   )}
-                  {respShinkai && Array.isArray(respShinkai.avisos) && !!respShinkai.avisos.length && (
-                    <p className="mt-1.5 text-[11px] leading-snug" style={{ color: AMARELO.texto }}>
-                      {respShinkai.avisos.join(" · ")}
+                  {/* O numero que importa e o DELES, nao o nosso. "11
+                      enviadas" com o Shinkai registrando 0 e exatamente
+                      o caso do MJA5B27: o reenvio de um carro que ja
+                      existe la nao acrescenta foto. Sem esta linha a
+                      tela diria "no Shinkai" e o lojista veria 3. */}
+                  {respShinkai && !respShinkai.erro && typeof respShinkai.fotos === "number"
+                    && respShinkai.fotos < (respShinkai.fotos_enviadas || 0) && (
+                    <p className="mt-1.5 rounded px-2 py-1.5 text-[11px] leading-snug"
+                      style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
+                      <b>O Shinkai não ficou com todas as fotos.</b> Foram {respShinkai.fotos_enviadas} e ele
+                      registrou {respShinkai.fotos}{respShinkai.acao === "atualizado"
+                        ? " — o carro já existia lá, e o reenvio não acrescenta foto a uma ficha que já tem as dela. As que faltam entram pelo painel do Shinkai, em Editar → Adicionar foto."
+                        : "."}
                     </p>
                   )}
+                  {(() => {
+                    const avisos = respShinkai && Array.isArray(respShinkai.avisos) ? respShinkai.avisos
+                      : (!respShinkai && Array.isArray(f.shinkaiAvisos) ? f.shinkaiAvisos : []);
+                    return avisos.length ? (
+                      <p className="mt-1.5 text-[11px] leading-snug" style={{ color: AMARELO.texto }}>
+                        {avisos.join(" · ")}
+                      </p>
+                    ) : null;
+                  })()}
                 </>
               )}
             </section>
@@ -13825,7 +13878,15 @@ function TelaVendaLojistas({ perfil }) {
                         {respShinkai[e.id].acao === "criado" ? "Criado" : "Atualizado"} no Shinkai
                         {respShinkai[e.id].status ? ` · ${respShinkai[e.id].status}` : ""}
                         {` · ${respShinkai[e.id].fotos_enviadas} foto${respShinkai[e.id].fotos_enviadas === 1 ? "" : "s"} enviada${respShinkai[e.id].fotos_enviadas === 1 ? "" : "s"}`}
+                        {typeof respShinkai[e.id].fotos === "number" ? ` · o Shinkai registrou ${respShinkai[e.id].fotos}` : ""}
                       </span>
+                      {typeof respShinkai[e.id].fotos === "number" && respShinkai[e.id].fotos < (respShinkai[e.id].fotos_enviadas || 0) && (
+                        <span className="mt-0.5 block" style={{ color: AMARELO.texto }}>
+                          O Shinkai não ficou com todas as fotos{respShinkai[e.id].acao === "atualizado"
+                            ? " — o reenvio não acrescenta foto a um carro que já existe lá; as que faltam entram pelo painel deles, em Editar → Adicionar foto."
+                            : "."}
+                        </span>
+                      )}
                       {(respShinkai[e.id].avisos || []).map((av, k) => (
                         <span key={k} className="mt-0.5 block" style={{ color: AMARELO.texto }}>{av}</span>
                       ))}

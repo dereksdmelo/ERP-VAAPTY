@@ -2093,6 +2093,52 @@ código, e acrescentar uma pede uma linha em `?recurso=acoes`. Um
 editor de regras só se paga quando a lista das oito deixar de servir —
 e aí o pedido virá com o caso que falta.
 
+### 54. O Shinkai leva só o que já está no servidor, e o reenvio não acrescenta foto
+
+O Derek viu em 05/10/2026 o Veracruz MJA5B27 com **3 fotos** no
+Shinkai e sem responsável, ao lado de um Creta com 19 — e o sistema
+tinha 11 fotos do Veracruz.
+
+**O dado não tinha se perdido; o envio foi cedo demais.** Fui ao banco
+antes de teorizar: as 11 fotos subiram uma a cada 2 s, das 14:09:36 às
+14:09:56, e o envio ao Shinkai terminou às 14:09:48 — a consulta à
+tabela `foto` rodou com três linhas dentro. O negociador salvou a
+ficha, as fotos começaram a subir, e ele apertou "Enviar ao Shinkai"
+no mesmo instante. O botão deixava, porque `liberado` só exige **uma**
+foto no servidor (decisão 1).
+
+**E o reenvio não conserta.** Reenviei o carro com as 11 fotos: a
+resposta deles veio `acao: atualizado`, `fotos: 0`, e a ficha no CRM
+deles continuou com as três. **O envio de um carro que já existe lá
+não acrescenta foto** — conferido duas vezes no mesmo dia. As que
+faltam entram pelo painel deles (Editar → Adicionar foto), ou o
+Mateus muda isso do lado de lá; está em PENDENCIAS.md.
+
+**Então o botão espera as fotos subirem.** Enquanto houver foto
+`aguardando` ou `enviando`, ele fica apagado e diz quantas faltam.
+Foto com `erro` não trava — a pessoa pode ter desistido dela —, mas a
+tela avisa que ela não vai e manda usar o "Tentar". **Quem afrouxar
+essa espera reintroduz o carro pela metade, e sem volta.**
+
+**O número que a tela mostra é o DELES.** "11 fotos enviadas" era o
+nosso número e dizia que estava tudo certo enquanto o Shinkai
+registrava 0. Agora sai "11 enviadas · o Shinkai registrou N", e
+quando N é menor a tela explica por quê. O resultado (`shinkaiFotos`,
+`shinkaiAvisos`) passou a ficar na ficha em vez de só no estado da
+tela — antes, recarregar apagava o aviso, e era assim que um carro
+ficava a tarde inteira pela metade sem ninguém ver.
+
+**O responsável vai certo daqui, e isso foi conferido ponta a ponta.**
+O atendimento tem `ANDRÉ BRUNO` (byte a byte igual ao cadastro), o
+`shinkai_nome` dele é `André Bruno`, a consulta pelo token do usuário
+devolve isso, a equipe deles tem exatamente `André Bruno`, e a
+resposta veio sem aviso. **No Editar da ficha deles o campo mostra
+"André Bruno · Negociador"; o cartão da lista é que não imprime
+"Responsável".** O Creta, cadastrado pelo painel deles, mostra. É
+pergunta para o Mateus — o cartão parece ler outro campo que não o
+`comprador_responsavel` da API. **Não há o que mudar aqui**, e mandar
+o nome sob outro campo é o erro que a decisão 46 proíbe.
+
 ## Convenções do código
 
 - **Português no domínio.** Estado, funções e rótulos em pt-BR
