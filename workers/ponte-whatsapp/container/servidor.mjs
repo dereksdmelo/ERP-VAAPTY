@@ -155,7 +155,8 @@ function conteudoDe(m) {
 async function traduzir(msg) {
   const m = conteudoDe(msg.message); if (!m) return null;
   const jid = msg.key.remoteJid;
-  const base = { id: msg.key.id, quando: Number(msg.messageTimestamp || 0) * 1000 || Date.now(), nome: msg.pushName || "" };
+  const base = { id: msg.key.id, quando: Number(msg.messageTimestamp || 0) * 1000 || Date.now(),
+    nome: msg.key.fromMe ? "" : (msg.pushName || "") };
   /* DE QUAL ANUNCIO VEIO (26/09/2026). Anuncio de "clique pro WhatsApp" traz na primeira mensagem o `externalAdReply`
      (titulo, id e link do anuncio, ctwa). Vai pro ERP no formato `referral` da Meta — o relatorio de marketing casa
      com o funil e com as vendas. */

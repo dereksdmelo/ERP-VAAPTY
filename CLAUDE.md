@@ -1861,6 +1861,25 @@ manhã aqui — guardar como UTC puro jogaria o compromisso para as 7h na
 agenda, a mesma armadilha que fez um mês inteiro sumir da tela na
 decisão 22.
 
+**O `pushName` DA MENSAGEM QUE SAI É O NOSSO NOME, não o do
+cliente** — e isso virou 213 conversas chamadas "Vaapty Joinville".
+O Derek viu o quadro com sete cartões idênticos e perguntou por quê.
+A `wa_receber` guardava "o nome mais recente que não for vazio", então
+bastava a IA responder para o nome do cliente ser trocado pelo nosso;
+em conversa que a loja começou (prospecção ativa), o nome do cliente
+nunca chegou a existir.
+
+**Só a mensagem que CHEGA traz nome (0061), e a guarda é no banco.**
+A ponte também parou de mandar, mas ela pode ser republicada sem a
+correção e o erro voltaria calado — no banco ele não entra, venha de
+onde vier.
+
+**178 nomes foram recuperados do texto da própria IA**, que trata o
+cliente pelo nome ("Oi Josiela, tudo bem?"). Só com inicial maiúscula,
+para "Oi, tudo bem" não virar o nome "tudo", e só onde o nome estava
+vazio. O que não deu para recuperar mostra o telefone — que é honesto,
+e melhor que o nome errado.
+
 **Mensagem que SAI não cria lead.** Escrever para um número que nunca
 respondeu é prospecção, não lead, e encheria o quadro de gente que
 nunca falou com a loja. A exceção é a saída que já confirma data e
