@@ -12208,6 +12208,12 @@ function LeadsExcluidos() {
  * o painel.
  */
 const COR_ACAO = { verde: "#1D7F58", laranja: "#E1521F", roxo: "#6D1B9E", cinza: "#6E6879" };
+// Nome curto de cada lista que obedece ao prazo: o título inteiro tem
+// vírgula dentro e a enumeração vira uma frase arrastada.
+const NOME_PRAZO = {
+  sumiu: "quem sumiu", parado: "quem está em Agendar sem conversa",
+  novo: "os novos intocados", remarcar: "quem não foi remarcado",
+};
 
 /* "3ª call" é o que se lê na linha, não "ligacoes: 3".
  *
@@ -12278,6 +12284,25 @@ function TelaAcoes({ equipe, aoVerConversa }) {
           </label>
         </div>
       </div>
+
+      {/* O PRAZO NÃO VALE PARA TUDO, e a tela precisa dizer quais —
+          senão mexer nele sem ver número mudar parece que não filtra.
+          "Escreveram e ninguém respondeu" fica de fora de propósito:
+          ela é AGORA, e exigir idade mínima esconderia quem acabou de
+          escrever. */}
+      {d && !!(d.listas_de_prazo || []).length && (
+        <p className="mb-3 text-[12px] leading-snug" style={{ color: C.mute }}>
+          O prazo vale para {d.listas_de_prazo.map((x) => NOME_PRAZO[x] || x).join(", ")}.
+          {" "}As outras são de agora e não esperam prazo nenhum.
+        </p>
+      )}
+      {d && !(d.listas_de_prazo || []).length && (
+        <p className="mb-3 rounded-lg px-3 py-2 text-[12.5px] leading-snug"
+          style={{ background: C.bg, color: C.mute }}>
+          Ninguém passou de {dias < 1 ? `${Math.round(dias * 24)} horas` : `${dias} dia${dias > 1 ? "s" : ""}`} —
+          as listas de prazo estão vazias. As que aparecem abaixo são de agora, e não dependem dele.
+        </p>
+      )}
 
       {erro && <p className="mb-3 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
 

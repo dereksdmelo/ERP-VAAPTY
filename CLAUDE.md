@@ -53,6 +53,25 @@ fala com a Placa Fipe mora em `api/placa.js`, atrás de `?acao=`.
 
 ## Rodar e publicar
 
+**O HTML NÃO PODE FICAR EM CACHE NA BORDA, e isso custou três
+investigações.** O Cloudflare respondia `cf-cache-status: HIT` para o
+`index.html` e servia a versão ANTERIOR depois de cada publicação, por
+vezes por mais de cinco minutos. O sintoma é o pior possível: a mudança
+parece não ter sido feita, ou a tela parece ter regredido — em
+05/10/2026 isso enganou o Derek uma vez ("não está filtrando") e a mim
+duas, caçando bugs que não existiam.
+
+**A aplicação inteira é UM arquivo** (decisão 7): servir o anterior é
+servir o sistema inteiro anterior.
+
+São duas peças, e **uma sozinha não resolve**: o Worker devolve o HTML
+com `no-store`, e o `run_worker_first` do `wrangler.jsonc` manda o `/`
+passar pelo Worker — sem ele o Cloudflare serve o arquivo estático
+**antes** de chamar o Worker, e o cabeçalho nunca é aplicado. Medido
+depois: a publicação passou a chegar ao navegador em **2 segundos**.
+O resto dos arquivos continua cacheável.
+
+
 ```bash
 vercel dev
 ```
@@ -2024,6 +2043,16 @@ tem um carro para vender, é lead** (decisão 27).
 
 **Lista vazia não aparece.** Painel cheio de zeros ensina a ignorar o
 painel, e aí o dia em que algo encher passa batido.
+
+**Mas o controle precisa dizer sobre o que ele manda.** O Derek mexeu o
+prazo de 1 para 14 dias, não viu número nenhum mudar e concluiu que não
+filtrava. Estava filtrando — nas listas de prazo, que estavam vazias.
+Agora a tela nomeia quais obedecem ao prazo e, quando todas estão
+vazias, diz isso em vez de simplesmente não mostrar nada.
+
+**"Escreveram e ninguém respondeu" fica fora do prazo de propósito:**
+ela é AGORA. Exigir idade mínima ali esconderia justamente quem acabou
+de escrever, que é o mais urgente de todos.
 
 **A ação acontece NA LINHA** — ligar, zap, abrir a conversa, agendar,
 e o "veio / não veio" onde a pergunta cabe. Quem trabalha essa fila

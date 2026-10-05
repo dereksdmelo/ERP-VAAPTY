@@ -1732,6 +1732,15 @@ module.exports = async function handler(req, res) {
       : call >= 10 ? (Number(l.ligacoes) || 0) >= 10
       : (Number(l.ligacoes) || 0) === call;
 
+    /* AS LISTAS DE PRAZO SÃO SÓ ALGUMAS, e a tela precisa dizer
+     * quais. O Derek mexeu o prazo de 1 para 14 dias, não viu número
+     * nenhum mudar e concluiu que não filtrava — estava filtrando, mas
+     * em listas que estavam vazias, e o controle parecia morto.
+     *
+     * **"Escreveram e ninguém respondeu" fica de fora de propósito**:
+     * ela é AGORA. Exigir idade mínima ali esconderia justamente quem
+     * acabou de escrever, que é o mais urgente de todos.
+     */
     const listas = [
       {
         id: "hoje",
@@ -1767,6 +1776,7 @@ module.exports = async function handler(req, res) {
       },
       {
         id: "sumiu",
+        prazo: true,
         titulo: `Mandamos e o cliente sumiu há ${rotuloPrazo(dias)}`,
         porque: "A última palavra foi nossa e ele não voltou. É ligação, não mensagem — mensagem ele já não respondeu.",
         cor: "roxo",
@@ -1774,6 +1784,7 @@ module.exports = async function handler(req, res) {
       },
       {
         id: "parado",
+        prazo: true,
         titulo: `Em Agendar há ${rotuloPrazo(dias)}, sem conversa`,
         porque: "Entrou por fora do WhatsApp e ninguém moveu. Só o telefone resolve.",
         cor: "roxo",
@@ -1782,13 +1793,15 @@ module.exports = async function handler(req, res) {
       },
       {
         id: "novo",
-        titulo: "Novos que ninguém tocou",
+        titulo: `Novos há ${rotuloPrazo(dias)} que ninguém tocou`,
         porque: "Entraram e ninguém falou com eles ainda.",
         cor: "roxo",
-        leads: todos.filter((l) => l.status === "novo" && String(l.criado_em) < atras(1)),
+        prazo: true,
+        leads: todos.filter((l) => l.status === "novo" && String(l.criado_em) < atras(dias)),
       },
       {
         id: "remarcar",
+        prazo: true,
         titulo: "Não vieram e não foram remarcados",
         porque: "Quem não veio é justamente quem precisa de ligação (decisão 27).",
         cor: "laranja",
@@ -1809,6 +1822,9 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({
       dias,
       call,
+      // Para a tela poder dizer "ninguém passou do prazo" em vez de
+      // simplesmente não mostrar nada.
+      listas_de_prazo: listas.filter((x) => x.prazo).map((x) => x.id),
       listas: listas.map((x) => ({ ...x, leads: x.leads.filter(naCall) }))
         .filter((x) => x.leads.length).map((x) => ({
         ...x,

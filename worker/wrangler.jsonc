@@ -21,7 +21,16 @@
   // A pasta e a raiz porque o index.html mora la e e fonte unica
   // (decisao 7). O que nao pode ser publico esta em `.assetsignore`,
   // na raiz -- **assets do Cloudflare sao publicos, sem login**.
-  "assets": { "directory": "../", "binding": "ASSETS" },
+  // `run_worker_first` para o HTML da aplicacao: por padrao o
+  // Cloudflare serve o arquivo estatico ANTES de chamar o Worker, e
+  // entao o cabecalho que impede o cache na borda nunca era aplicado
+  // -- o `/` vinha com `cf-cache-status: HIT` e servia a versao
+  // anterior do sistema inteiro depois de cada publicacao.
+  "assets": {
+    "directory": "../",
+    "binding": "ASSETS",
+    "run_worker_first": ["/", "/index.html"]
+  },
   // A ponte do WhatsApp, por binding. **Não por URL**: fetch de Worker
   // para Worker pelo endereço `workers.dev` não chega do outro lado.
   "services": [{ "binding": "PONTE", "service": "vaapty-ponte-whatsapp" }],

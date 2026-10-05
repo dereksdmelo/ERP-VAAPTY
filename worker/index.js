@@ -74,7 +74,31 @@ export default {
     const u = new URL(request.url);
     const m = /^\/api\/([a-z]+)\/?$/.exec(u.pathname);
     // O que nao e /api/ e arquivo: index.html, assinar.html, verificar.html.
-    if (!m) return env.ASSETS.fetch(request);
+    /* HTML NUNCA FICA EM CACHE NA BORDA.
+     *
+     * O Cloudflare estava respondendo `cf-cache-status: HIT` para o
+     * `index.html` e servindo a versão ANTERIOR depois de cada
+     * publicação — por vezes por muitos minutos. O sintoma é o pior
+     * possível: a tela parece quebrada ou a mudança parece não ter
+     * sido feita, e quem está olhando conclui que o sistema regrediu.
+     * Aconteceu três vezes em 05/10/2026, com o Derek e comigo, e as
+     * três me fizeram caçar um bug que não existia.
+     *
+     * **A aplicação inteira é UM arquivo** (decisão 7): servir o
+     * anterior é servir o sistema inteiro anterior. `no-store` custa
+     * um download de 300 KB por abertura e vale cada byte.
+     *
+     * O resto dos arquivos continua cacheável — fonte, PDF e as
+     * páginas públicas mudam raramente.
+     */
+    if (!m) {
+      const r = await env.ASSETS.fetch(request);
+      const tipo = r.headers.get("content-type") || "";
+      if (!tipo.includes("text/html")) return r;
+      const h = new Headers(r.headers);
+      h.set("Cache-Control", "no-store, must-revalidate");
+      return new Response(r.body, { status: r.status, statusText: r.statusText, headers: h });
+    }
 
     const handler = ROTAS[m[1]];
     if (!handler) return Response.json({ erro: "Rota desconhecida." }, { status: 404 });
