@@ -1852,6 +1852,55 @@ si mesma. E falha em silêncio: o funil é consequência da conversa, e um
 erro ali não pode fazer a ponte devolver erro e reentregar a mensagem
 em laço.
 
+### 52. Ligar pelo WhatsApp: o botão abre, quem disca é o aplicativo
+
+O Derek pediu em 05/10/2026 ligação pelo WhatsApp para o cliente,
+escolhendo de qual número sair, com o fone do computador. Pesquisei
+antes de prometer, e o que dá para fazer é menos do que parece.
+
+**Não existe link que inicie a chamada.** O WhatsApp não publica
+esquema de URL para isso, e a biblioteca da ponte (Baileys) sabe
+dizer que ENTROU uma chamada mas **não sabe fazer nem atender** — o
+protocolo de voz não está implementado em nenhuma biblioteca pública.
+
+**A API oficial existe e tem um custo escondido.** O
+[Business Calling API](https://developers.facebook.com/docs/whatsapp/cloud-api/calling/)
+saiu em julho de 2025 e a chamada iniciada pela empresa vale no Brasil.
+Mas exige o número na **Cloud API**, e número na Cloud API **sai do
+aplicativo e dos aparelhos conectados** — ou seja, sai da ponte, para
+de registrar conversa e para de alimentar o funil (decisão 48).
+**Escolher ligar por um número é escolher perder a coleta dele.**
+
+**Então o botão faz o possível, e diz o que faz.** Abre a conversa no
+aplicativo instalado (`whatsapp://`, não `wa.me`, que daria a volta
+pelo navegador) e a pessoa aperta o telefone lá. O fone com microfone
+funciona porque quem liga é o aplicativo. **Quem trocar isto por um
+link que promete discar está prometendo o que o WhatsApp não entrega.**
+
+**A escolha do número não finge escolher.** O WhatsApp do computador
+fica logado em um número por vez, e nenhum link troca de conta. A tela
+então diz **em qual janela a pessoa precisa estar**, com o número
+dela, e lembra a última escolha. Dizer "ligue pela Ana" e abrir a
+janela da loja seria pior que não oferecer escolha nenhuma.
+
+**Na conversa, o número sugerido é o que recebeu a mensagem** — é o
+que o cliente conhece, e ligar de outro faz a chamada parecer de
+desconhecido.
+
+**Número de operação não aparece na lista** (0058): não se liga para
+cliente pelo número do administrativo.
+
+**O botão está onde a pré-venda trabalha**: na lista de leads, no
+quadro, na tela de agendamentos (é lá que se confirma na véspera) e na
+conversa. Em cada um, "Ligar" e "Mensagem" ficam lado a lado — são
+gestos diferentes, e um só botão obrigaria a escolher antes de saber.
+
+**O `ferramentas-escopo.js` pegou um erro real aqui**, e vale
+registrar: o diálogo de ligação caiu dentro de `Agendamentos` enquanto
+o botão ficou em `FunilLeads` — exatamente o caso da decisão 7, que
+transpila sem reclamar e quebra na tela. O teste acusou "chama
+setLigando() sem declarar o estado" antes de qualquer clique.
+
 ## Convenções do código
 
 - **Português no domínio.** Estado, funções e rótulos em pt-BR

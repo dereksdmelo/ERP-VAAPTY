@@ -8618,6 +8618,7 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe }) {
   const [erro, setErro] = useState("");
   const [virando, setVirando] = useState(false);
   const [agendando, setAgendando] = useState(null);
+  const [ligandoConv, setLigandoConv] = useState(false);
   const fim = useRef(null);
 
   /* AGENDAR É UM GESTO SÓ, e o lead nasce no caminho.
@@ -8704,9 +8705,16 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe }) {
               {virando ? "abrindo…" : conversa.lead && conversa.lead.agendado_para ? "Remarcar" : "Agendar"}
             </button>
           )}
+          {/* Ligar sai do número em que a conversa chegou: é o que o
+              cliente conhece, e trocar de número no meio da conversa
+              faz a chamada parecer de desconhecido. */}
+          <button onClick={() => setLigandoConv(true)}
+            className="rounded-lg px-3 py-2 text-[13px] font-semibold text-white" style={{ background: C.verde }}>
+            Ligar
+          </button>
           <a href={zap(conversa.telefone)} target="_blank" rel="noopener noreferrer"
             className="rounded-lg border px-3 py-2 text-[13px] font-semibold"
-            style={{ borderColor: C.line, color: C.ink }}>Abrir no WhatsApp</a>
+            style={{ borderColor: C.line, color: C.ink }}>Mensagem</a>
           {aoVoltar && (
             <button onClick={aoVoltar} className="rounded-lg border px-3 py-2 text-[13px] font-semibold lg:hidden"
               style={{ borderColor: C.line, color: C.mute }}>Voltar</button>
@@ -8732,6 +8740,11 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe }) {
         ainda não existe.
       </p>
 
+      {ligandoConv && (
+        <Ligar para={conversa.telefone} nome={waQuem(conversa)}
+          canalSugerido={conversa.canal && conversa.canal.slug}
+          aoFechar={() => setLigandoConv(false)} />
+      )}
       {agendando && (
         <Agendador lead={agendando} equipe={equipe || []}
           aoFechar={() => setAgendando(null)} aoAgendar={salvarAgenda} />
@@ -11863,6 +11876,36 @@ const zap = (tel, msg) => {
   const num = d.length <= 11 ? `55${d}` : d;
   return `https://wa.me/${num}?text=${encodeURIComponent(msg)}`;
 };
+/* LIGAR PELO WHATSAPP, com o fone do computador.
+ *
+ * **Não existe link que inicie a chamada.** O WhatsApp não publica
+ * esquema de URL para isso, e a biblioteca da ponte (Baileys) sabe
+ * dizer que entrou uma chamada mas **não sabe fazer nem atender** — o
+ * protocolo de voz não está implementado em nenhuma biblioteca
+ * pública. A API oficial de chamadas existe, mas exige o número na
+ * Cloud API, e número na Cloud API **sai do aplicativo** — ou seja,
+ * sai da ponte e para de alimentar o funil.
+ *
+ * Então o que este botão faz é o possível e honesto: abre a conversa
+ * **no aplicativo instalado** (`whatsapp://`, não `wa.me`, que daria
+ * a volta pelo navegador) e a pessoa aperta o telefone lá. O fone com
+ * microfone funciona porque quem liga é o aplicativo.
+ *
+ * **Quem mudar isto para um link que promete discar** está prometendo
+ * o que o WhatsApp não entrega.
+ */
+// O número do canal vem do WhatsApp com o 55 do país; o formato da
+// casa é sem ele.
+const semDDI = (t) => {
+  const d = soDigitos(t);
+  return d.length > 11 && d.slice(0, 2) === "55" ? d.slice(2) : d;
+};
+
+const zapApp = (tel) => {
+  const d = soDigitos(tel);
+  return `whatsapp://send?phone=${d.length <= 11 ? `55${d}` : d}`;
+};
+
 const horaBR = (iso) => (iso ? String(iso).slice(11, 16) : "");
 const diaDaSemana = (iso) => ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"][new Date(`${String(iso).slice(0, 10)}T12:00:00`).getDay()];
 
@@ -12295,6 +12338,71 @@ const colunaDe = (l) => etapaDoLead(l).id;
 // nome, senão viram dois vocabulários para o mesmo funil.
 const etapaDoLead = (l) => COLUNAS_LEAD.find((c) => c.status.indexOf(l.status) >= 0) || COLUNAS_LEAD[0];
 
+/* A ESCOLHA DE QUAL NÚMERO LIGA.
+ *
+ * **O link não troca de conta** — o WhatsApp Desktop fica logado em um
+ * número por vez. Então a tela não finge escolher: ela diz em qual
+ * janela a pessoa tem que estar, e lembra qual foi a última escolha.
+ * Dizer "ligue pela Ana" e abrir a janela da loja seria pior que não
+ * oferecer escolha nenhuma.
+ */
+function Ligar({ para, nome, canalSugerido, aoFechar }) {
+  const [canais, setCanais] = useState([]);
+  const [de, setDe] = useState(canalSugerido || window.storage.get("vaapty:ligar-de") || "");
+  useEffect(() => {
+    waCanais().then((cs) => setCanais(cs.filter((c) => c.ativo && c.comercial !== false))).catch(() => setCanais([]));
+  }, []);
+  const escolhido = canais.filter((c) => c.slug === de)[0];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center"
+      style={{ background: "rgba(24,20,32,0.45)" }} onClick={aoFechar}>
+      <div className="w-full max-w-[420px] rounded-xl p-4" onClick={(e) => e.stopPropagation()}
+        style={{ background: C.paper, border: `1px solid ${C.line}`, boxShadow: "0 18px 50px rgba(24,20,32,0.28)" }}>
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="text-[16px]" style={{ fontFamily: F.disp, fontWeight: 800 }}>Ligar para {nome}</span>
+          <button onClick={aoFechar} className="text-[13px]" style={{ color: C.mute }}>fechar</button>
+        </div>
+        <div className="mt-0.5 text-[13.5px]" style={{ color: C.mute, fontFamily: F.mono }}>{telBR(para)}</div>
+
+        {!!canais.length && (
+          <Campo label="Ligar pelo número">
+            <select className={inputCls} style={inputSty} value={de}
+              onChange={(e) => { setDe(e.target.value); window.storage.set("vaapty:ligar-de", e.target.value); }}>
+              <option value="">Qualquer um</option>
+              {canais.map((c) => (
+                <option key={c.slug} value={c.slug}>{c.nome}{c.telefone ? ` · ${telBR(semDDI(c.telefone))}` : ""}</option>
+              ))}
+            </select>
+          </Campo>
+        )}
+
+        {escolhido && (
+          <p className="mt-2 rounded-lg px-3 py-2 text-[12.5px] leading-snug" style={{ background: C.roxoFraco, color: C.ink }}>
+            O WhatsApp do computador fica logado em <strong>um número por vez</strong>. Confira que a
+            janela aberta é a de <strong>{escolhido.nome}</strong>
+            {escolhido.telefone ? ` (${telBR(semDDI(escolhido.telefone))})` : ""} antes de chamar.
+          </p>
+        )}
+
+        <a href={zapApp(para)}
+          className="mt-3 block rounded-lg px-4 py-3 text-center text-[15px] font-bold text-white"
+          style={{ background: C.roxo }} onClick={() => setTimeout(aoFechar, 400)}>
+          Abrir a conversa no WhatsApp
+        </a>
+        <p className="mt-2 text-[12px] leading-snug" style={{ color: C.mute }}>
+          A conversa abre no aplicativo; o telefone fica no topo dela. O fone com microfone
+          do computador é usado automaticamente.
+        </p>
+        <a href={zap(para, "")} target="_blank" rel="noopener noreferrer"
+          className="mt-2 block text-center text-[12.5px]" style={{ color: C.roxo }}>
+          abrir no navegador, se o aplicativo não estiver instalado
+        </a>
+      </div>
+    </div>
+  );
+}
+
 function CartaoLead({ l, onAbrir, onArrastar, onVeio }) {
   const t = l.agendado_para ? Date.parse(l.agendado_para) : 0;
   const atrasado = t && t < Date.now();
@@ -12342,6 +12450,7 @@ function QuadroLeads({ perfil, equipe }) {
   const [agendando, setAgendando] = useState(null);
   const [perdendo, setPerdendo] = useState(null);
   const [criando, setCriando] = useState(false);
+  const [ligando, setLigando] = useState(null);
   const [novo, setNovo] = useState({ nome: "", telefone: "", carro: "", origem: "fluxo_loja" });
 
   const carregar = () => {
@@ -12479,9 +12588,15 @@ function QuadroLeads({ perfil, equipe }) {
               {menu.carro ? `${menu.carro} · ` : ""}{menu.telefone || "sem telefone"}
             </div>
             {menu.telefone && (
-              <a href={zap(menu.telefone)} target="_blank" rel="noopener noreferrer"
-                className="mt-3 block rounded-lg border px-3 py-2.5 text-center text-[14px] font-semibold"
-                style={{ borderColor: C.line, color: C.ink }}>Abrir no WhatsApp</a>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button onClick={() => { setLigando(menu); setMenu(null); }}
+                  className="rounded-lg px-3 py-2.5 text-[14px] font-semibold text-white" style={{ background: C.verde }}>
+                  Ligar
+                </button>
+                <a href={zap(menu.telefone)} target="_blank" rel="noopener noreferrer"
+                  className="rounded-lg border px-3 py-2.5 text-center text-[14px] font-semibold"
+                  style={{ borderColor: C.line, color: C.ink }}>Mensagem</a>
+              </div>
             )}
             <div className="mt-3 text-[10px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>Mover para</div>
             <div className="mt-1.5 grid grid-cols-2 gap-2">
@@ -12495,6 +12610,9 @@ function QuadroLeads({ perfil, equipe }) {
         </div>
       )}
 
+      {ligando && (
+        <Ligar para={ligando.telefone} nome={ligando.nome} aoFechar={() => setLigando(null)} />
+      )}
       {agendando && (
         <Agendador lead={agendando} equipe={equipe || []} aoFechar={() => setAgendando(null)}
           aoAgendar={async (mud) => { await mexer(agendando, { ...mud, status: "agendado" }); setAgendando(null); }} />
@@ -12519,6 +12637,7 @@ function FunilLeads({ perfil, equipe }) {
   const [busca, setBusca] = useState("");
   const [novo, setNovo] = useState({ nome: "", telefone: "", carro: "", origem: "google" });
   const [agendando, setAgendando] = useState(null);
+  const [ligando, setLigando] = useState(null);
   const [voltando, setVoltando] = useState(null);
   const [perdendo, setPerdendo] = useState(null);
   const [anotando, setAnotando] = useState(null);
@@ -12660,6 +12779,9 @@ function FunilLeads({ perfil, equipe }) {
 
             <div className="flex items-center gap-2 text-[12px]">
               {l.telefone && (
+                <button onClick={() => setLigando(l)} style={{ color: C.verde, fontWeight: 700 }}>ligar</button>
+              )}
+              {l.telefone && (
                 <a href={zap(l.telefone, `Olá ${l.nome}! Aqui é da Vaapty Joinville. Tudo bem?`)}
                   target="_blank" rel="noreferrer" style={{ color: C.verde, fontWeight: 600 }}>zap</a>
               )}
@@ -12719,6 +12841,9 @@ function FunilLeads({ perfil, equipe }) {
         ))}
       </div>
 
+      {ligando && (
+        <Ligar para={ligando.telefone} nome={ligando.nome} aoFechar={() => setLigando(null)} />
+      )}
       {perdendo && (
         <PorQuePerdeu aoFechar={() => setPerdendo(null)}
           aoEscolher={async (motivo) => {
@@ -12763,6 +12888,7 @@ function FunilLeads({ perfil, equipe }) {
 function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
+  const [ligando, setLigando] = useState(null);
   const [agendando, setAgendando] = useState(null);
   const [voltando, setVoltando] = useState(null);
   const [indo, setIndo] = useState("");
@@ -12856,6 +12982,10 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
                           WhatsApp
                         </a>
                       )}
+                      {l.telefone && (
+                        <button onClick={() => setLigando(l)} className="rounded-lg px-3 py-2 font-semibold text-white"
+                          style={{ background: C.verde }}>Ligar</button>
+                      )}
                       {l.telefone && <a href={`tel:${soDigitos(l.telefone)}`} style={{ color: C.roxo, fontWeight: 600 }}>{telBR(l.telefone)}</a>}
                       <button onClick={() => setAgendando(l)} style={{ color: C.mute }}>remarcar</button>
                       <button onClick={() => setVoltando(l)} style={{ color: C.mute }}>não veio</button>
@@ -12872,6 +13002,9 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
         );
       })}
 
+      {ligando && (
+        <Ligar para={ligando.telefone} nome={ligando.nome} aoFechar={() => setLigando(null)} />
+      )}
       {agendando && (
         <Agendador lead={agendando} equipe={equipe} aoFechar={() => setAgendando(null)}
           aoAgendar={async (dados) => { await mexer(agendando, dados); setAgendando(null); }} />
