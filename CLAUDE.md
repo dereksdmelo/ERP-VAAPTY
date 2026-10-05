@@ -2387,6 +2387,35 @@ e entra no cabeçalho das páginas que medem um mês. **Quem criar tela
 nova a registra em `destinosPara()` e a roteia no `App`**; tela sem
 entrada lá não existe para o usuário.
 
+**E em 05/10/2026 o menu virou QUATRO ÁREAS**, porque o Derek olhou e
+disse que estava bagunçado. Estava: quinze destinos numa lista
+corrida, com "Extrato de ofertas" entre "Painel do mês" e
+"Rentabilidade", e "Números do WhatsApp" entre "Equipe e metas" e
+"Financeiro". **A ordem era a ordem em que as telas nasceram**, que
+não é a ordem em que alguém procura.
+
+```
+          Meu dia
+PRÉ-VENDAS    Pré-vendas · Conversas · Leads de indicação
+NEGOCIAÇÃO    Atendimentos · Extrato · Estoque · Venda para lojistas
+GESTÃO        Painel do gestor · Painel do mês · Rentabilidade ·
+              Equipe e metas · Financeiro
+ADMINISTRATIVO  Administrativo · Números do WhatsApp
+```
+
+**As áreas são as da casa, não da arquitetura:** pré-venda traz o
+cliente, negociação compra o carro, gestão mede, administrativo cuida
+do papel. É assim que a equipe fala, e é por isso que a pessoa acha
+sem ler item por item.
+
+**"Meu dia" fica FORA das quatro, no topo.** Ele é de quem está
+logado, não de uma função — o negociador e a pré-venda usam o mesmo, e
+enfiá-lo numa área faria metade da equipe procurá-lo na outra.
+
+**O `area` é obrigatório em destino novo**; sem ele o item some do
+menu agrupado. E a folha do "Mais", no celular, usa os mesmos quatro
+títulos: ela tinha nove itens em fila e o polegar procurava.
+
 **O atendimento aberto (`VaaptyAponte`) fica fora da casca**, de
 propósito: é um fluxo guiado de oito etapas com trilho próprio, e a
 barra inferior competiria com o trilho pelo polegar.

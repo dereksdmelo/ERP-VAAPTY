@@ -17826,6 +17826,33 @@ function TelaExtratoAvulso({ perfil }) {
   );
 }
 
+/* O MENU EM QUATRO ÁREAS (05/10/2026).
+ *
+ * O Derek olhou a barra e disse: *"isso aqui tá muito bagunçado"*.
+ * Estava: quinze destinos numa lista corrida, com "Extrato de ofertas"
+ * entre "Painel do mês" e "Rentabilidade", e "Números do WhatsApp"
+ * entre "Equipe e metas" e "Financeiro". A ordem era a ordem em que as
+ * telas foram nascendo, que não é a ordem em que alguém procura.
+ *
+ * **As áreas são as da casa, não da arquitetura:** pré-venda traz o
+ * cliente, negociação compra o carro, gestão mede, administrativo
+ * cuida do papel. É assim que a equipe fala, e é por isso que a pessoa
+ * acha sem ler item por item.
+ *
+ * **"Meu dia" fica FORA das quatro, no topo.** Ele é de quem está
+ * logado, não de uma função — o negociador e a pré-venda usam o mesmo,
+ * e enfiá-lo numa área faria metade da equipe procurá-lo na outra.
+ *
+ * **Quem criar tela nova a registra aqui com a sua área**; tela sem
+ * entrada não existe para o usuário, e sem área cai no fim da lista.
+ */
+const AREAS = [
+  ["prevendas",  "Pré-vendas"],
+  ["negociacao", "Negociação"],
+  ["gestao",     "Gestão"],
+  ["adm",        "Administrativo"],
+];
+
 function destinosPara(perfil) {
   const gerente = !!(perfil && perfil.papel === "gerente");
   const adm = !!(perfil && (perfil.administrativo || gerente));
@@ -17833,43 +17860,44 @@ function destinosPara(perfil) {
   // no banco.
   const gestao = adm;
   return [
-    // O painel do gestor é o primeiro destino de quem é gerente: é a
-    // tela que ele abre de manhã e deixa aberta. Para os outros nem
-    // existe — e não por cortesia da tela: a RLS da 0033 devolve só a
-    // própria negociação a quem não é gerente.
-    gerente ? { id: "gestor", rot: "Painel do gestor", curto: "Gestor", principal: true } : null,
-    // O dia do negociador. Fica entre o painel e a lista porque é a
-    // tela que ele abre de manhã e volta nela o dia inteiro.
+    // O dia de quem está logado, acima das áreas: é a tela que ele abre
+    // de manhã e volta nela o dia inteiro.
     { id: "meudia", rot: "Meu dia", curto: "Meu dia", principal: true },
-    { id: "prevendas", rot: "Pré-vendas", curto: "Pré-v.", principal: true },
-    // A caixa de entrada é de todo dia para quem atende, então entra na
-    // barra do polegar, ao lado da pré-venda. É da EQUIPE: a RLS da
-    // 0054 abre conversa e mensagem para `e_equipe()` -- só o cadastro
-    // dos números é do gerente.
-    { id: "conversas", rot: "Conversas", curto: "Conversas", principal: true },
-    { id: "atendimentos", rot: "Atendimentos", curto: "Atend.", principal: true },
-    { id: "estoque", rot: "Estoque", curto: "Estoque", principal: true },
-    { id: "painel", rot: "Painel do mês", curto: "Painel" },
-    // Ferramenta, não destino de todo dia: fica no menu e fora da
-    // barra do polegar. Todo mundo vê — é uma calculadora, não mostra
-    // dado de cliente nenhum.
-    { id: "extrato", rot: "Extrato de ofertas", curto: "Extrato" },
-    // Rentabilidade e Venda para lojistas mostram margem e custo por
-    // carro: é conversa de gestão, não de quem está com o cliente na
-    // mesa. Fora para negociador e pré-venda.
-    gestao ? { id: "rentabilidade", rot: "Rentabilidade", curto: "Rentab." } : null,
-    { id: "leads", rot: "Leads de indicação", curto: "Leads" },
-    adm ? { id: "adm", rot: "Administrativo", curto: "Adm." } : null,
-    gerente ? { id: "gestao", rot: "Equipe e metas", curto: "Equipe" } : null,
-    // Ligar um número da loja é ato de gerente — e o servidor confere
-    // de novo, porque esconder o item é conveniência, não controle.
-    gerente ? { id: "whatsapp", rot: "Números do WhatsApp", curto: "WhatsApp" } : null,
+
+    // ---- trazer o cliente até a loja ----
+    { id: "prevendas", rot: "Pré-vendas", curto: "Pré-v.", area: "prevendas", principal: true },
+    { id: "conversas", rot: "Conversas", curto: "Conversas", area: "prevendas", principal: true },
+    { id: "leads", rot: "Leads de indicação", curto: "Indicações", area: "prevendas" },
+
+    // ---- o cliente na mesa e o carro ----
+    { id: "atendimentos", rot: "Atendimentos", curto: "Atend.", area: "negociacao", principal: true },
+    // Ferramenta, não destino de todo dia. Todo mundo vê — é uma
+    // calculadora, não mostra dado de cliente nenhum.
+    { id: "extrato", rot: "Extrato de ofertas", curto: "Extrato", area: "negociacao" },
+    { id: "estoque", rot: "Estoque", curto: "Estoque", area: "negociacao" },
+    // Margem e custo por carro é conversa de gestão, não de quem está
+    // com o cliente na mesa.
+    gestao ? { id: "lojistas", rot: "Venda para lojistas", curto: "Lojistas", area: "negociacao" } : null,
+
+    // ---- medir ----
+    // O painel do gestor não existe para quem não é gerente, e não por
+    // cortesia da tela: a RLS da 0033 devolve só a própria negociação.
+    gerente ? { id: "gestor", rot: "Painel do gestor", curto: "Gestor", area: "gestao" } : null,
+    { id: "painel", rot: "Painel do mês", curto: "Painel", area: "gestao" },
+    gestao ? { id: "rentabilidade", rot: "Rentabilidade", curto: "Rentab.", area: "gestao" } : null,
+    gerente ? { id: "gestao", rot: "Equipe e metas", curto: "Equipe", area: "gestao" } : null,
     // Área restrita: só quem tem o sinalizador no perfil (0021). A tela
     // esconde o destino; quem protege de verdade é a RLS.
-    (perfil && (perfil.financeiro || gerente)) ? { id: "financeiro", rot: "Financeiro", curto: "Financ." } : null,
-    gestao ? { id: "lojistas", rot: "Venda para lojistas", curto: "Lojistas" } : null,
+    (perfil && (perfil.financeiro || gerente)) ? { id: "financeiro", rot: "Financeiro", curto: "Financ.", area: "gestao" } : null,
+
+    // ---- o papel e a operação ----
+    adm ? { id: "adm", rot: "Administrativo", curto: "Adm.", area: "adm" } : null,
+    // Ligar um número da loja é ato de gerente — e o servidor confere
+    // de novo, porque esconder o item é conveniência, não controle.
+    gerente ? { id: "whatsapp", rot: "Números do WhatsApp", curto: "WhatsApp", area: "adm" } : null,
   ].filter(Boolean);
 }
+
 
 const Logotipo = () => (
   <span className="flex items-center gap-2">
@@ -17883,6 +17911,10 @@ function Shell({ perfil, tela, setTela, children }) {
   const destinos = destinosPara(perfil);
   const principais = destinos.filter((d) => d.principal);
   const demais = destinos.filter((d) => !d.principal);
+  // No topo, fora das áreas: é de quem está logado, não de uma função.
+  const soltos = destinos.filter((d) => !d.area);
+  const porArea = AREAS.map(([id, rot]) => ({ id, rot, itens: destinos.filter((d) => d.area === id) }))
+    .filter((g) => g.itens.length);
   const [mais, setMais] = useState(false);
 
   const ir = (id) => { setTela(id); setMais(false); window.scrollTo(0, 0); };
@@ -17917,10 +17949,19 @@ function Shell({ perfil, tela, setTela, children }) {
       <aside className="fixed inset-y-0 left-0 hidden w-60 flex-col lg:flex"
         style={{ background: C.paper, borderRight: `1px solid ${C.line}` }}>
         <div className="px-5 pt-5 pb-4"><Logotipo /></div>
-        <nav className="flex-1 space-y-0.5 px-3">
-          {principais.map(itemLateral)}
-          {!!demais.length && <div className="my-3 border-t" style={{ borderColor: C.line }} />}
-          {demais.map(itemLateral)}
+        {/* O TÍTULO DA ÁREA É O QUE FAZ A LISTA DEIXAR DE SER LISTA.
+            Quinze destinos corridos obrigam a ler item por item; com o
+            título, a pessoa salta direto para o pedaço certo. */}
+        <nav className="flex-1 overflow-y-auto px-3 pb-4">
+          <div className="space-y-0.5">{soltos.map(itemLateral)}</div>
+          {porArea.map((g) => (
+            <div key={g.id} className="mt-4">
+              <div className="px-3 pb-1 text-[10px] font-bold uppercase tracking-[0.1em]" style={{ color: C.mute }}>
+                {g.rot}
+              </div>
+              <div className="space-y-0.5">{g.itens.map(itemLateral)}</div>
+            </div>
+          ))}
         </nav>
         <div className="px-5 py-4" style={{ borderTop: `1px solid ${C.line}` }}>
           <div className="truncate text-[13px] font-semibold">{perfil ? perfil.nome : ""}</div>
@@ -17956,13 +17997,28 @@ function Shell({ perfil, tela, setTela, children }) {
           <div className="absolute inset-x-0 bottom-0 rounded-t-2xl p-4 pb-8" style={{ background: C.paper }}
             onClick={(e) => e.stopPropagation()}>
             <div className="mx-auto mb-3 h-1 w-10 rounded-full" style={{ background: C.line }} />
-            {demais.map((d) => (
-              <button key={d.id} onClick={() => ir(d.id)}
-                className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-[15px]"
-                style={{ color: tela === d.id ? C.roxo : C.ink, fontWeight: tela === d.id ? 700 : 500 }}>
-                <Icone nome={d.id} tam={20} />{d.rot}
-              </button>
-            ))}
+            {/* No celular as áreas também valem: a folha do "Mais"
+                tinha nove itens em fila e o polegar procurava. */}
+            <div className="max-h-[62vh] overflow-y-auto">
+              {AREAS.map(([id, rot]) => {
+                const itens = demais.filter((d) => d.area === id);
+                if (!itens.length) return null;
+                return (
+                  <div key={id} className="mb-1">
+                    <div className="px-3 pb-0.5 pt-2 text-[10px] font-bold uppercase tracking-[0.1em]" style={{ color: C.mute }}>
+                      {rot}
+                    </div>
+                    {itens.map((d) => (
+                      <button key={d.id} onClick={() => ir(d.id)}
+                        className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[15px]"
+                        style={{ color: tela === d.id ? C.roxo : C.ink, fontWeight: tela === d.id ? 700 : 500 }}>
+                        <Icone nome={d.id} tam={20} />{d.rot}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
             <div className="mt-2 flex items-center justify-between px-3 pt-3 text-[13px]"
               style={{ borderTop: `1px solid ${C.line}`, color: C.mute }}>
               <span>{perfil ? `${perfil.nome} · ${perfil.papel}` : ""}</span>
