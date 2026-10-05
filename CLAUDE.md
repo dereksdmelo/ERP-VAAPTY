@@ -2014,6 +2014,31 @@ está com o telefone na orelha e não pode trocar de tela a cada nome
 porque foi o número que o Derek deu, mas o ritmo da casa muda e a
 régua não devia exigir deploy.
 
+**A CALL É CONTADA PELO BOTÃO, nunca digitada (0062).** O Derek pediu
+para ver se é a 1ª, a 2ª, a 3ª — e o número muda a conversa: a
+primeira ligação é apresentação, a quinta é outra coisa, ou se insiste
+de outro jeito ou se para de insistir. Ninguém anota "foi a terceira"
+com o telefone na orelha, então um campo digitado ficaria em branco
+como todo campo que se pede para preencher depois.
+
+**Conta TENTATIVA, não conversa.** O sistema não sabe se atenderam, e
+fingir que sabe seria pior. "4ª call" quer dizer que se tentou quatro
+vezes — que é exatamente o que faz decidir se vale a quinta.
+
+**A contagem acontece no gesto que é a ligação**, não ao abrir o
+diálogo: quem abre pode fechar sem chamar ninguém. E o diálogo avisa
+qual vai ser ("vai ser a 3ª"), porque é antes de discar que isso muda
+o que se diz.
+
+**Zero aparece como "nunca ligaram", não como "0ª".** É o caso que
+mais pede ação, e um zero o esconderia dentro de um número.
+
+**O filtro de call atravessa TODAS as listas**, e é com ele que se faz
+a lista personalizada que o Derek pediu — "só de primeira call". A
+pergunta "quem ainda não foi chamado" não pertence a uma lista só.
+`10` quer dizer dez **ou mais**: quem já levou dez ligações é uma
+decisão, não um número.
+
 **O que ainda não existe:** regra escrita pelo gerente. As oito são
 código, e acrescentar uma pede uma linha em `?recurso=acoes`. Um
 editor de regras só se paga quando a lista das oito deixar de servir —

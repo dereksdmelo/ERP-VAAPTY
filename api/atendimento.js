@@ -672,6 +672,31 @@ async function leads(req, res, tok) {
    * **Quem excluiu é carimbado pelo servidor**, do token: a tela não
    * escolhe o nome (mesma regra da 0008).
    */
+  /* A LIGAÇÃO É CONTADA PELO BOTÃO, nunca digitada.
+   *
+   * Ninguém anota "foi a terceira" com o telefone na orelha; o que se
+   * faz é apertar ligar. Campo digitado aqui ficaria em branco como
+   * todo campo que se pede para preencher depois.
+   *
+   * **Conta tentativa, não conversa** — o sistema não sabe se
+   * atenderam, e fingir que sabe seria pior. "4ª call" quer dizer que
+   * se tentou quatro vezes, que é exatamente o que faz decidir se
+   * vale a quinta.
+   */
+  if (req.method === "POST" && String(req.query.acao || "") === "ligacao") {
+    const id = String(req.query.id || "");
+    if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido." });
+    const atual = (await banco(`${base}?select=ligacoes&id=eq.${id}`, { headers: cabecalhos(tok) }) || [])[0];
+    if (!atual) return res.status(404).json({ erro: "Lead não encontrado." });
+    const r = await banco(`${base}?id=eq.${id}`, {
+      method: "PATCH", headers: json(tok, { Prefer: "return=representation" }),
+      body: JSON.stringify({ ligacoes: (Number(atual.ligacoes) || 0) + 1, ultima_ligacao_em: new Date().toISOString() }),
+    });
+    const linha = (Array.isArray(r) ? r[0] : r) || null;
+    if (!linha) return res.status(403).json({ erro: "Não consegui registrar a ligação." });
+    return res.status(200).json({ lead: linha });
+  }
+
   if (req.method === "POST" && String(req.query.acao || "") === "excluir") {
     const id = String(req.query.id || "");
     if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido." });
@@ -1656,6 +1681,10 @@ module.exports = async function handler(req, res) {
    */
   if (String(req.query.recurso || "") === "acoes") {
     const dias = Math.min(60, Math.max(1, Number(req.query.dias) || 3));
+    /* O FILTRO DE CALL monta a lista personalizada que o Derek pediu:
+     * "só de primeira call", por exemplo. `10` quer dizer dez OU MAIS
+     * — quem já levou dez ligações é uma decisão, não um número. */
+    const call = req.query.call == null || req.query.call === "" ? null : Number(req.query.call);
     const agora = Date.now();
     const atras = (n) => new Date(agora - n * 86400000).toISOString();
 
@@ -1679,6 +1708,10 @@ module.exports = async function handler(req, res) {
     const hoje = hojeAqui();
     const todos = leads || [];
     const vivo = (l) => ["compareceu", "perdido"].indexOf(l.status) < 0;
+
+    const naCall = (l) => call == null ? true
+      : call >= 10 ? (Number(l.ligacoes) || 0) >= 10
+      : (Number(l.ligacoes) || 0) === call;
 
     const listas = [
       {
@@ -1748,7 +1781,9 @@ module.exports = async function handler(req, res) {
     // o painel.
     return res.status(200).json({
       dias,
-      listas: listas.filter((x) => x.leads.length).map((x) => ({
+      call,
+      listas: listas.map((x) => ({ ...x, leads: x.leads.filter(naCall) }))
+        .filter((x) => x.leads.length).map((x) => ({
         ...x,
         leads: x.leads
           .sort((a, b) => String(a.agendado_para || a.atualizado_em || "").localeCompare(String(b.agendado_para || b.atualizado_em || "")))

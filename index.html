@@ -11875,8 +11875,15 @@ async function criarLead(dados) {
   if (!r.ok) throw new Error(d.erro || "Não consegui gravar o lead.");
   return d.lead;
 }
-async function listarAcoes(dias) {
-  const r = await fetchAut(`/api/atendimento?recurso=acoes${dias ? `&dias=${dias}` : ""}`);
+async function registrarLigacao(id) {
+  const r = await fetchAut(`/api/atendimento?recurso=lead&id=${encodeURIComponent(id)}&acao=ligacao`, { method: "POST" });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui registrar a ligação.");
+  return d.lead;
+}
+async function listarAcoes(dias, call) {
+  const q = comoQuery({ recurso: "acoes", dias: dias || undefined, call: call == null ? undefined : call });
+  const r = await fetchAut(`/api/atendimento?${q}`);
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.erro || "Não consegui montar as ações.");
   return d;
@@ -12202,16 +12209,32 @@ function LeadsExcluidos() {
  */
 const COR_ACAO = { verde: "#1D7F58", laranja: "#E1521F", roxo: "#6D1B9E", cinza: "#6E6879" };
 
+/* "3ª call" é o que se lê na linha, não "ligacoes: 3".
+ *
+ * O número muda a conversa: a primeira ligação é apresentação, a
+ * quinta é outra coisa — ou se insiste de outro jeito, ou se para de
+ * insistir. Quem nunca foi chamado aparece como "nunca ligaram",
+ * porque zero ligação é o caso que mais pede ação e um "0ª" esconderia
+ * isso num número.
+ */
+const CHAMADA = (n) => {
+  const x = Number(n) || 0;
+  if (!x) return { rot: "nunca ligaram", cor: "#E1521F" };
+  if (x >= 10) return { rot: `${x}ª call`, cor: "#6E6879" };
+  return { rot: `${x}ª call`, cor: x >= 5 ? "#E1521F" : "#6E6879" };
+};
+
 function TelaAcoes({ equipe, aoVerConversa }) {
   const [d, setD] = useState(null);
   const [erro, setErro] = useState("");
   const [dias, setDias] = useState(3);
+  const [call, setCall] = useState(null);
   const [aberta, setAberta] = useState(null);
   const [ligando, setLigando] = useState(null);
   const [agendando, setAgendando] = useState(null);
 
-  const carregar = () => listarAcoes(dias).then((x) => { setD(x); setErro(""); }).catch((e) => setErro(e.message));
-  useEffect(() => { setD(null); carregar(); }, [dias]);
+  const carregar = () => listarAcoes(dias, call).then((x) => { setD(x); setErro(""); }).catch((e) => setErro(e.message));
+  useEffect(() => { setD(null); carregar(); }, [dias, call]);
 
   const mexer = async (l, mud) => {
     try { await atualizarLead(l.id, mud); carregar(); }
@@ -12226,16 +12249,31 @@ function TelaAcoes({ equipe, aoVerConversa }) {
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <p className="text-[13.5px]" style={{ color: C.mute }}>
           {d ? (total ? `${total} ${total > 1 ? "clientes esperando alguma coisa" : "cliente esperando alguma coisa"}`
-                      : "Nada parado. A fila está em dia.")
+                      : call != null ? "Ninguém nesse número de call." : "Nada parado. A fila está em dia.")
              : "montando as listas…"}
         </p>
-        <label className="flex items-center gap-2 text-[12.5px]" style={{ color: C.mute }}>
-          parado há
-          <select className="rounded-lg border px-2 py-1 text-[13px]" style={inputSty}
-            value={dias} onChange={(e) => setDias(Number(e.target.value))}>
-            {[1, 2, 3, 5, 7, 14].map((n) => <option key={n} value={n}>{n} dia{n > 1 ? "s" : ""}</option>)}
-          </select>
-        </label>
+        <div className="flex flex-wrap items-center gap-3">
+          {/* A LISTA PERSONALIZADA: "só de primeira call", por
+              exemplo. Corta todas as listas de uma vez, porque a
+              pergunta "quem ainda não foi chamado" atravessa todas. */}
+          <label className="flex items-center gap-2 text-[12.5px]" style={{ color: C.mute }}>
+            call
+            <select className="rounded-lg border px-2 py-1 text-[13px]" style={inputSty}
+              value={call == null ? "" : call} onChange={(e) => setCall(e.target.value === "" ? null : Number(e.target.value))}>
+              <option value="">todas</option>
+              <option value="0">nunca ligaram</option>
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => <option key={n} value={n}>já levou {n}</option>)}
+              <option value="10">10 ou mais</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-[12.5px]" style={{ color: C.mute }}>
+            parado há
+            <select className="rounded-lg border px-2 py-1 text-[13px]" style={inputSty}
+              value={dias} onChange={(e) => setDias(Number(e.target.value))}>
+              {[1, 2, 3, 5, 7, 14].map((n) => <option key={n} value={n}>{n} dia{n > 1 ? "s" : ""}</option>)}
+            </select>
+          </label>
+        </div>
       </div>
 
       {erro && <p className="mb-3 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
@@ -12266,11 +12304,18 @@ function TelaAcoes({ equipe, aoVerConversa }) {
                       style={{ borderColor: C.line }}>
                       <span className="min-w-0 flex-1">
                         <span className="font-semibold">{l.nome}</span>
+                        {l.telefone && (
+                          <span style={{ color: C.mute, fontFamily: F.mono }}> · {telBR(l.telefone)}</span>
+                        )}
                         {l.carro && <span style={{ color: C.mute }}> · {l.carro}</span>}
                         {l.agendado_para && (
                           <span style={{ color: cor }}> · {diaBR(l.agendado_para)} {horaBR(l.agendado_para)}</span>
                         )}
                         {l.origem && <span className="text-[11.5px]" style={{ color: C.mute }}> · {rotulo(ORIGENS, l.origem)}</span>}
+                        <span className="ml-2 rounded-full px-1.5 py-0.5 text-[10.5px] font-bold"
+                          style={{ background: CHAMADA(l.ligacoes).cor + "18", color: CHAMADA(l.ligacoes).cor }}>
+                          {CHAMADA(l.ligacoes).rot}
+                        </span>
                       </span>
                       {/* As ações de sempre, na própria linha: quem
                           trabalha esta fila está no telefone e não
@@ -12322,7 +12367,11 @@ function TelaAcoes({ equipe, aoVerConversa }) {
         </Bloco>
       )}
 
-      {ligando && <Ligar para={ligando.telefone} nome={ligando.nome} aoFechar={() => setLigando(null)} />}
+      {ligando && (
+        <Ligar para={ligando.telefone} nome={ligando.nome} chamadas={ligando.ligacoes}
+          aoLigar={async () => { try { await registrarLigacao(ligando.id); carregar(); } catch (e) {} }}
+          aoFechar={() => setLigando(null)} />
+      )}
       {agendando && (
         <Agendador lead={agendando} equipe={equipe || []} aoFechar={() => setAgendando(null)}
           aoAgendar={async (mud) => { await mexer(agendando, { ...mud, status: "agendado" }); setAgendando(null); }} />
@@ -12670,7 +12719,7 @@ const etapaDoLead = (l) => COLUNAS_LEAD.find((c) => c.status.indexOf(l.status) >
  * Dizer "ligue pela Ana" e abrir a janela da loja seria pior que não
  * oferecer escolha nenhuma.
  */
-function Ligar({ para, nome, canalSugerido, aoFechar }) {
+function Ligar({ para, nome, canalSugerido, aoFechar, aoLigar, chamadas }) {
   const [canais, setCanais] = useState([]);
   const [de, setDe] = useState(canalSugerido || window.storage.get("vaapty:ligar-de") || "");
   useEffect(() => {
@@ -12687,7 +12736,15 @@ function Ligar({ para, nome, canalSugerido, aoFechar }) {
           <span className="text-[16px]" style={{ fontFamily: F.disp, fontWeight: 800 }}>Ligar para {nome}</span>
           <button onClick={aoFechar} className="text-[13px]" style={{ color: C.mute }}>fechar</button>
         </div>
-        <div className="mt-0.5 text-[13.5px]" style={{ color: C.mute, fontFamily: F.mono }}>{telBR(para)}</div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-2">
+          <span className="text-[13.5px]" style={{ color: C.mute, fontFamily: F.mono }}>{telBR(para)}</span>
+          {chamadas != null && (
+            <span className="rounded-full px-2 py-0.5 text-[11.5px] font-bold"
+              style={{ background: CHAMADA(chamadas).cor + "18", color: CHAMADA(chamadas).cor }}>
+              {Number(chamadas) ? `vai ser a ${Number(chamadas) + 1}ª` : "primeira vez"}
+            </span>
+          )}
+        </div>
 
         {!!canais.length && (
           <Campo label="Ligar pelo número">
@@ -12709,9 +12766,13 @@ function Ligar({ para, nome, canalSugerido, aoFechar }) {
           </p>
         )}
 
+        {/* A CONTAGEM ACONTECE AQUI, no gesto que de fato é a
+            ligação — não ao abrir o diálogo, que a pessoa pode fechar
+            sem chamar ninguém. */}
         <a href={zapApp(para)}
           className="mt-3 block rounded-lg px-4 py-3 text-center text-[15px] font-bold text-white"
-          style={{ background: C.roxo }} onClick={() => setTimeout(aoFechar, 400)}>
+          style={{ background: C.roxo }}
+          onClick={() => { if (aoLigar) aoLigar(); setTimeout(aoFechar, 400); }}>
           Abrir a conversa no WhatsApp
         </a>
         <p className="mt-2 text-[12px] leading-snug" style={{ color: C.mute }}>
@@ -12743,6 +12804,7 @@ function CartaoLead({ l, onAbrir, onArrastar, onVeio }) {
       {l.carro && <div className="truncate text-[12px]" style={{ color: C.mute }}>{l.carro}</div>}
       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]" style={{ color: C.mute }}>
         {l.origem && <span>{rotulo(ORIGENS, l.origem)}</span>}
+        {!!Number(l.ligacoes) && <span style={{ color: CHAMADA(l.ligacoes).cor }}>{CHAMADA(l.ligacoes).rot}</span>}
         {l.agendado_para && (
           <span style={{ color: atrasado ? C.laranja : C.verde }}>
             {diaBR(l.agendado_para)} {horaBR(l.agendado_para)}
@@ -12964,7 +13026,9 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
       )}
 
       {ligando && (
-        <Ligar para={ligando.telefone} nome={ligando.nome} aoFechar={() => setLigando(null)} />
+        <Ligar para={ligando.telefone} nome={ligando.nome} chamadas={ligando.ligacoes}
+          aoLigar={async () => { try { const l = await registrarLigacao(ligando.id); setLista((ls) => (ls || []).map((x) => (x.id === l.id ? { ...x, ...l } : x))); } catch (e) {} }}
+          aoFechar={() => setLigando(null)} />
       )}
       {excluindo && (
         <PorQueExcluir nome={excluindo.nome} aoFechar={() => setExcluindo(null)}
@@ -13139,6 +13203,9 @@ function FunilLeads({ perfil, equipe, aoVerConversa }) {
             )}
 
             <div className="flex items-center gap-2 text-[12px]">
+              {!!Number(l.ligacoes) && (
+                <span className="text-[11px] font-semibold" style={{ color: CHAMADA(l.ligacoes).cor }}>{CHAMADA(l.ligacoes).rot}</span>
+              )}
               {l.telefone && (
                 <button onClick={() => setLigando(l)} style={{ color: C.verde, fontWeight: 700 }}>ligar</button>
               )}
@@ -13206,7 +13273,9 @@ function FunilLeads({ perfil, equipe, aoVerConversa }) {
       </div>
 
       {ligando && (
-        <Ligar para={ligando.telefone} nome={ligando.nome} aoFechar={() => setLigando(null)} />
+        <Ligar para={ligando.telefone} nome={ligando.nome} chamadas={ligando.ligacoes}
+          aoLigar={async () => { try { await registrarLigacao(ligando.id); carregar(); } catch (e) {} }}
+          aoFechar={() => setLigando(null)} />
       )}
       {perdendo && (
         <PorQuePerdeu aoFechar={() => setPerdendo(null)}
@@ -13450,7 +13519,9 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
       })}
 
       {ligando && (
-        <Ligar para={ligando.telefone} nome={ligando.nome} aoFechar={() => setLigando(null)} />
+        <Ligar para={ligando.telefone} nome={ligando.nome} chamadas={ligando.ligacoes}
+          aoLigar={async () => { try { await registrarLigacao(ligando.id); carregar(); } catch (e) {} }}
+          aoFechar={() => setLigando(null)} />
       )}
       {agendando && (
         <Agendador lead={agendando} equipe={equipe} aoFechar={() => setAgendando(null)}
