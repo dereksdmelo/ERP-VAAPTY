@@ -12290,15 +12290,23 @@ const COLUNAS_LEAD = [
   { id: "compareceu",  rot: "Compareceu", status: ["compareceu"],             cor: "#1D7F58" },
   { id: "perdido",     rot: "Já vendeu",  status: ["perdido"],                cor: "#6E6879" },
 ];
-const colunaDe = (l) => (COLUNAS_LEAD.find((c) => c.status.indexOf(l.status) >= 0) || COLUNAS_LEAD[0]).id;
+const colunaDe = (l) => etapaDoLead(l).id;
+// Um lugar só: o quadro e a lista chamam a mesma etapa pelo mesmo
+// nome, senão viram dois vocabulários para o mesmo funil.
+const etapaDoLead = (l) => COLUNAS_LEAD.find((c) => c.status.indexOf(l.status) >= 0) || COLUNAS_LEAD[0];
 
-function CartaoLead({ l, onAbrir, onArrastar }) {
-  const atrasado = l.agendado_para && Date.parse(l.agendado_para) < Date.now();
+function CartaoLead({ l, onAbrir, onArrastar, onVeio }) {
+  const t = l.agendado_para ? Date.parse(l.agendado_para) : 0;
+  const atrasado = t && t < Date.now();
+  /* A PERGUNTA SÓ APARECE QUANDO ELA PODE SER RESPONDIDA: chegou a
+   * hora marcada. Perguntar "veio?" três dias antes treina a pessoa a
+   * ignorar o botão, e aí ele deixa de valer no dia em que importa. */
+  const perguntar = !!onVeio && (l.status === "agendado" || l.status === "confirmado") && atrasado;
   return (
     <div draggable onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; onArrastar(l); }}
       onClick={() => onAbrir(l)}
       className="cursor-pointer rounded-lg p-2.5"
-      style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+      style={{ background: C.paper, border: `1px solid ${perguntar ? C.laranja : C.line}` }}>
       <div className="truncate text-[13.5px] font-semibold">{l.nome}</div>
       {l.carro && <div className="truncate text-[12px]" style={{ color: C.mute }}>{l.carro}</div>}
       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]" style={{ color: C.mute }}>
@@ -12309,6 +12317,18 @@ function CartaoLead({ l, onAbrir, onArrastar }) {
           </span>
         )}
       </div>
+      {perguntar && (
+        <div className="mt-2 border-t pt-2" style={{ borderColor: C.line }} onClick={(e) => e.stopPropagation()}>
+          <div className="text-[11px]" style={{ color: C.mute }}>Compareceu?</div>
+          <div className="mt-1 flex gap-1.5">
+            <button onClick={() => onVeio(l, true)}
+              className="flex-1 rounded px-2 py-1.5 text-[12px] font-bold text-white" style={{ background: C.verde }}>Sim</button>
+            <button onClick={() => onVeio(l, false)}
+              className="flex-1 rounded border px-2 py-1.5 text-[12px] font-bold"
+              style={{ borderColor: C.laranja, color: C.laranja }}>Não</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -12321,12 +12341,23 @@ function QuadroLeads({ perfil, equipe }) {
   const [menu, setMenu] = useState(null);
   const [agendando, setAgendando] = useState(null);
   const [perdendo, setPerdendo] = useState(null);
+  const [criando, setCriando] = useState(false);
+  const [novo, setNovo] = useState({ nome: "", telefone: "", carro: "", origem: "fluxo_loja" });
 
   const carregar = () => {
     setErro("");
     // `fila` fora das três conhecidas não filtra status nenhum — é
     // assim que o quadro vê as seis colunas de uma vez.
     listarLeads({ fila: "quadro" }).then(setLista).catch((e) => setErro(e.message));
+  };
+
+  const criar = async () => {
+    if (!novo.nome.trim()) return;
+    try {
+      const l = await criarLead({ ...novo, prospector_nome: perfil ? perfil.nome : null });
+      setLista((ls) => [l, ...(ls || [])]);
+      setNovo({ nome: "", telefone: "", carro: "", origem: novo.origem });
+    } catch (e) { setErro(e.message); }
   };
   useEffect(carregar, []);
 
@@ -12360,6 +12391,39 @@ function QuadroLeads({ perfil, equipe }) {
 
   return (
     <div>
+      {/* LEAD À MÃO NO QUADRO. A conversa cria sozinha o que chega pelo
+          WhatsApp, mas quem liga, quem passa na loja e quem é indicado
+          no corredor não passam por lá — e sem este botão o quadro
+          mentiria por omissão. */}
+      {criando ? (
+        <div className="mb-3 rounded-xl p-3" style={{ background: C.paper, border: `2px solid ${C.roxo}` }}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); criar(); } }}>
+          <div className="grid gap-2 lg:grid-cols-[1.2fr_1fr_1.2fr_auto]">
+            <input className={inputCls} style={inputSty} placeholder="Nome" autoFocus
+              value={novo.nome} onChange={(e) => setNovo({ ...novo, nome: e.target.value })} />
+            <input className={inputCls} style={inputSty} placeholder="Telefone" inputMode="tel"
+              value={novo.telefone} onChange={(e) => setNovo({ ...novo, telefone: e.target.value })} />
+            <input className={inputCls} style={inputSty} placeholder="Carro"
+              value={novo.carro} onChange={(e) => setNovo({ ...novo, carro: e.target.value })} />
+            <select className={inputCls} style={inputSty} value={novo.origem}
+              onChange={(e) => setNovo({ ...novo, origem: e.target.value })}>
+              {ORIGENS.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
+            </select>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <BotaoPrimario onClick={criar} disabled={!novo.nome.trim()}>Pôr no quadro</BotaoPrimario>
+            <button onClick={() => setCriando(false)} className="rounded-lg border px-4 py-2.5 text-[14px] font-semibold"
+              style={{ borderColor: C.line, color: C.mute }}>Cancelar</button>
+            <span className="text-[11px]" style={{ color: C.mute }}>Enter grava e já limpa para o próximo</span>
+          </div>
+        </div>
+      ) : (
+        <button onClick={() => setCriando(true)}
+          className="mb-3 rounded-lg px-4 py-2 text-[14px] font-semibold text-white" style={{ background: C.roxo }}>
+          + Lead
+        </button>
+      )}
+
       {erro && <p className="mb-3 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
       {lista === null && <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>}
 
@@ -12380,7 +12444,13 @@ function QuadroLeads({ perfil, equipe }) {
                 </div>
                 <div className="space-y-2">
                   {itens.map((l) => (
-                    <CartaoLead key={l.id} l={l} onArrastar={setArrastando} onAbrir={setMenu} />
+                    <CartaoLead key={l.id} l={l} onArrastar={setArrastando} onAbrir={setMenu}
+                      onVeio={(x, veio) => mexer(x, veio
+                        ? { status: "compareceu" }
+                        // Não veio volta para REAGENDAR e a data cai: hora
+                        // marcada que já passou não é compromisso, é ruído
+                        // na agenda de quem vai remarcar.
+                        : { status: "nao_compareceu", agendado_para: null, confirmado_em: null })} />
                   ))}
                   {!itens.length && (
                     <div className="rounded-lg p-3 text-center text-[11.5px]" style={{ color: C.mute }}>vazio</div>
@@ -12603,8 +12673,17 @@ function FunilLeads({ perfil, equipe }) {
               <button onClick={() => setPerdendo(l)} style={{ color: C.mute }}>saiu</button>
             </div>
 
-            <span className="w-[74px] shrink-0 text-right text-[10px] uppercase tracking-[0.05em]"
-              style={{ color: C.mute }}>{LEAD_ROT[l.status]}</span>
+            {/* A ETAPA DO FUNIL, com o MESMO nome do quadro — pedido do
+                Derek em 05/10/2026. "Em contato" na lista e "Agendar"
+                no quadro eram a mesma coisa com dois nomes, e quem lê
+                as duas telas tinha que traduzir na cabeça. A cor
+                também é a da coluna. */}
+            <span className="w-[88px] shrink-0 text-right">
+              <span className="rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.05em]"
+                style={{ background: etapaDoLead(l).cor + "18", color: etapaDoLead(l).cor }}>
+                {etapaDoLead(l).rot}
+              </span>
+            </span>
 
             {/* A anotação abre NA LINHA, não em janela.
 

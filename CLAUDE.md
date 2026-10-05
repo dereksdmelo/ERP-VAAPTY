@@ -1789,6 +1789,69 @@ de captura: quem atende telefone grava sem procurar botão (decisão
 27). O quadro responde "onde ponho a mão"; a lista responde "acabei de
 desligar, preciso gravar".
 
+**A lista diz a etapa com o MESMO nome do quadro.** "Em contato" na
+lista e "Agendar" no quadro eram a mesma coisa com dois nomes, e quem
+lê as duas telas traduzia na cabeça. `etapaDoLead()` é o lugar único.
+
+**E dá para pôr lead à mão no quadro.** A conversa cria sozinha o que
+chega pelo WhatsApp, mas quem liga, quem passa na loja e quem é
+indicado no corredor não passam por lá — sem o botão, o quadro mentiria
+por omissão.
+
+---
+
+**A CONVERSA MOVE O LEAD SOZINHA (0059).** O Derek descreveu o ciclo
+olhando as mensagens da Ana e da Camila:
+
+| de → para | o que dispara |
+|-----------|---------------|
+| — → **Novo** | toda mensagem que CHEGA de número desconhecido num canal comercial |
+| Novo → **Agendar** | a primeira resposta do cliente **depois** de a loja falar |
+| Agendar → **Agendado** | a loja confirma uma data **e** uma hora na mensagem |
+| Agendado → **Compareceu / Reagendar** | alguém aperta "veio?" no dia |
+| qualquer → **Já vendeu** | só à mão — o sistema não tem como saber |
+
+**Procura-se data e hora, não um molde de frase.** A Ana manda um
+texto fixo; **a Camila escreve algo completamente diferente, e as duas
+sempre confirmam uma data e uma hora**. Casar o molde quebraria no dia
+em que alguém reescrevesse o texto da IA — e quebraria em silêncio.
+
+**As duas são obrigatórias, e é isso que evita agendamento
+inventado.** Hora sozinha aparece o tempo todo ("abrimos às 9h",
+"ligo às 10h"); data sozinha também ("o carro é 05/10/2019"). Conferido
+contra doze casos, incluindo "Fiat Punto 2010/2011" e "29.900", que
+não podem virar hora marcada.
+
+**Só o que SAIU daqui conta.** O cliente propondo "pode ser dia 7 às
+15h?" não é agendamento; agendamento é a loja confirmando.
+
+**O relógio é o de Joinville.** "às 10:00" na mensagem quer dizer 10 da
+manhã aqui — guardar como UTC puro jogaria o compromisso para as 7h na
+agenda, a mesma armadilha que fez um mês inteiro sumir da tela na
+decisão 22.
+
+**Mensagem que SAI não cria lead.** Escrever para um número que nunca
+respondeu é prospecção, não lead, e encheria o quadro de gente que
+nunca falou com a loja. A exceção é a saída que já confirma data e
+hora: aí é agendamento, e agendamento sem lead não existe.
+
+**Compareceu e perdido não reabrem sozinhos.** Quem saiu da fila saiu
+por decisão de gente, e mensagem nova depois da visita é o caso comum,
+não a exceção — sem essa guarda, um "obrigado!" do cliente devolveria
+o lead para o funil.
+
+**"Não veio" derruba a data junto.** Hora marcada que já passou não é
+compromisso, é ruído na agenda de quem vai remarcar. E a pergunta
+"compareceu?" **só aparece depois da hora marcada**: perguntar três
+dias antes treina a pessoa a ignorar o botão, e aí ele deixa de valer
+no dia em que importa.
+
+**Quem decide é a função do banco, não a ponte.** A ponte só diz o que
+aconteceu; a regra viver em dois lugares é como ela passa a divergir de
+si mesma. E falha em silêncio: o funil é consequência da conversa, e um
+erro ali não pode fazer a ponte devolver erro e reentregar a mensagem
+em laço.
+
 ## Convenções do código
 
 - **Português no domínio.** Estado, funções e rótulos em pt-BR

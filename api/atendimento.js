@@ -1329,6 +1329,88 @@ async function mensagem(req, res, tok) {
  * atendimento, que é o assunto deste arquivo (mesma razão da
  * decisão 27).
  */
+/* A DATA E A HORA QUE A IA CONFIRMOU.
+ *
+ * O Derek mostrou a mensagem da Ana — "confirmado para o dia
+ * 05/10/2026 às 10:00" — e avisou que **a Camila escreve algo
+ * completamente diferente, mas sempre confirma uma data e uma hora**.
+ * Então o que se procura são as duas coisas juntas, não um molde de
+ * frase: molde quebra no dia em que alguém reescreve o texto da IA, e
+ * quebra em silêncio.
+ *
+ * **As duas são obrigatórias.** Hora sozinha ("às 10h") aparece em
+ * conversa o tempo todo — "ligo às 10h", "abrimos às 9h" — e viraria
+ * agendamento inventado. Data sozinha também: "o carro é de 2019".
+ *
+ * **Só olha o que SAIU daqui.** O cliente propondo "pode ser dia 7 às
+ * 15h?" não é agendamento; agendamento é a loja confirmando.
+ *
+ * **Data no passado é descartada**, porque é quase sempre referência a
+ * outra coisa (a data da compra, a do CRLV). O teto de 120 dias à
+ * frente é pela mesma razão, do outro lado.
+ */
+const MESES_TXT = {
+  jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6,
+  jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12,
+};
+
+function dataHoraConfirmada(texto, base) {
+  const t = String(texto || "");
+  if (!t) return null;
+  // Sem acento e em minúsculas: "às" e "as", "terça" e "terca".
+  const limpo = t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
+  // A HORA: "10:00", "10h", "10 h", "as 10". Minuto é opcional.
+  const mh = limpo.match(/(?:as|às|\bhorario\b[^\d]{0,12}|\bhora\b[^\d]{0,12}|\b)(\d{1,2})\s*(?::|h)\s*(\d{2})?\b/);
+  if (!mh) return null;
+  const hora = Number(mh[1]);
+  const min = mh[2] == null ? 0 : Number(mh[2]);
+  if (!(hora >= 0 && hora <= 23) || !(min >= 0 && min <= 59)) return null;
+  // "10h" ou "10:00" tudo bem; "10" solto não — sem o h nem os dois
+  // pontos, qualquer número da frase viraria hora.
+  if (!/[:h]/.test(mh[0])) return null;
+
+  const ref = base ? new Date(base) : new Date();
+  let ano = null, mes = null, dia = null;
+
+  // "05/10/2026" ou "05/10". O ano de dois dígitos vira 20xx.
+  const md = limpo.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+  if (md) {
+    dia = Number(md[1]); mes = Number(md[2]);
+    if (md[3]) { ano = Number(md[3]); if (ano < 100) ano += 2000; }
+  } else {
+    // "dia 7 de outubro", "7 de out"
+    const mx = limpo.match(/\b(\d{1,2})\s+de\s+([a-z]{3})/);
+    if (mx && MESES_TXT[mx[2]]) { dia = Number(mx[1]); mes = MESES_TXT[mx[2]]; }
+    else if (/\bamanha\b/.test(limpo)) {
+      const d = new Date(ref.getTime() + 86400000);
+      ano = d.getUTCFullYear(); mes = d.getUTCMonth() + 1; dia = d.getUTCDate();
+    } else if (/\bhoje\b/.test(limpo)) {
+      ano = ref.getUTCFullYear(); mes = ref.getUTCMonth() + 1; dia = ref.getUTCDate();
+    } else return null;
+  }
+  if (!(dia >= 1 && dia <= 31) || !(mes >= 1 && mes <= 12)) return null;
+  if (ano == null) {
+    // Sem ano na frase: o ano da mensagem, e o seguinte quando a data
+    // já passou — "dia 05/01" em dezembro é janeiro que vem.
+    ano = ref.getUTCFullYear();
+    const tentativa = Date.UTC(ano, mes - 1, dia);
+    if (tentativa < ref.getTime() - 7 * 86400000) ano += 1;
+  }
+
+  /* O RELÓGIO É O DE JOINVILLE, não o de Greenwich. "às 10:00" na
+   * mensagem quer dizer 10 da manhã aqui; guardar como UTC puro
+   * jogaria o compromisso para as 7h na agenda (mesma armadilha que
+   * sumiu com o mês inteiro na decisão 22). UTC−3 o ano todo: o
+   * horário de verão acabou em 2019. */
+  const quando = new Date(Date.UTC(ano, mes - 1, dia, hora + 3, min, 0));
+  if (isNaN(quando.getTime())) return null;
+  const agora = ref.getTime();
+  if (quando.getTime() < agora - 2 * 3600000) return null;          // já passou
+  if (quando.getTime() > agora + 120 * 86400000) return null;       // longe demais
+  return quando.toISOString();
+}
+
 async function ponte(req, res) {
   const segredo = process.env.PONTE_SEGREDO || "";
   if (!segredo || req.headers["x-ponte-segredo"] !== segredo) {
@@ -1370,6 +1452,26 @@ async function ponte(req, res) {
         p_anexo: anexo, p_quando: new Date(Number(c.quando) || Date.now()).toISOString(),
         p_anuncio: c.referral || null,
       });
+      /* A CONVERSA MOVE O LEAD (0059), e aqui só se diz o que
+       * aconteceu — quem decide se isso muda alguma coisa é a função
+       * do banco. A regra viver em dois lugares é como ela passa a
+       * divergir de si mesma.
+       *
+       * Falha em silêncio: o funil é consequência da conversa, e um
+       * erro aqui não pode fazer a ponte devolver erro e reentregar a
+       * mensagem em laço. */
+      if (id) {
+        try {
+          const quando = c.eco ? dataHoraConfirmada(texto, c.quando ? Number(c.quando) : Date.now()) : null;
+          const DO_CANAL = { "prospeccao-ativa": "prospeccao", tv: "tv", loja: "fluxo_loja" };
+          await rpc("wa_lead_avanca", {
+            p_mensagem: id,
+            p_evento: quando ? "agendou" : c.eco ? "nada" : "respondeu",
+            p_quando: quando,
+            p_origem: c.referral ? "facebook" : (DO_CANAL[canal] || "outro"),
+          });
+        } catch (e) {}
+      }
       // `novo: false` = a ponte reentregou algo que já estava aqui.
       return res.status(200).json({ ok: true, novo: !!id });
     } catch (e) { return res.status(200).json({ ok: false, erro: String(e.message || e).slice(0, 180) }); }
