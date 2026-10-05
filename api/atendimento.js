@@ -86,6 +86,13 @@ const daLista = (v, lista) => (lista.indexOf(String(v || "")) >= 0 ? String(v) :
 // O relógio da casa é America/Sao_Paulo, não UTC — mesmo de api/funil.js.
 const hojeAqui = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
 
+// "4 horas" e "3 dias" na mesma régua: a pré-venda responde em
+// minutos, e exigir um dia inteiro para chamar alguém de sumido
+// esconde a janela em que ainda dá para recuperar.
+const rotuloPrazo = (d) => (d < 1
+  ? `${Math.round(d * 24)} hora${Math.round(d * 24) > 1 ? "s" : ""}`
+  : `${d} dia${d > 1 ? "s" : ""}`);
+
 // O id do usuário, do miolo do token. Quem valida é o banco.
 function donoDoToken(tok) {
   try {
@@ -1680,7 +1687,7 @@ module.exports = async function handler(req, res) {
    * esfriou.
    */
   if (String(req.query.recurso || "") === "acoes") {
-    const dias = Math.min(60, Math.max(1, Number(req.query.dias) || 3));
+    const dias = Math.min(60, Math.max(0.05, Number(req.query.dias) || 3));
     /* O FILTRO DE CALL monta a lista personalizada que o Derek pediu:
      * "só de primeira call", por exemplo. `10` quer dizer dez OU MAIS
      * — quem já levou dez ligações é uma decisão, não um número. */
@@ -1694,15 +1701,27 @@ module.exports = async function handler(req, res) {
         { headers: cabecalhos(tok) }).catch(() => []),
     ]);
 
-    // Quem está esperando resposta, pelo mesmo cálculo da caixa de
-    // entrada — uma régua só para as duas telas.
-    const esperando = {};
+    /* QUEM ESTÁ CALADO, E DE QUAL LADO — a pergunta do Derek em
+     * 05/10/2026: *"aqui o parado seria: o cliente não respondeu,
+     * certo?"*. Estava impreciso: "parado" queria dizer **nada
+     * mudou**, que junta dois problemas opostos.
+     *
+     *  - a ÚLTIMA foi deles  → nós é que devemos resposta;
+     *  - a ÚLTIMA foi nossa  → o cliente sumiu.
+     *
+     * São ações diferentes: no primeiro caso responde-se agora, no
+     * segundo liga-se. Juntos numa lista só, a pré-venda não sabe o
+     * que fazer com o nome que está vendo.
+     */
+    const esperando = {};   // eles falaram por último
+    const semResposta = {}; // nós falamos por último
     (convs || []).forEach((c) => {
       const ca = Array.isArray(c.wa_canal) ? c.wa_canal[0] : c.wa_canal;
-      if (!ca || ca.comercial === false) return;
-      if (!c.ultima_de_fora) return;
-      if (c.respondida_em && c.respondida_em >= c.ultima_de_fora) return;
-      if (c.lead_id) esperando[c.lead_id] = c.ultima_de_fora;
+      if (!ca || ca.comercial === false || !c.lead_id) return;
+      const deles = c.ultima_de_fora || "";
+      const nossa = c.respondida_em || "";
+      if (deles && (!nossa || nossa < deles)) esperando[c.lead_id] = deles;
+      else if (nossa) semResposta[c.lead_id] = c.ultima_em || nossa;
     });
 
     const hoje = hojeAqui();
@@ -1747,11 +1766,19 @@ module.exports = async function handler(req, res) {
         leads: todos.filter((l) => vivo(l) && esperando[l.id]),
       },
       {
-        id: "parado",
-        titulo: `Há ${dias} dias em Agendar, sem marcar`,
-        porque: "Já falaram com a loja e não marcaram. É a fila que mais paga ligação.",
+        id: "sumiu",
+        titulo: `Mandamos e o cliente sumiu há ${rotuloPrazo(dias)}`,
+        porque: "A última palavra foi nossa e ele não voltou. É ligação, não mensagem — mensagem ele já não respondeu.",
         cor: "roxo",
-        leads: todos.filter((l) => l.status === "em_contato" && String(l.atualizado_em || l.criado_em) < atras(dias)),
+        leads: todos.filter((l) => vivo(l) && semResposta[l.id] && semResposta[l.id] < atras(dias)),
+      },
+      {
+        id: "parado",
+        titulo: `Em Agendar há ${rotuloPrazo(dias)}, sem conversa`,
+        porque: "Entrou por fora do WhatsApp e ninguém moveu. Só o telefone resolve.",
+        cor: "roxo",
+        leads: todos.filter((l) => l.status === "em_contato" && !esperando[l.id] && !semResposta[l.id] &&
+          String(l.atualizado_em || l.criado_em) < atras(dias)),
       },
       {
         id: "novo",

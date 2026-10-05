@@ -1995,6 +1995,26 @@ esvazia sozinha quando o trabalho é feito** — e volta a encher
 sozinha. Um "marcar como feito" que não mudasse o lead seria mentira
 que o quadro desmente na tela ao lado.
 
+**"PARADO" ERA IMPRECISO, e o Derek pegou:** *"aqui o parado seria: o
+cliente não respondeu, certo?"*. Não era — queria dizer **nada mudou**,
+que junta dois problemas opostos:
+
+| quem falou por último | o que fazer |
+|-----------------------|-------------|
+| **eles** | nós devemos resposta — responde agora |
+| **nós** | o cliente sumiu — é ligação, não mensagem |
+
+Mensagem ele já não respondeu; mandar outra é repetir o que não
+funcionou. Numa lista só, a pré-venda não sabe o que fazer com o nome
+que está vendo. Agora são duas, mais uma terceira para o lead que
+entrou por fora do WhatsApp e não tem conversa nenhuma — ali só o
+telefone resolve.
+
+**O prazo desce a HORAS.** A pré-venda da Vaapty responde em minutos:
+exigir um dia inteiro para chamar alguém de sumido esconde justamente
+a janela em que ainda dá para recuperar. O seletor vai de 4 horas a 14
+dias.
+
 **A ordem das listas é a ordem de urgência**, porque é a ordem em que
 devem ser trabalhadas: quem está na loja hoje, quem passou da hora sem
 desfecho, a confirmação de amanhã, quem escreveu e espera agora, quem
