@@ -27,6 +27,22 @@ on:
   # segredo muda e o Worker precisa reler).
   workflow_dispatch:
 
+# UMA PUBLICACAO DE CADA VEZ, E A MAIS NOVA GANHA.
+#
+# Sem isto, dois pushes seguidos disparam duas Actions que correm em
+# paralelo -- e **quem termina por ultimo vence, mesmo sendo o commit
+# mais velho**. Aconteceu em 05/10/2026: tres commits, e o que ficou no
+# ar foi o primeiro dos tres, levando embora o trabalho dos outros dois
+# sem erro nenhum em lugar nenhum. O sintoma e o pior possivel -- "voltou
+# como antes" --, e nao ha log que acuse, porque as duas Actions
+# passaram.
+#
+# `cancel-in-progress` derruba a corrida em andamento quando chega um
+# push novo: o que esta no ar passa a ser sempre o ultimo commit.
+concurrency:
+  group: publicar-cloudflare
+  cancel-in-progress: true
+
 jobs:
   publicar:
     runs-on: ubuntu-latest

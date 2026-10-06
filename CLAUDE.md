@@ -53,6 +53,23 @@ fala com a Placa Fipe mora em `api/placa.js`, atrás de `?acao=`.
 
 ## Rodar e publicar
 
+**DUAS PUBLICAÇÕES AO MESMO TEMPO: A MAIS VELHA PODE VENCER.** Em
+05/10/2026 três commits foram ao ar em poucos minutos — dois meus e um
+de outra sessão trabalhando no mesmo repositório — e **o que ficou
+servindo foi o PRIMEIRO dos três**, levando embora o trabalho dos
+outros dois. Cada push dispara uma Action, elas correm em paralelo, e
+**quem termina por último ganha**, mesmo sendo o commit mais antigo.
+
+**Não há erro em lugar nenhum**: as três Actions passam, o `git log`
+está certo, o arquivo local está certo. O único sintoma é o usuário
+dizer *"voltou como antes"* — foi assim que o Derek percebeu.
+
+O remédio é `concurrency` com `cancel-in-progress` no workflow: chegou
+push novo, a corrida em andamento é derrubada, e o que fica no ar é
+sempre o último commit. **Quem publicar à mão enquanto uma Action roda
+corre o mesmo risco** — confira o que está servindo depois, não só o
+que o deploy respondeu.
+
 **O HTML NÃO PODE FICAR EM CACHE NA BORDA, e isso custou três
 investigações.** O Cloudflare respondia `cf-cache-status: HIT` para o
 `index.html` e servia a versão ANTERIOR depois de cada publicação, por
