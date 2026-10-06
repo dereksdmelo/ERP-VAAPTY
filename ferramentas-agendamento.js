@@ -25,9 +25,13 @@ eval(fonte.slice(ini, fim));
 
 // Segunda-feira, 05/10/2026, 17h em Joinville.
 const BASE = new Date("2026-10-05T20:00:00Z");
-const hm = (iso) => new Date(iso).toLocaleString("pt-BR",
-  { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
-  .replace(",", "").replace(/\s+/g, " ");
+/* LÊ POR FATIA, igual ao `diaBR` e ao `horaBR` do index.html — não
+ * converte fuso. Esta linha é o teste de verdade: o que importa não é
+ * o instante estar certo em UTC, é a hora que o negociador vê na
+ * agenda ser a hora que a IA combinou. A versão anterior convertia
+ * para America/Sao_Paulo, e foi assim que ela deu "passou" num leitor
+ * que gravava três horas adiante — o teste encodava o bug. */
+const hm = (iso) => `${String(iso).slice(8, 10)}/${String(iso).slice(5, 7)} ${String(iso).slice(11, 16)}`;
 
 const MARCA = [
   ["fica combinado pra amanha as 9h30", "06/10 09:30"],

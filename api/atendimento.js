@@ -1535,15 +1535,30 @@ function dataHoraConfirmada(texto, base) {
     if (Date.UTC(ano, mes - 1, dia) < hojeAqui.getTime() - 7 * 86400000) ano += 1;
   }
 
-  /* O RELÓGIO É O DE JOINVILLE. "às 10:00" na mensagem quer dizer 10
-   * da manhã aqui; guardar como UTC puro jogaria o compromisso para as
-   * 7h na agenda (mesma armadilha da decisão 22). UTC−3 o ano todo. */
-  const quando = new Date(Date.UTC(ano, mes - 1, dia, hora + 3, min, 0));
-  if (isNaN(quando.getTime())) return null;
+  /* HORA DE PAREDE, COMO O RESTO DO SISTEMA. Isto já esteve errado, e
+   * o erro durou porque o raciocínio parecia o certo: a versão antiga
+   * convertia para o instante UTC verdadeiro (`hora + 3`), que é
+   * impecável em isolamento e discorda de todos os outros. O Agendador
+   * grava `"2026-10-06T10:00:00"` sem fuso, e `horaBR`/`diaBR` LEEM
+   * POR FATIA da string — não convertem. Então "10:00" combinado na
+   * conversa aparecia na agenda como 13:00, três horas adiante, e o
+   * Derek viu em 06/10/2026 com a semana inteira já marcada errada.
+   *
+   * **A convenção da casa é uma só: o que está guardado é a hora que
+   * se lê na parede de Joinville.** Quem mudar isso muda `horaBR`, o
+   * `diaBR`, o Agendador, os filtros `agendado_para=gte.…` e as
+   * comparações `.slice(0, 10)` da agenda semanal — todos de uma vez. */
+  const parede = Date.UTC(ano, mes - 1, dia, hora, min, 0);
+  if (isNaN(parede)) return null;
+  /* As duas guardas abaixo comparam MOMENTO com MOMENTO, e é por isso
+   * que o `+3` continua existindo aqui: sem ele, um horário marcado
+   * para dentro das próximas três horas cairia na recusa de "já
+   * passou" e o lead não sairia de AGENDAR. */
+  const instante = parede + 3 * 3600000;
   const agora = ref.getTime();
-  if (quando.getTime() < agora - 2 * 3600000) return null;
-  if (quando.getTime() > agora + 120 * 86400000) return null;
-  return quando.toISOString();
+  if (instante < agora - 2 * 3600000) return null;
+  if (instante > agora + 120 * 86400000) return null;
+  return new Date(parede).toISOString();
 }
 
 async function ponte(req, res) {
