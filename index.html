@@ -12299,6 +12299,7 @@ function TelaAcoes({ equipe, aoVerConversa }) {
   const [erro, setErro] = useState("");
   const [dias, setDias] = useState(3);
   const [call, setCall] = useState(null);
+  const [aviso, setAviso] = useState("");
   const [aberta, setAberta] = useState(null);
   const [ligando, setLigando] = useState(null);
   const [agendando, setAgendando] = useState(null);
@@ -12309,6 +12310,18 @@ function TelaAcoes({ equipe, aoVerConversa }) {
   const mexer = async (l, mud) => {
     try { await atualizarLead(l.id, mud); carregar(); }
     catch (e) { setErro(e.message); }
+  };
+
+  /* "Veio" abre o ATENDIMENTO, não troca um status: é o cliente
+   * sentando na mesa, e dali em diante ele é do negociador. O endpoint
+   * leva o que a pré-venda já perguntou — ninguém redigita com o
+   * cliente parado na frente (decisão 27). */
+  const chegou = async (l) => {
+    try {
+      await leadCompareceu(l.id, { negociador_id: l.negociador_id, negociador_nome: l.negociador_nome });
+      setAviso(`${l.nome} virou atendimento.`);
+      carregar();
+    } catch (e) { setErro(e.message); }
   };
 
   const listas = (d && d.listas) || [];
@@ -12369,6 +12382,11 @@ function TelaAcoes({ equipe, aoVerConversa }) {
       )}
 
       {erro && <p className="mb-3 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+      {aviso && (
+        <p className="mb-3 rounded-lg px-3 py-2 text-[13px]" style={{ background: "#E8F3EE", color: C.verde }}>
+          {aviso} Ele está em <strong>Atendimentos</strong>.
+        </p>
+      )}
 
       <div className="space-y-3">
         {listas.map((x) => {
@@ -12426,7 +12444,7 @@ function TelaAcoes({ equipe, aoVerConversa }) {
                           hoje e na de quem passou da hora. */}
                       {(x.id === "hoje" || x.id === "passou") ? (
                         <span className="flex gap-1.5">
-                          <button onClick={() => mexer(l, { status: "compareceu" })}
+                          <button onClick={() => chegou(l)}
                             className="rounded px-2 py-1 text-[12px] font-bold text-white" style={{ background: C.verde }}>veio</button>
                           <button onClick={() => mexer(l, { status: "nao_compareceu", agendado_para: null, confirmado_em: null })}
                             className="rounded border px-2 py-1 text-[12px] font-bold"
@@ -12472,32 +12490,24 @@ function TelaAcoes({ equipe, aoVerConversa }) {
   );
 }
 
-function TelaPreVendas({ perfil, aoAbrirAtendimento, aoVerConversa, mes, comp }) {
-  const [aba, setAba] = useState("funil");
+const TITULO_PV = {
+  acoes: "Ações", funil: "Leads", agenda: "Agendamentos",
+  perdidos: "Perdidos", canais: "Canais", excluidos: "Excluídos",
+};
+
+function TelaPreVendas({ perfil, aoAbrirAtendimento, aoVerConversa, mes, comp, aba }) {
   const [vista, setVista] = useState("quadro");
   const [equipe, setEquipe] = useState([]);
   useEffect(() => { listarNegociadores().then(setEquipe).catch(() => {}); }, []);
   return (
     <div>
-      <Cabecalho titulo="Pré-vendas" sub="Do telefone tocando ao cliente sentado na mesa."
+      {/* O TÍTULO É A SEÇÃO, não a área. A área já se chama Pré-vendas
+          na trilha; repetir o nome aqui gastaria a linha que diz onde
+          a pessoa está. */}
+      <Cabecalho titulo={TITULO_PV[aba] || "Pré-vendas"} sub="Do telefone tocando ao cliente sentado na mesa."
         mes={aba === "canais" || (aba === "funil" && vista === "quadro")
           ? { ...mes, todos: true } : null} />
-      <div className="mb-4 flex flex-wrap gap-1.5">
-        {/* Três filas, e a terceira existe porque perdido não pode
-            simplesmente sumir: é onde se confere se o cliente foi
-            mesmo embora — vendeu fora ou não tem interesse — e de onde
-            ele volta se mudar de ideia. */}
-        {/* "Canais" é a quarta porque é leitura, não fila: as três
-            primeiras são trabalho do dia. */}
-        {/* "Ações" vem primeiro porque é por onde o dia começa: o
-            quadro mostra onde cada um está, as ações dizem em quem
-            encostar agora. */}
-        {[["acoes", "Ações"], ["funil", "Leads"], ["agenda", "Agendamentos"], ["perdidos", "Perdidos"],
-          ["canais", "Canais"], ["excluidos", "Excluídos"]].map(([v, r]) => (
-          <button key={v} onClick={() => setAba(v)} className="rounded-full px-3.5 py-1.5 text-[13px] font-semibold"
-            style={{ background: aba === v ? C.roxo : C.paper, color: aba === v ? "#fff" : C.ink, border: `1px solid ${aba === v ? C.roxo : C.line}` }}>{r}</button>
-        ))}
-      </div>
+
       {aba === "funil" && (
         <div>
           {/* Quadro primeiro: é a leitura que o Derek pediu, e a que
@@ -12928,6 +12938,7 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
   const [agendando, setAgendando] = useState(null);
   const [perdendo, setPerdendo] = useState(null);
   const [criando, setCriando] = useState(false);
+  const [aviso, setAviso] = useState("");
   const [ligando, setLigando] = useState(null);
   const [excluindo, setExcluindo] = useState(null);
   const [novo, setNovo] = useState({ nome: "", telefone: "", carro: "", origem: "fluxo_loja" });
@@ -12955,6 +12966,14 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
     catch (e) { setErro(e.message); carregar(); }
   };
 
+  const chegou = async (l) => {
+    setLista((ls) => (ls || []).map((x) => (x.id === l.id ? { ...x, status: "compareceu" } : x)));
+    try {
+      await leadCompareceu(l.id, { negociador_id: l.negociador_id, negociador_nome: l.negociador_nome });
+      setAviso(`${l.nome} virou atendimento.`);
+    } catch (e) { setErro(e.message); carregar(); }
+  };
+
   /* MOVER PARA UMA COLUNA NÃO É SÓ TROCAR O STATUS.
    *
    * "Agendado" sem data não existe — então a coluna abre o agendador
@@ -12966,7 +12985,15 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
     if (col === colunaDe(l)) return;
     if (col === "agendado") { setAgendando(l); return; }
     if (col === "perdido") { setPerdendo(l); return; }
-    const ALVO = { novo: "novo", agendar: "em_contato", reagendar: "nao_compareceu", compareceu: "compareceu" };
+    /* "COMPARECEU" NÃO É SÓ UM STATUS: é o cliente sentando na mesa, e
+     * a partir daí ele é ATENDIMENTO (o Derek, 06/10/2026). O endpoint
+     * de `compareceu` cria o atendimento com o que a pré-venda já
+     * perguntou — nome, telefone, carro, origem e prospector —, que é
+     * o ponto inteiro desta fila: ninguém redigita com o cliente
+     * parado na frente da mesa (decisão 27). É idempotente, então
+     * clicar duas vezes não cria dois. */
+    if (col === "compareceu") { chegou(l); return; }
+    const ALVO = { novo: "novo", agendar: "em_contato", reagendar: "nao_compareceu" };
     const st = ALVO[col];
     if (!st) return;
     // Sair de "agendado" devolve a data: hora marcada num lead que
@@ -13030,6 +13057,11 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
       )}
 
       {erro && <p className="mb-3 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+      {aviso && (
+        <p className="mb-3 rounded-lg px-3 py-2 text-[13px]" style={{ background: "#E8F3EE", color: C.verde }}>
+          {aviso} Ele está em <strong>Atendimentos</strong>.
+        </p>
+      )}
       {lista === null && <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>}
 
       <div className="rolar overflow-x-auto pb-2">
@@ -13050,12 +13082,12 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
                 <div className="space-y-2">
                   {itens.map((l) => (
                     <CartaoLead key={l.id} l={l} onArrastar={setArrastando} onAbrir={setMenu}
-                      onVeio={(x, veio) => mexer(x, veio
-                        ? { status: "compareceu" }
-                        // Não veio volta para REAGENDAR e a data cai: hora
-                        // marcada que já passou não é compromisso, é ruído
-                        // na agenda de quem vai remarcar.
-                        : { status: "nao_compareceu", agendado_para: null, confirmado_em: null })} />
+                      onVeio={(x, veio) => veio
+                        ? chegou(x)
+                        /* Não veio volta para REAGENDAR e a data cai: hora
+                           marcada que já passou não é compromisso, é ruído
+                           na agenda de quem vai remarcar. */
+                        : mexer(x, { status: "nao_compareceu", agendado_para: null, confirmado_em: null })} />
                   ))}
                   {!itens.length && (
                     <div className="rounded-lg p-3 text-center text-[11.5px]" style={{ color: C.mute }}>vazio</div>
@@ -17879,10 +17911,27 @@ function destinosPara(perfil) {
     // de manhã e volta nela o dia inteiro.
     { id: "meudia", rot: "Meu dia", curto: "Meu dia", principal: true },
 
-    // ---- trazer o cliente até a loja ----
-    { id: "prevendas", rot: "Pré-vendas", curto: "Pré-v.", area: "prevendas", principal: true },
+    /* ---- trazer o cliente até a loja ----
+     *
+     * **As abas da pré-venda viraram destinos** (06/10/2026), a pedido
+     * do Derek: *"os itens de pré-vendas devem ficar no menu de
+     * pré-vendas e não em cima"*. Elas eram seis pílulas no topo da
+     * página, dentro de uma área que já tinha barra própria — dois
+     * níveis de navegação para a mesma coisa, e o de cima sumia quando
+     * a pessoa rolava.
+     *
+     * **E "Pré-vendas" virou "Leads"**, porque o destino é a fila, não
+     * a área: a área já se chama Pré-vendas na trilha, e repetir o
+     * nome no item não diz o que tem lá dentro.
+     */
+    { id: "pv_acoes", rot: "Ações", curto: "Ações", area: "prevendas", aba: "acoes", icone: "prevendas", principal: true },
+    { id: "prevendas", rot: "Leads", curto: "Leads", area: "prevendas", aba: "funil", icone: "leads", principal: true },
+    { id: "pv_agenda", rot: "Agendamentos", curto: "Agenda", area: "prevendas", aba: "agenda", icone: "meudia" },
     { id: "conversas", rot: "Conversas", curto: "Conversas", area: "prevendas", principal: true },
-    { id: "leads", rot: "Leads de indicação", curto: "Indicações", area: "prevendas" },
+    { id: "pv_canais", rot: "Canais", curto: "Canais", area: "prevendas", aba: "canais", icone: "painel" },
+    { id: "pv_perdidos", rot: "Perdidos", curto: "Perdidos", area: "prevendas", aba: "perdidos", icone: "leads" },
+    { id: "pv_excluidos", rot: "Excluídos", curto: "Excluídos", area: "prevendas", aba: "excluidos", icone: "leads" },
+    { id: "leads", rot: "Leads de indicação", curto: "Indicações", area: "prevendas", icone: "leads" },
 
     // ---- o cliente na mesa e o carro ----
     { id: "atendimentos", rot: "Atendimentos", curto: "Atend.", area: "negociacao", principal: true },
@@ -17981,7 +18030,7 @@ function Shell({ perfil, tela, setTela, children }) {
   const itemInferior = (d, aoClicar, ativo) => (
     <button key={d.id} onClick={aoClicar} className="flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px]"
       style={{ color: ativo ? C.roxo : C.mute, fontWeight: ativo ? 700 : 500 }}>
-      <Icone nome={d.id} tam={22} />
+      <Icone nome={d.icone || d.id} tam={22} />
       {d.curto}
     </button>
   );
@@ -18020,7 +18069,7 @@ function Shell({ perfil, tela, setTela, children }) {
               className="flex w-14 flex-col items-center gap-0.5 rounded-lg py-2 text-[9.5px]"
               style={{ background: tela === d.id ? C.roxoFraco : "transparent",
                        color: tela === d.id ? C.roxo : C.mute, fontWeight: tela === d.id ? 700 : 500 }}>
-              <Icone nome={d.id} tam={19} />{d.curto}
+              <Icone nome={d.icone || d.id} tam={19} />{d.curto}
             </button>
           ))}
 
@@ -18123,7 +18172,7 @@ function Shell({ perfil, tela, setTela, children }) {
                       <button key={d.id} onClick={() => ir(d.id)}
                         className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[15px]"
                         style={{ color: tela === d.id ? C.roxo : C.ink, fontWeight: tela === d.id ? 700 : 500 }}>
-                        <Icone nome={d.id} tam={20} />{d.rot}
+                        <Icone nome={d.icone || d.id} tam={20} />{d.rot}
                       </button>
                     ))}
                   </div>
@@ -19443,6 +19492,13 @@ function TelaGestao({ perfil, comp }) {
   );
 }
 
+// Destino → seção da pré-venda. Um lugar só: o menu e o roteador
+// precisam concordar, e dois mapas divergem no primeiro acréscimo.
+const ABA_PV = {
+  pv_acoes: "acoes", prevendas: "funil", pv_agenda: "agenda",
+  pv_canais: "canais", pv_perdidos: "perdidos", pv_excluidos: "excluidos",
+};
+
 function App() {
   const [estado, setEstado] = useState("carregando");   // carregando | fora | esperando | dentro | erro
   const [perfil, setPerfil] = useState(null);
@@ -19546,7 +19602,9 @@ function App() {
           aparece onde a pessoa estiver, e não só no "Meu dia". */}
       {pedeLembrete && <LembreteDoDia perfil={perfil} />}
       {tela === "meudia" && <TelaMeuDia perfil={perfil} />}
-      {tela === "prevendas" && <TelaPreVendas perfil={perfil} aoAbrirAtendimento={abrir}
+      {/* As seis seções da pré-venda são destinos do menu; a tela é a
+          mesma e recebe qual mostrar. */}
+      {ABA_PV[tela] && <TelaPreVendas perfil={perfil} aoAbrirAtendimento={abrir} aba={ABA_PV[tela]}
         aoVerConversa={verConversa} mes={mes} comp={compOuAtual} />}
       {tela === "atendimentos" && <CRM perfil={perfil} aoAbrir={abrir} mes={{ ...mes, todos: true }} />}
       {tela === "estoque" && <TelaEstoque perfil={perfil} comp={compOuAtual} mes={mes} />}

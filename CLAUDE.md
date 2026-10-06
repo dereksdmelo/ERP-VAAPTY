@@ -2676,7 +2676,21 @@ vazia.
 
 **"Chegou" cria o atendimento no servidor**, não na tela: nome,
 telefone, carro, origem e prospector saem do lead, o status nasce
-`cliente_na_loja` e a tela abre o atendimento já pronto. É o ponto
+`cliente_na_loja` e a tela abre o atendimento já pronto.
+
+**E agora isso vale em TODA parte onde se marca "compareceu"**
+(06/10/2026, o Derek: *"quando o cliente vira compareceu ele vai
+automaticamente para os atendimentos"*). No quadro e nas listas de
+ação o botão trocava só o status — o lead saía da fila da pré-venda e
+**não entrava em lista nenhuma do negociador**, que é o mesmo
+vazamento do "não veio" descrito acima. Os três caminhos passam pelo
+mesmo endpoint, que é idempotente: clicar duas vezes devolve o mesmo
+atendimento.
+
+**A tela NÃO pula para o atendimento criado.** Quem marca está
+trabalhando uma fila, e ser jogado para outra tela a cada nome faz
+perder o lugar — a confirmação é uma linha verde dizendo que ele está
+em Atendimentos. É o ponto
 inteiro desta aba — ninguém redigita com o cliente parado na frente da
 mesa. A ação é **idempotente**: lead que já tem `atendimento_id`
 devolve o mesmo id em vez de criar um segundo.
