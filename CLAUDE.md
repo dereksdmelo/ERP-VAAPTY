@@ -2321,6 +2321,15 @@ Até a 0019 o sistema terminava no contrato assinado. O que vem depois —
 o carro parado no pátio, custando dinheiro — não existia em lugar
 nenhum. `TelaEstoque` é isso, atrás de "Estoque e custos" na gestão.
 
+**UMA LINHA POR CARRO, não um cartão** (06/10/2026). Cada carro
+ocupava três linhas empilhadas e 140 px; com 47 no pátio, ver o
+estoque era rolar seis telas. **A pergunta que se faz aqui é de
+comparação** — qual está parado há mais tempo, qual custou mais — e
+comparar exige ver junto. Agora cabem doze por tela.
+
+**Os dias no pátio têm cor** a partir de 30 e de 60: dinheiro parado
+custa todos os dias, e um número cinza no meio de quarenta não é lido.
+
 **A ideia é uma só: custo previsto contra custo real.** Na mesa se
 combina débitos de R$ 3.000 e quitação de R$ 28.000; na prática se
 consegue desconto na quitação, aparece juros que ninguém viu, o carro
@@ -2430,8 +2439,32 @@ logado, não de uma função — o negociador e a pré-venda usam o mesmo, e
 enfiá-lo numa área faria metade da equipe procurá-lo na outra.
 
 **O `area` é obrigatório em destino novo**; sem ele o item some do
-menu agrupado. E a folha do "Mais", no celular, usa os mesmos quatro
-títulos: ela tinha nove itens em fila e o polegar procurava.
+menu agrupado. E a folha do "Mais", no celular, usa os mesmos títulos:
+ela tinha nove itens em fila e o polegar procurava.
+
+**No mesmo dia virou TRILHA MAIS PAINEL, e o Financeiro ganhou área
+própria** (são cinco). O Derek: *"faça ser retrátil cada parte,
+ficando à esquerda o menu principal e à direita logo ao lado as opções
+daquele menu"*.
+
+**A trilha é a área; o painel é o destino.** Mesmo agrupados, quinze
+itens empilhados obrigam a percorrer a lista inteira para chegar ao
+fim — com a trilha, escolhe-se a área e o painel mostra só aquelas
+quatro ou cinco linhas.
+
+**Clicar na trilha NÃO navega.** Trocar de tela ao escolher uma área
+levaria para um destino que ninguém pediu: quem está ali ainda está
+procurando. O painel segue a tela sozinho ao navegar, mas a pessoa
+pode olhar outra área sem sair de onde está — por isso a área vista é
+estado, e não derivada da tela.
+
+**O painel recolhe, e a escolha fica guardada** por aparelho. O
+Financeiro e o Estoque têm telas largas, e quem já sabe para onde vai
+não precisa da lista.
+
+**`window.storage.get` devolve PROMESSA e REJEITA quando não existe** —
+ler o retorno direto num `useState` daria sempre "aberto". A leitura
+mora no efeito, que é onde `await` cabe.
 
 **O atendimento aberto (`VaaptyAponte`) fica fora da casca**, de
 propósito: é um fluxo guiado de oito etapas com trilho próprio, e a

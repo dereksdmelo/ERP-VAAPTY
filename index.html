@@ -11568,45 +11568,56 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
         </p>
       )}
 
-      <div className="grid gap-2">
-        {filtro === "em_estoque" && visivel.map((e) => {
+      {/* UMA LINHA POR CARRO, não um cartão (06/10/2026).
+       *
+       * O Derek: *"o estoque tem que aparecer mais carros por tela"*.
+       * Cada carro ocupava três linhas empilhadas e 140 px; com 47 no
+       * pátio, ver o estoque era rolar seis telas. **A pergunta que se
+       * faz aqui é de comparação** — qual está parado há mais tempo,
+       * qual custou mais — e comparar exige ver junto.
+       *
+       * As colunas se apagam no celular por `hidden sm:`, em vez de
+       * quebrarem a linha: placa, custo e dias são o que decide, e o
+       * resto cabe quando a tela comporta.
+       */}
+      <div className="rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        {filtro === "em_estoque" && visivel.map((e, i) => {
           const v = e.veiculo || {};
           const c = contaDoEstoque(e);
           const dias = diasNoPatio(e);
+          /* **Parado há muito tempo é a informação principal do
+           * pátio**, e por isso ela tem cor: dinheiro parado custa
+           * todo dia, e um número cinza no meio de quarenta não é
+           * lido. */
+          const cor = dias == null ? C.mute : dias >= 60 ? C.laranja : dias >= 30 ? AMARELO.texto : C.mute;
           return (
-            <button key={e.id} onClick={() => setAbrindo(e.id)} className="w-full rounded-lg p-3.5 text-left"
-              style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-              <div className="flex items-start justify-between gap-3">
-                <span className="text-[15px] font-semibold leading-tight">
-                  {v.placa || "sem placa"}
-                  <span className="block text-[13px] font-normal" style={{ color: C.mute }}>
-                    {v.marca_modelo || "—"}{v.ano_modelo ? ` ${v.ano_modelo}` : ""}
-                  </span>
-                </span>
-                <span className="text-right">
-                  <span className="block text-[15px]" style={{ fontFamily: F.mono, fontWeight: 700 }}>{brl(c.atual)}</span>
-                  <span className="block text-[10px]" style={{ color: C.mute }}>custo</span>
-                </span>
-              </div>
-
-              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]" style={{ color: C.mute }}>
-                <span>entrou {diaBR(e.entrou_em)}</span>
-                {dias != null && <span>{dias} dia{dias === 1 ? "" : "s"} {e.situacao === "vendido" ? "até vender" : "no pátio"}</span>}
-                {!!c.aberto && <span style={{ color: AMARELO.texto }}>{c.aberto} conta{c.aberto > 1 ? "s" : ""} em aberto</span>}
-                {c.desvio !== 0 && (
+            <button key={e.id} onClick={() => setAbrindo(e.id)}
+              className="flex w-full items-center gap-3 px-3 py-2 text-left"
+              style={{ borderTop: i ? `1px solid ${C.line}` : "none" }}>
+              <span className="w-[86px] shrink-0 text-[13px] font-bold" style={{ fontFamily: F.mono }}>
+                {v.placa || "—"}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-[13px]">
+                {v.marca_modelo || "—"}
+                {v.ano_modelo ? <span style={{ color: C.mute }}> {v.ano_modelo}</span> : null}
+              </span>
+              <span className="hidden w-[78px] shrink-0 text-right text-[12px] sm:block" style={{ color: C.mute }}>
+                {diaBR(e.entrou_em)}
+              </span>
+              <span className="w-[62px] shrink-0 text-right text-[12px] font-semibold" style={{ color: cor }}>
+                {dias == null ? "—" : `${dias}d`}
+              </span>
+              <span className="w-[92px] shrink-0 text-right text-[13px]" style={{ fontFamily: F.mono, fontWeight: 700 }}>
+                {brl(c.atual)}
+              </span>
+              <span className="hidden w-[108px] shrink-0 text-right text-[11px] sm:block">
+                {!!c.aberto && <span style={{ color: AMARELO.texto }}>{c.aberto} em aberto</span>}
+                {!c.aberto && c.desvio !== 0 && (
                   <span style={{ color: c.desvio > 0 ? C.laranja : C.verde, fontWeight: 600 }}>
-                    {c.desvio > 0 ? "+" : "−"}{brl(Math.abs(c.desvio))} vs. previsto
+                    {c.desvio > 0 ? "+" : "−"}{brl(Math.abs(c.desvio))}
                   </span>
                 )}
-              </div>
-
-              {e.situacao === "vendido" && (
-                <div className="mt-2 rounded-md px-2.5 py-1.5 text-[12px]"
-                  style={{ background: c.margem >= 0 ? "#E8F3EE" : "#FDECE8" }}>
-                  Vendido {diaBR(e.vendido_em)}{e.comprador ? ` para ${e.comprador.nome}` : ""} por {brl(c.venda)} ·
-                  margem <b style={{ color: c.margem >= 0 ? C.verde : C.laranja }}>{brl(c.margem)}</b>
-                </div>
-              )}
+              </span>
             </button>
           );
         })}
@@ -17846,11 +17857,15 @@ function TelaExtratoAvulso({ perfil }) {
  * **Quem criar tela nova a registra aqui com a sua área**; tela sem
  * entrada não existe para o usuário, e sem área cai no fim da lista.
  */
+/* O terceiro campo é o ÍCONE da trilha — e ele é o nome de um destino
+ * que já tem desenho, não um ícone novo: a trilha mostra a área, e a
+ * área é reconhecida pelo que se faz nela. */
 const AREAS = [
-  ["prevendas",  "Pré-vendas"],
-  ["negociacao", "Negociação"],
-  ["gestao",     "Gestão"],
-  ["adm",        "Administrativo"],
+  ["prevendas",  "Pré-vendas",     "prevendas"],
+  ["negociacao", "Negociação",     "atendimentos"],
+  ["gestao",     "Gestão",         "painel"],
+  ["financeiro", "Financeiro",     "financeiro"],
+  ["adm",        "Administrativo", "adm"],
 ];
 
 function destinosPara(perfil) {
@@ -17888,7 +17903,13 @@ function destinosPara(perfil) {
     gerente ? { id: "gestao", rot: "Equipe e metas", curto: "Equipe", area: "gestao" } : null,
     // Área restrita: só quem tem o sinalizador no perfil (0021). A tela
     // esconde o destino; quem protege de verdade é a RLS.
-    (perfil && (perfil.financeiro || gerente)) ? { id: "financeiro", rot: "Financeiro", curto: "Financ.", area: "gestao" } : null,
+
+    // ---- o dinheiro ----
+    // Área restrita: só quem tem o sinalizador no perfil (0021). A tela
+    // esconde o destino; quem protege de verdade é a RLS. Virou área
+    // própria em 05/10/2026 — ela tem quatro abas dentro e não é
+    // leitura de gestão, é operação de quem concilia.
+    (perfil && (perfil.financeiro || gerente)) ? { id: "financeiro", rot: "Financeiro", curto: "Financ.", area: "financeiro" } : null,
 
     // ---- o papel e a operação ----
     adm ? { id: "adm", rot: "Administrativo", curto: "Adm.", area: "adm" } : null,
@@ -17913,9 +17934,31 @@ function Shell({ perfil, tela, setTela, children }) {
   const demais = destinos.filter((d) => !d.principal);
   // No topo, fora das áreas: é de quem está logado, não de uma função.
   const soltos = destinos.filter((d) => !d.area);
-  const porArea = AREAS.map(([id, rot]) => ({ id, rot, itens: destinos.filter((d) => d.area === id) }))
-    .filter((g) => g.itens.length);
+  const porArea = AREAS.map(([id, rot, icone]) => ({
+    id, rot, icone,
+    // Na trilha o rótulo é curto por força do espaço — 64 px.
+    curto: rot === "Administrativo" ? "Adm." : rot === "Negociação" ? "Negoc." : rot,
+    itens: destinos.filter((d) => d.area === id),
+  })).filter((g) => g.itens.length);
   const [mais, setMais] = useState(false);
+
+  /* O PAINEL SEGUE A TELA, mas a pessoa pode olhar outra área sem sair
+   * de onde está — por isso `area` é estado, e não derivado de `tela`.
+   * Ao navegar, ele volta a acompanhar. */
+  const areaDaTela = (porArea.filter((g) => g.itens.some((d) => d.id === tela))[0] || porArea[0] || {}).id;
+  const [area, setArea] = useState(areaDaTela);
+  const [painel, setPainel] = useState(true);
+  useEffect(() => {
+    let vivo = true;
+    window.storage.get("vaapty:menu-aberto")
+      .then((r) => { if (vivo && r && r.value === "0") setPainel(false); })
+      .catch(() => {});
+    return () => { vivo = false; };
+  }, []);
+  useEffect(() => { if (areaDaTela) setArea(areaDaTela); }, [areaDaTela]);
+  useEffect(() => { window.storage.set("vaapty:menu-aberto", painel ? "1" : "0").catch(() => {}); }, [painel]);
+  const areaVista = area || areaDaTela;
+  const grupoVisto = porArea.filter((g) => g.id === areaVista)[0] || porArea[0];
 
   const ir = (id) => { setTela(id); setMais(false); window.scrollTo(0, 0); };
 
@@ -17946,34 +17989,102 @@ function Shell({ perfil, tela, setTela, children }) {
   return (
     <div className="min-h-screen" style={{ background: C.bg, fontFamily: F.body, color: C.ink }}>
       {/* ---- barra lateral (desktop) ---- */}
-      <aside className="fixed inset-y-0 left-0 hidden w-60 flex-col lg:flex"
+      {/* ---- barra lateral em duas colunas (desktop) ----
+          Pedido do Derek em 05/10/2026: *"faça ser retrátil cada
+          parte, ficando à esquerda o menu principal e à direita logo
+          ao lado as opções daquele menu"*.
+
+          **A trilha é a área, o painel é o destino.** Com quinze itens
+          empilhados, mesmo agrupados, a pessoa percorre a lista
+          inteira para chegar ao fim; com a trilha, ela escolhe a área
+          primeiro e o painel mostra só aquelas quatro ou cinco linhas.
+
+          **Clicar na trilha NÃO navega.** Trocar de tela ao escolher
+          uma área levaria para um destino que a pessoa não pediu — ela
+          está procurando, não decidiu ainda.
+
+          **E o painel recolhe.** Quem já sabe onde quer ir não precisa
+          dele, e no `Financeiro` e no `Estoque` as telas são largas.
+          A escolha fica guardada por aparelho. */}
+      <aside className="fixed inset-y-0 left-0 z-20 hidden lg:flex"
         style={{ background: C.paper, borderRight: `1px solid ${C.line}` }}>
-        <div className="px-5 pt-5 pb-4"><Logotipo /></div>
-        {/* O TÍTULO DA ÁREA É O QUE FAZ A LISTA DEIXAR DE SER LISTA.
-            Quinze destinos corridos obrigam a ler item por item; com o
-            título, a pessoa salta direto para o pedaço certo. */}
-        <nav className="flex-1 overflow-y-auto px-3 pb-4">
-          <div className="space-y-0.5">{soltos.map(itemLateral)}</div>
-          {porArea.map((g) => (
-            <div key={g.id} className="mt-4">
-              <div className="px-3 pb-1 text-[10px] font-bold uppercase tracking-[0.1em]" style={{ color: C.mute }}>
-                {g.rot}
-              </div>
-              <div className="space-y-0.5">{g.itens.map(itemLateral)}</div>
-            </div>
+        {/* a trilha */}
+        <div className="flex w-16 shrink-0 flex-col items-center gap-1 border-r py-4"
+          style={{ borderColor: C.line }}>
+          <button onClick={() => ir(soltos.length ? soltos[0].id : "atendimentos")}
+            className="mb-2 grid h-9 w-9 place-items-center rounded-lg text-[14px]"
+            style={{ background: C.roxo, color: "#fff", fontFamily: F.disp, fontWeight: 800 }}>V</button>
+
+          {soltos.map((d) => (
+            <button key={d.id} onClick={() => ir(d.id)} title={d.rot}
+              className="flex w-14 flex-col items-center gap-0.5 rounded-lg py-2 text-[9.5px]"
+              style={{ background: tela === d.id ? C.roxoFraco : "transparent",
+                       color: tela === d.id ? C.roxo : C.mute, fontWeight: tela === d.id ? 700 : 500 }}>
+              <Icone nome={d.id} tam={19} />{d.curto}
+            </button>
           ))}
-        </nav>
-        <div className="px-5 py-4" style={{ borderTop: `1px solid ${C.line}` }}>
-          <div className="truncate text-[13px] font-semibold">{perfil ? perfil.nome : ""}</div>
-          <div className="flex items-center justify-between text-[12px]" style={{ color: C.mute }}>
-            <span className="capitalize">{perfil ? perfil.papel : ""}</span>
-            <button onClick={sair} style={{ color: C.mute }}>sair</button>
+
+          {!!porArea.length && <div className="my-1 h-px w-8" style={{ background: C.line }} />}
+
+          {porArea.map((g) => {
+            const aqui = g.itens.some((d) => d.id === tela);
+            const vendo = areaVista === g.id;
+            return (
+              <button key={g.id} title={g.rot}
+                onClick={() => { if (vendo && painel) setPainel(false); else { setArea(g.id); setPainel(true); } }}
+                className="flex w-14 flex-col items-center gap-0.5 rounded-lg py-2 text-[9.5px] leading-tight"
+                style={{ background: aqui ? C.roxoFraco : vendo ? C.bg : "transparent",
+                         color: aqui || vendo ? C.roxo : C.mute, fontWeight: aqui ? 700 : 500 }}>
+                <Icone nome={g.icone} tam={19} />
+                <span className="px-0.5 text-center">{g.curto}</span>
+              </button>
+            );
+          })}
+
+          <div className="mt-auto">
+            <button onClick={sair} className="flex w-14 flex-col items-center gap-0.5 rounded-lg py-2 text-[9.5px]"
+              style={{ color: C.mute }} title="sair">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h12" />
+              </svg>
+              sair
+            </button>
           </div>
         </div>
+
+        {/* o painel da área escolhida */}
+        {painel && grupoVisto && (
+          <div className="flex w-[184px] flex-col">
+            <div className="flex items-center justify-between px-3 pt-5 pb-2">
+              <span className="text-[10px] font-bold uppercase tracking-[0.1em]" style={{ color: C.mute }}>
+                {grupoVisto.rot}
+              </span>
+              <button onClick={() => setPainel(false)} title="recolher" style={{ color: C.mute }}>‹</button>
+            </div>
+            <nav className="flex-1 space-y-0.5 overflow-y-auto px-2 pb-4">
+              {grupoVisto.itens.map((d) => {
+                const ativo = tela === d.id;
+                return (
+                  <button key={d.id} onClick={() => ir(d.id)}
+                    className="w-full rounded-lg px-3 py-2 text-left text-[13.5px] leading-snug"
+                    style={{ background: ativo ? C.roxoFraco : "transparent",
+                             color: ativo ? C.roxo : C.ink, fontWeight: ativo ? 700 : 500 }}>
+                    {d.rot}
+                  </button>
+                );
+              })}
+            </nav>
+            <div className="px-3 py-3" style={{ borderTop: `1px solid ${C.line}` }}>
+              <div className="truncate text-[12.5px] font-semibold">{perfil ? perfil.nome : ""}</div>
+              <div className="text-[11.5px] capitalize" style={{ color: C.mute }}>{perfil ? perfil.papel : ""}</div>
+            </div>
+          </div>
+        )}
       </aside>
 
       {/* ---- conteúdo ---- */}
-      <main className="pb-24 lg:pb-10 lg:pl-60">
+      <main className={`pb-24 lg:pb-10 ${painel ? "lg:pl-[248px]" : "lg:pl-16"}`}>
         <div className="mx-auto max-w-[1080px] px-4 pt-4 lg:px-8 lg:pt-8">{children}</div>
       </main>
 
