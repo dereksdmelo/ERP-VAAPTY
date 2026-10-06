@@ -1989,10 +1989,37 @@ calada, e aí o teste passa enquanto o sistema erra.
 **Só o que SAIU daqui conta.** O cliente propondo "pode ser dia 7 às
 15h?" não é agendamento; agendamento é a loja confirmando.
 
-**O relógio é o de Joinville.** "às 10:00" na mensagem quer dizer 10 da
-manhã aqui — guardar como UTC puro jogaria o compromisso para as 7h na
-agenda, a mesma armadilha que fez um mês inteiro sumir da tela na
-decisão 22.
+**O QUE SE GUARDA É HORA DE PAREDE, e isto já esteve errado aqui.** A
+primeira versão convertia para o instante UTC verdadeiro
+(`Date.UTC(..., hora + 3, ...)`), com o raciocínio de que guardar
+"10:00" como UTC puro jogaria o compromisso para as 7h — a armadilha
+da decisão 22. O raciocínio é impecável sozinho e **discorda de todo o
+resto do sistema**: o Agendador grava `"2026-10-06T10:00:00"` sem
+fuso, e `horaBR` e `diaBR` leem **por fatia da string**, sem
+converter. Então o que a IA combinava às 10:00 aparecia na agenda às
+13:00. O Derek viu em 06/10/2026, com **trinta leads da semana já
+marcados três horas adiante** — e a leitura é a pior possível: o
+cliente chega e a loja o espera depois.
+
+**A convenção é uma só, e é a da tela: o que está guardado é a hora
+que se lê na parede de Joinville.** Mudá-la significa mexer em
+`horaBR`, `diaBR`, no Agendador, nos filtros `agendado_para=gte.…` e
+em toda comparação `.slice(0, 10)` da agenda semanal, de uma vez. O
+`+3` sobrevive em um lugar só, nas duas guardas de "já passou" e
+"muito longe", que comparam momento com momento: sem ele, horário
+marcado para dentro das próximas três horas seria recusado e o lead
+não sairia de AGENDAR. O caso `"seu horário para hoje as 17h"` é o que
+cobre isso.
+
+**E o teste encodava o bug, que é por que ele durou.** O
+`ferramentas-agendamento.js` lia o resultado com
+`toLocaleString("America/Sao_Paulo")` — convertendo de volta — e por
+isso dava os 25 casos como certos num leitor que gravava errado. Agora
+ele lê por fatia, igual à tela, e as 25 expectativas não mudaram:
+**o que muda é o que o teste pergunta.** A pergunta certa não é se o
+instante está certo em UTC; é se a hora que o negociador vê é a hora
+que a IA combinou. **Quem escrever teste de data aqui lê o valor do
+jeito que a tela lê.**
 
 **O `pushName` DA MENSAGEM QUE SAI É O NOSSO NOME, não o do
 cliente** — e isso virou 213 conversas chamadas "Vaapty Joinville".
