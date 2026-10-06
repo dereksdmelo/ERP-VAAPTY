@@ -20,7 +20,7 @@ import pino from "pino";
 const SEGREDO = process.env.PONTE_SEGREDO || "";
 const PONTE_URL = process.env.PONTE_URL || "";     // o Worker da ponte (guarda a sessao)
 const ERP_URL = process.env.ERP_URL || "";
-const GUARDA_MIDIA = process.env.GUARDA_MIDIA === "1";         // o Worker do ERP (recebe as mensagens)
+const GUARDA_MIDIA = process.env.GUARDA_MIDIA !== "0";         // o Worker do ERP (recebe as mensagens)
 const log = pino({ level: process.env.LOG || "warn" });
 const BOTOES_COMO = process.env.BOTOES || "texto";   // "nativo" = botoes pra todo mundo
 // numeros que ja recebem os botoes nativos (teste antes de ligar pra todos)
@@ -106,11 +106,24 @@ async function proErp(caminho, corpo) {
     return await r.json().catch(() => ({}));
   } catch (e) { log.error({ e: String(e), caminho }, "ERP não respondeu"); return {}; }
 }
+/* O ARQUIVO VAI EM BASE64 DENTRO DE JSON, e para o api/foto.js — que
+ * e o unico lugar com a chave de servico do Storage (decisao 9).
+ * Binario cru nao serve: o adaptador do Worker le corpo como TEXTO, e
+ * o arquivo chegaria corrompido sem erro nenhum. */
 async function subirMidia(buf, mime, nome) {
   try {
-    const r = await fetch(ERP_URL + rota("/ponte/midia") + "&canal=" + encodeURIComponent(CANAL) + "&nome=" + encodeURIComponent(nome || "arquivo"),
-      { method: "POST", headers: { "x-ponte-segredo": SEGREDO, "content-type": mime || "application/octet-stream" }, body: buf });
-    const d = await r.json(); return d && d.ok ? d.chave : "";
+    const r = await fetch(ERP_URL + "/api/foto?recurso=wa-midia", {
+      method: "POST",
+      headers: { "x-ponte-segredo": SEGREDO, "content-type": "application/json" },
+      body: JSON.stringify({
+        canal: CANAL, nome: nome || "arquivo",
+        tipo: mime || "application/octet-stream",
+        arquivo_base64: buf.toString("base64"),
+      }),
+    });
+    const d = await r.json();
+    if (d && d.erro) log.warn({ erro: d.erro, nome }, "midia nao guardada");
+    return d && d.chave ? d.chave : "";
   } catch (e) { return ""; }
 }
 /* O TELEFONE POR TRAS DO "LID" (24/09/2026, o Derek: "preciso que apareca as mensagens enviadas
@@ -199,7 +212,10 @@ async function traduzir(msg) {
      * memória -- então nem se baixa. `GUARDA_MIDIA=1` religa quando o
      * outro lado souber guardar. */
     if (GUARDA_MIDIA) {
-      try { const buf = await downloadMediaMessage(msg, "buffer", {}, { logger: log, reuploadRequest: sock.updateMediaMessage }); chave = await subirMidia(buf, mime, x.fileName || tipo); } catch (e) { log.warn({ e: String(e) }, "mídia não baixou"); }
+      try {
+        const buf = await downloadMediaMessage(msg, "buffer", {}, { logger: log, reuploadRequest: sock.updateMediaMessage });
+        chave = await subirMidia(buf, mime, x.fileName || tipo);
+      } catch (e) { log.warn({ e: String(e) }, "midia nao baixou"); }
     }
     return Object.assign(base, { tipo: "midia", midia: { tipo, mime, nome: x.fileName || "", legenda: x.caption || "", voz: !!x.ptt, chave } });
   }

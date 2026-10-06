@@ -1479,11 +1479,41 @@ lado em silêncio enquanto o `curl` de fora respondia 200. O caminho é
 handler em `req.ponte`. **Quem trocar o binding por URL reintroduz um
 404 que não deixa rastro em lugar nenhum.**
 
-**Na coleta a mídia não é guardada, e a ponte nem baixa.** Guardar
-arquivo pediria a chave de serviço no Storage — o tal terceiro uso. A
-mensagem fica registrada com tipo, mime, nome e legenda; o arquivo
-continua no WhatsApp. `GUARDA_MIDIA=1` religa o download no dia em que
-este lado souber guardar.
+**A MÍDIA PASSOU A SER GUARDADA (06/10/2026), e isso é a exceção da
+decisão 9 — aberta pelo Derek, não por mim.** Ele mostrou três vezes a
+mesma coisa: o áudio de voz e o CRLV em PDF que chegam na conversa não
+abriam. **Áudio de negociação é conteúdo de trabalho** — o cliente diz
+na nota de voz o que quer pelo carro, e aquilo valia tanto quanto o
+texto e sumia.
+
+**O endpoint mora no `api/foto.js` porque é o único lugar com a chave
+de serviço**, e levá-lo para outro seria espalhá-la — que é
+exatamente o que aquela decisão evita. São dois caminhos e só um usa a
+chave para entrar: a PONTE sobe o arquivo (sem login, pelo
+`PONTE_SEGREDO`, e a chave só toca o Storage); a EQUIPE pede o link, e
+aí a ordem é a da decisão 9 — **lê-se a mensagem com o token do
+usuário e só depois se assina.** Se a RLS não devolver a linha, a
+função para antes de tocar no arquivo.
+
+**O link é pedido no CLIQUE, não ao desenhar a conversa.** Assinar é
+uma ida ao servidor por arquivo; uma conversa com vinte fotos faria
+vinte, e o link vence em uma hora — assinar o que ninguém vai abrir é
+gasto e é link que expira antes do uso.
+
+**O bucket precisou aceitar áudio e vídeo (0063).** Ele nasceu para
+documento de veículo e só aceitava PDF e imagem — o áudio era recusado
+em silêncio. Tipo fora da lista continua recusado **com nome**, na
+função, em vez de voltar erro cru do Storage no meio de uma conversa.
+E falhar ao guardar não derruba a mensagem: o texto vale mesmo sem o
+arquivo, e a ponte reentregaria em laço.
+
+**Arquivo de antes dessa data não existe**, e a tela diz isso em vez
+de oferecer um botão que não abre nada.
+
+**Publicar a ponte não basta: o container precisa reiniciar.** O
+programa é baixado ao LIGAR, então o que já está rodando continua com
+a versão anterior — `/_reiniciar` resolve, e a sessão guardada no
+Durable Object faz os números voltarem sem QR.
 
 **Os três canais são cadastro (0056).** `wa_receber()` recusa canal que
 não existe, de propósito: a ponte não inventa canal. E o número que
@@ -1872,6 +1902,25 @@ ou cliente difícil — a mesma lição do motivo de "perdido" (decisão
 27). **"Oculta" quer dizer fora das filas de trabalho, não secreta:**
 quem procurar acha, com o motivo e com quem excluiu, carimbado pelo
 servidor.
+
+**A GRADE É A AGENDA, e por isso ela AGE** (06/10/2026, o Derek:
+*"colocar os botões de ação na lista de cima e fazer uma coisa só —
+agenda interativa"*). Antes eram duas listas da mesma coisa: a grade
+mostrava e a de baixo agia, e a pessoa olhava numa e trabalhava na
+outra. Agora o cartão abre no clique com Chegou, confirmou, não veio,
+ligar e remarcar.
+
+**E cada agendamento aparece UMA VEZ SÓ.** O Derek: *"não estão todos
+os agendamentos nos dois lugares"*. Estavam — a grade mostrava a
+semana e a lista mostrava tudo, então o mesmo nome saía duas vezes e o
+de outra semana só embaixo. **Duas listas da mesma coisa com recortes
+diferentes é o que faz alguém achar que falta dado.** A lista de baixo
+passou a ser só "fora desta semana".
+
+**Os horários vão de 9h às 18h, de meia em meia hora** — é o
+expediente da loja, e meia hora porque é assim que os horários reais
+aparecem nas conversas (09:30, 14:30, 16:30). Só hora cheia empurraria
+a pré-venda para o campo "outra" o tempo todo.
 
 **A agenda mostra a semana, de segunda a sábado.** A lista por dia
 responde "o que tem hoje"; a semana responde "como está minha semana",

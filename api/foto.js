@@ -812,9 +812,124 @@ async function dutAnexo(req, res) {
   return res.status(200).json({ ok: true });
 }
 
+/* ===================== A MÍDIA DO WHATSAPP =====================
+ *
+ * Foto, áudio e PDF que chegam na conversa. Até 06/10/2026 o sistema
+ * guardava só o registro de que veio algo — e o Derek bateu nisso três
+ * vezes: CRLV de cliente e áudio de negociação ficavam fora do
+ * alcance de quem precisa deles.
+ *
+ * **Isto é a exceção que a decisão 9 pedia para não ser aberta
+ * sozinha, e o Derek abriu.** Guardar arquivo exige a
+ * `SUPABASE_SERVICE_KEY` no Storage — e é por isso que o endpoint
+ * mora NESTE arquivo, que já é o único lugar com ela. Levá-lo para
+ * outro seria espalhar a chave, que é o que aquela decisão evita.
+ *
+ * **São dois caminhos e só um usa a chave para entrar:**
+ *
+ *  - a PONTE sobe o arquivo (sem login, pelo `PONTE_SEGREDO`), e a
+ *    chave só toca o Storage — a linha da mensagem é da ponte, pela
+ *    função estreita da 0055;
+ *  - a EQUIPE pede o link, e aí a ordem é a da decisão 9: lê-se a
+ *    mensagem **com o token do usuário** e só depois se assina. Se a
+ *    RLS não devolver a linha, a função para antes de tocar no
+ *    arquivo.
+ */
+const PASTA_WA = "wa";
+
+/* O WhatsApp manda mais tipo que o DUT: áudio de voz, vídeo e
+ * figurinha. Mapa SEPARADO de propósito — o anexo do lojista continua
+ * aceitando só documento e imagem, e misturar os dois abriria por
+ * acidente o que não foi decidido. */
+const TIPOS_WA = {
+  "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif",
+  "application/pdf": "pdf",
+  "audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/mp4": "m4a",
+  "audio/aac": "aac", "audio/amr": "amr", "audio/wav": "wav",
+  "video/mp4": "mp4", "video/3gpp": "3gp", "video/quicktime": "mov",
+};
+
+async function waMidia(req, res) {
+  const segredo = process.env.PONTE_SEGREDO || "";
+  if (!segredo || req.headers["x-ponte-segredo"] !== segredo) {
+    return res.status(401).json({ ok: false, erro: "sem permissão" });
+  }
+  if (req.method !== "POST") { res.setHeader("Allow", "POST"); return res.status(405).json({ ok: false }); }
+
+  let c = req.body;
+  if (c && typeof Buffer !== "undefined" && Buffer.isBuffer(c)) c = c.toString("utf8");
+  if (typeof c === "string") { try { c = JSON.parse(c); } catch (e) { c = null; } }
+  if (!c || typeof c !== "object") return res.status(400).json({ ok: false, erro: "envio inválido" });
+
+  const tipo = String(c.tipo || "").split(";")[0].trim();
+  /* O bucket da 0008 aceita quatro tipos; o WhatsApp manda áudio
+   * (ogg/opus), vídeo e figurinha também. O que ele não aceita é
+   * recusado AQUI, com nome — em vez de voltar erro cru do Storage no
+   * meio de uma conversa. */
+  const ext = TIPOS_WA[tipo];
+  if (!ext) return res.status(200).json({ ok: true, chave: "", erro: `tipo não guardado: ${tipo || "desconhecido"}` });
+
+  let cru = String(c.arquivo_base64 || "").trim();
+  if (cru.slice(0, 5) === "data:") { const v = cru.indexOf(","); cru = v < 0 ? "" : cru.slice(v + 1); }
+  cru = cru.replace(/\s/g, "");
+  if (!cru || !/^[A-Za-z0-9+/]+={0,2}$/.test(cru)) return res.status(400).json({ ok: false, erro: "arquivo inválido" });
+  const buf = Buffer.from(cru, "base64");
+  if (!buf.length) return res.status(400).json({ ok: false, erro: "arquivo vazio" });
+  if (buf.length > MAX_DOC) return res.status(200).json({ ok: true, chave: "", erro: "passa de 10 MB" });
+
+  const canal = String(c.canal || "x").replace(/[^\w-]/g, "").slice(0, 40);
+  const caminho = `${PASTA_WA}/${canal}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  try {
+    await arquivos(`${STORAGE()}/object/${BUCKET_DOC}/${paraURL(caminho)}`, {
+      method: "POST",
+      headers: hArquivo({ "Content-Type": tipo, "Cache-Control": "3600", "x-upsert": "false" }),
+      body: buf,
+    });
+  } catch (e) {
+    // Falhar aqui NÃO pode derrubar a mensagem: o texto e o registro
+    // valem mesmo sem o arquivo, e a ponte reentregaria em laço.
+    return res.status(200).json({ ok: true, chave: "", erro: "não consegui guardar" });
+  }
+  return res.status(200).json({ ok: true, chave: caminho, bytes: buf.length });
+}
+
+async function waArquivo(req, res, tok) {
+  const id = String(req.query.id || "");
+  if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido" });
+
+  /* A ORDEM É A DA DECISÃO 9: a mensagem é lida com o TOKEN DO
+   * USUÁRIO, então é a RLS da 0054 que decide se aquela pessoa pode
+   * ver aquela conversa. Só depois a chave de serviço assina o link.
+   * Invertida, a chave viraria uma porta para o bucket inteiro. */
+  const r = await fetch(`${URL_BASE}/rest/v1/wa_mensagem?select=anexo&id=eq.${id}`,
+    { headers: { apikey: ANON, Authorization: tok } });
+  if (!r.ok) return res.status(r.status === 401 ? 401 : 502).json({ erro: "Não consegui ler a mensagem." });
+  const linha = (await r.json().catch(() => []))[0];
+  const chave = linha && linha.anexo && linha.anexo.chave;
+  if (!chave || String(chave).slice(0, PASTA_WA.length + 1) !== `${PASTA_WA}/`) {
+    return res.status(404).json({ erro: "Esta mensagem não tem arquivo guardado." });
+  }
+
+  try {
+    const d = await arquivos(`${STORAGE()}/object/sign/${BUCKET_DOC}/${paraURL(chave)}`, {
+      method: "POST", headers: hArquivo({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ expiresIn: 3600 }),
+    });
+    const url = d && d.signedURL ? `${STORAGE()}${d.signedURL}` : null;
+    if (!url) return res.status(502).json({ erro: "Não consegui assinar o link." });
+    return res.status(200).json({ url });
+  } catch (e) { return res.status(502).json({ erro: "Não consegui assinar o link." }); }
+}
+
 module.exports = async function handler(req, res) {
   if (!URL_BASE || !CHAVE || !ANON) {
     return res.status(500).json({ erro: "SUPABASE_URL, SUPABASE_ANON_KEY ou SUPABASE_SERVICE_KEY não configurados." });
+  }
+
+  // A ponte chega sem login, pelo segredo compartilhado.
+  if (String(req.query.recurso || "") === "wa-midia") {
+    try { return await waMidia(req, res); }
+    catch (e) { return res.status(200).json({ ok: true, chave: "", erro: "falhou" }); }
   }
 
   // O lojista chega sem login: antes da checagem de sessão.
@@ -825,6 +940,11 @@ module.exports = async function handler(req, res) {
 
   const tok = tokenDe(req);
   if (!tok) return res.status(401).json(SEM_LOGIN);
+
+  if (String(req.query.recurso || "") === "wa-arquivo") {
+    try { return await waArquivo(req, res, tok); }
+    catch (e) { return res.status(502).json({ erro: "Não consegui abrir o arquivo." }); }
+  }
 
   if (String(req.query.recurso || "") === "shinkai") {
     try { return await shinkai(req, res, tok); }

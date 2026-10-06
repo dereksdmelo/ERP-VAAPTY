@@ -822,6 +822,12 @@ async function preVendasPorCanal(de, ate) {
   if (!r.ok) throw new Error(d.erro || "Não consegui carregar os canais.");
   return d;
 }
+async function waArquivo(id) {
+  const r = await fetchAut(`/api/foto?recurso=wa-arquivo&id=${encodeURIComponent(id)}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui abrir o arquivo.");
+  return d.url;
+}
 async function waMensagens(id) {
   const r = await fetchAut(`/api/atendimento?recurso=conversas&id=${encodeURIComponent(id)}`);
   const d = await r.json().catch(() => ({}));
@@ -8636,21 +8642,63 @@ const resumoMsg = (m) => {
 function Balao({ m }) {
   const meu = !!m.eco;
   const anexo = m.anexo || {};
+  const [url, setUrl] = useState("");
+  const [indo, setIndo] = useState(false);
+  const [erro, setErro] = useState("");
+
+  const QUE = { audio: anexo.voz ? "áudio de voz" : "áudio", image: "foto", video: "vídeo",
+                document: anexo.nome || "documento", sticker: "figurinha" };
+
+  /* O LINK É PEDIDO NO CLIQUE, não ao desenhar a conversa.
+   *
+   * Assinar é uma ida ao servidor por arquivo; uma conversa com vinte
+   * fotos faria vinte, e o link vence em uma hora — assinar o que
+   * ninguém vai abrir é gasto e é link que expira antes do uso. */
+  const abrir = async () => {
+    if (url) return;
+    setIndo(true); setErro("");
+    try { setUrl(await waArquivo(m.id)); }
+    catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+
   return (
     <div className={`flex ${meu ? "justify-end" : "justify-start"}`}>
       <div className="max-w-[78%] rounded-xl px-3 py-2"
         style={{ background: meu ? C.roxoFraco : C.paper, border: `1px solid ${C.line}` }}>
         {m.tipo === "midia" && (
-          /* O ARQUIVO NÃO ESTÁ AQUI, e a tela diz isso em vez de
-             mostrar um retângulo quebrado. Guardar mídia pediria a
-             chave de serviço no Storage — decisão 9, e está em
-             PENDENCIAS.md como escolha do Derek. */
-          <div className="mb-1 text-[12.5px]" style={{ color: C.mute }}>
-            📎 {anexo.tipo === "audio" ? (anexo.voz ? "áudio de voz" : "áudio")
-              : anexo.tipo === "image" ? "foto"
-              : anexo.tipo === "video" ? "vídeo"
-              : anexo.tipo === "document" ? (anexo.nome || "documento")
-              : "arquivo"} — fica no WhatsApp, não é guardado aqui
+          <div className="mb-1">
+            {url && anexo.tipo === "image" && (
+              <a href={url} target="_blank" rel="noopener noreferrer">
+                <img src={url} alt={QUE[anexo.tipo] || "arquivo"} className="max-h-[320px] rounded-lg" />
+              </a>
+            )}
+            {url && anexo.tipo === "audio" && (
+              <audio controls src={url} className="w-[240px]" />
+            )}
+            {url && anexo.tipo === "video" && (
+              <video controls src={url} className="max-h-[320px] rounded-lg" />
+            )}
+            {url && ["image", "audio", "video"].indexOf(anexo.tipo) < 0 && (
+              <a href={url} target="_blank" rel="noopener noreferrer"
+                className="text-[13px] font-semibold" style={{ color: C.roxo }}>
+                abrir {QUE[anexo.tipo] || "arquivo"}
+              </a>
+            )}
+            {!url && (
+              anexo.chave
+                ? <button onClick={abrir} className="text-[12.5px] font-semibold" style={{ color: C.roxo }}>
+                    📎 {indo ? "abrindo…" : QUE[anexo.tipo] || "arquivo"}
+                    {anexo.nome && anexo.tipo === "document" ? "" : ""}
+                  </button>
+                /* SEM CHAVE É ARQUIVO DE ANTES DE 06/10/2026, quando
+                   nada era guardado — e a tela diz isso em vez de
+                   oferecer um botão que não abre nada. */
+                : <span className="text-[12px]" style={{ color: C.mute }}>
+                    📎 {QUE[anexo.tipo] || "arquivo"} — chegou antes de o sistema guardar arquivos
+                  </span>
+            )}
+            {erro && <div className="mt-1 text-[12px]" style={{ color: C.laranja }}>{erro}</div>}
           </div>
         )}
         {m.tipo === "reacao" && (
@@ -11989,7 +12037,13 @@ const LEAD_ROT = {
   novo: "Novo", em_contato: "Em contato", agendado: "Agendado", confirmado: "Confirmado",
   compareceu: "Compareceu", nao_compareceu: "Não veio", perdido: "Perdido",
 };
-const HORARIOS = ["09:00", "10:00", "11:00", "13:30", "14:30", "15:30", "16:30", "17:30", "18:30"];
+const HORARIOS = (() => {
+  const h = [];
+  for (let m = 9 * 60; m <= 18 * 60; m += 30) {
+    h.push(`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
+  }
+  return h;
+})();
 
 const soDigitos = (t) => String(t || "").replace(/\D/g, "");
 const telBR = (t) => {
@@ -13645,6 +13699,7 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
   const [agendando, setAgendando] = useState(null);
   const [voltando, setVoltando] = useState(null);
   const [desloc, setDesloc] = useState(0);
+  const [cartao, setCartao] = useState(null);
   const [indo, setIndo] = useState("");
 
   const carregar = () => {
@@ -13702,6 +13757,7 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
   // Fora da semana à vista, nada some: a lista de baixo continua
   // mostrando tudo o que está em aberto.
   const dias = Object.keys(grupos).sort();
+  const foraDaSemana = dias.filter((d) => semana.indexOf(d) < 0);
   const rotuloDia = (d) => {
     const p = proximosDias(2);
     if (d === p[0].iso) return "Hoje";
@@ -13747,15 +13803,53 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
                       <div className="text-[13px] font-bold" style={{ color: eHoje ? C.roxo : C.ink }}>{diaBR(d).slice(0, 5)}</div>
                     </div>
                     <div className="space-y-1.5">
-                      {doDia.map((l) => (
-                        <div key={l.id} className="rounded-lg px-2 py-1.5"
-                          style={{ background: C.paper, border: `1px solid ${l.status === "confirmado" ? C.verde : C.line}` }}>
-                          <div className="text-[11.5px] font-bold" style={{ fontFamily: F.mono, color: l.status === "confirmado" ? C.verde : C.ink }}>
-                            {horaBR(l.agendado_para)}
+                      {/* A GRADE É A AGENDA, e por isso ela age — o Derek
+                          em 06/10/2026: *"colocar os botões de ação na
+                          lista de cima e fazer uma coisa só (agenda
+                          interativa)"*. Antes eram duas listas da mesma
+                          coisa: a grade mostrava e a de baixo agia, e a
+                          pessoa olhava numa e trabalhava na outra. */}
+                      {doDia.map((l) => {
+                        const conf = l.status === "confirmado";
+                        const passou = Date.parse(l.agendado_para) < Date.now();
+                        const aberto = cartao === l.id;
+                        return (
+                          <div key={l.id} className="rounded-lg"
+                            style={{ background: C.paper, border: `1px solid ${conf ? C.verde : passou ? C.laranja : C.line}` }}>
+                            <button onClick={() => setCartao(aberto ? null : l.id)} className="w-full px-2 py-1.5 text-left">
+                              <div className="text-[11.5px] font-bold" style={{ fontFamily: F.mono, color: conf ? C.verde : passou ? C.laranja : C.ink }}>
+                                {horaBR(l.agendado_para)}{conf ? " ✓" : ""}
+                              </div>
+                              <div className="truncate text-[12px]">{l.nome}</div>
+                            </button>
+                            {aberto && (
+                              <div className="space-y-1 border-t p-1.5" style={{ borderColor: C.line }}>
+                                <button onClick={() => chegou(l)} disabled={indo === l.id}
+                                  className="w-full rounded px-2 py-1.5 text-[11.5px] font-bold text-white"
+                                  style={{ background: C.roxo, opacity: indo === l.id ? 0.5 : 1 }}>
+                                  {indo === l.id ? "abrindo…" : "Chegou"}
+                                </button>
+                                <div className="grid grid-cols-2 gap-1">
+                                  <button onClick={() => mexer(l, { confirmado: !conf })}
+                                    className="rounded border px-1 py-1 text-[11px] font-semibold"
+                                    style={{ borderColor: C.verde, color: C.verde }}>{conf ? "desfazer" : "confirmou"}</button>
+                                  <button onClick={() => mexer(l, { status: "nao_compareceu", agendado_para: null, confirmado_em: null })}
+                                    className="rounded border px-1 py-1 text-[11px] font-semibold"
+                                    style={{ borderColor: C.laranja, color: C.laranja }}>não veio</button>
+                                </div>
+                                <div className="grid grid-cols-2 gap-1">
+                                  {l.telefone && (
+                                    <button onClick={() => setLigando(l)} className="rounded border px-1 py-1 text-[11px] font-semibold"
+                                      style={{ borderColor: C.line, color: C.verde }}>ligar</button>
+                                  )}
+                                  <button onClick={() => setAgendando(l)} className="rounded border px-1 py-1 text-[11px] font-semibold"
+                                    style={{ borderColor: C.line, color: C.roxo }}>remarcar</button>
+                                </div>
+                              </div>
+                            )}
                           </div>
-                          <div className="truncate text-[12px]">{l.nome}</div>
-                        </div>
-                      ))}
+                        );
+                      })}
                       {!doDia.length && (
                         <div className="py-2 text-center text-[11px]" style={{ color: C.mute }}>livre</div>
                       )}
@@ -13775,7 +13869,22 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
         </div>
       )}
 
-      {dias.map((d) => {
+      {/* FORA DA SEMANA À VISTA, e só isso.
+       *
+       * O Derek: *"não estão todos os agendamentos nos dois lugares"*.
+       * Estavam nos dois — a grade mostrava a semana e a lista mostrava
+       * tudo, então o mesmo nome aparecia duas vezes e o de outra
+       * semana aparecia só embaixo. Duas listas da mesma coisa com
+       * recortes diferentes é o que faz alguém achar que falta dado.
+       *
+       * Agora a grade é a semana e a lista é o resto: cada agendamento
+       * aparece **uma vez só**, e nada fica escondido. */}
+      {!!foraDaSemana.length && (
+        <div className="pt-2 text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: C.mute }}>
+          Fora desta semana
+        </div>
+      )}
+      {foraDaSemana.map((d) => {
         const atrasado = d < hoje;
         return (
           <div key={d}>
