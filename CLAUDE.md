@@ -1825,6 +1825,31 @@ de captura: quem atende telefone grava sem procurar botão (decisão
 27). O quadro responde "onde ponho a mão"; a lista responde "acabei de
 desligar, preciso gravar".
 
+**O menu do cartão é onde a fila é trabalhada** (06/10/2026): ligar,
+marcar a call, ler a conversa, anotar, corrigir o nome e mover.
+
+**O nome se edita ali, não num cadastro.** O que chega do WhatsApp é o
+que a pessoa pôs no perfil — "marysantinha710", "G..C Construções" — e
+quem descobre o nome de verdade descobre no telefone, falando. Mandar
+essa correção para outra tela é garantir que ela não aconteça.
+
+**Marcar a call sem abrir o WhatsApp** existe porque a ligação às
+vezes sai do telefone da mesa, ou o número foi chamado e não atendeu.
+Sem esse botão a contagem só conta o que passou pelo WhatsApp, e aí
+**ela mente para menos** — que é pior do que não ter, porque parece
+certa.
+
+**A conversa abre em JANELA, não em outra tela.** O histórico é
+consulta, não destino: ele responde "o que já foi prometido a esta
+pessoa" e devolve quem perguntou para onde estava. Trocar de tela para
+ler três mensagens faz perder o lugar na fila.
+
+**O quadro filtra por "agendados de hoje" e por número de call.** A
+coluna AGENDADO junta a semana inteira, e quem abre de manhã quer quem
+vem HOJE — com 29 cartões, o de hoje fica no meio dos de sexta. O
+"hoje" só corta as colunas que têm hora marcada; nas outras ele
+esvaziaria tudo e pareceria quebrado.
+
 **A conversa original abre dentro do ERP**, do cartão ou da lista. O
 histórico é o que diz o que já foi prometido ao cliente — ligar sem ele
 é recomeçar a conversa do zero na frente dele. A busca é pelos **oito

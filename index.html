@@ -12890,6 +12890,68 @@ function Ligar({ para, nome, canalSugerido, aoFechar, aoLigar, chamadas }) {
   );
 }
 
+/* A CONVERSA NUMA JANELA, sem sair da fila.
+ *
+ * Antes, "ver a conversa" trocava de tela — e quem está trabalhando o
+ * quadro perdia o lugar para ler três mensagens. O histórico é
+ * consulta, não destino: ele responde "o que já foi prometido a esta
+ * pessoa" e devolve quem perguntou para onde estava.
+ */
+function ConversaPopup({ telefone, nome, aoFechar }) {
+  const [msgs, setMsgs] = useState(null);
+  const [erro, setErro] = useState("");
+  const [canal, setCanal] = useState("");
+  const fim = useRef(null);
+
+  useEffect(() => {
+    let vivo = true;
+    const d = String(telefone || "").replace(/\D/g, "");
+    // Pelos oito últimos dígitos: a conversa guarda o 55 do país e o
+    // lead não, e o nono dígito varia entre as fontes.
+    waConversas({ busca: d.length >= 8 ? d.slice(-8) : d })
+      .then((lista) => {
+        if (!vivo) return;
+        if (!lista.length) { setMsgs([]); return; }
+        const c = lista[0];
+        setCanal((c.canal && c.canal.nome) || "");
+        return waMensagens(c.id).then((m) => { if (vivo) setMsgs(m); });
+      })
+      .catch((e) => { if (vivo) setErro(e.message); });
+    return () => { vivo = false; };
+  }, [telefone]);
+
+  useEffect(() => { if (fim.current) fim.current.scrollIntoView({ block: "end" }); }, [msgs && msgs.length]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center"
+      style={{ background: "rgba(24,20,32,0.45)" }} onClick={aoFechar}>
+      <div className="flex max-h-[80vh] w-full max-w-[560px] flex-col rounded-xl p-4" onClick={(e) => e.stopPropagation()}
+        style={{ background: C.paper, border: `1px solid ${C.line}`, boxShadow: "0 18px 50px rgba(24,20,32,0.28)" }}>
+        <div className="flex items-start justify-between gap-3 pb-3" style={{ borderBottom: `1px solid ${C.line}` }}>
+          <div className="min-w-0">
+            <div className="truncate text-[16px]" style={{ fontFamily: F.disp, fontWeight: 800 }}>{nome}</div>
+            <div className="text-[12.5px]" style={{ color: C.mute }}>
+              {telBR(telefone)}{canal ? ` · ${canal}` : ""}
+            </div>
+          </div>
+          <button onClick={aoFechar} className="text-[13px]" style={{ color: C.mute }}>fechar</button>
+        </div>
+        <div className="mt-3 flex-1 space-y-2 overflow-y-auto pr-1">
+          {erro && <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+          {!msgs && !erro && <p className="text-[13.5px]" style={{ color: C.mute }}>carregando…</p>}
+          {msgs && !msgs.length && (
+            <p className="text-[13.5px] leading-relaxed" style={{ color: C.mute }}>
+              Este lead não chegou pelo WhatsApp, ou chegou antes de o número ser ligado.
+            </p>
+          )}
+          {(msgs || []).map((m) => <Balao key={m.id} m={m} />)}
+          <div ref={fim} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CartaoLead({ l, onAbrir, onArrastar, onVeio }) {
   const t = l.agendado_para ? Date.parse(l.agendado_para) : 0;
   const atrasado = t && t < Date.now();
@@ -12938,9 +13000,15 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
   const [agendando, setAgendando] = useState(null);
   const [perdendo, setPerdendo] = useState(null);
   const [criando, setCriando] = useState(false);
+  const [hoje, setHoje] = useState(false);
+  const [call, setCall] = useState(null);
   const [aviso, setAviso] = useState("");
   const [ligando, setLigando] = useState(null);
   const [excluindo, setExcluindo] = useState(null);
+  const [vendoConversa, setVendoConversa] = useState(null);
+  const [editandoNome, setEditandoNome] = useState(false);
+  const [nomeNovo, setNomeNovo] = useState("");
+  const [obs, setObs] = useState("");
   const [novo, setNovo] = useState({ nome: "", telefone: "", carro: "", origem: "fluxo_loja" });
 
   const carregar = () => {
@@ -12964,6 +13032,40 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
     setLista((ls) => (ls || []).map((x) => (x.id === l.id ? { ...x, ...mud } : x)));
     try { await atualizarLead(l.id, mud); }
     catch (e) { setErro(e.message); carregar(); }
+  };
+
+  // Ao abrir outro cartão, o rascunho da anotação não pode ficar para
+  // trás — anotação do João na ficha da Maria é pior que anotação
+  // nenhuma.
+  const abrirMenu = (l) => { setMenu(l); setObs(""); setEditandoNome(false); };
+
+  const salvarNome = async () => {
+    const n = nomeNovo.trim();
+    if (!n || !menu) { setEditandoNome(false); return; }
+    setMenu({ ...menu, nome: n });
+    setEditandoNome(false);
+    await mexer(menu, { nome: n });
+  };
+
+  /* **Cada anotação entra com a data na frente, e nada é
+   * sobrescrito.** A anotação é o histórico do que já foi tentado;
+   * trocar a anterior pela nova apagaria o que faz a terceira ligação
+   * ser diferente da primeira (decisão 27). */
+  const salvarObs = async () => {
+    const t = obs.trim();
+    if (!t || !menu) return;
+    const texto = [menu.observacoes, `${diaBR(hojeEmSP())}: ${t}`].filter(Boolean).join("\n");
+    setMenu({ ...menu, observacoes: texto });
+    setObs("");
+    await mexer(menu, { observacoes: texto });
+  };
+
+  const contarCall = async (l) => {
+    try {
+      const x = await registrarLigacao(l.id);
+      setMenu((m) => (m && m.id === l.id ? { ...m, ...x } : m));
+      setLista((ls) => (ls || []).map((y) => (y.id === l.id ? { ...y, ...x } : y)));
+    } catch (e) { setErro(e.message); }
   };
 
   const chegou = async (l) => {
@@ -13019,7 +13121,25 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
     const d = String(l.criado_em || "").slice(0, 10);
     return d >= f.de && d <= f.ate;
   };
-  const porColuna = (id) => (lista || []).filter((l) => colunaDe(l) === id && noMes(l));
+
+  /* DOIS FILTROS QUE ATRAVESSAM O QUADRO INTEIRO (06/10/2026).
+   *
+   * **"Hoje"** porque a coluna AGENDADO junta a semana toda, e quem
+   * abre de manhã quer a lista de quem vem HOJE — com 29 cartões, o
+   * de hoje fica no meio dos de sexta.
+   *
+   * **A call** porque a conversa muda com o número: a primeira é
+   * apresentação, a quinta é outra coisa. É a mesma régua da aba
+   * Ações, aqui também.
+   */
+  const soHoje = (l) => !hoje || String(l.agendado_para || "").slice(0, 10) === hojeEmSP();
+  const naCall = (l) => call == null
+    ? true
+    : call >= 10 ? (Number(l.ligacoes) || 0) >= 10 : (Number(l.ligacoes) || 0) === call;
+  const porColuna = (id) => (lista || []).filter((l) => colunaDe(l) === id && noMes(l) && naCall(l)
+    // "Hoje" só faz sentido onde há hora marcada; nas outras colunas
+    // ele esvaziaria tudo e pareceria quebrado.
+    && (!hoje || ["agendado", "reagendar"].indexOf(id) < 0 || soHoje(l)));
 
   return (
     <div>
@@ -13050,10 +13170,29 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
           </div>
         </div>
       ) : (
-        <button onClick={() => setCriando(true)}
-          className="mb-3 rounded-lg px-4 py-2 text-[14px] font-semibold text-white" style={{ background: C.roxo }}>
-          + Lead
-        </button>
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <button onClick={() => setCriando(true)}
+            className="rounded-lg px-4 py-2 text-[14px] font-semibold text-white" style={{ background: C.roxo }}>
+            + Lead
+          </button>
+          <button onClick={() => setHoje(!hoje)}
+            className="rounded-full px-3 py-1.5 text-[12.5px] font-semibold"
+            style={hoje ? { background: C.verde, color: "#fff" }
+                        : { background: C.paper, color: C.mute, border: `1px solid ${C.line}` }}>
+            agendados de hoje
+          </button>
+          <label className="flex items-center gap-1.5 text-[12.5px]" style={{ color: C.mute }}>
+            call
+            <select className="rounded-lg border px-2 py-1 text-[12.5px]" style={inputSty}
+              value={call == null ? "" : call}
+              onChange={(e) => setCall(e.target.value === "" ? null : Number(e.target.value))}>
+              <option value="">todas</option>
+              <option value="0">nunca ligaram</option>
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => <option key={n} value={n}>já levou {n}</option>)}
+              <option value="10">10 ou mais</option>
+            </select>
+          </label>
+        </div>
       )}
 
       {erro && <p className="mb-3 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
@@ -13081,7 +13220,7 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
                 </div>
                 <div className="space-y-2">
                   {itens.map((l) => (
-                    <CartaoLead key={l.id} l={l} onArrastar={setArrastando} onAbrir={setMenu}
+                    <CartaoLead key={l.id} l={l} onArrastar={setArrastando} onAbrir={abrirMenu}
                       onVeio={(x, veio) => veio
                         ? chegou(x)
                         /* Não veio volta para REAGENDAR e a data cai: hora
@@ -13103,18 +13242,44 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
         Arraste o cartão entre as colunas, ou toque nele para mover e ligar.
       </p>
 
-      {/* O menu do cartão: mover, agendar e ligar num lugar só. No
-          celular ele é o único caminho — o arrasto do HTML não existe
-          no toque. */}
+      {/* O MENU DO CARTÃO é onde a fila é trabalhada: ligar, anotar,
+          ler a conversa e mover. No celular ele é o único caminho — o
+          arrasto do HTML não existe no toque.
+
+          **O nome e a observação se editam AQUI**, não numa tela de
+          cadastro: o nome que chega do WhatsApp é o que a pessoa pôs
+          no perfil ("marysantinha710", "G..C Construções"), e quem
+          descobre o nome de verdade descobre no telefone, falando. */}
       {menu && (
         <div className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center"
           style={{ background: "rgba(24,20,32,0.45)" }} onClick={() => setMenu(null)}>
-          <div className="w-full max-w-[400px] rounded-xl p-4" onClick={(e) => e.stopPropagation()}
+          <div className="max-h-[88vh] w-full max-w-[420px] overflow-y-auto rounded-xl p-4" onClick={(e) => e.stopPropagation()}
             style={{ background: C.paper, border: `1px solid ${C.line}`, boxShadow: "0 18px 50px rgba(24,20,32,0.28)" }}>
-            <div className="text-[15px]" style={{ fontFamily: F.disp, fontWeight: 800 }}>{menu.nome}</div>
-            <div className="mt-0.5 text-[12.5px]" style={{ color: C.mute }}>
-              {menu.carro ? `${menu.carro} · ` : ""}{menu.telefone || "sem telefone"}
+
+            {editandoNome ? (
+              <div className="flex gap-2">
+                <input className={inputCls} style={inputSty} value={nomeNovo} autoFocus
+                  onChange={(e) => setNomeNovo(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") salvarNome(); }} />
+                <button onClick={salvarNome} className="shrink-0 rounded-lg px-3 text-[13px] font-semibold text-white"
+                  style={{ background: C.roxo }}>ok</button>
+              </div>
+            ) : (
+              <button onClick={() => { setNomeNovo(menu.nome || ""); setEditandoNome(true); }}
+                className="block w-full text-left">
+                <span className="text-[15px]" style={{ fontFamily: F.disp, fontWeight: 800 }}>{menu.nome}</span>
+                <span className="ml-2 text-[11.5px]" style={{ color: C.roxo }}>editar</span>
+              </button>
+            )}
+
+            <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[12.5px]" style={{ color: C.mute }}>
+              <span>{menu.carro ? `${menu.carro} · ` : ""}{telBR(menu.telefone) || "sem telefone"}</span>
+              <span className="rounded-full px-1.5 py-0.5 text-[10.5px] font-bold"
+                style={{ background: CHAMADA(menu.ligacoes).cor + "18", color: CHAMADA(menu.ligacoes).cor }}>
+                {CHAMADA(menu.ligacoes).rot}
+              </span>
             </div>
+
             {menu.telefone && (
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <button onClick={() => { setLigando(menu); setMenu(null); }}
@@ -13126,17 +13291,43 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
                   style={{ borderColor: C.line, color: C.ink }}>Mensagem</a>
               </div>
             )}
-            {/* A CONVERSA ORIGINAL, dentro do ERP. O histórico é o que
-                diz o que já foi prometido ao cliente — ligar sem ele é
-                recomeçar a conversa do zero na frente dele. */}
-            {menu.telefone && aoVerConversa && (
-              <button onClick={() => { const t = menu.telefone; setMenu(null); aoVerConversa(t); }}
-                className="mt-2 w-full rounded-lg border px-3 py-2.5 text-[13.5px] font-semibold"
-                style={{ borderColor: C.line, color: C.roxo }}>Ver a conversa no sistema</button>
+
+            {/* MARCAR A CALL SEM ABRIR O DISCADOR: às vezes a ligação
+                acontece pelo telefone da mesa, ou o número foi chamado
+                e não atendeu. Sem este botão a contagem só conta o que
+                passou pelo WhatsApp, e aí ela mente para menos. */}
+            {menu.telefone && (
+              <button onClick={() => contarCall(menu)}
+                className="mt-2 w-full rounded-lg border px-3 py-2 text-[13px] font-semibold"
+                style={{ borderColor: C.line, color: C.verde }}>
+                + marcar {Number(menu.ligacoes || 0) + 1}ª call (sem abrir o WhatsApp)
+              </button>
             )}
+
+            {menu.telefone && (
+              <button onClick={() => { setVendoConversa(menu); setMenu(null); }}
+                className="mt-2 w-full rounded-lg border px-3 py-2.5 text-[13.5px] font-semibold"
+                style={{ borderColor: C.line, color: C.roxo }}>Ver a conversa</button>
+            )}
+
+            <Campo label="Observações" nota="Cada anotação entra com a data na frente; nada é sobrescrito.">
+              <textarea className={inputCls} style={{ ...inputSty, minHeight: 56 }} value={obs}
+                placeholder="o que ficou combinado, o que ele falou…"
+                onChange={(e) => setObs(e.target.value)} />
+            </Campo>
+            {!!obs.trim() && (
+              <button onClick={salvarObs} className="mt-1 w-full rounded-lg px-3 py-2 text-[13px] font-semibold text-white"
+                style={{ background: C.roxo }}>Anotar</button>
+            )}
+            {!!menu.observacoes && (
+              <p className="mt-2 whitespace-pre-wrap rounded-lg px-3 py-2 text-[12.5px] leading-snug"
+                style={{ background: C.bg, color: C.mute }}>{menu.observacoes}</p>
+            )}
+
             <button onClick={() => { setExcluindo(menu); setMenu(null); }}
-              className="mt-2 w-full rounded-lg px-3 py-2.5 text-[13px] font-semibold"
+              className="mt-3 w-full rounded-lg px-3 py-2 text-[13px] font-semibold"
               style={{ color: C.laranja }}>Excluir da lista</button>
+
             <div className="mt-3 text-[10px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>Mover para</div>
             <div className="mt-1.5 grid grid-cols-2 gap-2">
               {COLUNAS_LEAD.filter((c) => c.id !== colunaDe(menu)).map((c) => (
@@ -13147,6 +13338,11 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
             </div>
           </div>
         </div>
+      )}
+
+      {vendoConversa && (
+        <ConversaPopup telefone={vendoConversa.telefone} nome={vendoConversa.nome}
+          aoFechar={() => setVendoConversa(null)} />
       )}
 
       {ligando && (
