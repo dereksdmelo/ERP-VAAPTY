@@ -606,6 +606,7 @@ function paraLead(c) {
   if (c.telefone !== undefined) l.telefone = texto(c.telefone);
   if (c.carro !== undefined) l.carro = texto(c.carro);
   if (c.cidade !== undefined) l.cidade = texto(c.cidade);
+  if (c.fora_regiao !== undefined) l.fora_regiao = c.fora_regiao === true;
   if (c.origem !== undefined) l.origem = daLista(c.origem, ORIGENS) || "outro";
   if (c.status !== undefined && LEAD_STATUS.indexOf(String(c.status)) >= 0) l.status = c.status;
   if (c.negociador_id !== undefined) l.negociador_id = RX_UUID.test(String(c.negociador_id || "")) ? c.negociador_id : null;
@@ -1755,6 +1756,14 @@ module.exports = async function handler(req, res) {
     const todos = leads || [];
     const vivo = (l) => ["compareceu", "perdido"].indexOf(l.status) < 0;
 
+    /* QUEM TEM RETORNO MARCADO TEM DONO: a coluna "Contato futuro" do
+     * quadro (o Diego, 07/10/2026). Lead em `novo`/`em_contato` com
+     * `proximo_contato` é um combinado — "me liga quinta" — e não
+     * pode aparecer como "o cliente sumiu" ou "parado em Agendar", que
+     * cobram a pessoa por algo que ela já resolveu. Ele tem lista
+     * própria, que só acende quando a data chega. */
+    const comRetorno = (l) => ["novo", "em_contato"].indexOf(l.status) >= 0 && !!l.proximo_contato;
+
     const naCall = (l) => call == null ? true
       : call >= 10 ? (Number(l.ligacoes) || 0) >= 10
       : (Number(l.ligacoes) || 0) === call;
@@ -1802,12 +1811,19 @@ module.exports = async function handler(req, res) {
         leads: todos.filter((l) => vivo(l) && esperando[l.id]),
       },
       {
+        id: "retorno",
+        titulo: "Ligar de volta: o dia chegou",
+        porque: "Ficou combinado de ligar hoje — ou o dia já passou. Promessa feita ao cliente e não cumprida é o que mais esfria.",
+        cor: "laranja",
+        leads: todos.filter((l) => comRetorno(l) && String(l.proximo_contato).slice(0, 10) <= hoje),
+      },
+      {
         id: "sumiu",
         prazo: true,
         titulo: `Mandamos e o cliente sumiu há ${rotuloPrazo(dias)}`,
         porque: "A última palavra foi nossa e ele não voltou. É ligação, não mensagem — mensagem ele já não respondeu.",
         cor: "roxo",
-        leads: todos.filter((l) => vivo(l) && semResposta[l.id] && semResposta[l.id] < atras(dias)),
+        leads: todos.filter((l) => vivo(l) && !comRetorno(l) && semResposta[l.id] && semResposta[l.id] < atras(dias)),
       },
       {
         id: "parado",
@@ -1815,7 +1831,7 @@ module.exports = async function handler(req, res) {
         titulo: `Em Agendar há ${rotuloPrazo(dias)}, sem conversa`,
         porque: "Entrou por fora do WhatsApp e ninguém moveu. Só o telefone resolve.",
         cor: "roxo",
-        leads: todos.filter((l) => l.status === "em_contato" && !esperando[l.id] && !semResposta[l.id] &&
+        leads: todos.filter((l) => l.status === "em_contato" && !comRetorno(l) && !esperando[l.id] && !semResposta[l.id] &&
           String(l.atualizado_em || l.criado_em) < atras(dias)),
       },
       {
@@ -1824,7 +1840,7 @@ module.exports = async function handler(req, res) {
         porque: "Entraram e ninguém falou com eles ainda.",
         cor: "roxo",
         prazo: true,
-        leads: todos.filter((l) => l.status === "novo" && String(l.criado_em) < atras(dias)),
+        leads: todos.filter((l) => l.status === "novo" && !comRetorno(l) && String(l.criado_em) < atras(dias)),
       },
       {
         id: "remarcar",
@@ -1856,7 +1872,7 @@ module.exports = async function handler(req, res) {
         .filter((x) => x.leads.length).map((x) => ({
         ...x,
         leads: x.leads
-          .sort((a, b) => String(a.agendado_para || a.atualizado_em || "").localeCompare(String(b.agendado_para || b.atualizado_em || "")))
+          .sort((a, b) => String(a.agendado_para || a.proximo_contato || a.atualizado_em || "").localeCompare(String(b.agendado_para || b.proximo_contato || b.atualizado_em || "")))
           .slice(0, 60),
         total: x.leads.length,
       })),

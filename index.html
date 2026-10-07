@@ -8639,6 +8639,48 @@ const resumoMsg = (m) => {
   return m.texto || "";
 };
 
+/* O DIA DA CONVERSA, como o WhatsApp (o Diego, 07/10/2026: *"se na
+ * janela de conversa ter a data da conversa também, seria uma mão na
+ * roda… igual quando scrolla pra cima do wpp que tem 'hoje'"*). Sem
+ * ele, a hora de cada balão ("14:32") não diz de qual dia — e a
+ * pergunta de quem lê a conversa antes de ligar é "isso foi hoje ou
+ * semana passada?", porque muda o que se diz.
+ *
+ * **O dia é o de Joinville**, não o de Greenwich: mensagem das 22h
+ * cairia no dia seguinte e a conversa de ontem à noite apareceria como
+ * "Hoje" (a mesma armadilha da decisão 22). */
+const diaDaMensagem = (iso) => (iso && !isNaN(Date.parse(iso))
+  ? new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }) : "");
+const rotuloDoDia = (dia) => {
+  const hoje = hojeEmSP();
+  if (dia === hoje) return "Hoje";
+  const ontem = new Date(Date.parse(`${hoje}T12:00:00Z`) - 86400000).toISOString().slice(0, 10);
+  if (dia === ontem) return "Ontem";
+  return `${dia.slice(8, 10)}/${dia.slice(5, 7)}/${dia.slice(0, 4)}`;
+};
+
+function ListaDeBaloes({ msgs }) {
+  let ultimo = "";
+  return (msgs || []).map((m) => {
+    const dia = diaDaMensagem(m.quando);
+    const novoDia = !!dia && dia !== ultimo;
+    if (dia) ultimo = dia;
+    return (
+      <React.Fragment key={m.id}>
+        {novoDia && (
+          <div className="flex justify-center py-1">
+            <span className="rounded-full px-3 py-0.5 text-[11.5px] font-semibold"
+              style={{ background: C.bg, color: C.mute, border: `1px solid ${C.line}` }}>
+              {rotuloDoDia(dia)}
+            </span>
+          </div>
+        )}
+        <Balao m={m} />
+      </React.Fragment>
+    );
+  });
+}
+
 function Balao({ m }) {
   const meu = !!m.eco;
   const anexo = m.anexo || {};
@@ -8832,7 +8874,7 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe }) {
             para frente — o que é mais antigo que isso continua só no celular.
           </p>
         )}
-        {(msgs || []).map((m) => <Balao key={m.id} m={m} />)}
+        <ListaDeBaloes msgs={msgs} />
         <div ref={fim} />
       </div>
 
@@ -12868,6 +12910,14 @@ function ordenarFila(lista) {
 const COLUNAS_LEAD = [
   { id: "novo",        rot: "Novo",       status: ["novo"],                   cor: "#6D1B9E" },
   { id: "agendar",     rot: "Agendar",    status: ["em_contato"],             cor: "#8E4FC0" },
+  /* CONTATO FUTURO (o Diego, 07/10/2026: *"tá faltando também um
+   * [contato futuro]… mais uma coluna, e quando clicar abrir igual ao
+   * agendamento"*). **Não é status novo** — é o lead em `novo` ou
+   * `em_contato` que TEM `proximo_contato`, o mesmo "ligar depois" que
+   * a Lista já gravava. Antes ele ficava dentro de AGENDAR, misturado
+   * com quem ninguém tocou, e a data só aparecia na Lista. Por isso
+   * `status` é vazio aqui: a coluna sai da DATA, em `etapaDoLead`. */
+  { id: "futuro",      rot: "Contato futuro", status: [],                     cor: "#B26B00" },
   { id: "agendado",    rot: "Agendado",   status: ["agendado", "confirmado"], cor: "#4A9E7A" },
   { id: "reagendar",   rot: "Reagendar",  status: ["nao_compareceu"],         cor: "#E1521F" },
   { id: "compareceu",  rot: "Compareceu", status: ["compareceu"],             cor: "#1D7F58" },
@@ -12876,7 +12926,9 @@ const COLUNAS_LEAD = [
 const colunaDe = (l) => etapaDoLead(l).id;
 // Um lugar só: o quadro e a lista chamam a mesma etapa pelo mesmo
 // nome, senão viram dois vocabulários para o mesmo funil.
-const etapaDoLead = (l) => COLUNAS_LEAD.find((c) => c.status.indexOf(l.status) >= 0) || COLUNAS_LEAD[0];
+const ehContatoFuturo = (l) => ["novo", "em_contato"].indexOf(l.status) >= 0 && !!l.proximo_contato;
+const etapaDoLead = (l) => (ehContatoFuturo(l) ? COLUNAS_LEAD.find((c) => c.id === "futuro") : null)
+  || COLUNAS_LEAD.find((c) => c.status.indexOf(l.status) >= 0) || COLUNAS_LEAD[0];
 
 /* A ESCOLHA DE QUAL NÚMERO LIGA.
  *
@@ -13009,7 +13061,14 @@ const REGIAO_LOJA = [
  * inteira, não só este trecho — é o que a decisão 7 registra sobre o
  * `brl`. */
 const chaveCidade = (t) => semAcento(t).trim().toLowerCase();
+/* FORA DA REGIÃO = MARCADO À MÃO **OU** CIDADE FORA DA LISTA. A
+ * pré-venda sabe que o cliente é de longe antes de saber a cidade
+ * ("ele mora pra Curitiba") e não vai parar uma ligação para digitar —
+ * o Diego, 07/10/2026: *"falta ter o como colocar o lead no 'fora de
+ * região', botão acho que já serve"* (0065). As duas fontes se somam:
+ * quem marcou à mão não perde a marca ao digitar uma cidade. */
 const foraDaRegiao = (l) => {
+  if (l && l.fora_regiao === true) return true;
   const c = chaveCidade(l && l.cidade);
   return !!c && REGIAO_LOJA.indexOf(c) < 0;
 };
@@ -13054,7 +13113,7 @@ function ConversaPopup({ telefone, nome, aoFechar, aoLigar, aoRenomear, rotuloFe
                   onChange={(e) => setNomeNovo(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && nomeNovo.trim()) { aoRenomear(nomeNovo.trim()); setEditando(false); }
-                    if (e.key === "Escape") setEditando(false);
+                    if (e.key === "Escape") { e.preventDefault(); setEditando(false); }
                   }} />
                 <button onClick={() => { if (nomeNovo.trim()) aoRenomear(nomeNovo.trim()); setEditando(false); }}
                   className="shrink-0 rounded-lg px-3 text-[13px] font-semibold text-white" style={{ background: C.roxo }}>ok</button>
@@ -13091,7 +13150,7 @@ function ConversaPopup({ telefone, nome, aoFechar, aoLigar, aoRenomear, rotuloFe
               Este lead não chegou pelo WhatsApp, ou chegou antes de o número ser ligado.
             </p>
           )}
-          {(msgs || []).map((m) => <Balao key={m.id} m={m} />)}
+          <ListaDeBaloes msgs={msgs} />
           <div ref={fim} />
         </div>
       </div>
@@ -13114,11 +13173,19 @@ function CartaoLead({ l, onAbrir, onArrastar, onVeio }) {
       <div className="truncate text-[13.5px] font-semibold">{l.nome}</div>
       {l.carro && <div className="truncate text-[12px]" style={{ color: C.mute }}>{l.carro}</div>}
       {foraDaRegiao(l) && (
-        <div className="truncate text-[11.5px]" style={{ color: C.laranja, fontWeight: 600 }}>{l.cidade}</div>
+        <div className="truncate text-[11.5px]" style={{ color: C.laranja, fontWeight: 600 }}>{l.cidade || "fora da região"}</div>
       )}
       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]" style={{ color: C.mute }}>
         {l.origem && <span>{rotulo(ORIGENS, l.origem)}</span>}
         {!!Number(l.ligacoes) && <span style={{ color: CHAMADA(l.ligacoes).cor }}>{CHAMADA(l.ligacoes).rot}</span>}
+        {ehContatoFuturo(l) && (() => {
+          const f = FAIXAS_LEAD[faixaDoLead(l)];
+          return (
+            <span style={{ color: f.cor || C.mute, fontWeight: 600 }}>
+              ↻ {diaBR(l.proximo_contato)}{f.rot ? ` · ${f.rot}` : ""}
+            </span>
+          );
+        })()}
         {l.agendado_para && (
           <span style={{ color: atrasado ? C.laranja : C.verde }}>
             {diaBR(l.agendado_para)} {horaBR(l.agendado_para)}
@@ -13155,6 +13222,7 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
   const [fora, setFora] = useState(false);
   const [busca, setBusca] = useState("");
   const [excluidosAch, setExcluidosAch] = useState([]);
+  const [voltando, setVoltando] = useState(null);
   const [aviso, setAviso] = useState("");
   const [ligando, setLigando] = useState(null);
   const [excluindo, setExcluindo] = useState(null);
@@ -13317,6 +13385,9 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
     if (col === colunaDe(l)) return;
     if (col === "agendado") { setAgendando(l); return; }
     if (col === "perdido") { setPerdendo(l); return; }
+    // Contato futuro pergunta QUANDO, como o agendado pergunta a hora:
+    // coluna sem data não existe (é a mesma razão de "Agendado").
+    if (col === "futuro") { setVoltando(l); return; }
     /* "COMPARECEU" NÃO É SÓ UM STATUS: é o cliente sentando na mesa, e
      * a partir daí ele é ATENDIMENTO (o Derek, 06/10/2026). O endpoint
      * de `compareceu` cria o atendimento com o que a pré-venda já
@@ -13331,7 +13402,9 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
     // Sair de "agendado" devolve a data: hora marcada num lead que
     // voltou para a fila é compromisso que ninguém vai cumprir.
     const limpa = (col === "novo" || col === "agendar") ? { agendado_para: null, confirmado_em: null } : {};
-    mexer(l, { status: st, ...limpa });
+    // Sair de Contato futuro leva a data junto: retorno marcado num
+    // lead que voltou para a fila é promessa que ninguém vai cobrar.
+    mexer(l, { status: st, proximo_contato: null, ...limpa });
   };
 
   /* O MÊS FILTRA PELA ENTRADA, não pela data marcada.
@@ -13362,7 +13435,14 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
    * apresentação, a quinta é outra coisa. É a mesma régua da aba
    * Ações, aqui também.
    */
-  const soHoje = (l) => !hoje || String(l.agendado_para || "").slice(0, 10) === hojeEmSP();
+  /* "HOJE" EM CONTATO FUTURO É O QUE VENCEU, não só o que é de hoje
+   * (o Diego: *"e essa ter filtro 'hoje' pra ela"*). Retorno de ontem
+   * que ninguém fez é justamente o que esse filtro existe para achar —
+   * escondê-lo sob "hoje" seria o vazamento silencioso da decisão 27.
+   * Em Agendado e Reagendar continua sendo o dia exato. */
+  const soHoje = (l, id) => !hoje || (id === "futuro"
+    ? String(l.proximo_contato || "").slice(0, 10) <= hojeEmSP()
+    : String(l.agendado_para || "").slice(0, 10) === hojeEmSP());
   const naCall = (l) => call == null
     ? true
     : call >= 10 ? (Number(l.ligacoes) || 0) >= 10 : (Number(l.ligacoes) || 0) === call;
@@ -13400,7 +13480,7 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
       && (!fora || foraDaRegiao(l))
       // "Hoje" só faz sentido onde há hora marcada; nas outras colunas
       // ele esvaziaria tudo e pareceria quebrado.
-      && (!hoje || ["agendado", "reagendar"].indexOf(id) < 0 || soHoje(l))));
+      && (!hoje || ["agendado", "reagendar", "futuro"].indexOf(id) < 0 || soHoje(l, id))));
 
   return (
     <div>
@@ -13447,10 +13527,11 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
             )}
           </div>
           <button onClick={() => setHoje(!hoje)}
+            title="Agendados e reagendar para hoje, e contatos futuros que venceram"
             className="rounded-full px-3 py-1.5 text-[12.5px] font-semibold"
             style={hoje ? { background: C.verde, color: "#fff" }
                         : { background: C.paper, color: C.mute, border: `1px solid ${C.line}` }}>
-            agendados de hoje
+            de hoje
           </button>
           <label className="flex items-center gap-1.5 text-[12.5px]" style={{ color: C.mute }}>
             call
@@ -13575,7 +13656,7 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
                 <input className={inputCls} style={inputSty} value={carroNovo} autoFocus
                   placeholder="o carro que ele quer vender"
                   onChange={(e) => setCarroNovo(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") salvarCarro(); if (e.key === "Escape") setEditandoCarro(false); }} />
+                  onKeyDown={(e) => { if (e.key === "Enter") salvarCarro(); if (e.key === "Escape") { e.preventDefault(); setEditandoCarro(false); } }} />
                 <button onClick={salvarCarro} className="shrink-0 rounded-lg px-3 text-[13px] font-semibold text-white"
                   style={{ background: C.roxo }}>ok</button>
               </div>
@@ -13592,7 +13673,7 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
                 <input className={inputCls} style={inputSty} value={cidadeNova} autoFocus
                   placeholder="de onde ele é"
                   onChange={(e) => setCidadeNova(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") salvarCidade(); if (e.key === "Escape") setEditandoCidade(false); }} />
+                  onKeyDown={(e) => { if (e.key === "Enter") salvarCidade(); if (e.key === "Escape") { e.preventDefault(); setEditandoCidade(false); } }} />
                 <button onClick={salvarCidade} className="shrink-0 rounded-lg px-3 text-[13px] font-semibold text-white"
                   style={{ background: C.roxo }}>ok</button>
               </div>
@@ -13603,6 +13684,24 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
                 {menu.cidade || "sem cidade"}
                 {foraDaRegiao(menu) ? " · fora da região" : ""}
                 <span className="ml-2 text-[11.5px]" style={{ color: C.roxo, fontWeight: 600 }}>editar</span>
+              </button>
+            )}
+            {/* O BOTÃO, e não só a cidade (o Diego: *"botão acho que já
+                serve"*). Quando é a cidade que põe o lead fora, o botão
+                não desfaz — diz como, em vez de fingir que tirou. */}
+            {menu.fora_regiao ? (
+              <button onClick={() => alterar(menu, { fora_regiao: false })}
+                className="mt-1 text-[12px] font-semibold" style={{ color: C.laranja }}>
+                Fora da região — tirar a marca
+              </button>
+            ) : foraDaRegiao(menu) ? (
+              <p className="mt-1 text-[11.5px]" style={{ color: C.mute }}>
+                Está fora pela cidade. Corrija a cidade para ele voltar à região.
+              </p>
+            ) : (
+              <button onClick={() => alterar(menu, { fora_regiao: true })}
+                className="mt-1 text-[12px] font-semibold" style={{ color: C.roxo }}>
+                Marcar como fora da região
               </button>
             )}
 
@@ -13707,13 +13806,26 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
       )}
       {agendando && (
         <Agendador lead={agendando} equipe={equipe || []} aoFechar={() => setAgendando(null)}
-          aoAgendar={async (mud) => { await mexer(agendando, { ...mud, status: "agendado" }); setAgendando(null); }} />
+          aoAgendar={async (mud) => { await mexer(agendando, { ...mud, status: "agendado", proximo_contato: null }); setAgendando(null); }} />
+      )}
+      {voltando && (
+        <QuandoVoltar titulo="Contato futuro — quando ligar de volta?"
+          valor={voltando.proximo_contato || ""}
+          aoFechar={() => setVoltando(null)}
+          aoEscolher={async (dia, obs) => {
+            const nota = obs ? `${diaBR(dia)}: ${obs}` : "";
+            await mexer(voltando, {
+              status: "em_contato", proximo_contato: dia,
+              observacoes: [voltando.observacoes, nota].filter(Boolean).join("\n"),
+            });
+            setVoltando(null);
+          }} />
       )}
       {perdendo && (
         <PorQuePerdeu aoFechar={() => setPerdendo(null)}
           aoEscolher={async (motivo) => {
             await mexer(perdendo, {
-              status: "perdido",
+              status: "perdido", proximo_contato: null,
               observacoes: [perdendo.observacoes, `${diaBR(hojeEmSP())}: saiu da fila — ${motivo}`].filter(Boolean).join("\n"),
             });
             setPerdendo(null);
@@ -20111,6 +20223,36 @@ function App() {
    * mostra está em Conversas — duas telas da casca. Guardá-lo dentro
    * de uma delas obrigaria a outra a adivinhar. */
   const [conversaAlvo, setConversaAlvo] = useState(null);
+  /* ESC FECHA A JANELA DE CIMA (o Diego, 07/10/2026: *"se der pra
+   * fechar essas janela de popup no ESC"*). É UM ouvinte só, no
+   * documento, e não um por janela: o menu do lead, a conversa e o
+   * discador podem estar abertos juntos, e com um ouvinte em cada um o
+   * ESC fecharia os três de uma vez. Aqui fecha só a de cima, e o
+   * segundo ESC fecha a de baixo.
+   *
+   * **Fechar é clicar no fundo**, que é o que toda janela desta casa já
+   * faz (`onClick={aoFechar}` no `fixed inset-0`) — então a regra de
+   * fechar mora num lugar só, e janela nova ganha o ESC de graça. A de
+   * cima é a de maior `z-index`: o "Mais" do celular é `z-40` e as
+   * janelas `z-50`, e a última no DOM nem sempre é a que se vê.
+   *
+   * Campo que trata o próprio ESC (cancelar a edição do nome) avisa com
+   * `preventDefault()` e a janela fica. */
+  useEffect(() => {
+    const aoApertar = (e) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      let topo = null, zTopo = -1;
+      document.querySelectorAll("div.fixed.inset-0").forEach((el) => {
+        if (!el.getClientRects().length) return;   // display:none (lg:hidden)
+        const z = parseInt(getComputedStyle(el).zIndex, 10) || 0;
+        if (z >= zTopo) { topo = el; zTopo = z; }
+      });
+      if (topo) topo.click();
+    };
+    document.addEventListener("keydown", aoApertar);
+    return () => document.removeEventListener("keydown", aoApertar);
+  }, []);
+
   const verConversa = (telefone) => { setConversaAlvo(String(telefone || "")); setTela("conversas"); };
   const [comp, setComp] = useState(() => competenciaDe(hojeEmSP()));
   const MESES = useMemo(() => mesesRecentes(18), []);

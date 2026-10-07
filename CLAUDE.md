@@ -2257,6 +2257,97 @@ pergunta para o Mateus — o cartão parece ler outro campo que não o
 `comprador_responsavel` da API. **Não há o que mudar aqui**, e mandar
 o nome sob outro campo é o erro que a decisão 46 proíbe.
 
+### 55. O quadro depois do primeiro dia de uso do Diego
+
+O Diego, da pré-venda, usou o quadro em 07/10/2026 e mandou, no
+WhatsApp, uma lista do que atrapalhava. O que ficou de pé:
+
+**Ligar ou ler a conversa não fecha o menu do lead.** Abrir o discador
+ou a conversa fazia `setMenu(null)`, e a pessoa voltava ao quadro sem
+conseguir mais *alimentar* o lead — agendar, reagendar, anotar —,
+porque o cartão tinha saído do filtro em que ela estava (uma call a
+mais e o filtro "1ª call" já não o mostra). **Ligar é o meio; registrar
+o que foi combinado é o fim.** Agora o menu fica aberto atrás, e a
+conversa devolve a pessoa a ele (o botão diz "voltar", não "fechar").
+Quem fechar o menu junto de novo quebra o fluxo outra vez.
+
+**Dentro da conversa cabem os dois gestos que a leitura provoca:**
+ligar e corrigir o nome — é lendo que se descobre que
+"marysantinha710" se chama Mary. A gravação do nome e do carro mora em
+`alterar()`, num lugar só, porque menu, conversa e discador podem estar
+abertos juntos, cada um com a sua cópia do lead.
+
+**Contato futuro é a sétima coluna, e não é status novo.** É o lead em
+`novo` ou `em_contato` que TEM `proximo_contato` — o mesmo "ligar
+depois" que a Lista já gravava e que no quadro ficava escondido dentro
+de AGENDAR, misturado com quem ninguém tocou. A coluna sai da **data**
+(`ehContatoFuturo`, em `etapaDoLead`), por isso `status` é vazio no
+`COLUNAS_LEAD`. Mover para ela abre o `QuandoVoltar` — chips de dia
+antes do calendário, como o agendador —, e mover para qualquer outra
+leva a data junto: retorno marcado num lead que voltou para a fila é
+promessa que ninguém vai cobrar. Fica entre AGENDAR e AGENDADO, que é
+onde ela pertence no fluxo; as seis colunas ditadas pelo Derek
+(decisão 51) continuam todas lá, na ordem dele.
+
+**"De hoje" em Contato futuro é o que VENCEU, não só o que é de hoje**
+(o Diego: *"e essa ter filtro 'hoje' pra ela"*). Retorno de ontem que
+ninguém fez é justamente o que o filtro existe para achar; escondê-lo
+sob "hoje" seria o vazamento silencioso da decisão 27. Em Agendado e
+Reagendar continua sendo o dia exato. **Isso é leitura minha** — se a
+casa quiser só o dia exato, é `soHoje()`.
+
+**As Ações respeitam o retorno marcado.** "O cliente sumiu há 3 dias",
+"parado em Agendar" e "novos que ninguém tocou" **não cobram** quem tem
+`proximo_contato`: ele tem dono, a pessoa já decidiu quando ligar. Em
+vez disso nasceu a lista **"Ligar de volta: o dia chegou"**, que só
+acende quando a data chega ou passa. Sem essa exclusão, a coluna nova
+criaria cobrança duplicada por algo já resolvido.
+
+**Fora da região é uma marca à mão OU uma cidade fora da lista (0064,
+0065).** A 0064 deu ao lead a cidade; o Diego notou que não havia como
+colocar alguém em "fora da região" (*"botão acho que já serve"*) — a
+pré-venda sabe que o cliente é de longe antes de saber a cidade, e não
+vai parar a ligação para digitar. As duas fontes se somam
+(`foraDaRegiao`): quem marcou à mão não perde a marca ao digitar uma
+cidade. Quando é a cidade que põe o lead fora, o botão não finge
+desfazer — diz para corrigir a cidade.
+
+**O DDD não é palpite de cidade.** O 47 cobre de Joinville a Blumenau e
+Itajaí (90 km), e quem muda de cidade leva o número antigo. Chutar por
+ele poria "perto" em quem está longe. **`REGIAO_LOJA` é um chute meu,
+feito por mapa** — o Derek corrige a lista, que mora no código.
+Cidade em branco **não** é "fora": é "ninguém perguntou ainda".
+
+**A busca ignora etapa e todos os outros filtros, e vai ao servidor.**
+Com texto digitado, mês, call, "de hoje" e "fora da região" ficam de
+lado: ele procura alguém, e a resposta é "está em tal coluna" — não
+"está, mas o filtro o escondeu". O quadro só traz os 300 mais novos;
+uma busca que varresse só a tela diria "nada" sobre quem entrou há dois
+meses. O telefone casa pelos **dígitos** (`*4*7*9*…*`, um superconjunto
+que a tela refina), e **excluídos também são procurados**, com o
+motivo, numa linha à parte. Ao limpar a busca o quadro recarrega, para
+o excedente do servidor não ficar nas colunas.
+
+**ESC fecha a janela de cima, por UM ouvinte no documento.** Um ouvinte
+por janela fecharia o menu, a conversa e o discador de uma vez, já que
+podem estar abertos juntos. O ouvinte clica no fundo da janela de maior
+`z-index` — que é o que toda janela da casa já faz para fechar —, então
+janela nova ganha o ESC sem código. O "Mais" do celular é `z-40` e as
+janelas `z-50`: a última no DOM nem sempre é a que se vê, e as de
+`display:none` não contam. Campo que trata o próprio ESC (cancelar a
+edição do nome) chama `preventDefault()` e a janela fica.
+
+**A conversa mostra o dia** (*Hoje*, *Ontem*, *06/10/2026*), como o
+WhatsApp. A hora do balão ("14:32") não diz de qual dia, e a pergunta de
+quem lê antes de ligar é "foi hoje ou semana passada?". **O dia é o de
+Joinville**: mensagem das 22h30 cairia no dia seguinte em UTC, e a
+conversa de ontem à noite apareceria como "Hoje" (a armadilha da
+decisão 22).
+
+**`ferramentas-quadro.js` guarda essas regras** — em que coluna o lead
+cai, quando está fora da região, qual o dia da mensagem —, lidas do
+próprio `index.html`.
+
 ## Convenções do código
 
 - **Português no domínio.** Estado, funções e rótulos em pt-BR
