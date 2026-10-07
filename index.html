@@ -13054,8 +13054,12 @@ const REGIAO_LOJA = [
   "joinville", "pirabeiraba", "araquari", "barra velha", "balneario barra do sul",
   "sao francisco do sul", "garuva", "itapoa", "guaramirim", "jaragua do sul",
   "schroeder", "massaranduba", "corupa", "campo alegre", "sao bento do sul",
-  "rio negrinho", "mafra", "itaiopolis",
 ];
+/* RIO NEGRINHO, MAFRA E ITAIÓPOLIS SAÍRAM DA LISTA (07/10/2026). Eu os
+ * tinha posto como "da região" por mapa; o Diego marcou um lead de Rio
+ * Negrinho como fora da região à mão, e Mafra e Itaiópolis são mais
+ * longe ainda. Os dados da casa mandam no meu chute — e é por isso que
+ * a lista continua sendo para o Derek corrigir. */
 /* `semAcento` já existe lá em cima e NÃO pode ser redeclarado: duas
  * declarações do mesmo nome no escopo do Babel derrubam a aplicação
  * inteira, não só este trecho — é o que a decisão 7 registra sobre o
@@ -13072,6 +13076,22 @@ const foraDaRegiao = (l) => {
   const c = chaveCidade(l && l.cidade);
   return !!c && REGIAO_LOJA.indexOf(c) < 0;
 };
+
+/* FORA DA REGIÃO SAI DA FILA DE TRABALHO (o Diego, vendo o Rudi Reizel
+ * marcado em laranja e ainda em AGENDAR: *"faltou ele sair dessa
+ * lista"*). Até aqui "fora da região" era só um filtro que se ligava —
+ * o lead continuava no meio de quem atravessa a cidade em vinte minutos,
+ * consumindo a ligação que era de outro, e a marca só mudava a cor do
+ * cartão. Agora ele some de NOVO, AGENDAR e CONTATO FUTURO e vive na
+ * fila própria (o chip "fora da região", que mostra quantos são).
+ *
+ * **Só dessas três, porque são onde ainda se decide ligar.** Quem já
+ * tem hora marcada, não veio, chegou ou foi perdido continua onde
+ * está: esconder um agendamento só porque a pessoa mora longe faria a
+ * loja perder a visita que ela mesma marcou — e a marca de "fora" é
+ * sobre o esforço de prospecção, não sobre uma visita que já existe. */
+const COLUNAS_DE_TRABALHO = ["novo", "agendar", "futuro"];
+const escondidoPorFora = (l, idColuna) => COLUNAS_DE_TRABALHO.indexOf(idColuna) >= 0 && foraDaRegiao(l);
 
 function ConversaPopup({ telefone, nome, aoFechar, aoLigar, aoRenomear, rotuloFechar }) {
   const [msgs, setMsgs] = useState(null);
@@ -13461,6 +13481,9 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
    * perguntar "onde ele está", e a resposta não depende de em que mês
    * ele entrou — é a mesma razão do "todos os meses" (decisão 22). */
   const termo = semAcento(busca).trim().toLowerCase();
+  // Quantos estão na fila de fora — sem o número, quem sai das colunas
+  // parece ter sumido do sistema.
+  const nFora = (lista || []).filter((l) => foraDaRegiao(l) && (!comp || noMes(l))).length;
   const termoNum = busca.replace(/\D/g, "");
   const naBusca = (l) => {
     if (!termo) return true;
@@ -13477,7 +13500,9 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
   const porColuna = (id) => (lista || []).filter((l) => colunaDe(l) === id && (termo
     ? naBusca(l)
     : noMes(l) && naCall(l)
-      && (!fora || foraDaRegiao(l))
+      // O chip liga a fila à parte (só os de fora, em toda coluna); sem
+      // ele, quem é de fora sai das colunas de trabalho.
+      && (fora ? foraDaRegiao(l) : !escondidoPorFora(l, id))
       // "Hoje" só faz sentido onde há hora marcada; nas outras colunas
       // ele esvaziaria tudo e pareceria quebrado.
       && (!hoje || ["agendado", "reagendar", "futuro"].indexOf(id) < 0 || soHoje(l, id))));
@@ -13547,11 +13572,14 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
           {/* **Fora da região é fila à parte, não cor no cartão.** Quem
               mora longe não vem à loja, e a conversa com ele é outra —
               misturado no meio, ele consome a ligação que deveria ir
-              para quem atravessa a cidade em vinte minutos. */}
+              para quem atravessa a cidade em vinte minutos. Os de fora
+              saem de Novo, Agendar e Contato futuro (ver
+              `escondidoPorFora`) e moram aqui. */}
           <button onClick={() => setFora((v) => !v)}
+            title="Leads de fora saem de Novo, Agendar e Contato futuro. Quem já tem hora marcada continua onde está."
             className="rounded-full px-3 py-1.5 text-[12.5px]"
             style={{ background: fora ? C.laranja : C.bg, color: fora ? "#fff" : C.ink, fontWeight: fora ? 700 : 500 }}>
-            fora da região
+            fora da região{nFora ? ` · ${nFora}` : ""}
           </button>
         </div>
       )}

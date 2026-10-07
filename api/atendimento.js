@@ -1764,6 +1764,17 @@ module.exports = async function handler(req, res) {
      * própria, que só acende quando a data chega. */
     const comRetorno = (l) => ["novo", "em_contato"].indexOf(l.status) >= 0 && !!l.proximo_contato;
 
+    /* QUEM FOI MARCADO COMO FORA DA REGIÃO TAMBÉM SAI DESSAS COBRANÇAS
+     * (o Diego, 07/10/2026): ele não está mais na fila de trabalho do
+     * quadro, e cobrar "o cliente sumiu" de quem a pré-venda decidiu
+     * não perseguir é fazer a pessoa resolver duas vezes. **Só vale
+     * para a marca à mão (`fora_regiao`)**: a lista de cidades da loja
+     * mora na tela, e levá-la para cá criaria duas listas do mesmo
+     * recorte — quem mexer em uma teria de lembrar da outra. Lead que
+     * está fora só pela cidade digitada continua aparecendo aqui, e o
+     * quadro o esconde; se isso incomodar, é marcar com o botão. */
+    const deFora = (l) => l.fora_regiao === true;
+
     const naCall = (l) => call == null ? true
       : call >= 10 ? (Number(l.ligacoes) || 0) >= 10
       : (Number(l.ligacoes) || 0) === call;
@@ -1823,7 +1834,7 @@ module.exports = async function handler(req, res) {
         titulo: `Mandamos e o cliente sumiu há ${rotuloPrazo(dias)}`,
         porque: "A última palavra foi nossa e ele não voltou. É ligação, não mensagem — mensagem ele já não respondeu.",
         cor: "roxo",
-        leads: todos.filter((l) => vivo(l) && !comRetorno(l) && semResposta[l.id] && semResposta[l.id] < atras(dias)),
+        leads: todos.filter((l) => vivo(l) && !comRetorno(l) && !deFora(l) && semResposta[l.id] && semResposta[l.id] < atras(dias)),
       },
       {
         id: "parado",
@@ -1831,7 +1842,7 @@ module.exports = async function handler(req, res) {
         titulo: `Em Agendar há ${rotuloPrazo(dias)}, sem conversa`,
         porque: "Entrou por fora do WhatsApp e ninguém moveu. Só o telefone resolve.",
         cor: "roxo",
-        leads: todos.filter((l) => l.status === "em_contato" && !comRetorno(l) && !esperando[l.id] && !semResposta[l.id] &&
+        leads: todos.filter((l) => l.status === "em_contato" && !comRetorno(l) && !deFora(l) && !esperando[l.id] && !semResposta[l.id] &&
           String(l.atualizado_em || l.criado_em) < atras(dias)),
       },
       {
@@ -1840,7 +1851,7 @@ module.exports = async function handler(req, res) {
         porque: "Entraram e ninguém falou com eles ainda.",
         cor: "roxo",
         prazo: true,
-        leads: todos.filter((l) => l.status === "novo" && !comRetorno(l) && String(l.criado_em) < atras(dias)),
+        leads: todos.filter((l) => l.status === "novo" && !comRetorno(l) && !deFora(l) && String(l.criado_em) < atras(dias)),
       },
       {
         id: "remarcar",

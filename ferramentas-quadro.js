@@ -24,8 +24,8 @@ const codigo = [
   pega("const REGIAO_LOJA = [", "function ConversaPopup("),
   pega("const diaDaMensagem = ", "function ListaDeBaloes("),
 ].join("\n");
-const { etapaDoLead, foraDaRegiao, diaDaMensagem, rotuloDoDia, hojeEmSP } = new Function(
-  `${codigo}\nreturn { etapaDoLead, foraDaRegiao, diaDaMensagem, rotuloDoDia, hojeEmSP };`)();
+const { etapaDoLead, foraDaRegiao, escondidoPorFora, diaDaMensagem, rotuloDoDia, hojeEmSP } = new Function(
+  `${codigo}\nreturn { etapaDoLead, foraDaRegiao, escondidoPorFora, diaDaMensagem, rotuloDoDia, hojeEmSP };`)();
 
 let erros = 0, total = 0;
 const confere = (rotulo, got, esperado) => {
@@ -60,6 +60,23 @@ confere("Curitiba",                      foraDaRegiao({ cidade: "Curitiba" }), t
 confere("Blumenau (90 km, fora da lista)", foraDaRegiao({ cidade: "Blumenau" }), true);
 confere("marca desligada explícita",     foraDaRegiao({ fora_regiao: false, cidade: "Joinville" }), false);
 confere("lead nulo não quebra",          foraDaRegiao(null), false);
+// O Diego marcou Rio Negrinho como fora (07/10/2026); Mafra e Itaiópolis são mais longe.
+confere("Rio Negrinho é fora",           foraDaRegiao({ cidade: "RIO NEGRINHO" }), true);
+confere("Mafra é fora",                  foraDaRegiao({ cidade: "Mafra" }), true);
+confere("Itaiópolis é fora",             foraDaRegiao({ cidade: "Itaiópolis" }), true);
+
+// ---- quem é de fora sai da FILA DE TRABALHO, mas não das visitas já marcadas ----
+const longe = { fora_regiao: true };
+confere("fora some de Novo",             escondidoPorFora(longe, "novo"), true);
+confere("fora some de Agendar",          escondidoPorFora(longe, "agendar"), true);
+confere("fora some de Contato futuro",   escondidoPorFora(longe, "futuro"), true);
+confere("fora com hora marcada FICA",    escondidoPorFora(longe, "agendado"), false);
+confere("fora que não veio FICA",        escondidoPorFora(longe, "reagendar"), false);
+confere("fora que compareceu FICA",      escondidoPorFora(longe, "compareceu"), false);
+confere("fora que foi perdido FICA",     escondidoPorFora(longe, "perdido"), false);
+confere("quem é daqui nunca some",       escondidoPorFora({ cidade: "Joinville" }, "agendar"), false);
+confere("cidade em branco não some",     escondidoPorFora({}, "novo"), false);
+confere("fora só pela cidade também some", escondidoPorFora({ cidade: "Curitiba" }, "agendar"), true);
 
 // ---- o dia da conversa: o relógio é o de Joinville ----
 confere("22h30 em Joinville ainda é ontem", diaDaMensagem("2026-10-07T01:30:00Z"), "2026-10-06");

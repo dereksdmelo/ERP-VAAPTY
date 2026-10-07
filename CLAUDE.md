@@ -2312,6 +2312,34 @@ vai parar a ligação para digitar. As duas fontes se somam
 cidade. Quando é a cidade que põe o lead fora, o botão não finge
 desfazer — diz para corrigir a cidade.
 
+**Quem é de fora SAI das colunas de trabalho** (o Diego, vendo o Rudi
+Reizel marcado em laranja e ainda em AGENDAR: *"faltou ele sair dessa
+lista"*). Eu tinha escrito, em comentário, que fora da região era "fila
+à parte, não cor no cartão" — e implementado só um filtro que se
+liga. A marca mudava a cor e o lead continuava no meio de quem atravessa
+a cidade em vinte minutos. Agora ele some de **Novo, Agendar e Contato
+futuro** (`escondidoPorFora`) e mora no chip "fora da região", que diz
+quantos são — sem o número, quem sai das colunas parece ter sumido do
+sistema.
+
+**Só dessas três, porque são onde ainda se decide ligar.** Quem já tem
+hora marcada, não veio, chegou ou foi perdido **continua onde está**:
+esconder um agendamento só porque a pessoa mora longe faria a loja
+perder a visita que ela mesma marcou. A marca é sobre o esforço de
+prospecção, não sobre uma visita que já existe. A busca continua
+achando todo mundo, de fora ou não.
+
+**As Ações também deixam de cobrar quem foi marcado à mão** ("sumiu",
+"parado em Agendar", "novos"). **Só a marca, não a cidade**: a lista de
+cidades mora na tela, e levá-la ao servidor criaria duas listas do mesmo
+recorte. Lead que está fora só pela cidade digitada some do quadro mas
+ainda aparece nas Ações — se incomodar, é marcar com o botão.
+
+**O mapa perdeu para o dado.** `REGIAO_LOJA` tinha Rio Negrinho, Mafra e
+Itaiópolis como "da região"; o Diego marcou à mão um lead de Rio
+Negrinho como fora, e Mafra e Itaiópolis são mais longe ainda. Saíram da
+lista. As demais continuam sendo chute meu.
+
 **O DDD não é palpite de cidade.** O 47 cobre de Joinville a Blumenau e
 Itajaí (90 km), e quem muda de cidade leva o número antigo. Chutar por
 ele poria "perto" em quem está longe. **`REGIAO_LOJA` é um chute meu,
