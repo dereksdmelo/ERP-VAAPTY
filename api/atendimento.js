@@ -660,7 +660,18 @@ async function leads(req, res, tok) {
     if (de) f.push(`agendado_para=gte.${de}T00:00:00`);
     if (ate) f.push(`agendado_para=lte.${ate}T23:59:59`);
     const q = String(req.query.q || "").trim().replace(/[(),*]/g, " ").trim();
-    if (q) f.push(`or=(nome.ilike.*${q}*,telefone.ilike.*${q}*,carro.ilike.*${q}*)`);
+    if (q) {
+      /* O TELEFONE CASA PELOS DÍGITOS, com curinga entre eles. O lead
+       * guarda "(47) 9159-6011" ou "47991596011" conforme quem digitou,
+       * e `ilike` compara texto: "47 9159" não acharia nenhum dos dois.
+       * `*4*7*9*1*5*9*` casa a sequência com qualquer formatação no
+       * meio. É um superconjunto — pode trazer um número com os mesmos
+       * dígitos espalhados —, e a tela refaz o corte exato; aqui só
+       * importa não deixar de trazer quem existe. */
+      const dig = q.replace(/\D/g, "");
+      const tel = dig.length >= 3 ? `,telefone.ilike.*${dig.split("").join("*")}*` : "";
+      f.push(`or=(nome.ilike.*${q}*,telefone.ilike.*${q}*,carro.ilike.*${q}*${tel})`);
+    }
     if (/^\d{4}-\d{2}-\d{2}$/.test(proximo)) f.push(`proximo_contato=eq.${proximo}`);
     const ordem = fila === "agenda" ? "agendado_para.asc"
       : fila === "excluidos" ? "excluido_em.desc" : "criado_em.desc";

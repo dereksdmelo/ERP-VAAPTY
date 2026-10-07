@@ -13154,6 +13154,7 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
   const [call, setCall] = useState(null);
   const [fora, setFora] = useState(false);
   const [busca, setBusca] = useState("");
+  const [excluidosAch, setExcluidosAch] = useState([]);
   const [aviso, setAviso] = useState("");
   const [ligando, setLigando] = useState(null);
   const [excluindo, setExcluindo] = useState(null);
@@ -13183,6 +13184,47 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
     } catch (e) { setErro(e.message); }
   };
   useEffect(carregar, []);
+
+  /* A BUSCA VAI AO SERVIDOR, não só olha o que já carregou. O quadro
+   * traz os 300 leads mais novos; quem entrou há dois meses não está
+   * lá, e uma busca que só varre a lista na tela diria "nada" sobre
+   * alguém que existe — a leitura errada mais cara de uma busca. O que
+   * volta é MESCLADO em `lista` (e não guardado à parte) para que
+   * mover, ligar e anotar continuem atualizando o mesmo cartão.
+   *
+   * **Excluídos também são procurados** (o Diego, 07/10/2026: *"buscar
+   * em todas as possíveis posições"*): quem não acha um lead depois de
+   * procurar em todas as colunas conclui que ele nunca existiu — e ele
+   * pode estar escondido, com o motivo escrito. Aparece à parte, numa
+   * linha, porque excluído não é fila de trabalho. */
+  const mesclou = useRef(false);
+  useEffect(() => {
+    const q = busca.trim();
+    if (q.length < 2) {
+      setExcluidosAch([]);
+      /* Ao limpar, o quadro volta ao que era: o que a busca trouxe a
+       * mais (inclusive o excedente que o servidor devolve de
+       * propósito, ver `?recurso=lead`) não pode ficar misturado nas
+       * colunas. */
+      if (mesclou.current) { mesclou.current = false; carregar(); }
+      return;
+    }
+    let vivo = true;
+    const t = setTimeout(() => {
+      listarLeads({ fila: "quadro", q }).then((r) => {
+        if (!vivo) return;
+        mesclou.current = true;
+        setLista((ls) => {
+          const base = ls || [];
+          const tem = {};
+          base.forEach((x) => { tem[x.id] = true; });
+          return base.concat(r.filter((x) => !tem[x.id]));
+        });
+      }).catch(() => {});
+      listarLeads({ fila: "excluidos", q }).then((r) => { if (vivo) setExcluidosAch(r); }).catch(() => {});
+    }, 300);
+    return () => { vivo = false; clearTimeout(t); };
+  }, [busca]);
 
   const mexer = async (l, mud) => {
     setLista((ls) => (ls || []).map((x) => (x.id === l.id ? { ...x, ...mud } : x)));
@@ -13346,12 +13388,19 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
     if (texto.indexOf(termo) >= 0) return true;
     return termoNum.length >= 3 && String(l.telefone || "").replace(/\D/g, "").indexOf(termoNum) >= 0;
   };
-  const porColuna = (id) => (lista || []).filter((l) => colunaDe(l) === id && (termo ? true : noMes(l)) && naCall(l)
-    && naBusca(l)
-    && (!fora || foraDaRegiao(l))
-    // "Hoje" só faz sentido onde há hora marcada; nas outras colunas
-    // ele esvaziaria tudo e pareceria quebrado.
-    && (!hoje || ["agendado", "reagendar"].indexOf(id) < 0 || soHoje(l)));
+  /* **COM TEXTO NA BUSCA, NADA MAIS FILTRA** (o Diego, 07/10/2026:
+   * *"ignorar estágio do lead"*, *"buscar em todas as possíveis
+   * posições"*). Ele procura alguém, e a resposta é "está em tal
+   * coluna" — não "está, mas o filtro de call o escondeu". Mês, call,
+   * "agendados de hoje" e "fora da região" ficam de lado enquanto há
+   * texto, e voltam sozinhos quando a busca é limpa. */
+  const porColuna = (id) => (lista || []).filter((l) => colunaDe(l) === id && (termo
+    ? naBusca(l)
+    : noMes(l) && naCall(l)
+      && (!fora || foraDaRegiao(l))
+      // "Hoje" só faz sentido onde há hora marcada; nas outras colunas
+      // ele esvaziaria tudo e pareceria quebrado.
+      && (!hoje || ["agendado", "reagendar"].indexOf(id) < 0 || soHoje(l))));
 
   return (
     <div>
@@ -13429,10 +13478,20 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
       {erro && <p className="mb-3 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
       {!!termo && lista !== null && (() => {
         const n = COLUNAS_LEAD.reduce((t, c) => t + porColuna(c.id).length, 0);
+        const ex = excluidosAch.filter((l) => naBusca(l));
         return (
-          <p className="mb-3 text-[12.5px]" style={{ color: n ? C.mute : C.laranja }}>
-            {n ? `${n} achado${n === 1 ? "" : "s"} em todos os meses.` : "Nada com esse nome ou telefone — confira os filtros acima."}
-          </p>
+          <div className="mb-3 text-[12.5px]" style={{ color: C.mute }}>
+            <p style={{ color: n || ex.length ? C.mute : C.laranja }}>
+              {n ? `${n} achado${n === 1 ? "" : "s"}, em qualquer etapa e em todos os meses.`
+                 : "Nada com esse nome ou telefone em nenhuma etapa."}
+            </p>
+            {!!ex.length && (
+              <p className="mt-0.5">
+                Também em <strong>Excluídos</strong>: {ex.slice(0, 5).map((l) => `${l.nome}${l.excluido_motivo ? ` (${l.excluido_motivo})` : ""}`).join("; ")}
+                {ex.length > 5 ? ` e mais ${ex.length - 5}` : ""}.
+              </p>
+            )}
+          </div>
         );
       })()}
       {aviso && (
