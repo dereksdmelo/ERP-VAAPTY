@@ -12951,10 +12951,26 @@ function Ligar({ para, nome, canalSugerido, aoFechar, aoLigar, chamadas }) {
  * consulta, não destino: ele responde "o que já foi prometido a esta
  * pessoa" e devolve quem perguntou para onde estava.
  */
-function ConversaPopup({ telefone, nome, aoFechar }) {
+/* A CONVERSA É CONSULTA, E QUEM A ABRE ESTÁ NO MEIO DE UM TRABALHO.
+ *
+ * Ela responde "o que já foi prometido a esta pessoa" — e a resposta
+ * quase sempre leva ao gesto seguinte: ligar, corrigir o nome,
+ * agendar. Por isso ela leva o telefone e o nome junto, e devolve
+ * quem a abriu para o lugar de onde veio (`rotuloFechar`), em vez de
+ * largar a pessoa no quadro.
+ *
+ * O Diego pediu os três em 07/10/2026: *"botão ligar quando abrir
+ * conversa"*, *"ou voltar"*, *"se a opção de editar o nome ficar
+ * disponível tbm na janela de conversa"*. O nome é o caso mais claro:
+ * é LENDO a conversa que se descobre que "marysantinha710" se chama
+ * Mary, e mandar corrigir isso em outra tela é garantir que não
+ * aconteça. */
+function ConversaPopup({ telefone, nome, aoFechar, aoLigar, aoRenomear, rotuloFechar }) {
   const [msgs, setMsgs] = useState(null);
   const [erro, setErro] = useState("");
   const [canal, setCanal] = useState("");
+  const [editando, setEditando] = useState(false);
+  const [nomeNovo, setNomeNovo] = useState("");
   const fim = useRef(null);
 
   useEffect(() => {
@@ -12982,14 +12998,42 @@ function ConversaPopup({ telefone, nome, aoFechar }) {
       <div className="flex max-h-[80vh] w-full max-w-[560px] flex-col rounded-xl p-4" onClick={(e) => e.stopPropagation()}
         style={{ background: C.paper, border: `1px solid ${C.line}`, boxShadow: "0 18px 50px rgba(24,20,32,0.28)" }}>
         <div className="flex items-start justify-between gap-3 pb-3" style={{ borderBottom: `1px solid ${C.line}` }}>
-          <div className="min-w-0">
-            <div className="truncate text-[16px]" style={{ fontFamily: F.disp, fontWeight: 800 }}>{nome}</div>
+          <div className="min-w-0 flex-1">
+            {editando ? (
+              <div className="flex gap-2">
+                <input className={inputCls} style={inputSty} value={nomeNovo} autoFocus
+                  onChange={(e) => setNomeNovo(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && nomeNovo.trim()) { aoRenomear(nomeNovo.trim()); setEditando(false); }
+                    if (e.key === "Escape") setEditando(false);
+                  }} />
+                <button onClick={() => { if (nomeNovo.trim()) aoRenomear(nomeNovo.trim()); setEditando(false); }}
+                  className="shrink-0 rounded-lg px-3 text-[13px] font-semibold text-white" style={{ background: C.roxo }}>ok</button>
+              </div>
+            ) : (
+              <div className="truncate text-[16px]" style={{ fontFamily: F.disp, fontWeight: 800 }}>
+                {nome}
+                {aoRenomear && (
+                  <button onClick={() => { setNomeNovo(nome || ""); setEditando(true); }}
+                    className="ml-2 align-middle text-[11.5px]" style={{ color: C.roxo, fontWeight: 600 }}>editar</button>
+                )}
+              </div>
+            )}
             <div className="text-[12.5px]" style={{ color: C.mute }}>
               {telBR(telefone)}{canal ? ` · ${canal}` : ""}
             </div>
           </div>
-          <button onClick={aoFechar} className="text-[13px]" style={{ color: C.mute }}>fechar</button>
+          <button onClick={aoFechar} className="shrink-0 text-[13px] font-semibold" style={{ color: C.roxo }}>
+            {rotuloFechar || "fechar"}
+          </button>
         </div>
+        {/* LIGAR SEM SAIR DA CONVERSA: o que se lê aqui é justamente o
+            que decide o que falar na ligação. */}
+        {aoLigar && telefone && (
+          <button onClick={aoLigar}
+            className="mt-3 w-full rounded-lg px-3 py-2.5 text-[14px] font-semibold text-white"
+            style={{ background: C.verde }}>Ligar para {nome || telBR(telefone)}</button>
+        )}
         <div className="mt-3 flex-1 space-y-2 overflow-y-auto pr-1">
           {erro && <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
           {!msgs && !erro && <p className="text-[13.5px]" style={{ color: C.mute }}>carregando…</p>}
@@ -13062,6 +13106,8 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
   const [vendoConversa, setVendoConversa] = useState(null);
   const [editandoNome, setEditandoNome] = useState(false);
   const [nomeNovo, setNomeNovo] = useState("");
+  const [editandoCarro, setEditandoCarro] = useState(false);
+  const [carroNovo, setCarroNovo] = useState("");
   const [obs, setObs] = useState("");
   const [novo, setNovo] = useState({ nome: "", telefone: "", carro: "", origem: "fluxo_loja" });
 
@@ -13091,14 +13137,37 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
   // Ao abrir outro cartão, o rascunho da anotação não pode ficar para
   // trás — anotação do João na ficha da Maria é pior que anotação
   // nenhuma.
-  const abrirMenu = (l) => { setMenu(l); setObs(""); setEditandoNome(false); };
+  const abrirMenu = (l) => { setMenu(l); setObs(""); setEditandoNome(false); setEditandoCarro(false); };
+
+  /* O NOME E O CARRO SE CORRIGEM EM QUALQUER JANELA ABERTA, e por
+   * isso a gravação mora aqui: o menu, a conversa e o discador podem
+   * estar os três na tela ao mesmo tempo (ver o comentário do botão
+   * Ligar), e cada um com a sua cópia do lead. Atualizar só a de cima
+   * faria a correção sumir ao voltar para a de baixo. */
+  const alterar = async (l, mud) => {
+    setMenu((m) => (m && m.id === l.id ? { ...m, ...mud } : m));
+    setVendoConversa((v) => (v && v.id === l.id ? { ...v, ...mud } : v));
+    setLigando((g) => (g && g.id === l.id ? { ...g, ...mud } : g));
+    await mexer(l, mud);
+  };
+  const renomear = (l, n) => alterar(l, { nome: n });
 
   const salvarNome = async () => {
     const n = nomeNovo.trim();
     if (!n || !menu) { setEditandoNome(false); return; }
-    setMenu({ ...menu, nome: n });
     setEditandoNome(false);
-    await mexer(menu, { nome: n });
+    await renomear(menu, n);
+  };
+
+  /* O CARRO FALTAVA, e é o que a pré-venda pergunta na primeira
+   * frase (o Derek, 07/10/2026: *"falta um campo pra colocar o carro
+   * da pessoa"*). Ele já existia na coluna e no cartão, e já ia para
+   * o atendimento no "compareceu" — só não havia onde digitar depois
+   * que o lead nascia. */
+  const salvarCarro = async () => {
+    if (!menu) { setEditandoCarro(false); return; }
+    setEditandoCarro(false);
+    await alterar(menu, { carro: carroNovo.trim() });
   };
 
   /* **Cada anotação entra com a data na frente, e nada é
@@ -13326,8 +13395,25 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
               </button>
             )}
 
+            {editandoCarro ? (
+              <div className="mt-1 flex gap-2">
+                <input className={inputCls} style={inputSty} value={carroNovo} autoFocus
+                  placeholder="o carro que ele quer vender"
+                  onChange={(e) => setCarroNovo(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") salvarCarro(); if (e.key === "Escape") setEditandoCarro(false); }} />
+                <button onClick={salvarCarro} className="shrink-0 rounded-lg px-3 text-[13px] font-semibold text-white"
+                  style={{ background: C.roxo }}>ok</button>
+              </div>
+            ) : (
+              <button onClick={() => { setCarroNovo(menu.carro || ""); setEditandoCarro(true); }}
+                className="mt-0.5 block w-full text-left text-[12.5px]" style={{ color: menu.carro ? C.ink : C.mute }}>
+                {menu.carro || "sem carro anotado"}
+                <span className="ml-2 text-[11.5px]" style={{ color: C.roxo, fontWeight: 600 }}>editar</span>
+              </button>
+            )}
+
             <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[12.5px]" style={{ color: C.mute }}>
-              <span>{menu.carro ? `${menu.carro} · ` : ""}{telBR(menu.telefone) || "sem telefone"}</span>
+              <span>{telBR(menu.telefone) || "sem telefone"}</span>
               <span className="rounded-full px-1.5 py-0.5 text-[10.5px] font-bold"
                 style={{ background: CHAMADA(menu.ligacoes).cor + "18", color: CHAMADA(menu.ligacoes).cor }}>
                 {CHAMADA(menu.ligacoes).rot}
@@ -13336,7 +13422,17 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
 
             {menu.telefone && (
               <div className="mt-3 grid grid-cols-2 gap-2">
-                <button onClick={() => { setLigando(menu); setMenu(null); }}
+                {/* O MENU FICA ABERTO ATRÁS. Ele fechava aqui, e o
+                    Diego mostrou o custo em 07/10/2026: discar
+                    devolvia a pessoa ao quadro, e de lá ela não
+                    conseguia mais *alimentar* o lead — agendar,
+                    reagendar, anotar — porque o cartão tinha saído do
+                    filtro em que ela estava (uma call a mais e o
+                    "1ª call" já não o mostra). **Ligar é o meio;
+                    registrar o que foi combinado é o fim.** Quem
+                    fechar o menu junto de novo quebra o fluxo outra
+                    vez. */}
+                <button onClick={() => setLigando(menu)}
                   className="rounded-lg px-3 py-2.5 text-[14px] font-semibold text-white" style={{ background: C.verde }}>
                   Ligar
                 </button>
@@ -13359,7 +13455,7 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
             )}
 
             {menu.telefone && (
-              <button onClick={() => { setVendoConversa(menu); setMenu(null); }}
+              <button onClick={() => setVendoConversa(menu)}
                 className="mt-2 w-full rounded-lg border px-3 py-2.5 text-[13.5px] font-semibold"
                 style={{ borderColor: C.line, color: C.roxo }}>Ver a conversa</button>
             )}
@@ -13396,6 +13492,9 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
 
       {vendoConversa && (
         <ConversaPopup telefone={vendoConversa.telefone} nome={vendoConversa.nome}
+          rotuloFechar={menu && menu.id === vendoConversa.id ? "voltar" : "fechar"}
+          aoLigar={() => setLigando(vendoConversa)}
+          aoRenomear={(n) => renomear(vendoConversa, n)}
           aoFechar={() => setVendoConversa(null)} />
       )}
 
