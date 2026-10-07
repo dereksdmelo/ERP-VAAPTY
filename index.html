@@ -12017,10 +12017,21 @@ async function restaurarLead(id) {
 }
 
 async function atualizarLead(id, dados) {
-  const r = await fetchAut(`/api/atendimento?recurso=lead&id=${encodeURIComponent(id)}`, {
-    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
-  });
-  const d = await r.json().catch(() => ({}));
+  const manda = async (corpo) => {
+    const r = await fetchAut(`/api/atendimento?recurso=lead&id=${encodeURIComponent(id)}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo),
+    });
+    return [r, await r.json().catch(() => ({}))];
+  };
+  let [r, d] = await manda(dados);
+  /* A SEGUNDA TENTATIVA É SEM A CIDADE. `cidade` é coluna nova (0064);
+   * num banco que ainda não a tenha, o PATCH inteiro é recusado e
+   * leva junto o nome, o carro e o status — e o que a pessoa acabou
+   * de digitar some sem explicação. Mesmo remédio da decisão 36. */
+  if (!r.ok && dados && dados.cidade !== undefined) {
+    const { cidade, ...resto } = dados;
+    if (Object.keys(resto).length) [r, d] = await manda(resto);
+  }
   if (!r.ok) throw new Error(d.erro || "Não consegui salvar.");
   return d.lead;
 }
@@ -12965,6 +12976,44 @@ function Ligar({ para, nome, canalSugerido, aoFechar, aoLigar, chamadas }) {
  * é LENDO a conversa que se descobre que "marysantinha710" se chama
  * Mary, e mandar corrigir isso em outra tela é garantir que não
  * aconteça. */
+/* FORA DO RANGE É DISTÂNCIA, e quem decide é a cidade digitada.
+ *
+ * O Diego, em 07/10/2026: *"o cliente que tá fora do range precisa de
+ * um tratamento específico, talvez uma lista de 'fora do range'"*.
+ * Quem mora longe não atravessa o estado para sentar na mesa, e
+ * trabalhar esse lead como os outros gasta ligação numa visita que
+ * não vai acontecer.
+ *
+ * **O DDD não serve de palpite.** O 47 cobre de Joinville a Blumenau
+ * e Itajaí — 90 km — e quem muda de cidade leva o número antigo.
+ * Chutar por ele poria "perto" em quem está longe, que é exatamente o
+ * erro que esta lista existe para evitar. A cidade é perguntada: a
+ * pré-venda já pergunta na ligação e a IA já pergunta na conversa.
+ *
+ * **Cidade em branco NÃO é "fora"** — é "ninguém perguntou ainda", e
+ * são coisas diferentes (mesma régua do visto nulo da decisão 30).
+ * Por isso a lista de fora só mostra quem tem cidade escrita.
+ *
+ * A lista abaixo é a região de onde a loja realmente recebe gente, e
+ * **é um chute meu para o Derek corrigir** — foi montada por mapa, não
+ * por dado da casa. Quem souber que Blumenau vem, ou que São Bento
+ * não vem, mexe aqui. */
+const REGIAO_LOJA = [
+  "joinville", "pirabeiraba", "araquari", "barra velha", "balneario barra do sul",
+  "sao francisco do sul", "garuva", "itapoa", "guaramirim", "jaragua do sul",
+  "schroeder", "massaranduba", "corupa", "campo alegre", "sao bento do sul",
+  "rio negrinho", "mafra", "itaiopolis",
+];
+/* `semAcento` já existe lá em cima e NÃO pode ser redeclarado: duas
+ * declarações do mesmo nome no escopo do Babel derrubam a aplicação
+ * inteira, não só este trecho — é o que a decisão 7 registra sobre o
+ * `brl`. */
+const chaveCidade = (t) => semAcento(t).trim().toLowerCase();
+const foraDaRegiao = (l) => {
+  const c = chaveCidade(l && l.cidade);
+  return !!c && REGIAO_LOJA.indexOf(c) < 0;
+};
+
 function ConversaPopup({ telefone, nome, aoFechar, aoLigar, aoRenomear, rotuloFechar }) {
   const [msgs, setMsgs] = useState(null);
   const [erro, setErro] = useState("");
@@ -13064,6 +13113,9 @@ function CartaoLead({ l, onAbrir, onArrastar, onVeio }) {
       style={{ background: C.paper, border: `1px solid ${perguntar ? C.laranja : C.line}` }}>
       <div className="truncate text-[13.5px] font-semibold">{l.nome}</div>
       {l.carro && <div className="truncate text-[12px]" style={{ color: C.mute }}>{l.carro}</div>}
+      {foraDaRegiao(l) && (
+        <div className="truncate text-[11.5px]" style={{ color: C.laranja, fontWeight: 600 }}>{l.cidade}</div>
+      )}
       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]" style={{ color: C.mute }}>
         {l.origem && <span>{rotulo(ORIGENS, l.origem)}</span>}
         {!!Number(l.ligacoes) && <span style={{ color: CHAMADA(l.ligacoes).cor }}>{CHAMADA(l.ligacoes).rot}</span>}
@@ -13100,6 +13152,7 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
   const [criando, setCriando] = useState(false);
   const [hoje, setHoje] = useState(false);
   const [call, setCall] = useState(null);
+  const [fora, setFora] = useState(false);
   const [aviso, setAviso] = useState("");
   const [ligando, setLigando] = useState(null);
   const [excluindo, setExcluindo] = useState(null);
@@ -13108,6 +13161,8 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
   const [nomeNovo, setNomeNovo] = useState("");
   const [editandoCarro, setEditandoCarro] = useState(false);
   const [carroNovo, setCarroNovo] = useState("");
+  const [editandoCidade, setEditandoCidade] = useState(false);
+  const [cidadeNova, setCidadeNova] = useState("");
   const [obs, setObs] = useState("");
   const [novo, setNovo] = useState({ nome: "", telefone: "", carro: "", origem: "fluxo_loja" });
 
@@ -13137,7 +13192,10 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
   // Ao abrir outro cartão, o rascunho da anotação não pode ficar para
   // trás — anotação do João na ficha da Maria é pior que anotação
   // nenhuma.
-  const abrirMenu = (l) => { setMenu(l); setObs(""); setEditandoNome(false); setEditandoCarro(false); };
+  const abrirMenu = (l) => {
+    setMenu(l); setObs("");
+    setEditandoNome(false); setEditandoCarro(false); setEditandoCidade(false);
+  };
 
   /* O NOME E O CARRO SE CORRIGEM EM QUALQUER JANELA ABERTA, e por
    * isso a gravação mora aqui: o menu, a conversa e o discador podem
@@ -13168,6 +13226,12 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
     if (!menu) { setEditandoCarro(false); return; }
     setEditandoCarro(false);
     await alterar(menu, { carro: carroNovo.trim() });
+  };
+
+  const salvarCidade = async () => {
+    if (!menu) { setEditandoCidade(false); return; }
+    setEditandoCidade(false);
+    await alterar(menu, { cidade: cidadeNova.trim() });
   };
 
   /* **Cada anotação entra com a data na frente, e nada é
@@ -13260,6 +13324,7 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
     ? true
     : call >= 10 ? (Number(l.ligacoes) || 0) >= 10 : (Number(l.ligacoes) || 0) === call;
   const porColuna = (id) => (lista || []).filter((l) => colunaDe(l) === id && noMes(l) && naCall(l)
+    && (!fora || foraDaRegiao(l))
     // "Hoje" só faz sentido onde há hora marcada; nas outras colunas
     // ele esvaziaria tudo e pareceria quebrado.
     && (!hoje || ["agendado", "reagendar"].indexOf(id) < 0 || soHoje(l)));
@@ -13315,6 +13380,15 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
               <option value="10">10 ou mais</option>
             </select>
           </label>
+          {/* **Fora da região é fila à parte, não cor no cartão.** Quem
+              mora longe não vem à loja, e a conversa com ele é outra —
+              misturado no meio, ele consome a ligação que deveria ir
+              para quem atravessa a cidade em vinte minutos. */}
+          <button onClick={() => setFora((v) => !v)}
+            className="rounded-full px-3 py-1.5 text-[12.5px]"
+            style={{ background: fora ? C.laranja : C.bg, color: fora ? "#fff" : C.ink, fontWeight: fora ? 700 : 500 }}>
+            fora da região
+          </button>
         </div>
       )}
 
@@ -13408,6 +13482,25 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
               <button onClick={() => { setCarroNovo(menu.carro || ""); setEditandoCarro(true); }}
                 className="mt-0.5 block w-full text-left text-[12.5px]" style={{ color: menu.carro ? C.ink : C.mute }}>
                 {menu.carro || "sem carro anotado"}
+                <span className="ml-2 text-[11.5px]" style={{ color: C.roxo, fontWeight: 600 }}>editar</span>
+              </button>
+            )}
+
+            {editandoCidade ? (
+              <div className="mt-1 flex gap-2">
+                <input className={inputCls} style={inputSty} value={cidadeNova} autoFocus
+                  placeholder="de onde ele é"
+                  onChange={(e) => setCidadeNova(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") salvarCidade(); if (e.key === "Escape") setEditandoCidade(false); }} />
+                <button onClick={salvarCidade} className="shrink-0 rounded-lg px-3 text-[13px] font-semibold text-white"
+                  style={{ background: C.roxo }}>ok</button>
+              </div>
+            ) : (
+              <button onClick={() => { setCidadeNova(menu.cidade || ""); setEditandoCidade(true); }}
+                className="mt-0.5 block w-full text-left text-[12.5px]"
+                style={{ color: menu.cidade ? (foraDaRegiao(menu) ? C.laranja : C.ink) : C.mute }}>
+                {menu.cidade || "sem cidade"}
+                {foraDaRegiao(menu) ? " · fora da região" : ""}
                 <span className="ml-2 text-[11.5px]" style={{ color: C.roxo, fontWeight: 600 }}>editar</span>
               </button>
             )}

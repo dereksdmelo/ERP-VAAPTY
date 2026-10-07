@@ -605,6 +605,7 @@ function paraLead(c) {
   if (c.nome !== undefined) l.nome = texto(c.nome);
   if (c.telefone !== undefined) l.telefone = texto(c.telefone);
   if (c.carro !== undefined) l.carro = texto(c.carro);
+  if (c.cidade !== undefined) l.cidade = texto(c.cidade);
   if (c.origem !== undefined) l.origem = daLista(c.origem, ORIGENS) || "outro";
   if (c.status !== undefined && LEAD_STATUS.indexOf(String(c.status)) >= 0) l.status = c.status;
   if (c.negociador_id !== undefined) l.negociador_id = RX_UUID.test(String(c.negociador_id || "")) ? c.negociador_id : null;
