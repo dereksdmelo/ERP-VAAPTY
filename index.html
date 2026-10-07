@@ -13153,6 +13153,7 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
   const [hoje, setHoje] = useState(false);
   const [call, setCall] = useState(null);
   const [fora, setFora] = useState(false);
+  const [busca, setBusca] = useState("");
   const [aviso, setAviso] = useState("");
   const [ligando, setLigando] = useState(null);
   const [excluindo, setExcluindo] = useState(null);
@@ -13323,7 +13324,30 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
   const naCall = (l) => call == null
     ? true
     : call >= 10 ? (Number(l.ligacoes) || 0) >= 10 : (Number(l.ligacoes) || 0) === call;
-  const porColuna = (id) => (lista || []).filter((l) => colunaDe(l) === id && noMes(l) && naCall(l)
+  /* A BUSCA É POR NOME, TELEFONE, CARRO E CIDADE (o Diego, 07/10/2026:
+   * *"barra de busca, telefone e nome já fica legal"*). Com 100 cartões
+   * no quadro, achar a Maria que acabou de ligar de volta é percorrer
+   * seis colunas com o telefone na orelha.
+   *
+   * **O telefone casa pelos dígitos**, não pela string: o lead guarda
+   * "(47) 9159-6011" ou "47991596011" conforme quem digitou, e o
+   * WhatsApp traz 55 na frente. Quem digita "9159" ou "47 9159" acha
+   * nos três formatos. Menos de três dígitos não busca por telefone —
+   * "4" acharia todo mundo do 47 e pareceria que a busca não filtra.
+   *
+   * **Enquanto há texto, o mês não filtra.** Procurar alguém é
+   * perguntar "onde ele está", e a resposta não depende de em que mês
+   * ele entrou — é a mesma razão do "todos os meses" (decisão 22). */
+  const termo = semAcento(busca).trim().toLowerCase();
+  const termoNum = busca.replace(/\D/g, "");
+  const naBusca = (l) => {
+    if (!termo) return true;
+    const texto = semAcento([l.nome, l.carro, l.cidade].filter(Boolean).join(" ")).toLowerCase();
+    if (texto.indexOf(termo) >= 0) return true;
+    return termoNum.length >= 3 && String(l.telefone || "").replace(/\D/g, "").indexOf(termoNum) >= 0;
+  };
+  const porColuna = (id) => (lista || []).filter((l) => colunaDe(l) === id && (termo ? true : noMes(l)) && naCall(l)
+    && naBusca(l)
     && (!fora || foraDaRegiao(l))
     // "Hoje" só faz sentido onde há hora marcada; nas outras colunas
     // ele esvaziaria tudo e pareceria quebrado.
@@ -13363,6 +13387,16 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
             className="rounded-lg px-4 py-2 text-[14px] font-semibold text-white" style={{ background: C.roxo }}>
             + Lead
           </button>
+          <div className="relative min-w-[200px] flex-1 sm:max-w-[320px]">
+            <input className={inputCls} style={{ ...inputSty, paddingRight: busca ? 32 : undefined }}
+              placeholder="Buscar nome, telefone ou carro" value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Escape") setBusca(""); }} />
+            {!!busca && (
+              <button onClick={() => setBusca("")} aria-label="limpar a busca"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-[16px] leading-none" style={{ color: C.mute }}>×</button>
+            )}
+          </div>
           <button onClick={() => setHoje(!hoje)}
             className="rounded-full px-3 py-1.5 text-[12.5px] font-semibold"
             style={hoje ? { background: C.verde, color: "#fff" }
@@ -13393,6 +13427,14 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
       )}
 
       {erro && <p className="mb-3 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+      {!!termo && lista !== null && (() => {
+        const n = COLUNAS_LEAD.reduce((t, c) => t + porColuna(c.id).length, 0);
+        return (
+          <p className="mb-3 text-[12.5px]" style={{ color: n ? C.mute : C.laranja }}>
+            {n ? `${n} achado${n === 1 ? "" : "s"} em todos os meses.` : "Nada com esse nome ou telefone — confira os filtros acima."}
+          </p>
+        );
+      })()}
       {aviso && (
         <p className="mb-3 rounded-lg px-3 py-2 text-[13px]" style={{ background: "#E8F3EE", color: C.verde }}>
           {aviso} Ele está em <strong>Atendimentos</strong>.
