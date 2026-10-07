@@ -14254,9 +14254,29 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
                                 {horaBR(l.agendado_para)}{conf ? " ✓" : ""}
                               </div>
                               <div className="truncate text-[12px]">{l.nome}</div>
+                              {/* O CARRO NO CARTÃO (o Diego, 07/10/2026: *"mostrar
+                                  nome do veículo"*). Quem confere a agenda quer saber
+                                  QUE carro vem — é o que a negociação prepara. Hoje
+                                  só 2 de 49 agendados têm o campo, porque o cliente
+                                  diz o carro em texto livre na conversa; "sem carro"
+                                  fica apagado, para o buraco aparecer em vez de o
+                                  cartão parecer completo. */}
+                              <div className="truncate text-[11px]" style={{ color: C.mute, opacity: l.carro ? 1 : 0.55 }}>
+                                {l.carro || "sem carro"}
+                              </div>
                             </button>
                             {aberto && (
                               <div className="space-y-1 border-t p-1.5" style={{ borderColor: C.line }}>
+                                {/* Campo não controlado de propósito: o `defaultValue` +
+                                    gravar ao sair evita estado novo dentro do `map`
+                                    (decisão 7), e o `key` refaz o campo quando a
+                                    recarga traz o valor gravado. */}
+                                <input key={`${l.id}:${l.carro || ""}`} defaultValue={l.carro || ""}
+                                  placeholder="carro dele (ex.: Sandero 2011)"
+                                  className="w-full rounded border px-1.5 py-1 text-[11.5px] outline-none"
+                                  style={{ borderColor: C.line, background: "#fff" }}
+                                  onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+                                  onBlur={(e) => { const v = e.target.value.trim(); if (v !== (l.carro || "")) mexer(l, { carro: v }); }} />
                                 <button onClick={() => chegou(l)} disabled={indo === l.id}
                                   className="w-full rounded px-2 py-1.5 text-[11.5px] font-bold text-white"
                                   style={{ background: C.roxo, opacity: indo === l.id ? 0.5 : 1 }}>
@@ -14335,7 +14355,7 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="min-w-0">
                         <div className="text-[15px] font-semibold">
-                          <span style={{ fontVariantNumeric: "tabular-nums" }}>{horaBR(l.agendado_para)}</span> · {l.nome}
+                          <span style={{ fontVariantNumeric: "tabular-nums" }}>{horaBR(l.agendado_para)}</span> · {l.nome}{l.carro ? <span style={{ color: C.mute }}> — {l.carro}</span> : null}
                         </div>
                         <div className="text-[13px]" style={{ color: C.mute }}>
                           {[l.carro, l.negociador_nome || (l.negociador && l.negociador.nome) || "sem negociador"].filter(Boolean).join(" · ")}
