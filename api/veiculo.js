@@ -317,8 +317,22 @@ async function importarEstoque(req, res, tok, c) {
   const nomes = Array.from(new Set(validas
     .map((l) => String(l.comprador || "").trim())
     .filter((n) => n && !NAO_E_COMPRADOR.test(n))));
+  /* O NOME VAI CODIFICADO, e o `&` é a razão. "GEFERSON VIEIRA DA
+   * SILVA & CIA LTDA" cru na URL encerra o parâmetro `nome=` ali
+   * mesmo: o PostgREST recebe a lista cortada no meio e devolve
+   * `PGRST100 failed to parse filter`, com a importação inteira
+   * parada. O Derek bateu nisso em 07/10/2026 com a planilha de abril,
+   * 47 compradores, e o erro apontava a coluna 322 — exatamente o `&`.
+   *
+   * As aspas do PostgREST protegem vírgula e parêntese DENTRO do
+   * filtro; elas não protegem nada de um caractere que a query string
+   * já tinha consumido antes. São duas camadas, e esta faltava — a
+   * mesma lição da decisão 10, onde a busca escapa vírgula e
+   * parêntese no `or=`. **Texto que veio de planilha nunca entra numa
+   * URL sem `encodeURIComponent`.** */
+  const paraFiltro = (n) => `"${encodeURIComponent(n.replace(/"/g, ""))}"`;
   const existentes = nomes.length
-    ? await supa(`${base("comprador")}?select=id,nome&nome=in.(${nomes.map((n) => `"${n.replace(/"/g, "")}"`).join(",")})`, { headers: cab })
+    ? await supa(`${base("comprador")}?select=id,nome&nome=in.(${nomes.map(paraFiltro).join(",")})`, { headers: cab })
     : [];
   const compradorPor = {};
   (existentes || []).forEach((x) => { compradorPor[x.nome.toLowerCase()] = x; });
