@@ -184,7 +184,25 @@ const ROTULOS = [
  * subiu seria errar com o carro já no pátio.
  */
 const SHINKAI_URL = "https://www.shinkai.com.br/api/public/veiculo";
-const SHINKAI_KEY = process.env.SHINKAI_API_KEY || "";
+/* A CHAVE É APARADA, e a FORMA dela é conferível por fora (09/10/2026).
+ * O envio funcionava pela Vercel e falhava pelo Cloudflare — o
+ * negociador só via "não foi" —, e a rede estava inocente: da borda da
+ * Cloudflare o Shinkai responde igual. Sobrava a chave, e o GET abaixo
+ * só dizia "configurada", que um placeholder de 11 caracteres, um
+ * espaço colado junto ou uma quebra de linha também são. `fetch`
+ * recusa cabeçalho com quebra de linha, e o `catch` engolia o motivo.
+ *
+ * **A forma nunca devolve o valor**: só a classe — ausente, curta
+ * (o tamanho do placeholder que `vercel env pull` entrega para
+ * variável Sensitive, ver `worker/mudar-segredos.mjs`), com caractere
+ * inválido, ou ok. Mesma régua do `configurado`, e é o que distingue
+ * "não subiu" de "subiu errado" sem abrir o painel com o carro na mesa. */
+const SHINKAI_BRUTA = process.env.SHINKAI_API_KEY || "";
+const SHINKAI_KEY = SHINKAI_BRUTA.trim();
+const formaDaChave = () => !SHINKAI_KEY ? "ausente"
+  : SHINKAI_KEY.length <= 20 ? "curta"
+  : /[^\x21-\x7E]/.test(SHINKAI_KEY) ? "caractere_invalido"
+  : SHINKAI_BRUTA !== SHINKAI_KEY ? "ok_com_espaco_nas_pontas" : "ok";
 const SHINKAI_ORIGEM = process.env.SHINKAI_ORIGEM || "vaapty-joinville";
 
 // Os opcionais sao CHIPS na ficha do Shinkai, e o casamento e pelo
@@ -219,7 +237,7 @@ const numeroOuNulo = (v) => {
 };
 
 async function shinkai(req, res, tok) {
-  if (req.method === "GET") return res.status(200).json({ configurado: !!SHINKAI_KEY });
+  if (req.method === "GET") return res.status(200).json({ configurado: !!SHINKAI_KEY, forma: formaDaChave() });
   if (req.method !== "POST") {
     res.setHeader("Allow", "GET, POST");
     return res.status(405).json({ erro: "Use GET ou POST." });
@@ -435,7 +453,19 @@ async function shinkai(req, res, tok) {
       body: JSON.stringify(corpo),
     });
   } catch (err) {
-    return res.status(502).json({ erro: "Não consegui falar com o Shinkai." });
+    /* O MOTIVO NÃO SE ENGOLE, e também não se repassa cru: a mensagem
+     * de um `fetch` que recusa cabeçalho pode trazer o próprio valor
+     * dele — a chave. Vai o NOME do erro e a forma da chave; o resto
+     * fica no registro do servidor. */
+    const forma = formaDaChave();
+    console.error("shinkai: fetch falhou", err && err.name, "forma da chave:", forma, "tamanho:", SHINKAI_KEY.length);
+    return res.status(502).json({
+      erro: forma === "caractere_invalido"
+        ? "A chave do Shinkai guardada tem espaço, acento ou quebra de linha no meio. Grave-a de novo em SHINKAI_API_KEY."
+        : forma === "curta"
+        ? "A chave do Shinkai guardada é curta demais — parece o placeholder da Vercel, não a chave. Grave-a de novo em SHINKAI_API_KEY."
+        : `Não consegui falar com o Shinkai (${String((err && err.name) || "erro de rede").slice(0, 40)}).`,
+    });
   }
   const texto = await r.text();
   let d = null;
@@ -449,6 +479,7 @@ async function shinkai(req, res, tok) {
     const msg = r.status === 401 ? "O Shinkai recusou a chave (401). Confira SHINKAI_API_KEY."
       : r.status === 422 ? `O Shinkai não aceitou os dados: ${detalhe || "sem detalhe"}`
       : `O Shinkai respondeu ${r.status}.${detalhe ? ` ${detalhe}` : ""}`;
+    console.error("shinkai: respondeu", r.status, "forma da chave:", formaDaChave());
     return res.status(502).json({ erro: limpar(msg), erros: (d && d.erros) || null });
   }
 
