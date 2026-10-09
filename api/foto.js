@@ -476,7 +476,7 @@ async function shinkai(req, res, tok) {
     // de quem está com o carro na frente. Engolir a lista e dizer só
     // "falhou" obrigaria a abrir o log da Vercel.
     const detalhe = d && Array.isArray(d.erros) ? d.erros.join(" · ") : "";
-    const msg = r.status === 401 ? "O Shinkai recusou a chave (401). Confira SHINKAI_API_KEY."
+    const msg = r.status === 401 ? `O Shinkai recusou a chave (401). Confira SHINKAI_API_KEY — a que está guardada aqui é "${formaDaChave()}".`
       : r.status === 422 ? `O Shinkai não aceitou os dados: ${detalhe || "sem detalhe"}`
       : `O Shinkai respondeu ${r.status}.${detalhe ? ` ${detalhe}` : ""}`;
     console.error("shinkai: respondeu", r.status, "forma da chave:", formaDaChave());
