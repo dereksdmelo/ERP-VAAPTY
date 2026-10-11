@@ -2376,6 +2376,75 @@ decisão 22).
 cai, quando está fora da região, qual o dia da mensagem —, lidas do
 próprio `index.html`.
 
+### 56. O financeiro, parecido com o da Camisetas Já: a primeira fase
+
+O Derek mandou em 11/10/2026 o pacote do financeiro da Camisetas Já
+(*"faça o financeiro parecido com esse"*) — o outro projeto dele, a
+referência de um BPO já em produção. Li a documentação, a tela de ~6.100
+linhas e o backend antes de propor. O que veio dele foi o **modelo**, não
+o código: lá é Planilha Google + Apps Script, aqui é Postgres; lá a
+venda é a OS, aqui é o carro; lá há franquia, royalties e DTF, aqui não.
+
+**A ideia que o Vaapty ainda não tinha é a de abrir pelo que está
+errado.** O pacote começa em "Pendências — tudo que precisa de ação, num
+lugar só", e separa as telas em *todo dia* e *fim do mês*. O número que
+importa não é quanto existe, é quanto está errado. Seis abas soltas
+diziam onde ficam as coisas, e não o que fazer primeiro — foi assim que
+3.684 de 3.756 lançamentos ficaram sem categoria sem ninguém ver.
+
+**Escolha do Derek: começar por menu em grupos + Pendências.** As outras
+fases ficam registradas para quando ele pedir: Conciliação como tela
+própria (fila do extrato com sugestão), Balanço, Ano, Investimento e
+payback, e os cadastros (Sócios, Mensais, plano de contas com natureza).
+Premissas que segui sem perguntar, e que valem para as próximas: manter a
+identidade visual do Vaapty (copiar o azul-marinho deles criaria dois
+sistemas na mesma tela); tudo no Supabase; as regras da Camisetas (OS,
+royalties, SDR) **não** vêm; o caixa em dinheiro (gaveta) fica de fora,
+porque o Vaapty opera por PIX e transferência.
+
+**As conferências moram numa função do banco (0066, `fin_pendencias`),
+não no Node.** São oito contagens sobre milhares de linhas, e trazer 3.756
+lançamentos só para contar quantos não têm categoria seria mandar meio
+megabyte a cada abertura. E a função se testa contra os dados reais
+direto no editor do painel — foi assim que cada contagem foi conferida
+antes de existir tela. É `security invoker`: roda com a RLS de quem
+chamou, e **recusa quem não é do financeiro em vez de devolver zeros**,
+porque um painel que diz "nada pendente" a quem não enxerga nada é a
+leitura errada mais cara.
+
+**Os dados reais mudaram o desenho, duas vezes** — a lição que o pacote
+repete (*"teste com os dados reais antes de publicar"*):
+
+- **"Carro vendido sem recebimento lançado" ficou de fora.** Os 487
+  vendidos estão TODOS sem data de venda (a importação da planilha só
+  trouxe a semana); a conferência acusaria quase todos, e alarme falso é
+  o que faz um painel de pendências deixar de ser lido. A tela diz que
+  não confere isso. Entra quando a venda tiver data.
+- **"Extrato parado" entrou, e não estava no plano.** O último movimento
+  importado é de 30/09 e nenhum mês está fechado — a conta que mais
+  precisa de atenção não aparecia em nenhuma lista.
+
+**O cartão de "sem categoria" mostra a quantidade e não o valor.** Somar
+entrada e saída de milhares de linhas dá R$ 66 milhões de movimento
+bruto, que é verdade e não diz nada. A quantidade é o que se resolve.
+
+**Zero aparece em verde, no fim, em vez de sumir.** Cartão em dia não
+pode ocupar o lugar de cartão com problema, mas um cartão ausente deixa a
+dúvida de "será que conferiu?".
+
+**O atalho chega no MÊS da pendência.** O lançamento sem categoria de
+agosto não está na tela de outubro; `aoMudarMes` leva o seletor junto.
+
+**Não há grupo de "cadastros" ainda**: conta, categoria e favorecido se
+editam dentro de Lançamentos, e um grupo com um atalho para a mesma tela
+seria menu que promete o que não tem.
+
+**`ferramentas-sintaxe.js` valida que o `index.html` transpila**, usando
+o `esbuild` que já está nas dependências da ponte. Um erro de JSX não
+quebra uma tela, derruba o sistema (decisão 7) — e esta fase foi validada
+assim antes de publicar, mais uma simulação local (servidor falso de
+`/api` com dados fictícios) para olhar a tela renderizada sem credencial.
+
 ## Convenções do código
 
 - **Português no domínio.** Estado, funções e rótulos em pt-BR

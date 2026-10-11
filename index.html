@@ -14764,25 +14764,178 @@ function baixarCSV(nome, cabecalho, linhas) {
 }
 const TIPOS_NEG_ROT = { pagto_cliente: "Pagto cliente", quitacao: "Quitação", debitos: "Débitos", pagto_lojista: "Pagto lojista", reembolso: "Reembolso", outro: "Outro" };
 
-function TelaFinanceiro({ perfil, comp, mes }) {
-  const [aba, setAba] = useState("lancamentos");
-  const ABAS = [["lancamentos", "Lançamentos"], ["contas", "A pagar / receber"], ["fechamento", "Fechamento"], ["dre", "DRE"], ["carros", "Carros"], ["folha", "Folha"]];
+function TelaFinanceiro({ perfil, comp, mes, aoMudarMes }) {
+  /* AS ABAS EM DOIS GRUPOS, e a primeira é o que pede ação (11/10/2026).
+   *
+   * O pacote do financeiro da Camisetas Já separa "todo dia" de "fim do
+   * mês" e abre na tela de pendências: quem conduz o financeiro começa
+   * pelo que está errado, não pelo que existe. Seis abas soltas diziam
+   * onde ficam as coisas, e não o que fazer primeiro — e foi assim que
+   * 3.684 lançamentos ficaram sem categoria sem ninguém ver.
+   *
+   * **Sem grupo de "cadastros" por enquanto**: conta, categoria e
+   * favorecido ainda se editam dentro de Lançamentos, e um grupo com um
+   * atalho para a mesma tela seria menu que promete o que não tem. */
+  const [aba, setAba] = useState("pendencias");
+  const GRUPOS = [
+    ["todo dia", [["pendencias", "Pendências"], ["lancamentos", "Lançamentos"], ["contas", "A pagar / receber"], ["carros", "Carros"]]],
+    ["fim do mês", [["fechamento", "Fechamento"], ["dre", "DRE"], ["folha", "Folha"]]],
+  ];
+  // Quem vem de uma pendência chega no MÊS dela: o lançamento sem
+  // categoria de agosto não está na tela de outubro.
+  const irPara = (a, c) => { if (c && aoMudarMes) aoMudarMes(competenciaDe(c)); setAba(a); };
   return (
     <div>
-      <Cabecalho titulo="Financeiro" mes={mes}
-        sub="Área restrita: extrato conciliado, fechamento previsto × realizado, DRE, carros e folha." />
-      <div className="mb-4 flex flex-wrap gap-1.5">
-        {ABAS.map(([v, r]) => (
-          <button key={v} onClick={() => setAba(v)} className="rounded-full px-3.5 py-1.5 text-[13px] font-semibold"
-            style={{ background: aba === v ? C.roxo : C.paper, color: aba === v ? "#fff" : C.ink, border: `1px solid ${aba === v ? C.roxo : C.line}` }}>{r}</button>
+      <Cabecalho titulo="Financeiro" mes={aba === "pendencias" ? null : mes}
+        sub="Área restrita: o que pede ação, o extrato conciliado, fechamento previsto × realizado, DRE, carros e folha." />
+      {/* Cada grupo é UM bloco que quebra inteiro: o rótulo "fim do mês"
+          ficava sozinho no fim de uma linha, longe das abas dele. */}
+      <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-2">
+        {GRUPOS.map(([titulo, abas]) => (
+          <div key={titulo} className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-0.5 text-[10px] font-bold uppercase tracking-[0.1em]" style={{ color: C.mute }}>{titulo}</span>
+            {abas.map(([v, r]) => (
+              <button key={v} onClick={() => setAba(v)} className="rounded-full px-3.5 py-1.5 text-[13px] font-semibold"
+                style={{ background: aba === v ? C.roxo : C.paper, color: aba === v ? "#fff" : C.ink, border: `1px solid ${aba === v ? C.roxo : C.line}` }}>{r}</button>
+            ))}
+          </div>
         ))}
       </div>
+      {aba === "pendencias" && <FinPendencias aoIr={irPara} />}
       {aba === "lancamentos" && <FinLancamentos comp={comp} />}
       {aba === "contas" && <FinContas comp={comp} />}
       {aba === "fechamento" && <FinFechamento comp={comp} />}
       {aba === "dre" && <FinDRE comp={comp} />}
       {aba === "carros" && <FinCarros comp={comp} />}
       {aba === "folha" && <FinFolha comp={comp} />}
+    </div>
+  );
+}
+
+/**
+ * Pendências: tudo que pede ação, num lugar só.
+ *
+ * É a tela de abertura do financeiro da Camisetas Já e a ideia que o
+ * Vaapty ainda não tinha: o número que importa não é quanto existe, é
+ * quanto está errado. Cada cartão é uma conferência, vem do banco já
+ * contada (`fin_pendencias`, 0066) e leva para a aba onde se resolve.
+ *
+ * **Zero aparece como zero, em verde, e fica no fim.** Cartão em dia
+ * não pode ocupar o lugar de cartão com problema — e some a dúvida de
+ * "será que conferiu?", que um cartão ausente deixaria.
+ *
+ * **O que ela NÃO confere está dito na tela** (rodapé): carro vendido
+ * sem recebimento lançado. Os 487 vendidos não têm data de venda, e a
+ * conferência acusaria quase todos — alarme falso que faz o painel
+ * deixar de ser lido. Entra quando a venda tiver data.
+ */
+function FinPendencias({ aoIr }) {
+  const [d, setD] = useState(null); const [erro, setErro] = useState("");
+  const carregar = () => { setErro(""); setD(null); fin("pendencias").then(setD).catch((e) => setErro(e.message)); };
+  useEffect(carregar, []);
+  if (erro) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
+  if (!d) return <p className="text-[13px]" style={{ color: C.mute }}>Conferindo o financeiro…</p>;
+
+  const VERMELHO = "#C0281B";
+  const val = (x) => rs2((Number(x.debito) || 0) + (Number(x.credito) || 0));
+  const curto = (t, n) => { const x = String(t || "").trim() || "sem descrição"; return x.length > n ? `${x.slice(0, n - 1)}…` : x; };
+  const venc = d.vencidos || {}, conf = d.conferir || {}, sc = d.sem_categoria || {}, ng = d.negociacao || {},
+        sp = d.sem_pessoa || {}, ep = d.extrato_parado || {}, mf = d.meses_sem_fechar || {}, fo = d.folha || {};
+  const dia = (n) => `${n} dia${n === 1 ? "" : "s"}`;
+
+  const cartoes = [
+    { id: "venc", titulo: "Contas vencidas", cor: VERMELHO, aba: "contas",
+      n: (venc.a_pagar_qtd || 0) + (venc.a_receber_qtd || 0),
+      sub: `${venc.a_pagar_qtd || 0} a pagar (R$ ${rs2(venc.a_pagar_valor)}) · ${venc.a_receber_qtd || 0} a receber (R$ ${rs2(venc.a_receber_valor)})`,
+      itens: (venc.itens || []).map((x) => [curto(x.descricao || x.favorecido, 38), `venceu ${diaBR(x.vencimento)} · ${dia(x.dias)} · R$ ${val(x)}`]) },
+    { id: "conf", titulo: "Movimentos a conferir", cor: AMARELO.texto, aba: "lancamentos", n: conf.qtd || 0,
+      sub: "O sistema ligou um movimento a um título sozinho. Confira se casou certo.",
+      comp: (conf.itens || [])[0] && conf.itens[0].data,
+      itens: (conf.itens || []).map((x) => [curto(x.descricao, 38), `${diaBR(x.data)} · R$ ${val(x)}`]) },
+    { id: "ep", titulo: "Extrato parado", cor: VERMELHO, aba: "lancamentos", n: ep.qtd || 0,
+      sub: "Conta sem movimento importado há mais de 7 dias — o saldo calculado deixou de ser o do banco.",
+      comp: (ep.itens || [])[0] && ep.itens[0].ultima,
+      itens: (ep.itens || []).map((x) => [x.nome, x.ultima ? `${diaBR(x.ultima)} · há ${dia(x.dias)}` : "nunca recebeu"]) },
+    { id: "mf", titulo: "Meses sem fechar", cor: AMARELO.texto, aba: "lancamentos", n: mf.qtd || 0,
+      sub: "O saldo do banco ainda não foi conferido contra os lançamentos (últimos 6 meses).",
+      comp: (mf.itens || [])[0] && mf.itens[0].mes,
+      itens: (mf.itens || []).map((x) => [x.nome, rotuloMes(x.mes)]) },
+    { id: "sc", titulo: "Lançamentos sem categoria", cor: C.laranja, aba: "lancamentos", n: sc.qtd || 0,
+      // Sem o valor de propósito: somar entrada e saída de milhares de
+      // linhas dá R$ 66 milhões de movimento bruto, que é verdade e não
+      // diz nada — a quantidade é o que se resolve.
+      sub: `${sc.qtd_90d || 0} nos últimos 90 dias. Sem categoria o lançamento não entra no DRE.`,
+      comp: (sc.itens || [])[0] && sc.itens[0].data,
+      itens: (sc.itens || []).map((x) => [curto(x.descricao, 38), `${diaBR(x.data)} · R$ ${val(x)}`]) },
+    { id: "ng", titulo: "Carro sem carro, ou sem a parte do negócio", cor: C.laranja, aba: "lancamentos", n: ng.qtd || 0,
+      sub: `R$ ${rs2(ng.valor)} em categoria de negociação sem dizer de que carro ou de que parte — não bate com o combinado.`,
+      comp: (ng.itens || [])[0] && ng.itens[0].data,
+      itens: (ng.itens || []).map((x) => [curto(x.descricao, 34), `${diaBR(x.data)} · ${[x.sem_carro && "sem carro", x.sem_parte && "sem parte"].filter(Boolean).join(" e ")}`]) },
+    { id: "sp", titulo: "Folha e vale sem a pessoa", cor: C.laranja, aba: "lancamentos", n: sp.qtd || 0,
+      sub: `R$ ${rs2(sp.valor)} que não conciliam com a folha do mês.`,
+      comp: (sp.itens || [])[0] && sp.itens[0].data,
+      itens: (sp.itens || []).map((x) => [curto(x.descricao, 38), `${diaBR(x.data)} · R$ ${val(x)}`]) },
+    { id: "fo", titulo: "Folha de mês passado sem pagar", cor: VERMELHO, aba: "folha", n: fo.qtd || 0,
+      sub: `R$ ${rs2(fo.valor)} de líquido sem data de pagamento.`,
+      comp: (fo.itens || [])[0] && fo.itens[0].competencia,
+      itens: (fo.itens || []).map((x) => [x.nome, `${rotuloMes(x.competencia)} · R$ ${rs2(x.liquido)}`]) },
+  ];
+  const comProblema = cartoes.filter((c) => c.n > 0), emDia = cartoes.filter((c) => !c.n);
+
+  return (
+    <div>
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-[13px]" style={{ color: C.mute }}>
+          {comProblema.length
+            ? <><b style={{ color: C.ink }}>{comProblema.length}</b> de {cartoes.length} conferências com pendência.</>
+            : "Tudo em dia nas conferências abaixo."}
+        </p>
+        <button onClick={carregar} className="rounded-full border px-3 py-1 text-[12px] font-semibold"
+          style={{ borderColor: C.line, color: C.roxo, background: C.paper }}>conferir de novo</button>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        {comProblema.map((c) => (
+          <button key={c.id} onClick={() => aoIr(c.aba, c.comp)}
+            className="flex flex-col justify-start rounded-xl p-3.5 text-left" style={{ background: C.paper, border: `1px solid ${C.line}`, borderLeft: `4px solid ${c.cor}` }}>
+            <div className="flex w-full items-baseline justify-between gap-3">
+              <span className="text-[13.5px] font-bold">{c.titulo}</span>
+              <span className="text-[24px] font-bold leading-none" style={{ color: c.cor, fontVariantNumeric: "tabular-nums" }}>
+                {c.n.toLocaleString("pt-BR")}
+              </span>
+            </div>
+            <p className="mt-1 text-[12px] leading-snug" style={{ color: C.mute }}>{c.sub}</p>
+            {!!c.itens.length && (
+              <ul className="mt-2 space-y-1">
+                {c.itens.slice(0, 4).map((it, i) => (
+                  <li key={i} className="flex items-baseline justify-between gap-3 text-[12px]">
+                    <span className="truncate">{it[0]}</span>
+                    <span className="shrink-0" style={{ color: C.mute, fontVariantNumeric: "tabular-nums" }}>{it[1]}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="mt-2 text-[11.5px] font-semibold" style={{ color: C.roxo }}>
+              {c.n > 4 ? `+ ${(c.n - 4).toLocaleString("pt-BR")} · ` : ""}abrir em {c.aba === "folha" ? "Folha" : c.aba === "contas" ? "A pagar / receber" : "Lançamentos"} →
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {!!emDia.length && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {emDia.map((c) => (
+            <span key={c.id} className="rounded-full px-3 py-1 text-[12px] font-semibold"
+              style={{ background: "#E8F3EE", color: C.verde }}>✓ {c.titulo}</span>
+          ))}
+        </div>
+      )}
+
+      <p className="mt-4 text-[11.5px] leading-snug" style={{ color: C.mute }}>
+        Ainda não confere: carro vendido sem recebimento lançado. As vendas importadas não têm data, e a
+        conferência acusaria quase todas — alarme falso faz o painel deixar de ser lido. Entra quando a venda
+        tiver data.
+      </p>
     </div>
   );
 }
@@ -20409,7 +20562,7 @@ function App() {
         <TelaConversas alvo={conversaAlvo} aoConsumirAlvo={() => setConversaAlvo(null)} />
       )}
       {tela === "whatsapp" && perfil && perfil.papel === "gerente" && <TelaWhatsApp />}
-      {tela === "financeiro" && <TelaFinanceiro perfil={perfil} comp={compOuAtual} mes={mes} />}
+      {tela === "financeiro" && <TelaFinanceiro perfil={perfil} comp={compOuAtual} mes={mes} aoMudarMes={setComp} />}
       {tela === "lojistas" && podeGestao && <TelaVendaLojistas perfil={perfil} />}
     </Shell>
   );

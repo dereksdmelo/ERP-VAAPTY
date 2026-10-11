@@ -10,6 +10,7 @@
  *   ?recurso=funcionario   GET · POST · PATCH ?id=
  *   ?recurso=vale          GET ?competencia= · POST · PATCH ?id=
  *   ?recurso=folha         GET ?competencia= · PUT     salário + comissão + bonificação − vales
+ *   ?recurso=pendencias    GET                         tudo que pede ação, num lugar só (0066)
  *
  * Quem decide o acesso é a RLS (e_financeiro): esta função só repassa
  * o token. Para quem não é do financeiro, o banco devolve lista vazia
@@ -1459,8 +1460,24 @@ async function estoqueLista(req, res, tok) {
   return res.status(200).json({ estoque: (lista || []).map((e) => ({ id: e.id, situacao: e.situacao, placa: e.veiculo && e.veiculo.placa, carro: e.veiculo && e.veiculo.marca_modelo })) });
 }
 
+/**
+ * Pendências: o que pede ação, num lugar só (11/10/2026).
+ *
+ * As conferências moram numa função do banco (0066), não aqui: são oito
+ * contagens sobre milhares de linhas, e trazê-las para o Node só para
+ * contar seria mandar meio megabyte a cada abertura da tela. A função é
+ * `security invoker` — roda com a RLS de quem chama — e recusa quem não
+ * é do financeiro em vez de devolver zeros, porque um painel que diz
+ * "nada pendente" a quem não enxerga nada é a leitura errada mais cara.
+ */
+async function pendencias(req, res, tok) {
+  if (req.method !== "GET") { res.setHeader("Allow", "GET"); return res.status(405).json({ erro: "Use GET." }); }
+  const r = await supa(`${URL_BASE}/rest/v1/rpc/fin_pendencias`, { method: "POST", headers: cab(tok), body: "{}" });
+  return res.status(200).json(r || {});
+}
+
 const RECURSOS = { conta, categoria, funcionario, favorecido, lancamento, importar, dre, carros, vale, folha,
-                   fechamento, orcamento, rateio, negociacao, titulo, fluxo, log, recibo, estoque: estoqueLista };
+                   fechamento, orcamento, rateio, negociacao, titulo, fluxo, log, recibo, pendencias, estoque: estoqueLista };
 
 module.exports = async function handler(req, res) {
   if (!URL_BASE || !ANON) return res.status(500).json({ erro: "SUPABASE_URL ou SUPABASE_ANON_KEY não configurados." });
