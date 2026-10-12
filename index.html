@@ -14764,8 +14764,9 @@ function baixarCSV(nome, cabecalho, linhas) {
 }
 const TIPOS_NEG_ROT = { pagto_cliente: "Pagto cliente", quitacao: "Quitação", debitos: "Débitos", pagto_lojista: "Pagto lojista", reembolso: "Reembolso", outro: "Outro" };
 
-function TelaFinanceiro({ perfil, comp, mes, aoMudarMes }) {
-  /* AS ABAS EM DOIS GRUPOS, e a primeira é o que pede ação (11/10/2026).
+function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
+  /* AS ABAS SÃO DESTINOS DO PAINEL LATERAL, e a primeira é o que pede
+   * ação (11/10/2026).
    *
    * O pacote do financeiro da Camisetas Já separa "todo dia" de "fim do
    * mês" e abre na tela de pendências: quem conduz o financeiro começa
@@ -14773,34 +14774,33 @@ function TelaFinanceiro({ perfil, comp, mes, aoMudarMes }) {
    * onde ficam as coisas, e não o que fazer primeiro — e foi assim que
    * 3.684 lançamentos ficaram sem categoria sem ninguém ver.
    *
+   * Elas nasceram como pílulas no topo desta tela, e o Derek mandou para
+   * a lateral (*"esses menus devem aparecer na barra lateral"*): é onde
+   * a casa pôs a navegação, e dois níveis para a mesma coisa era o que
+   * já tinha sido desfeito na pré-venda (decisão 51). A lista mora em
+   * `destinosPara()`, com `grupo` para o rótulo; esta tela só recebe
+   * qual aba mostrar.
+   *
    * **Sem grupo de "cadastros" por enquanto**: conta, categoria e
    * favorecido ainda se editam dentro de Lançamentos, e um grupo com um
    * atalho para a mesma tela seria menu que promete o que não tem. */
-  const [aba, setAba] = useState("pendencias");
-  const GRUPOS = [
-    ["todo dia", [["pendencias", "Pendências"], ["lancamentos", "Lançamentos"], ["contas", "A pagar / receber"], ["carros", "Carros"]]],
-    ["fim do mês", [["fechamento", "Fechamento"], ["dre", "DRE"], ["folha", "Folha"]]],
-  ];
+  const TITULO = { pendencias: "Pendências", lancamentos: "Lançamentos", contas: "A pagar / receber",
+    carros: "Carros", fechamento: "Fechamento", dre: "DRE", folha: "Folha" };
+  const SUB = {
+    pendencias: "Tudo que pede ação, num lugar só.",
+    lancamentos: "O extrato do banco: categorizar, ligar ao carro, fechar o mês.",
+    contas: "Títulos em aberto: o que vence e o que já venceu.",
+    carros: "O que foi combinado com cada carro contra o que foi lançado.",
+    fechamento: "Previsto × realizado do mês.",
+    dre: "O resultado: quanto entrou, quanto custou, quanto sobrou.",
+    folha: "Salário, comissão, bonificação e vales.",
+  };
   // Quem vem de uma pendência chega no MÊS dela: o lançamento sem
   // categoria de agosto não está na tela de outubro.
-  const irPara = (a, c) => { if (c && aoMudarMes) aoMudarMes(competenciaDe(c)); setAba(a); };
+  const irPara = (a, c) => { if (c && aoMudarMes) aoMudarMes(competenciaDe(c)); if (aoIrPara) aoIrPara(a); };
   return (
     <div>
-      <Cabecalho titulo="Financeiro" mes={aba === "pendencias" ? null : mes}
-        sub="Área restrita: o que pede ação, o extrato conciliado, fechamento previsto × realizado, DRE, carros e folha." />
-      {/* Cada grupo é UM bloco que quebra inteiro: o rótulo "fim do mês"
-          ficava sozinho no fim de uma linha, longe das abas dele. */}
-      <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-2">
-        {GRUPOS.map(([titulo, abas]) => (
-          <div key={titulo} className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-0.5 text-[10px] font-bold uppercase tracking-[0.1em]" style={{ color: C.mute }}>{titulo}</span>
-            {abas.map(([v, r]) => (
-              <button key={v} onClick={() => setAba(v)} className="rounded-full px-3.5 py-1.5 text-[13px] font-semibold"
-                style={{ background: aba === v ? C.roxo : C.paper, color: aba === v ? "#fff" : C.ink, border: `1px solid ${aba === v ? C.roxo : C.line}` }}>{r}</button>
-            ))}
-          </div>
-        ))}
-      </div>
+      <Cabecalho titulo={TITULO[aba] || "Financeiro"} mes={aba === "pendencias" ? null : mes} sub={SUB[aba]} />
       {aba === "pendencias" && <FinPendencias aoIr={irPara} />}
       {aba === "lancamentos" && <FinLancamentos comp={comp} />}
       {aba === "contas" && <FinContas comp={comp} />}
@@ -18869,7 +18869,21 @@ function destinosPara(perfil) {
     // esconde o destino; quem protege de verdade é a RLS. Virou área
     // própria em 05/10/2026 — ela tem quatro abas dentro e não é
     // leitura de gestão, é operação de quem concilia.
-    (perfil && (perfil.financeiro || gerente)) ? { id: "financeiro", rot: "Financeiro", curto: "Financ.", area: "financeiro" } : null,
+    /* **As abas do financeiro viraram destinos do painel** (o Derek,
+     * 11/10/2026: *"esses menus devem aparecer na barra lateral"*) —
+     * a mesma decisão que tirou as seis pílulas da pré-venda do topo da
+     * página: dois níveis de navegação para a mesma coisa, e o de cima
+     * sumia quando a pessoa rolava. `grupo` é o rótulo que o painel
+     * escreve acima dos itens (todo dia / fim do mês). */
+    ...((perfil && (perfil.financeiro || gerente)) ? [
+      { id: "fin_pendencias",  rot: "Pendências",        curto: "Financ.", area: "financeiro", aba: "pendencias",  grupo: "todo dia",   icone: "financeiro" },
+      { id: "fin_lancamentos", rot: "Lançamentos",       curto: "Financ.", area: "financeiro", aba: "lancamentos", grupo: "todo dia",   icone: "financeiro" },
+      { id: "fin_contas",      rot: "A pagar / receber", curto: "Financ.", area: "financeiro", aba: "contas",      grupo: "todo dia",   icone: "financeiro" },
+      { id: "fin_carros",      rot: "Carros",            curto: "Financ.", area: "financeiro", aba: "carros",      grupo: "todo dia",   icone: "financeiro" },
+      { id: "fin_fechamento",  rot: "Fechamento",        curto: "Financ.", area: "financeiro", aba: "fechamento",  grupo: "fim do mês", icone: "financeiro" },
+      { id: "fin_dre",         rot: "DRE",               curto: "Financ.", area: "financeiro", aba: "dre",         grupo: "fim do mês", icone: "financeiro" },
+      { id: "fin_folha",       rot: "Folha",             curto: "Financ.", area: "financeiro", aba: "folha",       grupo: "fim do mês", icone: "financeiro" },
+    ] : []),
 
     // ---- o papel e a operação ----
     adm ? { id: "adm", rot: "Administrativo", curto: "Adm.", area: "adm" } : null,
@@ -19023,15 +19037,24 @@ function Shell({ perfil, tela, setTela, children }) {
               <button onClick={() => setPainel(false)} title="recolher" style={{ color: C.mute }}>‹</button>
             </div>
             <nav className="flex-1 space-y-0.5 overflow-y-auto px-2 pb-4">
-              {grupoVisto.itens.map((d) => {
+              {grupoVisto.itens.map((d, i) => {
                 const ativo = tela === d.id;
+                // O rótulo do grupo aparece quando ele muda, e só aí:
+                // "todo dia" uma vez, não em cada item.
+                const novoGrupo = !!d.grupo && d.grupo !== (grupoVisto.itens[i - 1] || {}).grupo;
                 return (
-                  <button key={d.id} onClick={() => ir(d.id)}
-                    className="w-full rounded-lg px-3 py-2 text-left text-[13.5px] leading-snug"
-                    style={{ background: ativo ? C.roxoFraco : "transparent",
-                             color: ativo ? C.roxo : C.ink, fontWeight: ativo ? 700 : 500 }}>
-                    {d.rot}
-                  </button>
+                  <React.Fragment key={d.id}>
+                    {novoGrupo && (
+                      <div className={`px-3 pb-1 text-[10px] font-bold uppercase tracking-[0.1em] ${i ? "pt-3" : "pt-1"}`}
+                        style={{ color: C.mute }}>{d.grupo}</div>
+                    )}
+                    <button onClick={() => ir(d.id)}
+                      className="w-full rounded-lg px-3 py-2 text-left text-[13.5px] leading-snug"
+                      style={{ background: ativo ? C.roxoFraco : "transparent",
+                               color: ativo ? C.roxo : C.ink, fontWeight: ativo ? 700 : 500 }}>
+                      {d.rot}
+                    </button>
+                  </React.Fragment>
                 );
               })}
             </nav>
@@ -20403,6 +20426,14 @@ function TelaGestao({ perfil, comp }) {
   );
 }
 
+// Destino → aba do financeiro. Mesmo desenho do ABA_PV, pela mesma
+// razão: o menu e o roteador precisam concordar.
+const ABA_FIN = {
+  fin_pendencias: "pendencias", fin_lancamentos: "lancamentos", fin_contas: "contas", fin_carros: "carros",
+  fin_fechamento: "fechamento", fin_dre: "dre", fin_folha: "folha",
+};
+const DESTINO_FIN = Object.fromEntries(Object.entries(ABA_FIN).map(([d, a]) => [a, d]));
+
 // Destino → seção da pré-venda. Um lugar só: o menu e o roteador
 // precisam concordar, e dois mapas divergem no primeiro acréscimo.
 const ABA_PV = {
@@ -20562,7 +20593,8 @@ function App() {
         <TelaConversas alvo={conversaAlvo} aoConsumirAlvo={() => setConversaAlvo(null)} />
       )}
       {tela === "whatsapp" && perfil && perfil.papel === "gerente" && <TelaWhatsApp />}
-      {tela === "financeiro" && <TelaFinanceiro perfil={perfil} comp={compOuAtual} mes={mes} aoMudarMes={setComp} />}
+      {ABA_FIN[tela] && <TelaFinanceiro perfil={perfil} comp={compOuAtual} mes={mes} aba={ABA_FIN[tela]}
+        aoMudarMes={setComp} aoIrPara={(aba) => setTela(DESTINO_FIN[aba])} />}
       {tela === "lojistas" && podeGestao && <TelaVendaLojistas perfil={perfil} />}
     </Shell>
   );

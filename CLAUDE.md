@@ -2435,6 +2435,20 @@ dúvida de "será que conferiu?".
 **O atalho chega no MÊS da pendência.** O lançamento sem categoria de
 agosto não está na tela de outubro; `aoMudarMes` leva o seletor junto.
 
+**As abas viraram destinos do painel lateral, não pílulas no topo** (o
+Derek, logo depois: *"esses menus devem aparecer na barra lateral"*).
+Nasceram como pílulas em dois grupos; ele mandou para a lateral, que é
+onde a casa pôs a navegação — e dois níveis para a mesma coisa é o que a
+decisão 51 já tinha desfeito na pré-venda. São sete destinos em
+`destinosPara()` (`fin_pendencias`, `fin_lancamentos`, `fin_contas`,
+`fin_carros`, `fin_fechamento`, `fin_dre`, `fin_folha`), roteados pelo
+`ABA_FIN` — mesmo desenho do `ABA_PV`, pela mesma razão: o menu e o
+roteador precisam concordar, e dois mapas divergem no primeiro
+acréscimo. `grupo` é o rótulo que o painel escreve acima dos itens (*todo
+dia*, *fim do mês*), **uma vez, quando muda** — e vale para qualquer área
+que queira agrupar. O destino único `financeiro` deixou de existir; a
+última tela não é guardada, então nada antigo cai em branco.
+
 **Não há grupo de "cadastros" ainda**: conta, categoria e favorecido se
 editam dentro de Lançamentos, e um grupo com um atalho para a mesma tela
 seria menu que promete o que não tem.
