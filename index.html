@@ -3719,6 +3719,151 @@ function MandarAssinar({ doc, telefone, nome, estado, aoMudar }) {
   );
 }
 
+/**
+ * Comissão de indicação: o negócio em que a Vaapty não compra (0067).
+ *
+ * Pedido do Derek em 12/10/2026: quando a quitação passa do valor do
+ * carro, a Vaapty não resolve — mas um lojista resolve, assumindo o
+ * financiamento, e paga uma comissão por ter recebido o cliente. A casa
+ * já lançava isso na planilha ("ADAM ASSUMIU", 30 vezes); faltava a
+ * opção nascer no atendimento, onde o caso aparece.
+ *
+ * **Vira uma linha do estoque, já vendida, com compra zero.** É o que
+ * faz a comissão entrar na rentabilidade, na meta do negociador e nos
+ * recebimentos do financeiro sem uma conta nova em lugar nenhum — e a
+ * `natureza` impede que ela pareça carro que passou pelo pátio.
+ *
+ * Aparece sempre, discreta; acende quando a quitação mais os débitos
+ * passam do POR (ou da FIPE). "Desde o atendimento" foi o pedido: é na
+ * Negociação que se descobre que o carro não fecha.
+ */
+function IndicacaoLojista({ atendimento, f, perfil }) {
+  const aid = atendimento && atendimento.id;
+  const [est, setEst] = useState(undefined); const [veiculoId, setVeiculoId] = useState(null);
+  const [aberto, setAberto] = useState(false); const [lojistas, setLojistas] = useState(null);
+  const [compId, setCompId] = useState(""); const [novoNome, setNovoNome] = useState("");
+  const [solucao, setSolucao] = useState("Assume o financiamento");
+  const [valor, setValor] = useState(""); const [obs, setObs] = useState("");
+  const [ocupado, setOcupado] = useState(false); const [erro, setErro] = useState("");
+  const carregar = async () => {
+    if (!aid) return;
+    try {
+      const r = await fetchAut(`/api/veiculo?recurso=estoque&atendimento_id=${encodeURIComponent(aid)}`);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.erro || "");
+      setEst(d.estoque || null); setVeiculoId(d.veiculo_id || (d.estoque && d.estoque.veiculo_id) || null);
+    } catch (e) { setEst(null); }
+  };
+  useEffect(() => { carregar(); }, [aid]);
+  useEffect(() => {
+    if (aberto && !lojistas) listarCompradores("").then((l) => setLojistas(l.filter((c) => c.ativo !== false))).catch(() => setLojistas([]));
+  }, [aberto]);
+
+  // Carregando, ou o carro foi comprado de verdade: nada a oferecer.
+  if (!aid || est === undefined) return null;
+  if (est && est.natureza !== "indicacao") return null;
+
+  if (est) {
+    return (
+      <div className="rounded-lg p-3" style={{ background: "#F1ECF8", border: `1px solid ${C.line}` }}>
+        <div className="text-[12.5px] font-bold" style={{ color: C.roxo }}>Indicação registrada</div>
+        <div className="mt-0.5 text-[12px]">
+          {(est.comprador && est.comprador.nome) || "Lojista"} paga <b>{brl(est.valor_venda)}</b> de comissão · {diaBR(est.vendido_em || est.entrou_em)}
+        </div>
+        {est.observacoes && <div className="mt-0.5 text-[11.5px]" style={{ color: C.mute }}>{est.observacoes}</div>}
+        <div className="mt-1 text-[11px]" style={{ color: C.mute }}>
+          Já conta na rentabilidade e na meta de {est.negociador_nome || "quem atendeu"}. O financeiro confere o PIX em Recebimentos.
+        </div>
+      </div>
+    );
+  }
+
+  const quitDeb = numeroBR(f.quitacao) + numeroBR(f.debitos);
+  const ref = numeroBR(f.por) || numeroBR(f.fipe);
+  const acima = ref > 0 && quitDeb > ref;
+  const podeGravar = !!veiculoId && numeroBR(valor) > 0 && (compId || novoNome.trim());
+  const gravar = async () => {
+    setOcupado(true); setErro("");
+    try {
+      await entrarNoEstoque({
+        veiculo_id: veiculoId, atendimento_id: aid, natureza: "indicacao",
+        comprador_id: compId || null, comprador_nome: compId ? null : novoNome.trim(),
+        valor_venda: valor,
+        observacoes: `Indicação — ${solucao}${obs.trim() ? `. ${obs.trim()}` : ""}`,
+        negociador_nome: atendimento.negociador_nome || (perfil && perfil.nome) || null,
+        meio_alcance: atendimento.origem || null, prospector: atendimento.prospec || null,
+      });
+      await carregar(); setAberto(false);
+    } catch (e) { setErro(e.message); }
+    setOcupado(false);
+  };
+
+  if (!aberto) {
+    return acima ? (
+      <div className="rounded-lg p-3" style={{ background: AMARELO.fundo, border: `1px solid ${AMARELO.borda}` }}>
+        <div className="text-[12.5px] font-bold" style={{ color: AMARELO.texto }}>
+          Quitação e débitos ({brl(quitDeb)}) passam do valor do carro ({brl(ref)})
+        </div>
+        <div className="mt-0.5 text-[11.5px]" style={{ color: AMARELO.texto }}>
+          A Vaapty não compra assim — mas um lojista pode resolver (assumir o financiamento) e pagar comissão pela indicação.
+        </div>
+        <button onClick={() => setAberto(true)} className="mt-2 rounded-md border px-3 py-1 text-[12px] font-semibold"
+          style={{ borderColor: AMARELO.texto, color: AMARELO.texto, background: "#fff" }}>Indicar a um lojista</button>
+      </div>
+    ) : (
+      <button onClick={() => setAberto(true)} className="text-[12px] font-semibold" style={{ color: C.roxo }}>
+        Não dá para comprar? Indicar a um lojista (comissão) →
+      </button>
+    );
+  }
+
+  return (
+    <Bloco titulo="Indicar a um lojista"
+      sub="A Vaapty não compra; o lojista resolve e paga a comissão. Ela entra na rentabilidade e na meta de quem atendeu.">
+      <div className="space-y-2.5">
+        {!veiculoId && (
+          <p className="text-[11.5px]" style={{ color: AMARELO.texto }}>
+            Salve a ficha do carro no banco primeiro (etapa Lançamento) — é ela que diz de que carro é a comissão.
+          </p>
+        )}
+        <Campo label="Lojista que resolve" req>
+          <select className={inputCls} style={inputSty} value={compId} onChange={(e) => setCompId(e.target.value)}>
+            <option value="">{lojistas ? "— outro, digitar o nome —" : "carregando…"}</option>
+            {(lojistas || []).map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+          </select>
+        </Campo>
+        {!compId && (
+          <Campo label="Nome do lojista">
+            <input className={inputCls} style={inputSty} value={novoNome} onChange={(e) => setNovoNome(e.target.value)} />
+          </Campo>
+        )}
+        <div className="flex flex-wrap gap-1.5">
+          {["Assume o financiamento", "Quita e revende", "Outra solução"].map((s) => (
+            <button key={s} onClick={() => setSolucao(s)} className="rounded-full border px-2.5 py-0.5 text-[11.5px]"
+              style={{ borderColor: solucao === s ? C.roxo : C.line, color: solucao === s ? C.roxo : C.ink }}>{s}</button>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 gap-2.5">
+          <Campo label="Comissão" req>
+            <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={valor} onChange={(e) => setValor(e.target.value)} />
+          </Campo>
+          <Campo label="Observação">
+            <input className={inputCls} style={inputSty} value={obs} onChange={(e) => setObs(e.target.value)} />
+          </Campo>
+        </div>
+        {erro && <p className="text-[11.5px]" style={{ color: C.laranja }}>{erro}</p>}
+        <div className="flex gap-2">
+          <button disabled={!podeGravar || ocupado} onClick={gravar} className="flex-1 rounded-md py-2 text-[12.5px] font-semibold"
+            style={{ background: podeGravar ? C.roxo : "#E7E3EC", color: podeGravar ? "#fff" : C.mute }}>
+            {ocupado ? "Gravando…" : "Registrar indicação"}
+          </button>
+          <button onClick={() => setAberto(false)} className="rounded-md border px-3 text-[12px]" style={{ borderColor: C.line, color: C.mute }}>cancelar</button>
+        </div>
+      </div>
+    </Bloco>
+  );
+}
+
 function TrilhoFechamento({ f, preContratoFeito, contratoLiberado }) {
   const passos = [
     ["Valor", !!f.valorFechado, "quanto fechou"],
@@ -5577,6 +5722,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
 
           return (
           <>
+            <IndicacaoLojista atendimento={atendimento} f={f} perfil={perfil} />
             {gap != null && (
               <div className="rounded-lg p-3" style={{ background: C.roxoFraco, border: `1px solid ${C.line}` }}>
                 <div className="text-[10px] uppercase tracking-[0.14em]" style={{ color: C.mute }}>Gap de abertura</div>
@@ -5752,6 +5898,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 ordem existia só na cabeça de quem já sabia, e a tela
                 parecia uma pilha de blocos. */}
             <TrilhoFechamento f={f} preContratoFeito={preContratoFeito} contratoLiberado={contratoLiberado} />
+            <IndicacaoLojista atendimento={atendimento} f={f} perfil={perfil} />
 
             {/* Primeiro de propósito, a pedido do Derek: é aqui que o
                 valor fecha. O pré-contrato e o contrato final saem com
@@ -11315,7 +11462,11 @@ function Rentabilidade({ vendidos, comp }) {
                     {td(dias != null ? dias : "—")}
                     {td(v.marca_modelo || "—", { dir: "left" })}
                     {td(v.placa || "—", { dir: "left" })}
-                    {td(e.comprador ? e.comprador.nome : "—", { dir: "left" })}
+                    {/* Comissão de indicação (0067): a "venda" é a comissão,
+                        e a compra é zero porque o carro nunca foi nosso. */}
+                    {td(<>{e.comprador ? e.comprador.nome : "—"}{e.natureza === "indicacao" && (
+                      <span className="ml-1.5 rounded px-1 text-[10px] font-semibold" style={{ background: "#F1ECF8", color: C.roxo }}>indicação</span>
+                    )}</>, { dir: "left" })}
                     {td(rs(r.venda), { forte: true })}
                     {td(rs(r.compra))}
                     {td(rs(r.debitos))}
@@ -14784,11 +14935,12 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
    * **Sem grupo de "cadastros" por enquanto**: conta, categoria e
    * favorecido ainda se editam dentro de Lançamentos, e um grupo com um
    * atalho para a mesma tela seria menu que promete o que não tem. */
-  const TITULO = { pendencias: "Pendências", lancamentos: "Lançamentos", contas: "A pagar / receber",
+  const TITULO = { pendencias: "Pendências", lancamentos: "Lançamentos", recebimentos: "Recebimentos", contas: "A pagar / receber",
     carros: "Carros", fechamento: "Fechamento", dre: "DRE", folha: "Folha" };
   const SUB = {
     pendencias: "Tudo que pede ação, num lugar só.",
     lancamentos: "O extrato do banco: categorizar, ligar ao carro, fechar o mês.",
+    recebimentos: "Toda venda tem que aparecer no extrato — ou ter um motivo escrito.",
     contas: "Títulos em aberto: o que vence e o que já venceu.",
     carros: "O que foi combinado com cada carro contra o que foi lançado.",
     fechamento: "Previsto × realizado do mês.",
@@ -14803,6 +14955,7 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
       <Cabecalho titulo={TITULO[aba] || "Financeiro"} mes={aba === "pendencias" ? null : mes} sub={SUB[aba]} />
       {aba === "pendencias" && <FinPendencias aoIr={irPara} />}
       {aba === "lancamentos" && <FinLancamentos comp={comp} />}
+      {aba === "recebimentos" && <FinRecebimentos comp={comp} />}
       {aba === "contas" && <FinContas comp={comp} />}
       {aba === "fechamento" && <FinFechamento comp={comp} />}
       {aba === "dre" && <FinDRE comp={comp} />}
@@ -14824,10 +14977,10 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
  * não pode ocupar o lugar de cartão com problema — e some a dúvida de
  * "será que conferiu?", que um cartão ausente deixaria.
  *
- * **O que ela NÃO confere está dito na tela** (rodapé): carro vendido
- * sem recebimento lançado. Os 487 vendidos não têm data de venda, e a
- * conferência acusaria quase todos — alarme falso que faz o painel
- * deixar de ser lido. Entra quando a venda tiver data.
+ * **Venda sem recebimento entrou em 12/10/2026** (0067). Ela esperava a
+ * data da venda, que as importadas não têm; a saída foi uma janela em
+ * volta da data de compra e o casamento automático rodar ANTES de contar
+ * — sem ele, o cartão acusaria o que a máquina resolve sozinha.
  */
 function FinPendencias({ aoIr }) {
   const [d, setD] = useState(null); const [erro, setErro] = useState("");
@@ -14843,7 +14996,13 @@ function FinPendencias({ aoIr }) {
         sp = d.sem_pessoa || {}, ep = d.extrato_parado || {}, mf = d.meses_sem_fechar || {}, fo = d.folha || {};
   const dia = (n) => `${n} dia${n === 1 ? "" : "s"}`;
 
+  const vsr = d.vendas_sem_receber;
   const cartoes = [
+    // Primeiro: é dinheiro que a loja já ganhou e ainda não viu.
+    ...(vsr ? [{ id: "vsr", titulo: "Venda sem recebimento", cor: VERMELHO, aba: "recebimentos", n: vsr.qtd || 0,
+      sub: `R$ ${rs2(vsr.valor)} vendidos há mais de 10 dias (últimos 90) que não aparecem no extrato nem têm motivo escrito.`,
+      comp: (vsr.itens || [])[0] && vsr.itens[0].data,
+      itens: (vsr.itens || []).map((x) => [curto(`${x.comprador || "sem comprador"}${x.placa ? ` · ${x.placa}` : ""}`, 38), `${diaBR(x.data)} · R$ ${rs2(x.falta)}`]) }] : []),
     { id: "venc", titulo: "Contas vencidas", cor: VERMELHO, aba: "contas",
       n: (venc.a_pagar_qtd || 0) + (venc.a_receber_qtd || 0),
       sub: `${venc.a_pagar_qtd || 0} a pagar (R$ ${rs2(venc.a_pagar_valor)}) · ${venc.a_receber_qtd || 0} a receber (R$ ${rs2(venc.a_receber_valor)})`,
@@ -14916,7 +15075,7 @@ function FinPendencias({ aoIr }) {
               </ul>
             )}
             <div className="mt-2 text-[11.5px] font-semibold" style={{ color: C.roxo }}>
-              {c.n > 4 ? `+ ${(c.n - 4).toLocaleString("pt-BR")} · ` : ""}abrir em {c.aba === "folha" ? "Folha" : c.aba === "contas" ? "A pagar / receber" : "Lançamentos"} →
+              {c.n > 4 ? `+ ${(c.n - 4).toLocaleString("pt-BR")} · ` : ""}abrir em {c.aba === "folha" ? "Folha" : c.aba === "contas" ? "A pagar / receber" : c.aba === "recebimentos" ? "Recebimentos" : "Lançamentos"} →
             </div>
           </button>
         ))}
@@ -14931,11 +15090,11 @@ function FinPendencias({ aoIr }) {
         </div>
       )}
 
-      <p className="mt-4 text-[11.5px] leading-snug" style={{ color: C.mute }}>
-        Ainda não confere: carro vendido sem recebimento lançado. As vendas importadas não têm data, e a
-        conferência acusaria quase todas — alarme falso faz o painel deixar de ser lido. Entra quando a venda
-        tiver data.
-      </p>
+      {!vsr && (
+        <p className="mt-4 text-[11.5px] leading-snug" style={{ color: C.mute }}>
+          A conferência de venda sem recebimento não respondeu desta vez — abra Recebimentos para ver.
+        </p>
+      )}
     </div>
   );
 }
@@ -16274,6 +16433,320 @@ function FinFechamento({ comp }) {
 }
 
 /* ---------------- carros ---------------- */
+
+/* ---------------- recebimentos (0067) ---------------- */
+
+/**
+ * Toda venda tem que aparecer no extrato.
+ *
+ * O Derek, em 12/10/2026: *"o que for identificado automaticamente,
+ * perfeito; aqueles que não forem identificados tem que pedir pro
+ * financeiro casar, ou explicar"*. São as três saídas da tela, e
+ * nenhuma outra: o automático (valor exato e pagador reconhecido), o
+ * casamento à mão, e a explicação escrita.
+ *
+ * **Abre em "faltando", não em "todas"** — mesma régua da caixa de
+ * entrada do WhatsApp (decisão 48): a pergunta de todo dia é o que não
+ * fechou, e venda recebida no meio da lista é o que faz a pendente
+ * passar batido.
+ *
+ * **Casar à mão ENSINA.** O CNPJ que pagou fica ligado ao comprador
+ * (`fin_pagador`), e a próxima venda dele casa sozinha. A Alfa Veículos
+ * paga pela F C Montevechio; nenhum nome casa isso, e a pessoa só
+ * precisa dizer uma vez.
+ */
+function FinRecebimentos({ comp }) {
+  const [d, setD] = useState(null); const [erro, setErro] = useState(""); const [aviso, setAviso] = useState("");
+  const [filtro, setFiltro] = useState("faltando"); const [aberta, setAberta] = useState(null);
+  const recarregar = () => fin("recebimentos", { competencia: comp }).then(setD).catch((e) => setErro(e.message));
+  useEffect(() => {
+    let vivo = true;
+    setD(null); setErro(""); setAviso(""); setAberta(null);
+    // O inequívoco casa antes de a lista aparecer: mostrar como
+    // pendente o que a máquina resolve sozinha é trabalho inventado.
+    fin("recebimentos", { competencia: comp, acao: "automatico" }, { method: "POST" })
+      .then((r) => { if (vivo && r.casadas) setAviso(`${r.casadas} venda${r.casadas === 1 ? " foi identificada" : "s foram identificadas"} agora, sozinha${r.casadas === 1 ? "" : "s"}: valor exato e pagador reconhecido.`); })
+      .catch(() => {})
+      .then(() => fin("recebimentos", { competencia: comp }))
+      .then((x) => { if (vivo) setD(x); })
+      .catch((e) => { if (vivo) setErro(e.message); });
+    return () => { vivo = false; };
+  }, [comp]);
+
+  if (erro && !d) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
+  if (!d) return <p className="text-[13px]" style={{ color: C.mute }}>Cruzando as vendas com o extrato…</p>;
+
+  const VERMELHO = "#C0281B";
+  const SIT = {
+    pendente: { rot: "não apareceu", cor: VERMELHO, fundo: "#FBEAE8" },
+    parcial: { rot: "parcial", cor: AMARELO.texto, fundo: AMARELO.fundo },
+    recebido: { rot: "recebido", cor: C.verde, fundo: "#E8F3EE" },
+    explicado: { rot: "explicado", cor: C.roxo, fundo: "#F1ECF8" },
+  };
+  const grupos = {
+    faltando: d.vendas.filter((v) => v.situacao === "pendente" || v.situacao === "parcial"),
+    recebido: d.vendas.filter((v) => v.situacao === "recebido"),
+    explicado: d.vendas.filter((v) => v.situacao === "explicado"),
+    todas: d.vendas,
+  };
+  const lista = grupos[filtro] || [];
+  const r = d.resumo || {};
+  const tile = (rot, valor, sub, cor) => (
+    <div className="rounded-xl px-3 py-2.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+      <div className="text-[11px] font-semibold uppercase tracking-[0.05em]" style={{ color: C.mute }}>{rot}</div>
+      <div className="text-[18px] font-bold" style={{ color: cor || C.ink, fontVariantNumeric: "tabular-nums" }}>R$ {rs2(valor)}</div>
+      <div className="text-[11.5px]" style={{ color: C.mute }}>{sub}</div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+        {tile("Vendido", r.valor, `${r.vendas || 0} venda${r.vendas === 1 ? "" : "s"} em ${rotuloMes(comp)}`)}
+        {tile("No extrato", r.recebido, "casado com crédito do banco", C.verde)}
+        {tile("Explicado", r.explicado, "sem crédito, com motivo escrito", C.roxo)}
+        {tile("Falta", r.falta, `${r.pendentes || 0} venda${r.pendentes === 1 ? "" : "s"} sem fechar`, r.falta > 0 ? VERMELHO : C.verde)}
+      </div>
+
+      {aviso && <p className="rounded-lg px-3 py-2 text-[12.5px]" style={{ background: "#E8F3EE", color: C.verde }}>✓ {aviso}</p>}
+      {erro && <p className="text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
+
+      <div className="flex flex-wrap gap-1.5">
+        {[["faltando", "Faltando"], ["recebido", "Recebidas"], ["explicado", "Explicadas"], ["todas", "Todas"]].map(([k, rot]) => (
+          <button key={k} onClick={() => { setFiltro(k); setAberta(null); }}
+            className="rounded-full border px-3 py-1 text-[12px] font-semibold"
+            style={{ borderColor: filtro === k ? C.roxo : C.line, background: filtro === k ? C.roxo : C.paper, color: filtro === k ? "#fff" : C.ink }}>
+            {rot} <span style={{ opacity: 0.75 }}>{grupos[k].length}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="overflow-hidden rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        {lista.map((v) => {
+          const s = SIT[v.situacao] || SIT.pendente;
+          const abertaAqui = aberta === v.id;
+          return (
+            <div key={v.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+              <button onClick={() => setAberta(abertaAqui ? null : v.id)}
+                className="flex w-full items-center gap-3 px-3 py-2.5 text-left" style={{ background: abertaAqui ? "#FAF8FC" : "transparent" }}>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-baseline gap-x-2">
+                    <span className="text-[13px] font-semibold">{v.comprador || "sem comprador"}</span>
+                    {v.natureza === "indicacao" && (
+                      <span className="rounded px-1.5 text-[10.5px] font-semibold" style={{ background: "#F1ECF8", color: C.roxo }}>comissão de indicação</span>
+                    )}
+                  </div>
+                  <div className="truncate text-[11.5px]" style={{ color: C.mute }}>
+                    {diaBR(v.base)} · {v.carro || "carro sem ficha"}{v.placa ? ` · ${v.placa}` : ""}{v.negociador ? ` · ${v.negociador}` : ""}
+                  </div>
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className="text-[13px] font-bold" style={{ fontVariantNumeric: "tabular-nums" }}>R$ {rs2(v.valor)}</div>
+                  <div className="mt-0.5 flex items-center justify-end gap-1.5">
+                    {v.situacao === "parcial" && <span className="text-[11px]" style={{ color: C.mute, fontVariantNumeric: "tabular-nums" }}>falta {rs2(v.falta)}</span>}
+                    <span className="rounded-full px-2 text-[10.5px] font-semibold" style={{ background: s.fundo, color: s.cor }}>{s.rot}</span>
+                  </div>
+                </div>
+              </button>
+              {abertaAqui && <PainelRecebimento v={v} aoMudou={recarregar} />}
+            </div>
+          );
+        })}
+        {!lista.length && (
+          <p className="px-3 py-6 text-center text-[13px]" style={{ color: C.mute }}>
+            {filtro === "faltando" ? `Toda venda de ${rotuloMes(comp)} está no extrato ou explicada.` : "Nada aqui."}
+          </p>
+        )}
+      </div>
+
+      {!!(d.creditos_soltos || []).length && (
+        <div className="rounded-xl p-3" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+          <div className="text-[13px] font-bold">Entrou de lojista e não pagou venda nenhuma</div>
+          <p className="mb-2 text-[11.5px] leading-snug" style={{ color: C.mute }}>
+            Créditos de {rotuloMes(comp)} cujo pagador parece um comprador do cadastro. Pode ser carro de outro mês
+            (abra o mês da venda), carro que não foi lançado no estoque, ou não ser venda — aí categorize em Lançamentos.
+          </p>
+          <div className="space-y-1.5">
+            {d.creditos_soltos.map((c) => <CreditoSolto key={c.id} c={c} vendas={d.vendas} aoMudou={recarregar} />)}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Fora do FinRecebimentos de propósito: componente declarado dentro de
+// outro vira tipo novo a cada render, e o campo perde o foco a cada
+// tecla (decisão 7).
+function PainelRecebimento({ v, aoMudou }) {
+  const [creditos, setCreditos] = useState(null); const [sel, setSel] = useState([]); const [busca, setBusca] = useState("");
+  const [explicando, setExplicando] = useState(false); const [motivo, setMotivo] = useState(""); const [valorEx, setValorEx] = useState("");
+  const [ocupado, setOcupado] = useState(false); const [erro, setErro] = useState(""); const [feito, setFeito] = useState("");
+  const agir = async (fn, msg) => {
+    setOcupado(true); setErro(""); setFeito("");
+    try { const r = await fn(); setFeito(typeof msg === "function" ? msg(r) : msg); await aoMudou(); }
+    catch (e) { setErro(e.message); }
+    setOcupado(false);
+  };
+  const casar = (ids) => agir(
+    () => fin("recebimentos", { acao: "casar" }, finJson("POST", { estoque_id: v.id, lancamento_ids: ids })),
+    (r) => `Casado.${r && r.aprendeu ? " O pagador ficou guardado: a próxima venda deste comprador casa sozinha." : ""}`);
+  const procurar = async () => {
+    setErro("");
+    try { const r = await fin("recebimentos", { estoque_id: v.id }); setCreditos(r.creditos || []); }
+    catch (e) { setErro(e.message); }
+  };
+  const MODO = { auto: "automático", manual: "casado à mão", explicado: "explicado" };
+  const SEM_EXTRATO = ["Pago em dinheiro", "Encontro de contas com outra compra", "Pago em outra conta", "Desconto dado ao lojista", "Venda desfeita"];
+  const termo = busca.trim().toLowerCase();
+  const termoNum = busca.replace(/\D/g, "");
+  const vistos = (creditos || []).filter((c) => !termo
+    || String(c.descricao || "").toLowerCase().includes(termo)
+    || (termoNum && String(Math.round(c.livre)).includes(termoNum)));
+  const somaSel = (creditos || []).filter((c) => sel.indexOf(c.id) >= 0).reduce((t, c) => t + c.livre, 0);
+  const botao = "rounded-md border px-2.5 py-1 text-[12px] font-semibold";
+
+  return (
+    <div className="space-y-3 px-3 pb-3 pt-1" style={{ background: "#FAF8FC" }}>
+      {!!v.recebimentos.length && (
+        <div className="space-y-1">
+          {v.recebimentos.map((x) => (
+            <div key={x.id} className="flex items-start justify-between gap-3 text-[12px]">
+              <div className="min-w-0">
+                <span className="mr-1.5 rounded px-1.5 text-[10.5px] font-semibold" style={{ background: x.modo === "auto" ? "#E8F3EE" : "#F1ECF8", color: x.modo === "auto" ? C.verde : C.roxo }}>{MODO[x.modo]}</span>
+                {x.lancamento
+                  ? <span>{diaBR(x.lancamento.data)} · {x.lancamento.descricao}</span>
+                  : <span>“{x.explicacao}”</span>}
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <span style={{ fontVariantNumeric: "tabular-nums" }}>R$ {rs2(x.valor)}</span>
+                <button disabled={ocupado} onClick={() => agir(() => fin("recebimentos", { id: x.id }, { method: "DELETE" }), "Desfeito.")}
+                  className="text-[11.5px] font-semibold" style={{ color: C.laranja }}>desfazer</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {v.falta > 0 && (
+        <>
+          {!!v.sugestoes.length && (
+            <div>
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.05em]" style={{ color: C.mute }}>Pode ser</div>
+              <div className="space-y-1.5">
+                {v.sugestoes.map((s, i) => (
+                  <div key={i} className="flex items-start justify-between gap-3 rounded-lg px-2.5 py-1.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+                    <div className="min-w-0 text-[12px]">
+                      {s.itens.map((it) => <div key={it.id} className="truncate">{diaBR(it.data)} · {it.descricao} · <b style={{ fontVariantNumeric: "tabular-nums" }}>R$ {rs2(it.livre)}</b></div>)}
+                      <div className="text-[11px]" style={{ color: C.mute }}>{s.motivo}</div>
+                    </div>
+                    <button disabled={ocupado} onClick={() => casar(s.ids)} className={botao} style={{ borderColor: C.roxo, color: C.roxo }}>casar</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            <button disabled={ocupado} onClick={procurar} className={botao} style={{ borderColor: C.line, color: C.ink, background: C.paper }}>
+              procurar no extrato
+            </button>
+            <button disabled={ocupado} onClick={() => { setExplicando(!explicando); setValorEx(""); }} className={botao}
+              style={{ borderColor: C.line, color: C.ink, background: C.paper }}>
+              não está no extrato — explicar
+            </button>
+          </div>
+
+          {creditos && (
+            <div className="rounded-lg p-2" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+              <input className="mb-1.5 w-full rounded border px-2 py-1 text-[12px] outline-none" style={inputSty}
+                placeholder="Filtrar por nome ou valor" value={busca} onChange={(e) => setBusca(e.target.value)} />
+              <div className="max-h-64 space-y-0.5 overflow-y-auto">
+                {vistos.map((c) => (
+                  <label key={c.id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-[12px] hover:bg-[#F6F3FA]">
+                    <input type="checkbox" checked={sel.indexOf(c.id) >= 0}
+                      onChange={(e) => setSel(e.target.checked ? sel.concat(c.id) : sel.filter((x) => x !== c.id))} />
+                    <span className="shrink-0" style={{ color: C.mute }}>{diaBR(c.data)}</span>
+                    <span className="min-w-0 flex-1 truncate">{c.descricao}</span>
+                    <span className="shrink-0" style={{ fontVariantNumeric: "tabular-nums" }}>
+                      R$ {rs2(c.livre)}{c.livre < c.valor - 0.01 && <span style={{ color: C.mute }}> de {rs2(c.valor)}</span>}
+                    </span>
+                  </label>
+                ))}
+                {!vistos.length && <p className="py-2 text-center text-[12px]" style={{ color: C.mute }}>Nenhum crédito livre perto desta venda{termo ? " com esse filtro" : ""}.</p>}
+              </div>
+              {!!sel.length && (
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <span className="text-[12px]" style={{ color: igualR(somaSel, v.falta) ? C.verde : AMARELO.texto }}>
+                    {sel.length} selecionado{sel.length === 1 ? "" : "s"} · R$ {rs2(somaSel)} {igualR(somaSel, v.falta) ? "— bate com o que falta" : `· falta R$ ${rs2(v.falta)}`}
+                  </span>
+                  <button disabled={ocupado} onClick={() => { casar(sel); setSel([]); setCreditos(null); }} className={botao}
+                    style={{ borderColor: C.roxo, background: C.roxo, color: "#fff" }}>casar selecionados</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {explicando && (
+            <div className="space-y-2 rounded-lg p-2.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+              <div className="flex flex-wrap gap-1.5">
+                {SEM_EXTRATO.map((m) => (
+                  <button key={m} onClick={() => setMotivo(m)} className="rounded-full border px-2.5 py-0.5 text-[11.5px]"
+                    style={{ borderColor: motivo === m ? C.roxo : C.line, color: motivo === m ? C.roxo : C.ink }}>{m}</button>
+                ))}
+              </div>
+              <textarea rows={2} className="w-full rounded border px-2 py-1 text-[12px] outline-none" style={inputSty}
+                placeholder="O que aconteceu com este dinheiro — quem vai ler é quem fecha o mês."
+                value={motivo} onChange={(e) => setMotivo(e.target.value)} />
+              <div className="flex items-center gap-2">
+                <span className="text-[12px]" style={{ color: C.mute }}>Valor</span>
+                <input className="w-28 rounded border px-2 py-1 text-right text-[12px] outline-none" style={{ ...inputSty, fontFamily: F.mono }}
+                  inputMode="decimal" placeholder={rs2(v.falta)} value={valorEx} onChange={(e) => setValorEx(e.target.value)} />
+                <button disabled={ocupado || !motivo.trim()}
+                  onClick={() => agir(() => fin("recebimentos", { acao: "explicar" }, finJson("POST", { estoque_id: v.id, explicacao: motivo.trim(), valor: valorEx || null })), "Explicação gravada.")}
+                  className={botao} style={{ borderColor: motivo.trim() ? C.roxo : C.line, color: motivo.trim() ? C.roxo : C.mute }}>gravar</button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {feito && <p className="text-[12px]" style={{ color: C.verde }}>✓ {feito}</p>}
+      {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+    </div>
+  );
+}
+const igualR = (a, b) => Math.abs((Number(a) || 0) - (Number(b) || 0)) < 0.01;
+
+function CreditoSolto({ c, vendas, aoMudou }) {
+  const [ocupado, setOcupado] = useState(false); const [erro, setErro] = useState("");
+  const candidatas = vendas.filter((v) => c.vendas.indexOf(v.id) >= 0);
+  const casar = async (vid) => {
+    setOcupado(true); setErro("");
+    try { await fin("recebimentos", { acao: "casar" }, finJson("POST", { estoque_id: vid, lancamento_ids: [c.id] })); await aoMudou(); }
+    catch (e) { setErro(e.message); }
+    setOcupado(false);
+  };
+  return (
+    <div className="rounded-lg px-2.5 py-1.5 text-[12px]" style={{ border: `1px solid ${C.line}` }}>
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="min-w-0 truncate">{diaBR(c.data)} · {c.descricao}</span>
+        <b className="shrink-0" style={{ fontVariantNumeric: "tabular-nums" }}>R$ {rs2(c.livre)}</b>
+      </div>
+      {!!candidatas.length && (
+        <div className="mt-1 flex flex-wrap gap-1.5">
+          {candidatas.map((v) => (
+            <button key={v.id} disabled={ocupado} onClick={() => casar(v.id)} className="rounded-md border px-2 py-0.5 text-[11.5px] font-semibold"
+              style={{ borderColor: C.roxo, color: C.roxo }}>
+              casar com {v.comprador}{v.placa ? ` · ${v.placa}` : ""} (falta R$ {rs2(v.falta)})
+            </button>
+          ))}
+        </div>
+      )}
+      {erro && <p className="mt-1 text-[11.5px]" style={{ color: C.laranja }}>{erro}</p>}
+    </div>
+  );
+}
 
 function FinCarros({ comp }) {
   const [d, setD] = useState(null); const [erro, setErro] = useState("");
@@ -18878,6 +19351,7 @@ function destinosPara(perfil) {
     ...((perfil && (perfil.financeiro || gerente)) ? [
       { id: "fin_pendencias",  rot: "Pendências",        curto: "Financ.", area: "financeiro", aba: "pendencias",  grupo: "todo dia",   icone: "financeiro" },
       { id: "fin_lancamentos", rot: "Lançamentos",       curto: "Financ.", area: "financeiro", aba: "lancamentos", grupo: "todo dia",   icone: "financeiro" },
+      { id: "fin_recebimentos", rot: "Recebimentos",     curto: "Financ.", area: "financeiro", aba: "recebimentos", grupo: "todo dia",  icone: "financeiro" },
       { id: "fin_contas",      rot: "A pagar / receber", curto: "Financ.", area: "financeiro", aba: "contas",      grupo: "todo dia",   icone: "financeiro" },
       { id: "fin_carros",      rot: "Carros",            curto: "Financ.", area: "financeiro", aba: "carros",      grupo: "todo dia",   icone: "financeiro" },
       { id: "fin_fechamento",  rot: "Fechamento",        curto: "Financ.", area: "financeiro", aba: "fechamento",  grupo: "fim do mês", icone: "financeiro" },
@@ -20429,8 +20903,8 @@ function TelaGestao({ perfil, comp }) {
 // Destino → aba do financeiro. Mesmo desenho do ABA_PV, pela mesma
 // razão: o menu e o roteador precisam concordar.
 const ABA_FIN = {
-  fin_pendencias: "pendencias", fin_lancamentos: "lancamentos", fin_contas: "contas", fin_carros: "carros",
-  fin_fechamento: "fechamento", fin_dre: "dre", fin_folha: "folha",
+  fin_pendencias: "pendencias", fin_lancamentos: "lancamentos", fin_recebimentos: "recebimentos", fin_contas: "contas",
+  fin_carros: "carros", fin_fechamento: "fechamento", fin_dre: "dre", fin_folha: "folha",
 };
 const DESTINO_FIN = Object.fromEntries(Object.entries(ABA_FIN).map(([d, a]) => [a, d]));
 

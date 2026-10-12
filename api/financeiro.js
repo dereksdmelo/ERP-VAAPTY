@@ -11,6 +11,7 @@
  *   ?recurso=vale          GET ?competencia= · POST · PATCH ?id=
  *   ?recurso=folha         GET ?competencia= · PUT     salário + comissão + bonificação − vales
  *   ?recurso=pendencias    GET                         tudo que pede ação, num lugar só (0066)
+ *   ?recurso=recebimentos  GET ?competencia= · POST ?acao=automatico|casar|explicar · DELETE ?id=   (0067)
  *
  * Quem decide o acesso é a RLS (e_financeiro): esta função só repassa
  * o token. Para quem não é do financeiro, o banco devolve lista vazia
@@ -540,6 +541,13 @@ async function importar(req, res, tok) {
     if (/^saldo/i.test(catNome || "") || /saldo anterior/i.test(String(l.descricao || ""))) {
       saldoInicial = cred - deb; saldoEm = data; return;
     }
+    /* O SALDO DO DIA NÃO É MOVIMENTO. O Itaú imprime "SALDO TOTAL
+     * DISPONÍVEL DIA" ao fim de cada dia, com o saldo no campo de
+     * crédito — e só "saldo anterior" era reconhecido acima. Foram 194
+     * linhas e R$ 29,5 milhões de crédito que nunca entrou, marcados
+     * como `cancelado` pela 0067. Não é saldo inicial também: é o
+     * fim de um dia no meio do arquivo. */
+    if (/^saldo (total|do dia|dispon)/i.test(String(l.descricao || "").trim())) return;
     if (!data || (!deb && !cred) || (deb && cred)) { invalidas += 1; return; }
     const cat = catNome ? catPor[catNome.toLowerCase()] : null;
     const catId = cat ? cat.id : (memoria[normDesc(l.descricao)] || null);
@@ -1455,6 +1463,296 @@ async function recibo(req, res, tok) {
   }
 }
 
+/* ------------------ recebimentos (0067) ------------------ */
+
+/**
+ * Toda venda tem que aparecer no extrato.
+ *
+ *   GET    ?competencia=            as vendas do mês, o que entrou de cada uma, e sugestões
+ *   GET    ?estoque_id=             os créditos livres perto daquela venda, para casar à mão
+ *   POST   ?acao=automatico         casa sozinho o que é inequívoco
+ *   POST   ?acao=casar              { estoque_id, lancamento_ids }  — e aprende o pagador
+ *   POST   ?acao=explicar           { estoque_id, explicacao, valor? }
+ *   DELETE ?id=                     desfaz um casamento ou uma explicação
+ *
+ * **O automático só casa o que não tem como estar errado**: valor
+ * exato E pagador reconhecido (pelo nome do comprador ou por um
+ * casamento anterior), e nenhum outro candidato disputando — nem outro
+ * crédito para a venda, nem outra venda para o crédito. O resto vira
+ * sugestão, que a pessoa confirma. Casamento errado esconde venda não
+ * recebida atrás de um "ok" verde, e esse é o erro que esta tela
+ * existe para pegar; deixar passar só custa um clique.
+ *
+ * A data da venda importada é a da COMPRA (decisão 25), e o lojista
+ * paga quando revende — por isso a janela vai de uma semana antes a
+ * 75 dias depois.
+ */
+const JANELA_ANTES = 7, JANELA_DEPOIS = 75;
+const somaDias = (d, n) => {
+  const [a, m, x] = String(d).slice(0, 10).split("-").map(Number);
+  return new Date(Date.UTC(a, m - 1, x) + n * 86400000).toISOString().slice(0, 10);
+};
+const igual = (a, b) => Math.abs((Number(a) || 0) - (Number(b) || 0)) < 0.01;
+const r2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
+
+/* O que não identifica ninguém: forma jurídica, ramo, a palavra do
+ * banco e os sobrenomes mais comuns do Brasil. "ANDERSON - UNIAUTO" e
+ * "SAVYON ESLEY OLIVEIRA MAIA" não podem casar com um PIX só porque
+ * alguém nele se chama Oliveira. */
+const NAO_IDENTIFICA = new Set((
+  "LTDA EIRELI EPP VEICULOS VEICULO AUTO AUTOS CAR CARS MOTORS MOTOS MULTIMARCAS COMERCIO COM " +
+  "DAS DOS PIX RECEBIDO RECEBIMENTOS RECEBIMENTO TED DOC TRANSF TRANSFERENCIA BOLETOS BOLETO " +
+  "DEPOSITO ASSUMIU JUNIOR FILHO NETO SOBRINHO SILVA SOUZA SOUSA SANTOS OLIVEIRA PEREIRA LIMA " +
+  "COSTA FERREIRA RODRIGUES ALVES GOMES MARTINS ROCHA RIBEIRO CARVALHO ALMEIDA LOPES SOARES " +
+  "VIEIRA BARBOSA").split(" "));
+const tokensDe = (t) => new Set(String(t || "").normalize("NFD").replace(/[̀-ͯ]/g, "")
+  .toUpperCase().replace(/[^A-Z]+/g, " ").split(" ")
+  .filter((x) => x.length >= 3 && !NAO_IDENTIFICA.has(x)));
+const cruza = (a, b) => { for (const x of a) if (b.has(x)) return true; return false; };
+// Linha que o banco imprime e não é dinheiro de ninguém.
+const NAO_E_PAGAMENTO = /^(saldo|rend(imentos)? pago|res aplic|aplic)/i;
+
+async function dadosRecebimento(tok, de, ate) {
+  const cDe = somaDias(de, -JANELA_ANTES), cAte = somaDias(ate, JANELA_DEPOIS);
+  const [vendas, creditos] = await Promise.all([
+    supa(`${base("estoque")}?select=id,natureza,entrou_em,vendido_em,valor_venda,negociador_nome,` +
+      `comprador(id,nome),veiculo(placa,marca_modelo),` +
+      `fin_recebimento(id,valor,modo,explicacao,lancamento_id,criado_em,fin_lancamento(data,descricao,credito))` +
+      `&situacao=eq.vendido&or=(and(vendido_em.gte.${de},vendido_em.lte.${ate}),and(vendido_em.is.null,entrou_em.gte.${de},entrou_em.lte.${ate}))` +
+      `&order=entrou_em.asc&limit=2000`, { headers: cab(tok) }),
+    supa(`${base("fin_lancamento")}?select=id,data,credito,descricao,favorecido_id,categoria_id,fin_recebimento(valor,estoque_id)` +
+      `&situacao=eq.efetivado&credito=gt.0&data=gte.${cDe}&data=lte.${cAte}&order=data.asc&limit=20000`, { headers: cab(tok) }),
+  ]);
+  const compIds = Array.from(new Set((vendas || []).map((e) => e.comprador && e.comprador.id).filter(Boolean)));
+  const pags = compIds.length
+    ? await supa(`${base("fin_pagador")}?select=comprador_id,favorecido_id&comprador_id=in.(${compIds.join(",")})`, { headers: cab(tok) })
+    : [];
+  const pagadores = {};
+  (pags || []).forEach((p) => { (pagadores[p.comprador_id] = pagadores[p.comprador_id] || new Set()).add(p.favorecido_id); });
+
+  const cred = (creditos || [])
+    .filter((c) => !NAO_E_PAGAMENTO.test(String(c.descricao || "").trim()))
+    .map((c) => {
+      const usado = (c.fin_recebimento || []).reduce((t, x) => t + (Number(x.valor) || 0), 0);
+      return { id: c.id, data: c.data, valor: Number(c.credito) || 0, livre: r2((Number(c.credito) || 0) - usado),
+        descricao: c.descricao, favorecido_id: c.favorecido_id, categoria_id: c.categoria_id, tokens: tokensDe(c.descricao) };
+    });
+  const vend = (vendas || []).map((e) => {
+    const recs = e.fin_recebimento || [];
+    const recebido = recs.filter((x) => x.lancamento_id).reduce((t, x) => t + (Number(x.valor) || 0), 0);
+    const explicado = recs.filter((x) => !x.lancamento_id).reduce((t, x) => t + (Number(x.valor) || 0), 0);
+    const valor = Number(e.valor_venda) || 0;
+    const comp = e.comprador || {};
+    return {
+      id: e.id, natureza: e.natureza || "compra", base: e.vendido_em || e.entrou_em, valor,
+      recebido: r2(recebido), explicado: r2(explicado), falta: r2(Math.max(0, valor - recebido - explicado)),
+      comprador_id: comp.id || null, comprador: comp.nome || null, tokens: tokensDe(comp.nome),
+      placa: e.veiculo && e.veiculo.placa, carro: e.veiculo && e.veiculo.marca_modelo, negociador: e.negociador_nome,
+      recebimentos: recs.map((x) => ({ id: x.id, valor: Number(x.valor) || 0, modo: x.modo, explicacao: x.explicacao,
+        em: x.criado_em, lancamento: x.lancamento_id ? { id: x.lancamento_id, ...(x.fin_lancamento || {}) } : null })),
+    };
+  });
+  return { vend, cred, pagadores };
+}
+
+function motorRecebimento({ vend, cred, pagadores }) {
+  const naJanela = (v, c) => v.base && c.data >= somaDias(v.base, -JANELA_ANTES) && c.data <= somaDias(v.base, JANELA_DEPOIS);
+  const reconhece = (v, c) => {
+    if (c.favorecido_id && pagadores[v.comprador_id] && pagadores[v.comprador_id].has(c.favorecido_id)) return "pagador";
+    return v.tokens.size && cruza(v.tokens, c.tokens) ? "nome" : null;
+  };
+  const candidatos = (v) => cred.filter((c) => c.livre > 0.009 && naJanela(v, c));
+  // Subconjuntos de 2 a 4 créditos que somam exatamente o que falta —
+  // o lojista que paga um carro em dois PIX. Até 10 candidatos: 2^10
+  // combinações, e passar disso já não é caso de máquina.
+  const combos = (lista, alvo) => {
+    const achados = [];
+    if (lista.length < 2 || lista.length > 10) return achados;
+    for (let m = 1; m < (1 << lista.length); m++) {
+      let n = 0, s = 0; const sel = [];
+      for (let i = 0; i < lista.length; i++) if (m & (1 << i)) { n++; s += lista[i].livre; sel.push(lista[i]); }
+      if (n >= 2 && n <= 4 && igual(s, alvo)) achados.push(sel);
+    }
+    return achados;
+  };
+  const perfeito = (v) => {
+    if (v.falta <= 0) return null;
+    const C = candidatos(v).filter((c) => reconhece(v, c));
+    const um = C.filter((c) => igual(c.livre, v.falta));
+    if (um.length === 1) return um;
+    if (um.length > 1) return null;
+    const cs = combos(C, v.falta);
+    return cs.length === 1 ? cs[0] : null;
+  };
+  const sugestoes = (v) => {
+    if (v.falta <= 0) return [];
+    const C = candidatos(v);
+    const lista = C.map((c) => {
+      const r = reconhece(v, c), exato = igual(c.livre, v.falta);
+      const dias = Math.abs((Date.parse(c.data) - Date.parse(v.base)) / 86400000);
+      return { c, r, exato, nota: (r === "pagador" ? 4 : r ? 3 : 0) + (exato ? 3 : 0) - dias / 60 };
+    }).filter((x) => x.r || x.exato).sort((a, b) => b.nota - a.nota).slice(0, 3)
+      .map((x) => ({
+        ids: [x.c.id], valor: x.c.livre,
+        motivo: [x.exato ? "valor exato" : "valor diferente", x.r === "pagador" ? "pagador já conhecido" : x.r ? "nome parecido" : "pagador desconhecido"].join(" · "),
+        itens: [{ id: x.c.id, data: x.c.data, descricao: x.c.descricao, livre: x.c.livre }],
+      }));
+    combos(C.filter((c) => reconhece(v, c)), v.falta).slice(0, 2).forEach((sel) => lista.push({
+      ids: sel.map((c) => c.id), valor: r2(sel.reduce((t, c) => t + c.livre, 0)), motivo: `${sel.length} créditos somam o valor exato · nome parecido`,
+      itens: sel.map((c) => ({ id: c.id, data: c.data, descricao: c.descricao, livre: c.livre })),
+    }));
+    return lista;
+  };
+  return { perfeito, sugestoes, reconhece, naJanela };
+}
+
+// Casa sozinho o inequívoco e devolve quantas vendas casou.
+async function casarAutomatico(tok, de, ate) {
+  const dados = await dadosRecebimento(tok, de, ate);
+  const { perfeito } = motorRecebimento(dados);
+  const propostas = dados.vend.map((v) => [v, perfeito(v)]).filter((p) => p[1]);
+  // Crédito disputado por duas vendas não vai para nenhuma.
+  const uso = {};
+  propostas.forEach(([, cs]) => cs.forEach((c) => { uso[c.id] = (uso[c.id] || 0) + 1; }));
+  const limpas = propostas.filter(([, cs]) => cs.every((c) => uso[c.id] === 1));
+  const linhas = [];
+  limpas.forEach(([v, cs]) => cs.forEach((c) => linhas.push({ estoque_id: v.id, lancamento_id: c.id, valor: c.livre, modo: "auto" })));
+  if (!linhas.length) return 0;
+  await supa(base("fin_recebimento"), { method: "POST", headers: cab(tok), body: JSON.stringify(linhas) });
+  await supa(`${URL_BASE}/rest/v1/rpc/fin_recebimento_categorizar`, { method: "POST", headers: cab(tok), body: "{}" });
+  return limpas.length;
+}
+
+async function recebimentos(req, res, tok) {
+  const acao = String(req.query.acao || "");
+
+  if (req.method === "GET" && RX_ID.test(String(req.query.estoque_id || ""))) {
+    // Os créditos livres em volta desta venda, para casar à mão quando
+    // nem o nome nem o valor bateram.
+    const eid = String(req.query.estoque_id);
+    const e = um(await supa(`${base("estoque")}?select=id,entrou_em,vendido_em&id=eq.${eid}`, { headers: cab(tok) }));
+    if (!e) return res.status(404).json({ erro: "Venda não encontrada." });
+    const dia = e.vendido_em || e.entrou_em;
+    const dados = await dadosRecebimento(tok, dia, dia);
+    const v = dados.vend.find((x) => x.id === eid);
+    const { naJanela } = motorRecebimento(dados);
+    const livres = dados.cred.filter((c) => c.livre > 0.009 && (!v || naJanela(v, c)))
+      .map((c) => ({ id: c.id, data: c.data, descricao: c.descricao, valor: c.valor, livre: c.livre }));
+    if (v) livres.sort((a, b) => Math.abs(a.livre - v.falta) - Math.abs(b.livre - v.falta));
+    return res.status(200).json({ creditos: livres.slice(0, 200) });
+  }
+
+  if (req.method === "GET") {
+    const comp = competenciaDe(req.query.competencia) || competenciaDe(hojeAqui());
+    const fim = fimDoMes(comp);
+    const dados = await dadosRecebimento(tok, comp, fim);
+    const { sugestoes, reconhece, naJanela } = motorRecebimento(dados);
+
+    /* O outro lado: dinheiro de lojista que entrou no mês e não pagou
+     * venda nenhuma. Sem esta lista, o PIX que pagou um carro de outro
+     * mês — ou um carro que ninguém lançou no estoque — fica invisível,
+     * e a venda dele aparece como não recebida para sempre. */
+    const [todos, cats] = await Promise.all([
+      supa(`${base("comprador")}?select=id,nome&limit=5000`, { headers: cab(tok) }),
+      supa(`${base("fin_categoria")}?select=id,grupo`, { headers: cab(tok) }),
+    ]);
+    const tokComp = (todos || []).map((c) => tokensDe(c.nome)).filter((t) => t.size);
+    const grupoDe = {}; (cats || []).forEach((c) => { grupoDe[c.id] = c.grupo; });
+    const soltos = dados.cred.filter((c) => c.livre >= 300 && c.data >= comp && c.data <= fim &&
+        (!c.categoria_id || grupoDe[c.categoria_id] === "negociacao") && tokComp.some((t) => cruza(t, c.tokens)))
+      .map((c) => ({
+        id: c.id, data: c.data, descricao: c.descricao, valor: c.valor, livre: c.livre,
+        vendas: dados.vend.filter((v) => v.falta > 0 && naJanela(v, c) && reconhece(v, c)).map((v) => v.id),
+      }));
+
+    const vendas = dados.vend.map((v) => {
+      const situacao = v.falta <= 0 ? (v.explicado > 0 && v.recebido < v.valor - 0.01 ? "explicado" : "recebido")
+        : v.recebido > 0 || v.explicado > 0 ? "parcial" : "pendente";
+      const { tokens, ...resto } = v;
+      return { ...resto, situacao, sugestoes: sugestoes(v) };
+    });
+    const soma = (k) => r2(vendas.reduce((t, v) => t + v[k], 0));
+    return res.status(200).json({
+      competencia: comp, vendas, creditos_soltos: soltos,
+      resumo: { vendas: vendas.length, valor: soma("valor"), recebido: soma("recebido"), explicado: soma("explicado"), falta: soma("falta"),
+        pendentes: vendas.filter((v) => v.situacao === "pendente" || v.situacao === "parcial").length },
+    });
+  }
+
+  if (req.method === "POST" && acao === "automatico") {
+    const comp = competenciaDe(req.query.competencia) || competenciaDe(hojeAqui());
+    const n = await casarAutomatico(tok, comp, fimDoMes(comp));
+    return res.status(200).json({ casadas: n });
+  }
+
+  if (req.method === "POST" && (acao === "casar" || acao === "explicar")) {
+    const c = await corpoDe(req);
+    const eid = String((c && c.estoque_id) || "");
+    if (!RX_ID.test(eid)) return res.status(400).json({ erro: "estoque_id inválido." });
+    const e = um(await supa(`${base("estoque")}?select=id,valor_venda,comprador_id,fin_recebimento(valor)&id=eq.${eid}`, { headers: cab(tok) }));
+    if (!e) return res.status(404).json({ erro: "Venda não encontrada." });
+    let falta = r2((Number(e.valor_venda) || 0) - (e.fin_recebimento || []).reduce((t, x) => t + (Number(x.valor) || 0), 0));
+    if (falta <= 0) return res.status(409).json({ erro: "Esta venda já está toda recebida ou explicada." });
+
+    if (acao === "explicar") {
+      const explicacao = texto(c.explicacao);
+      if (!explicacao) return res.status(400).json({ erro: "Diga por que esta venda não aparece no extrato." });
+      const valor = c.valor == null || c.valor === "" ? falta : r2(decimal(c.valor));
+      if (!(valor > 0) || valor > falta + 0.01) return res.status(400).json({ erro: `O valor explicado vai de R$ 0,01 até o que falta (R$ ${falta.toLocaleString("pt-BR")}).` });
+      await supa(base("fin_recebimento"), { method: "POST", headers: cab(tok),
+        body: JSON.stringify({ estoque_id: eid, valor, modo: "explicado", explicacao }) });
+      return res.status(201).json({ ok: true });
+    }
+
+    const ids = (Array.isArray(c.lancamento_ids) ? c.lancamento_ids : []).filter((x) => RX_ID.test(String(x)));
+    if (!ids.length) return res.status(400).json({ erro: "Escolha ao menos um crédito do extrato." });
+    const lancs = await supa(`${base("fin_lancamento")}?select=id,credito,favorecido_id,fin_recebimento(valor,estoque_id)` +
+      `&id=in.(${ids.join(",")})&situacao=eq.efetivado&credito=gt.0`, { headers: cab(tok) });
+    const linhas = [];
+    // Na ordem em que a pessoa escolheu; o crédito maior que o que falta
+    // entra só com o que falta, e o resto dele fica livre para o outro
+    // carro que ele também pagou.
+    ids.forEach((id) => {
+      const l = (lancs || []).find((x) => x.id === id);
+      if (!l || falta <= 0) return;
+      if ((l.fin_recebimento || []).some((x) => x.estoque_id === eid)) return;
+      const livre = r2((Number(l.credito) || 0) - (l.fin_recebimento || []).reduce((t, x) => t + (Number(x.valor) || 0), 0));
+      const valor = r2(Math.min(livre, falta));
+      if (valor <= 0) return;
+      linhas.push({ estoque_id: eid, lancamento_id: id, valor, modo: "manual" });
+      falta = r2(falta - valor);
+    });
+    if (!linhas.length) return res.status(409).json({ erro: "Esses créditos já foram usados inteiros em outras vendas." });
+    await supa(base("fin_recebimento"), { method: "POST", headers: cab(tok), body: JSON.stringify(linhas) });
+
+    // O aprendizado: este CNPJ/CPF paga por este comprador. Na próxima
+    // venda dele, o automático já reconhece.
+    let aprendeu = 0;
+    const favs = Array.from(new Set((lancs || []).filter((l) => linhas.some((x) => x.lancamento_id === l.id))
+      .map((l) => l.favorecido_id).filter(Boolean)));
+    if (e.comprador_id && favs.length) {
+      const r = await supa(`${base("fin_pagador")}?on_conflict=comprador_id,favorecido_id`, {
+        method: "POST", headers: cab(tok, { Prefer: "resolution=ignore-duplicates,return=representation" }),
+        body: JSON.stringify(favs.map((f) => ({ comprador_id: e.comprador_id, favorecido_id: f }))),
+      });
+      aprendeu = (r || []).length;
+    }
+    await supa(`${URL_BASE}/rest/v1/rpc/fin_recebimento_categorizar`, { method: "POST", headers: cab(tok), body: "{}" });
+    return res.status(201).json({ ok: true, casados: linhas.length, falta, aprendeu });
+  }
+
+  if (req.method === "DELETE") {
+    const id = String(req.query.id || "");
+    if (!RX_ID.test(id)) return res.status(400).json({ erro: "id inválido." });
+    const r = await supa(`${base("fin_recebimento")}?id=eq.${id}`, { method: "DELETE", headers: cab(tok, REP) });
+    if (!um(r)) return res.status(403).json({ erro: "Não achei esse casamento, ou a regra do banco recusou." });
+    return res.status(200).json({ ok: true });
+  }
+
+  res.setHeader("Allow", "GET, POST, DELETE");
+  return res.status(405).json({ erro: "Use GET, POST ou DELETE." });
+}
+
 async function estoqueLista(req, res, tok) {
   const lista = await supa(`${base("estoque")}?select=id,situacao,veiculo(placa,marca_modelo)&order=entrou_em.desc&limit=400`, { headers: cab(tok) });
   return res.status(200).json({ estoque: (lista || []).map((e) => ({ id: e.id, situacao: e.situacao, placa: e.veiculo && e.veiculo.placa, carro: e.veiculo && e.veiculo.marca_modelo })) });
@@ -1473,11 +1771,31 @@ async function estoqueLista(req, res, tok) {
 async function pendencias(req, res, tok) {
   if (req.method !== "GET") { res.setHeader("Allow", "GET"); return res.status(405).json({ erro: "Use GET." }); }
   const r = await supa(`${URL_BASE}/rest/v1/rpc/fin_pendencias`, { method: "POST", headers: cab(tok), body: "{}" });
-  return res.status(200).json(r || {});
+  /* VENDA SEM RECEBIMENTO, nos últimos 90 dias (0067). Antes de contar,
+   * casa o inequívoco: sem isso o cartão acusaria como pendente o que a
+   * máquina resolveria sozinha, e o painel mentiria para mais. Dez dias
+   * de carência porque o lojista paga quando revende — venda de ontem
+   * sem PIX é o normal, não pendência.
+   *
+   * Falhar aqui não derruba as outras oito conferências. */
+  let vsr = null;
+  try {
+    const hoje = hojeAqui(), de = somaDias(hoje, -90);
+    await casarAutomatico(tok, de, hoje);
+    const { vend } = await dadosRecebimento(tok, de, hoje);
+    const limite = somaDias(hoje, -10);
+    const pend = vend.filter((v) => v.falta > 0 && v.base <= limite).sort((a, b) => (a.base < b.base ? -1 : 1));
+    vsr = {
+      qtd: pend.length, valor: r2(pend.reduce((t, v) => t + v.falta, 0)),
+      itens: pend.slice(0, 5).map((v) => ({ data: v.base, comprador: v.comprador, placa: v.placa, falta: v.falta })),
+    };
+  } catch (e) { vsr = null; }
+  return res.status(200).json({ ...(r || {}), vendas_sem_receber: vsr });
 }
 
 const RECURSOS = { conta, categoria, funcionario, favorecido, lancamento, importar, dre, carros, vale, folha,
-                   fechamento, orcamento, rateio, negociacao, titulo, fluxo, log, recibo, pendencias, estoque: estoqueLista };
+                   fechamento, orcamento, rateio, negociacao, titulo, fluxo, log, recibo, pendencias, recebimentos,
+                   estoque: estoqueLista };
 
 module.exports = async function handler(req, res) {
   if (!URL_BASE || !ANON) return res.status(500).json({ erro: "SUPABASE_URL ou SUPABASE_ANON_KEY não configurados." });

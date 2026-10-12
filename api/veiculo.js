@@ -313,7 +313,13 @@ async function importarEstoque(req, res, tok, c) {
   (jaTem || []).forEach((e) => { noEstoque[e.veiculo_id] = true; });
 
   // 4. compradores, pelo nome (a chave prática, como no cadastro)
-  const NAO_E_COMPRADOR = /^(n[aã]o vendido|adam assumiu)/i;
+  /* "ASSUMIU" é a comissão de indicação (0067): o lojista assumiu o
+   * financiamento e pagou à Vaapty por ter recebido o cliente. Até
+   * 12/10/2026 "ADAM ASSUMIU" sozinho era tratado como não-comprador e
+   * o carro entrava no PÁTIO — um carro que a Vaapty nunca comprou.
+   * Agora é comprador, a linha é vendida e a natureza diz o que ela é. */
+  const NAO_E_COMPRADOR = /^n[aã]o vendido/i;
+  const INDICACAO = /\bassumiu\b/i;
   const nomes = Array.from(new Set(validas
     .map((l) => String(l.comprador || "").trim())
     .filter((n) => n && !NAO_E_COMPRADOR.test(n))));
@@ -362,6 +368,7 @@ async function importarEstoque(req, res, tok, c) {
       veiculo_id: v.id,
       atendimento_id: v.atendimento_id || null,
       situacao: comp && venda ? "vendido" : "em_estoque",
+      natureza: INDICACAO.test(nomeComp) ? "indicacao" : "compra",
       entrou_em: dataISO(l.data) || undefined,
       valor_compra: decimal(l.valor_cliente),
       comprador_id: comp ? comp.id : null,
@@ -474,6 +481,38 @@ async function estoque(req, res, tok) {
       prospector: texto(c.prospector),
     };
     if (dataISO(c.entrou_em)) linha.entrou_em = c.entrou_em;
+
+    /* COMISSÃO DE INDICAÇÃO (0067). A Vaapty não compra o carro — a
+     * quitação passa do que ele vale —, um lojista resolve e paga uma
+     * comissão por ter recebido o cliente. Entra como linha do estoque
+     * já VENDIDA, compra zero e venda igual à comissão: é assim que a
+     * casa já lançava na planilha, e é o que faz o número cair na
+     * rentabilidade, na meta do negociador e nos recebimentos sem uma
+     * conta nova em lugar nenhum. A `natureza` é o que impede de ser
+     * confundida com carro que passou pelo pátio. */
+    if (c.natureza === "indicacao") {
+      const comissao = decimal(c.valor_venda);
+      if (!(comissao > 0)) return res.status(400).json({ erro: "Informe o valor da comissão." });
+      let compradorId = RX_ID.test(String(c.comprador_id || "")) ? c.comprador_id : null;
+      const nomeNovo = texto(c.comprador_nome);
+      if (!compradorId && nomeNovo) {
+        const ja = await supa(`${base("comprador")}?select=id&nome=ilike.${encodeURIComponent(nomeNovo.replace(/[,()*]/g, " "))}&limit=1`, { headers: cab });
+        if ((ja || []).length) compradorId = ja[0].id;
+        else {
+          const novoC = await supa(base("comprador"), {
+            method: "POST", headers: cabecalhos(tok, { Prefer: "return=representation" }),
+            body: JSON.stringify({ nome: nomeNovo, tipo: "lojista" }),
+          });
+          compradorId = ((Array.isArray(novoC) ? novoC[0] : novoC) || {}).id || null;
+        }
+      }
+      if (!compradorId) return res.status(400).json({ erro: "Diga qual lojista paga a comissão." });
+      const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+      Object.assign(linha, {
+        natureza: "indicacao", situacao: "vendido", comprador_id: compradorId,
+        valor_compra: 0, valor_venda: comissao, entrou_em: hoje, vendido_em: hoje,
+      });
+    }
 
     const criado = await supa(base("estoque"), {
       method: "POST", headers: cabecalhos(tok, { Prefer: "return=representation" }),

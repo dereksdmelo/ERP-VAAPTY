@@ -2439,8 +2439,8 @@ agosto não está na tela de outubro; `aoMudarMes` leva o seletor junto.
 Derek, logo depois: *"esses menus devem aparecer na barra lateral"*).
 Nasceram como pílulas em dois grupos; ele mandou para a lateral, que é
 onde a casa pôs a navegação — e dois níveis para a mesma coisa é o que a
-decisão 51 já tinha desfeito na pré-venda. São sete destinos em
-`destinosPara()` (`fin_pendencias`, `fin_lancamentos`, `fin_contas`,
+decisão 51 já tinha desfeito na pré-venda. São oito destinos em
+`destinosPara()` (`fin_pendencias`, `fin_lancamentos`, `fin_recebimentos`, `fin_contas`,
 `fin_carros`, `fin_fechamento`, `fin_dre`, `fin_folha`), roteados pelo
 `ABA_FIN` — mesmo desenho do `ABA_PV`, pela mesma razão: o menu e o
 roteador precisam concordar, e dois mapas divergem no primeiro
@@ -2458,6 +2458,74 @@ o `esbuild` que já está nas dependências da ponte. Um erro de JSX não
 quebra uma tela, derruba o sistema (decisão 7) — e esta fase foi validada
 assim antes de publicar, mais uma simulação local (servidor falso de
 `/api` com dados fictícios) para olhar a tela renderizada sem credencial.
+
+### 57. Recebimentos: toda venda tem que aparecer no extrato
+
+O Derek, em 12/10/2026: *"eu tenho que me certificar que todas as
+vendas tenham sido recebidas… o que for identificado automaticamente,
+perfeito; aqueles que não forem identificados tem que pedir pro
+financeiro casar, ou explicar"*. São as três saídas da aba, e nenhuma
+outra.
+
+**Antes de desenhar, o dado.** Das 475 vendas de 2026, **um** crédito
+estava ligado a carro. 334 tinham um crédito de valor exato na janela;
+só 190 com um candidato único. O nome não basta (Alfa Veículos paga
+pelo CNPJ da F C Montevechio; o carro do Melville foi pago pela Aline),
+o valor não basta (dois Anderson, mesmo valor, mesma semana), e o
+lojista paga um carro em dois PIX (James: 25.500 + 5.000).
+
+**`fin_recebimento` (0067) é o casamento, pedaço por pedaço**: crédito
+que paga dois carros vira duas linhas, cada uma com o seu `valor`. Sem
+crédito, a linha é **explicação** — obrigatória. Venda que sai da lista
+sem dizer por quê é o que a tabela existe para impedir.
+
+**O automático só casa o inequívoco**: valor exato **e** pagador
+reconhecido **e** ninguém disputando — nem outro crédito para a venda,
+nem outra venda para o crédito. O resto vira sugestão de um clique.
+Casamento errado esconde venda não recebida atrás de um "ok" verde; é o
+erro que a tela existe para pegar. Mesma régua do agendamento lido da
+conversa (decisão 51): **o erro que se prefere é deixar passar.**
+
+**"Nome parecido" ignora o que não identifica ninguém**: forma jurídica,
+ramo ("VEICULOS", "MULTIMARCAS"), as palavras do banco e os vinte
+sobrenomes mais comuns. Sem isso, "SAVYON ESLEY OLIVEIRA MAIA" casaria
+com qualquer PIX de um Oliveira.
+
+**Casar à mão ensina** (`fin_pagador`): o CNPJ que pagou fica ligado ao
+comprador, e a próxima venda dele casa sozinha. A Montevechio só
+precisa ser apresentada uma vez.
+
+**Crédito casado vira lançamento categorizado** — Negociação,
+pagamento do lojista, aquele carro —, por `fin_recebimento_categorizar()`,
+numa chamada só: o primeiro automático pega perto de duzentos créditos,
+e um PATCH por linha estouraria o teto de subrequisições do Worker. Só
+quando o crédito inteiro é de UM carro e ninguém categorizou antes.
+
+**A janela é da compra, não da venda.** A data das vendas importadas é a
+da COMPRA (decisão 25), e o lojista paga quando revende — por isso vai
+de uma semana antes a 75 dias depois.
+
+**A Pendências passou a conferir venda sem recebimento** (últimos 90
+dias, dez de carência), e roda o automático ANTES de contar — senão o
+cartão acusaria o que a máquina resolve sozinha.
+
+**O olhar no dado achou um buraco maior: 185 linhas "SALDO TOTAL
+DISPONÍVEL DIA" estavam no extrato como crédito** — R$ 29,5 milhões que
+nunca entraram. O importador só reconhecia "saldo anterior". A 0067 as
+marca `cancelado` (não apaga: a chave do extrato continua barrando a
+reentrada) e o importador passou a pular a linha.
+
+**A comissão de indicação é uma linha do estoque, já vendida, com
+compra zero** (`natureza = 'indicacao'`). Quitação maior que o carro: a
+Vaapty não compra, um lojista resolve (assume o financiamento) e paga
+pela indicação. A casa já lançava assim — 31 linhas "ADAM … ASSUMIU" na
+planilha. Fazer dela uma linha do estoque é o que a põe na
+rentabilidade, na meta do negociador e nos recebimentos **sem uma conta
+nova em lugar nenhum**; a `natureza` impede que pareça carro que passou
+pelo pátio. Nasce no atendimento (Negociação e Fechamento), e acende
+quando quitação mais débitos passam do POR. O importador da
+rentabilidade reconhece "ASSUMIU" — antes, "ADAM ASSUMIU" sozinho
+mandava para o PÁTIO um carro que a Vaapty nunca comprou.
 
 ## Convenções do código
 
