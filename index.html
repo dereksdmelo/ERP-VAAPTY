@@ -1837,6 +1837,10 @@ function etapaConcluida(id, f, fotos) {
 // Onda 1 do redesenho: o corpo sobe de 14 para 16 px e o campo ganha
 // altura. Abaixo de 16 px o Safari do iPhone dá zoom ao focar o campo —
 // e o negociador perde o enquadramento no meio do preenchimento.
+// O nome do papel como a casa fala. O enum guarda `prep` e `pre_venda`;
+// a tela mostra "Adm" e "Pré-venda".
+const PAPEL_ROT = { negociador: "Negociador", pre_venda: "Pré-venda", prep: "Adm", gerente: "Gerente" };
+const papelRot = (p) => PAPEL_ROT[p] || p || "";
 const inputCls = "w-full rounded-lg border px-3 py-2.5 text-[16px] outline-none";
 const inputSty = { borderColor: C.line, background: "#fff", color: C.ink };
 
@@ -4873,7 +4877,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
       <header className="px-4 pt-4 pb-3" style={{ background: C.roxo, color: "#fff" }}>
         <div className="flex items-baseline justify-between">
           <span className="text-[10px] uppercase tracking-[0.22em]" style={{ opacity: 0.7 }}>
-            {perfil ? `${perfil.nome} · ${perfil.papel}` : "Vaapty Joinville"}
+            {perfil ? `${perfil.nome} · ${papelRot(perfil.papel)}` : "Vaapty Joinville"}
           </span>
           {cota && (
             <span className="text-[10px]" style={{ fontFamily: F.mono, opacity: cota.restantes <= 3 ? 1 : 0.7, color: cota.restantes <= 3 ? "#FFC9B4" : "#fff" }}>
@@ -19554,7 +19558,7 @@ function Shell({ perfil, tela, setTela, children }) {
             </nav>
             <div className="px-3 py-3" style={{ borderTop: `1px solid ${C.line}` }}>
               <div className="truncate text-[12.5px] font-semibold">{perfil ? perfil.nome : ""}</div>
-              <div className="text-[11.5px] capitalize" style={{ color: C.mute }}>{perfil ? perfil.papel : ""}</div>
+              <div className="text-[11.5px] capitalize" style={{ color: C.mute }}>{perfil ? papelRot(perfil.papel) : ""}</div>
             </div>
           </div>
         )}
@@ -19609,7 +19613,7 @@ function Shell({ perfil, tela, setTela, children }) {
             </div>
             <div className="mt-2 flex items-center justify-between px-3 pt-3 text-[13px]"
               style={{ borderTop: `1px solid ${C.line}`, color: C.mute }}>
-              <span>{perfil ? `${perfil.nome} · ${perfil.papel}` : ""}</span>
+              <span>{perfil ? `${perfil.nome} · ${papelRot(perfil.papel)}` : ""}</span>
               <button onClick={sair} style={{ color: C.roxo, fontWeight: 600 }}>sair</button>
             </div>
           </div>
@@ -19718,12 +19722,18 @@ function Acessos({ perfil }) {
             style={{ background: a.ativo ? "#fff" : "#FBFAFC", border: `1px solid ${a.ativo ? C.line : C.laranja}` }}>
             <span className="min-w-0 flex-1 truncate text-[14px] font-semibold">{a.nome}{a.id === (perfil && perfil.id) ? <span className="ml-1 text-[11px] font-normal" style={{ color: C.mute }}>· você</span> : null}</span>
             <select className="rounded-lg border px-2 py-1 text-[12px] outline-none" style={inputSty}
-              value={a.papel} onChange={(e) => mexer(a, { papel: e.target.value })}>
+              value={a.papel} onChange={(e) => mexer(a, e.target.value === "prep" ? { papel: "prep", administrativo: true } : { papel: e.target.value })}>
+              {/* "Adm" é o valor `prep` do enum, renomeado na tela a pedido
+                  do Derek (13/10/2026): o papel de preparar carro nunca
+                  ganhou tela nem permissão, e quem a casa põe ali é o
+                  administrativo. O acesso de verdade continua sendo a marca
+                  `administrativo` (decisão 19) — por isso escolher "Adm" já
+                  a liga, senão a pessoa teria o nome e não a tela. */}
               {/* Os valores são os do enum `papel_usuario` (0004). O
                   cadastro de negociadores usa `prospeccao`; aqui é
                   `pre_venda`, e trocar um pelo outro faz o banco
                   recusar o update inteiro. */}
-              {[["negociador", "Negociador"], ["pre_venda", "Pré-venda"], ["prep", "Prep"], ["gerente", "Gerente"]].map(([v, r]) => <option key={v} value={v}>{r}</option>)}
+              {[["negociador", "Negociador"], ["pre_venda", "Pré-venda"], ["prep", "Adm"], ["gerente", "Gerente"]].map(([v, r]) => <option key={v} value={v}>{r}</option>)}
             </select>
             {marca(a, "ativo", "entra")}
             {marca(a, "administrativo", "administrativo")}
