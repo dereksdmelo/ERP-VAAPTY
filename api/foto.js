@@ -952,6 +952,35 @@ async function waArquivo(req, res, tok) {
   } catch (e) { return res.status(502).json({ erro: "Não consegui assinar o link." }); }
 }
 
+/* O ARQUIVO QUE O LOJISTA MANDOU COM O DUT (13/10/2026). O pedido
+ * guardava CNH e comprovante desde a 0057, e a tela mostrava o nome de
+ * cada um como etiqueta — sem link nenhum. O Derek: "não tá dando pra
+ * abrir os arquivos anexados".
+ *
+ * Mesma ordem do `waArquivo`: a linha é lida com o TOKEN DO USUÁRIO (a
+ * RLS da 0057 abre `dut_anexo` à equipe) e só então a chave assina. E
+ * o caminho tem que estar na pasta `dut/` — o bucket é o dos documentos
+ * do veículo, e um caminho de outra pasta não se assina por aqui. */
+async function dutArquivo(req, res, tok) {
+  const id = String(req.query.id || "");
+  if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido" });
+  const r = await fetch(`${URL_BASE}/rest/v1/dut_anexo?select=caminho&id=eq.${id}`,
+    { headers: { apikey: ANON, Authorization: tok } });
+  if (!r.ok) return res.status(r.status === 401 ? 401 : 502).json({ erro: "Não consegui ler o anexo." });
+  const linha = (await r.json().catch(() => []))[0];
+  const chave = linha && linha.caminho;
+  if (!chave || String(chave).slice(0, 4) !== "dut/") return res.status(404).json({ erro: "Este anexo não tem arquivo guardado." });
+  try {
+    const d = await arquivos(`${STORAGE()}/object/sign/${BUCKET_DOC}/${paraURL(chave)}`, {
+      method: "POST", headers: hArquivo({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ expiresIn: 3600 }),
+    });
+    const url = d && d.signedURL ? `${STORAGE()}${d.signedURL}` : null;
+    if (!url) return res.status(502).json({ erro: "Não consegui assinar o link." });
+    return res.status(200).json({ url });
+  } catch (e) { return res.status(502).json({ erro: "Não consegui assinar o link." }); }
+}
+
 module.exports = async function handler(req, res) {
   if (!URL_BASE || !CHAVE || !ANON) {
     return res.status(500).json({ erro: "SUPABASE_URL, SUPABASE_ANON_KEY ou SUPABASE_SERVICE_KEY não configurados." });
@@ -974,6 +1003,11 @@ module.exports = async function handler(req, res) {
 
   if (String(req.query.recurso || "") === "wa-arquivo") {
     try { return await waArquivo(req, res, tok); }
+    catch (e) { return res.status(502).json({ erro: "Não consegui abrir o arquivo." }); }
+  }
+
+  if (String(req.query.recurso || "") === "dut-arquivo") {
+    try { return await dutArquivo(req, res, tok); }
     catch (e) { return res.status(502).json({ erro: "Não consegui abrir o arquivo." }); }
   }
 
