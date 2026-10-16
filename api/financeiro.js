@@ -283,13 +283,27 @@ async function lancamento(req, res, tok) {
     const lista = await supa(
       `${base("fin_lancamento")}?select=${CAMPOS_LANC}&situacao=eq.efetivado${conta ? `&conta_id=eq.${conta}` : ""}${f}&order=data.asc,criado_em.asc&limit=2000`,
       { headers: cab(tok) });
-    // O saldo que entra no mês: saldo inicial da conta + tudo antes.
-    let saldoAnterior = null;
+    /* O saldo que entra no mês: o saldo de ABERTURA da conta mais o que
+     * se moveu entre a abertura e o começo do mês.
+     *
+     * A abertura é digitada pelo financeiro (15/10/2026: "quer começar
+     * do valor que começou o mês"). `saldo_inicial` é o saldo no COMEÇO
+     * do dia `saldo_inicial_em`, e o que veio antes dele não entra na
+     * conta — é histórico importado que nunca foi conferido, e foi ele
+     * que deixou o saldo de outubro em −27 mil com o banco positivo.
+     * Mês anterior à abertura não tem saldo: `saldo_anterior` vai nulo e
+     * a tela diz por quê. */
+    let saldoAnterior = null, abertura = null;
     if (conta && porData) {
       const ct = um(await supa(`${base("fin_conta")}?select=saldo_inicial,saldo_inicial_em&id=eq.${conta}`, { headers: cab(tok) }));
-      const antes = await supa(`${base("fin_lancamento")}?select=debito,credito&situacao=eq.efetivado&conta_id=eq.${conta}&data=lt.${comp}&limit=100000`, { headers: cab(tok) });
-      saldoAnterior = (ct ? Number(ct.saldo_inicial) || 0 : 0) +
-        (antes || []).reduce((t, x) => t + (Number(x.credito) || 0) - (Number(x.debito) || 0), 0);
+      const inicio = ct && ct.saldo_inicial_em ? String(ct.saldo_inicial_em).slice(0, 10) : null;
+      abertura = { data: inicio, valor: ct ? Number(ct.saldo_inicial) || 0 : 0 };
+      if (!inicio || comp >= inicio) {
+        const antes = await supa(`${base("fin_lancamento")}?select=debito,credito&situacao=eq.efetivado&conta_id=eq.${conta}` +
+          `${inicio ? `&data=gte.${inicio}` : ""}&data=lt.${comp}&limit=100000`, { headers: cab(tok) });
+        saldoAnterior = abertura.valor +
+          (antes || []).reduce((t, x) => t + (Number(x.credito) || 0) - (Number(x.debito) || 0), 0);
+      }
     }
     // Sugestão de categoria para o que está sem: a categoria mais usada
     // nas descrições iguais (sem números, sem placa). É o que o BPO
@@ -308,7 +322,7 @@ async function lancamento(req, res, tok) {
         sugestoes[l.id] = Object.keys(c).sort((a, b) => c[b] - c[a])[0];
       });
     }
-    return res.status(200).json({ competencia: comp, lancamentos: lista || [], saldo_anterior: saldoAnterior, sugestoes, truncado: (lista || []).length >= 2000 });
+    return res.status(200).json({ competencia: comp, lancamentos: lista || [], saldo_anterior: saldoAnterior, abertura, sugestoes, truncado: (lista || []).length >= 2000 });
   }
   if (req.method === "POST") {
     const c = await corpoDe(req);
@@ -645,8 +659,12 @@ async function importar(req, res, tok) {
       fechamentoGravado = comp;
     }
   }
+  /* O "Saldo anterior" do arquivo só vira abertura de conta que ainda
+   * NÃO tem uma. A abertura é digitada pelo financeiro e é a régua do
+   * saldo inteiro; cada extrato colado por cima a trocaria pelo saldo de
+   * um dia qualquer, e o caixa mudaria sem ninguém ter mexido nele. */
   if (saldoInicial != null) {
-    await supa(`${base("fin_conta")}?id=eq.${contaId}`, {
+    await supa(`${base("fin_conta")}?id=eq.${contaId}&saldo_inicial_em=is.null`, {
       method: "PATCH", headers: cab(tok), body: JSON.stringify({ saldo_inicial: saldoInicial, saldo_inicial_em: saldoEm }),
     });
   }
@@ -677,12 +695,14 @@ async function fechamento(req, res, tok) {
   if (!contaId) return res.status(400).json({ erro: "Escolha a conta." });
   if (req.method === "GET") {
     const [ct, movs, f] = await Promise.all([
-      supa(`${base("fin_conta")}?select=saldo_inicial&id=eq.${contaId}`, { headers: cab(tok) }),
-      supa(`${base("fin_lancamento")}?select=debito,credito,conciliado&situacao=eq.efetivado&conta_id=eq.${contaId}&data=lte.${fimDoMes(comp)}&limit=100000`, { headers: cab(tok) }),
+      supa(`${base("fin_conta")}?select=saldo_inicial,saldo_inicial_em&id=eq.${contaId}`, { headers: cab(tok) }),
+      supa(`${base("fin_lancamento")}?select=data,debito,credito,conciliado&situacao=eq.efetivado&conta_id=eq.${contaId}&data=lte.${fimDoMes(comp)}&limit=100000`, { headers: cab(tok) }),
       supa(`${base("fin_fechamento")}?select=*&conta_id=eq.${contaId}&competencia=eq.${comp}`, { headers: cab(tok) }),
     ]);
+    // Desde a abertura, como na lista (acima).
+    const ini = um(ct) && um(ct).saldo_inicial_em ? String(um(ct).saldo_inicial_em).slice(0, 10) : "";
     const saldoCalc = (um(ct) ? Number(um(ct).saldo_inicial) || 0 : 0) +
-      (movs || []).reduce((t, x) => t + (Number(x.credito) || 0) - (Number(x.debito) || 0), 0);
+      (movs || []).filter((x) => !ini || String(x.data) >= ini).reduce((t, x) => t + (Number(x.credito) || 0) - (Number(x.debito) || 0), 0);
     const naoConciliados = (movs || []).filter((x) => !x.conciliado).length;
     const fe = um(f);
     return res.status(200).json({
@@ -965,12 +985,16 @@ async function fluxo(req, res, tok) {
   const semanas = Math.min(26, Math.max(2, Math.trunc(Number(req.query.semanas) || 8)));
   const hoje = hojeAqui();
   const [contas, mov, abertos] = await Promise.all([
-    supa(`${base("fin_conta")}?select=id,nome,saldo_inicial&ativa=is.true`, { headers: cab(tok) }),
-    supa(`${base("fin_lancamento")}?select=debito,credito&situacao=eq.efetivado&data=lte.${hoje}&limit=100000`, { headers: cab(tok) }),
+    supa(`${base("fin_conta")}?select=id,nome,saldo_inicial,saldo_inicial_em&ativa=is.true`, { headers: cab(tok) }),
+    supa(`${base("fin_lancamento")}?select=conta_id,data,debito,credito&situacao=eq.efetivado&data=lte.${hoje}&limit=100000`, { headers: cab(tok) }),
     supa(`${base("fin_lancamento")}?select=id,debito,credito,vencimento,descricao,favorecido,fin_favorecido(nome)&situacao=eq.aberto&limit=2000`, { headers: cab(tok) }),
   ]);
+  // Cada conta conta a partir da própria abertura, e só conta ativa.
+  const inicioDe = {};
+  (contas || []).forEach((c) => { inicioDe[c.id] = c.saldo_inicial_em ? String(c.saldo_inicial_em).slice(0, 10) : ""; });
   const saldoHoje = (contas || []).reduce((t, c) => t + (Number(c.saldo_inicial) || 0), 0) +
-    (mov || []).reduce((t, l) => t + (Number(l.credito) || 0) - (Number(l.debito) || 0), 0);
+    (mov || []).filter((l) => l.conta_id in inicioDe && (!inicioDe[l.conta_id] || String(l.data) >= inicioDe[l.conta_id]))
+      .reduce((t, l) => t + (Number(l.credito) || 0) - (Number(l.debito) || 0), 0);
 
   const dia = (iso, mais) => { const d = new Date(`${iso}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + mais); return d.toISOString().slice(0, 10); };
   const faixas = [];

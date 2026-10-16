@@ -15244,6 +15244,74 @@ function ConfereNegociacao({ estoqueId, tipo, valor }) {
 
 /* ---------------- lançamentos ---------------- */
 
+/**
+ * O saldo de abertura da conta, na primeira linha do extrato (15/10/2026).
+ *
+ * O financeiro pediu para "começar do valor que começou o mês": o saldo
+ * calculado de outubro saía −27 mil porque somava nove meses de
+ * histórico importado e nunca conferido. Agora a pessoa digita a data
+ * e o valor que o BANCO mostrava naquele dia, e o saldo passa a ser
+ * esse número mais o que se moveu desde então — o que veio antes fica
+ * na lista, mas não entra na conta.
+ *
+ * É digitado, não puxado do extrato: o "SALDO TOTAL DISPONÍVEL" do
+ * Itaú já entrou errado uma vez (0067), e a abertura é a régua do saldo
+ * inteiro — quem a escolhe é quem vai conferir contra o banco.
+ *
+ * Componente de topo, não declarado dentro do FinLancamentos: declarado
+ * lá dentro ele seria remontado a cada render, e o campo perderia o foco
+ * a cada tecla (decisão 7).
+ */
+function AberturaConta({ d, comp, conta, aoGravar, aoErro }) {
+  const ab = d.abertura || {};
+  const [editando, setEditando] = useState(false);
+  const [data, setData] = useState("");
+  const [valor, setValor] = useState("");
+  const [gravando, setGravando] = useState(false);
+  const abrir = () => {
+    setData(ab.data || String(comp).slice(0, 10));
+    setValor(ab.data ? String(ab.valor).replace(".", ",") : "");
+    setEditando(true);
+  };
+  const gravar = async () => {
+    if (!data || String(valor).trim() === "") return;
+    setGravando(true);
+    try {
+      await fin("conta", { id: conta }, finJson("PATCH", { saldo_inicial: valor, saldo_inicial_em: data }));
+      setEditando(false); aoGravar();
+    } catch (e) { aoErro(e.message); }
+    setGravando(false);
+  };
+  const antes = d.saldo_anterior == null;
+  return (
+    <tr style={{ background: C.bg }}>
+      <td colSpan={7} className="px-2 py-1.5 text-[12px]" style={{ color: C.mute }}>
+        {!editando ? (
+          <span className="flex flex-wrap items-baseline gap-x-2">
+            <span>{antes ? `Antes da abertura da conta (${diaBR(ab.data)}/${String(ab.data).slice(0, 4)}) — este mês não entra no saldo` : "Saldo anterior"}</span>
+            <span>
+              · {ab.data ? `abertura em ${diaBR(ab.data)}/${String(ab.data).slice(0, 4)} com R$ ${rs2(ab.valor)}` : "sem saldo de abertura definido"}
+            </span>
+            <button onClick={abrir} className="font-semibold" style={{ color: C.roxo }}>{ab.data ? "alterar" : "definir saldo de abertura"}</button>
+          </span>
+        ) : (
+          <span className="flex flex-wrap items-center gap-2" onKeyDown={(e) => { if (e.key === "Enter") gravar(); if (e.key === "Escape") { e.preventDefault(); setEditando(false); } }}>
+            <span style={{ color: C.ink }}>Saldo no banco no começo do dia</span>
+            <input type="date" className="rounded border px-1.5 py-0.5 text-[12px] outline-none" style={inputSty} value={data} onChange={(e) => setData(e.target.value)} />
+            <span style={{ color: C.ink }}>R$</span>
+            <input autoFocus inputMode="decimal" placeholder="0,00" className="w-32 rounded border px-1.5 py-0.5 text-right text-[12px] outline-none"
+              style={{ ...inputSty, fontFamily: F.mono }} value={valor} onChange={(e) => setValor(e.target.value)} />
+            <button onClick={gravar} disabled={gravando} className="font-semibold" style={{ color: C.roxo }}>{gravando ? "gravando…" : "gravar"}</button>
+            <button onClick={() => setEditando(false)} style={{ color: C.mute }}>cancelar</button>
+            <span className="w-full text-[11px]">O saldo passa a ser este valor mais o que se moveu desde essa data. O que veio antes continua na lista, mas não entra na conta.</span>
+          </span>
+        )}
+      </td>
+      <td className="px-2 py-1.5 text-right text-[12px]" style={{ fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>{antes ? "—" : rs2(d.saldo_anterior)}</td><td />
+    </tr>
+  );
+}
+
 function FinLancamentos({ comp }) {
   const [contas, setContas] = useState([]);
   const [conta, setConta] = useState("");
@@ -15300,9 +15368,17 @@ function FinLancamentos({ comp }) {
     fin("estoque").then((x) => setCarros(x.estoque)).catch(() => {});
     fin("funcionario").then((x) => setFuncs(x.lista)).catch(() => {});
   }, []);
-  const carregar = () => {
+  /* RECARREGAR NÃO APAGA A TELA (15/10/2026). Cada categoria escolhida
+   * chamava `carregar()`, que zerava a lista: a tabela sumia, aparecia
+   * "carregando" e a rolagem voltava ao topo — no meio de um mês com
+   * cem linhas, a pessoa perdia o lugar a cada clique ("página carrega
+   * a cada atualização, ruim pq se perde"). Agora só trocar de conta ou
+   * de mês limpa a tela; depois de gravar, os números chegam por baixo
+   * e a linha alterada já mudou na hora (`mudar`). */
+  const carregar = (silencioso) => {
     if (!conta) return;
-    setD(null); setErro("");
+    if (silencioso !== true) setD(null);
+    setErro("");
     fin("lancamento", { competencia: comp, conta_id: conta }).then(setD).catch((e) => setErro(e.message));
     fin("fechamento", { competencia: comp, conta_id: conta }).then(setFech).catch(() => setFech(null));
   };
@@ -15310,11 +15386,11 @@ function FinLancamentos({ comp }) {
 
   const lote = async (itens) => {
     if (!itens.length) return;
-    try { await fin("lancamento", { acao: "lote" }, finJson("PATCH", { itens })); carregar(); }
+    try { await fin("lancamento", { acao: "lote" }, finJson("PATCH", { itens })); carregar(true); }
     catch (e) { setErro(e.message); }
   };
   const gravarFech = async (mud) => {
-    try { await fin("fechamento", { competencia: comp, conta_id: conta }, finJson("PUT", mud)); carregar(); }
+    try { await fin("fechamento", { competencia: comp, conta_id: conta }, finJson("PUT", mud)); carregar(true); }
     catch (e) { setErro(e.message); }
   };
   const exportar = () => {
@@ -15328,12 +15404,17 @@ function FinLancamentos({ comp }) {
   };
 
   const mudar = async (l, mud) => {
-    try { await fin("lancamento", { id: l.id }, finJson("PATCH", mud)); carregar(); }
+    // A linha muda na hora; o servidor confirma por baixo.
+    setD((x) => x && { ...x, lancamentos: x.lancamentos.map((y) => (y.id !== l.id ? y : {
+      ...y, ...mud,
+      ...(mud.categoria_id !== undefined ? { fin_categoria: mud.categoria_id ? { ...(y.fin_categoria || {}), id: mud.categoria_id, nome: catNome(mud.categoria_id) } : null } : {}),
+    })) });
+    try { await fin("lancamento", { id: l.id }, finJson("PATCH", mud)); carregar(true); }
     catch (e) { setErro(e.message); }
   };
   const apagar = async (l) => {
     if (!window.confirm(`Apagar "${l.descricao || "lançamento"}" de ${rs2(l.debito || l.credito)}?`)) return;
-    try { await fin("lancamento", { id: l.id }, { method: "DELETE" }); carregar(); }
+    try { await fin("lancamento", { id: l.id }, { method: "DELETE" }); carregar(true); }
     catch (e) { setErro(e.message); }
   };
   // Enter grava e deixa o formulário aberto com a mesma data e
@@ -15343,7 +15424,7 @@ function FinLancamentos({ comp }) {
     if (!novo) return;
     try {
       await fin("lancamento", null, finJson("POST", { ...novo, conta_id: conta }));
-      setNovo({ ...novo, descricao: "", debito: "", credito: "" }); carregar();
+      setNovo({ ...novo, descricao: "", debito: "", credito: "" }); carregar(true);
     } catch (e) { setErro(e.message); }
   };
   const aoEnter = (e) => { if (e.key === "Enter") { e.preventDefault(); gravarNovo(); } };
@@ -15453,10 +15534,7 @@ function FinLancamentos({ comp }) {
                   style={{ color: C.mute, textAlign: i >= 5 && i <= 7 ? "right" : "left", borderBottom: `1px solid ${C.line}` }}>{h}</th>))}
             </tr></thead>
             <tbody>
-              <tr style={{ background: C.bg }}>
-                <td colSpan={7} className="px-2 py-1.5 text-[12px]" style={{ color: C.mute }}>Saldo anterior</td>
-                <td className="px-2 py-1.5 text-right text-[12px]" style={{ fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>{rs2(d.saldo_anterior)}</td><td />
-              </tr>
+              <AberturaConta d={d} comp={comp} conta={conta} aoGravar={() => carregar(true)} aoErro={setErro} />
               {lista.map((l) => {
                 saldo += (Number(l.credito) || 0) - (Number(l.debito) || 0);
                 const v = l.estoque && l.estoque.veiculo;
@@ -15528,7 +15606,7 @@ function FinLancamentos({ comp }) {
                     </td>
                     <td className="px-2 py-1 text-right text-[12px]" style={{ fontVariantNumeric: "tabular-nums", color: C.laranja }}>{Number(l.debito) ? rs2(l.debito) : ""}</td>
                     <td className="px-2 py-1 text-right text-[12px]" style={{ fontVariantNumeric: "tabular-nums", color: C.verde }}>{Number(l.credito) ? rs2(l.credito) : ""}</td>
-                    <td className="px-2 py-1 text-right text-[12px]" style={{ fontVariantNumeric: "tabular-nums", color: saldo < 0 ? C.laranja : C.ink }}>{filtroCat ? "" : rs2(saldo)}</td>
+                    <td className="px-2 py-1 text-right text-[12px]" style={{ fontVariantNumeric: "tabular-nums", color: saldo < 0 ? C.laranja : C.ink }}>{filtroCat || d.saldo_anterior == null ? "" : rs2(saldo)}</td>
                     <td className="whitespace-nowrap px-2 py-1 text-right">
                       <button onClick={() => emitirRecibo(l)} disabled={reciboIndo === l.id}
                         className="text-[11px] disabled:opacity-50" style={{ color: C.roxo, fontWeight: 600 }}>
@@ -15586,7 +15664,7 @@ function FinLancamentos({ comp }) {
                           aoFechar={() => setRepartindo("")}
                           aoSalvar={async (itens) => {
                             await fin("rateio", { lancamento_id: l.id }, finJson("PUT", { itens }));
-                            setRepartindo(""); carregar();
+                            setRepartindo(""); carregar(true);
                           }} />
                       </td>
                     </tr>
@@ -15598,7 +15676,7 @@ function FinLancamentos({ comp }) {
                 <td colSpan={5} className="px-2 py-1.5 text-[12px] font-semibold">Total do mês · {d.lancamentos.length} lançamento{d.lancamentos.length === 1 ? "" : "s"}</td>
                 <td className="px-2 py-1.5 text-right text-[12px] font-semibold" style={{ fontVariantNumeric: "tabular-nums", color: C.laranja }}>{rs2(totais.deb)}</td>
                 <td className="px-2 py-1.5 text-right text-[12px] font-semibold" style={{ fontVariantNumeric: "tabular-nums", color: C.verde }}>{rs2(totais.cred)}</td>
-                <td className="px-2 py-1.5 text-right text-[12px] font-bold" style={{ fontVariantNumeric: "tabular-nums" }}>{rs2((d.saldo_anterior || 0) + totais.cred - totais.deb)}</td><td />
+                <td className="px-2 py-1.5 text-right text-[12px] font-bold" style={{ fontVariantNumeric: "tabular-nums" }}>{d.saldo_anterior == null ? "—" : rs2(d.saldo_anterior + totais.cred - totais.deb)}</td><td />
               </tr>
             </tbody>
           </table>

@@ -2527,6 +2527,31 @@ quando quitação mais débitos passam do POR. O importador da
 rentabilidade reconhece "ASSUMIU" — antes, "ADAM ASSUMIU" sozinho
 mandava para o PÁTIO um carro que a Vaapty nunca comprou.
 
+### 58. O caixa começa do saldo que o financeiro digita
+
+O financeiro pediu em 15/10/2026 para *"zerar o caixa e iniciar em
+outubro"* — e o Derek corrigiu no mesmo dia: não é zero, é **o valor
+com que o mês começou no banco, digitado à mão**. O saldo calculado de
+outubro saía −27 mil com a conta positiva, porque somava nove meses de
+histórico importado que ninguém nunca conferiu.
+
+**A abertura é data + valor, na primeira linha do extrato
+(`AberturaConta`).** `saldo_inicial` é o saldo no COMEÇO do dia
+`saldo_inicial_em`, e só o que se moveu dali em diante entra na conta —
+na lista, no fechamento do mês e no fluxo projetado, os três pelo mesmo
+corte. O que veio antes continua na lista, sem saldo, e o mês anterior
+à abertura diz isso em vez de mostrar um número.
+
+**A importação deixou de sobrescrever a abertura.** O "Saldo anterior"
+de cada extrato colado trocava o saldo inicial da conta pelo de um dia
+qualquer; agora só preenche conta que ainda não tem abertura.
+
+**E a lista não some mais a cada alteração.** Escolher uma categoria
+recarregava tudo, a tabela virava "Carregando…" e a rolagem voltava ao
+topo — *"página carrega a cada atualização, ruim pq se perde"*. A linha
+muda na hora e os números chegam por baixo; só trocar de conta ou de
+mês limpa a tela.
+
 ## Convenções do código
 
 - **Português no domínio.** Estado, funções e rótulos em pt-BR
