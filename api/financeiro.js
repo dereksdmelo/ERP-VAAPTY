@@ -553,7 +553,11 @@ async function importar(req, res, tok) {
     const deb = Math.abs(decimal(l.debito) || 0), cred = Math.abs(decimal(l.credito) || 0);
     const catNome = texto(l.categoria);
     if (/^saldo/i.test(catNome || "") || /saldo anterior/i.test(String(l.descricao || ""))) {
-      saldoInicial = cred - deb; saldoEm = data; return;
+      /* O "Saldo anterior" do banco é o saldo no FIM do dia em que ele
+       * vem datado; a abertura da conta é o saldo no COMEÇO do dia
+       * (decisão 58). Gravar a mesma data contaria duas vezes o que se
+       * moveu nela — foi o que tirou R$ 10 mil da abertura de outubro. */
+      saldoInicial = cred - deb; saldoEm = data ? somaDias(data, 1) : null; return;
     }
     /* O SALDO DO DIA NÃO É MOVIMENTO. O Itaú imprime "SALDO TOTAL
      * DISPONÍVEL DIA" ao fim de cada dia, com o saldo no campo de
