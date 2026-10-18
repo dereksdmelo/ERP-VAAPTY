@@ -83,6 +83,7 @@ confere("no máximo três mensagens", F.lerSaida('{"mensagens":["1","2","3","4"]
 confere("sem mensagem não é resposta", F.lerSaida('{"mensagens":[]}', livres), null);
 const solto = F.lerSaida("Claro, posso ajudar!", livres);
 confere("texto solto vale, marcado e sem agendar", [solto.mensagens, solto.formato_livre, solto.agendar], [["Claro, posso ajudar!"], true, ""]);
+confere("vírgula sobrando não derruba", F.lerSaida('```json\n{"mensagens": ["Oi!",\n],\n"agendar": "",}\n```', livres).mensagens, ["Oi!"]);
 confere("JSON quebrado não é resposta", F.lerSaida('{"mensagens": ["oi"', livres), null);
 
 console.log("a instrução");

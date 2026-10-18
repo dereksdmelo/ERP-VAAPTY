@@ -280,7 +280,14 @@ function lerSaida(texto, livres) {
   const s = String(texto || "");
   const i = s.indexOf("{"), j = s.lastIndexOf("}");
   let o = null;
-  if (i >= 0 && j > i) { try { o = JSON.parse(s.slice(i, j + 1)); } catch (e) {} }
+  if (i >= 0 && j > i) {
+    const bloco = s.slice(i, j + 1);
+    // A vírgula sobrando antes de `]` ou `}` é o tropeço mais comum do
+    // modelo — foi o que derrubou o terceiro ponto do primeiro replay.
+    // Corrigir só ela é seguro; texto de mensagem com ", ]" dentro é
+    // improvável a ponto de não pagar um parser de verdade.
+    try { o = JSON.parse(bloco); } catch (e) { try { o = JSON.parse(bloco.replace(/,\s*([\]}])/g, "$1")); } catch (e2) {} }
+  }
   // Texto solto, sem JSON nenhum, é resposta escrita fora do formato:
   // no treino vale mostrar — o gerente julga o texto — marcado, e sem
   // agendar nada, porque o agendamento só existe no campo dele.
