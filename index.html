@@ -19508,6 +19508,9 @@ function destinosPara(perfil) {
     { id: "pv_perdidos", rot: "Perdidos", curto: "Perdidos", area: "prevendas", aba: "perdidos", icone: "leads" },
     { id: "pv_excluidos", rot: "Excluídos", curto: "Excluídos", area: "prevendas", aba: "excluidos", icone: "leads" },
     { id: "leads", rot: "Leads de indicação", curto: "Indicações", area: "prevendas", icone: "leads" },
+    // Treinar a IA é decidir como a loja fala com o cliente, e a
+    // conversa original tem nome e telefone de quem escreveu (0069).
+    gerente ? { id: "treino_ia", rot: "Treino da IA", curto: "Treino IA", area: "prevendas", icone: "leads" } : null,
 
     // ---- o cliente na mesa e o carro ----
     { id: "atendimentos", rot: "Atendimentos", curto: "Atend.", area: "negociacao", principal: true },
@@ -21183,6 +21186,238 @@ function ConfigLoja() {
   );
 }
 
+/* ----------- o treino da IA de atendimento (0069) ----------- */
+// Mora em /api/atendimento?recurso=flavia pelo teto de 12 funções; a
+// conversa existe para virar lead e atendimento, que é o assunto de lá.
+async function flaviaApi(metodo, query, corpo) {
+  const r = await fetchAut(`/api/atendimento?recurso=flavia${query ? `&${query}` : ""}`, corpo
+    ? { method: metodo, headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo) }
+    : { method: metodo });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "A IA não respondeu.");
+  return d;
+}
+
+const NOTAS_TREINO = [
+  ["flavia", "IA nova melhor"], ["original", "Original melhor"], ["empate", "Empate"], ["ruim", "As duas ruins"],
+];
+const RESULTADO_TREINO = {
+  na_loja: ["levou à loja", C.verde], agendou: ["agendou", C.roxo], conversou: ["só conversou", C.mute],
+};
+
+/**
+ * O TREINO DA IA: ela redige, o gerente compara.
+ *
+ * Cada ponto é um momento real em que o cliente escreveu para a Ana ou
+ * a Camila. À esquerda o que elas responderam, à direita o que a nossa
+ * responderia — e a nota e a correção do gerente embaixo. **A correção
+ * é o que ensina**: volta como exemplo a cada rascunho novo
+ * (`api/atendimento.js`, recurso flavia).
+ *
+ * **A lista abre nas conversas que levaram o cliente à loja**, que é
+ * a régua da base (ia/base-atendimento-lead.md): aprender com quem
+ * deu certo primeiro.
+ *
+ * **Nada sai daqui para o cliente.** É replay: a ponte só escuta, e a
+ * tela diz isso no topo para ninguém achar que avaliar é responder.
+ */
+function TelaTreinoIA() {
+  const cfg = useConfigLoja();
+  const nome = (cfg && cfg.ia_nome) || "Flávia";
+  const [lista, setLista] = useState(null);
+  const [correcoes, setCorrecoes] = useState(0);
+  const [filtro, setFiltro] = useState("na_loja");
+  const [erro, setErro] = useState("");
+  const [aberta, setAberta] = useState(null);
+  const [pontos, setPontos] = useState(null);
+  const [ocupado, setOcupado] = useState({});
+  const [lote, setLote] = useState(null);
+
+  const recarregarLista = () => flaviaApi("GET")
+    .then((d) => { setLista(d.conversas || []); setCorrecoes(d.correcoes || 0); })
+    .catch((e) => setErro(e.message));
+  useEffect(() => { recarregarLista(); }, []);
+
+  const abrir = async (c) => {
+    setAberta(c); setPontos(null); setErro("");
+    try { setPontos((await flaviaApi("GET", `conversa_id=${c.id}`)).pontos || []); }
+    catch (e) { setErro(e.message); }
+  };
+  const trocaPonto = (mid, treino) => setPontos((ps) => ps.map((p) => (p.mensagem_id === mid ? { ...p, treino } : p)));
+
+  const redigir = async (p) => {
+    setOcupado((o) => ({ ...o, [p.mensagem_id]: true })); setErro("");
+    try { trocaPonto(p.mensagem_id, (await flaviaApi("POST", "", { conversa_id: aberta.id, mensagem_id: p.mensagem_id })).treino); }
+    catch (e) { setErro(e.message); }
+    setOcupado((o) => ({ ...o, [p.mensagem_id]: false }));
+  };
+  // Um de cada vez, e não em paralelo: cada rascunho lê as correções
+  // gravadas até ali, e a pessoa vê o progresso em vez de esperar
+  // trinta segundos olhando para nada.
+  const redigirTodos = async () => {
+    const falta = (pontos || []).filter((p) => !p.treino);
+    for (let i = 0; i < falta.length; i++) {
+      setLote(`${i + 1} de ${falta.length}`);
+      await redigir(falta[i]);
+    }
+    setLote(null); recarregarLista();
+  };
+  const avaliar = async (p, mudanca) => {
+    const t = { ...p.treino, ...mudanca };
+    trocaPonto(p.mensagem_id, t);
+    try { trocaPonto(p.mensagem_id, (await flaviaApi("PATCH", "", { id: t.id, nota: t.nota, correcao: t.correcao })).treino); }
+    catch (e) { setErro(e.message); }
+  };
+
+  const visiveis = (lista || []).filter((c) => !filtro || c.resultado === filtro);
+  const contagem = (r) => (lista || []).filter((c) => c.resultado === r).length;
+
+  return (
+    <div>
+      <Cabecalho titulo={`Treino da ${nome}`}
+        sub={`A ${nome} redige o que responderia nas conversas reais da Ana e da Camila; você compara e corrige.`} />
+      <p className="mb-4 rounded-lg px-3 py-2 text-[13px] leading-snug" style={{ background: C.roxoFraco, color: C.roxo }}>
+        Nada daqui vai para o cliente: é replay de conversa que já aconteceu. As correções que você escreve viram
+        exemplo para a {nome} — {correcoes ? `${correcoes} até agora` : "nenhuma ainda"}.
+      </p>
+      {erro && <p className="mb-3 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+      <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
+        <Bloco titulo="Conversas">
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {Object.entries(RESULTADO_TREINO).map(([k, [rot]]) => (
+              <button key={k} onClick={() => setFiltro(k)} className="rounded-full px-2.5 py-1 text-[12px] font-semibold"
+                style={{ background: filtro === k ? C.roxo : C.bg, color: filtro === k ? "#fff" : C.ink }}>
+                {rot} · {contagem(k)}
+              </button>
+            ))}
+          </div>
+          {!lista ? <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p> : (
+            <div className="max-h-[70vh] space-y-1 overflow-y-auto">
+              {visiveis.map((c) => (
+                <button key={c.id} onClick={() => abrir(c)} className="block w-full rounded-lg px-2.5 py-2 text-left"
+                  style={{ background: aberta && aberta.id === c.id ? C.roxoFraco : "transparent" }}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-[13.5px] font-semibold">{c.nome || "sem nome"}</span>
+                    <span className="shrink-0 text-[11px]" style={{ color: C.mute }}>{c.canal}</span>
+                  </div>
+                  <div className="text-[11.5px]" style={{ color: C.mute }}>
+                    {c.feitos ? `${c.avaliados} de ${c.feitos} avaliados` : "não treinada"}
+                  </div>
+                </button>
+              ))}
+              {!visiveis.length && <p className="text-[13px]" style={{ color: C.mute }}>Nenhuma conversa aqui.</p>}
+            </div>
+          )}
+        </Bloco>
+
+        <div>
+          {!aberta ? (
+            <Bloco titulo="Escolha uma conversa"
+              sub="Comece pelas que levaram o cliente à loja: é com elas que a base foi escrita." />
+          ) : !pontos ? (
+            <p className="text-[13px]" style={{ color: C.mute }}>Carregando a conversa…</p>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-[17px] font-bold">{aberta.nome || "sem nome"}</div>
+                  <div className="text-[12.5px]" style={{ color: C.mute }}>
+                    {aberta.canal} · {RESULTADO_TREINO[aberta.resultado][0]} · {pontos.length} momentos em que o cliente escreveu
+                  </div>
+                </div>
+                <BotaoPrimario disabled={!!lote || !pontos.some((p) => !p.treino)} onClick={redigirTodos}>
+                  {lote ? `Redigindo ${lote}…` : pontos.some((p) => !p.treino) ? `A ${nome} redige todos` : "Todos redigidos"}
+                </BotaoPrimario>
+              </div>
+              {pontos.map((p, i) => (
+                <PontoTreino key={p.mensagem_id} n={i + 1} p={p} nome={nome} ocupado={!!ocupado[p.mensagem_id]}
+                  aoRedigir={() => redigir(p)} aoAvaliar={(m) => avaliar(p, m)} />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Componente de topo, e não declarado dentro da tela: declarado lá
+   dentro, ele vira tipo novo a cada render e o campo da correção perde
+   o foco a cada tecla (decisão 7). */
+function PontoTreino({ n, p, nome, ocupado, aoRedigir, aoAvaliar }) {
+  const t = p.treino;
+  const [texto, setTexto] = useState((t && t.correcao) || "");
+  useEffect(() => { setTexto((t && t.correcao) || ""); }, [t && t.id, t && t.criado_em]);
+  const prop = (t && t.proposta) || null;
+  const quando = String(new Date(p.quando).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }));
+  const balao = (txt, fundo) => (
+    <div className="whitespace-pre-wrap rounded-lg px-3 py-2 text-[13.5px] leading-snug" style={{ background: fundo }}>{txt}</div>
+  );
+  return (
+    <section className="rounded-xl p-3 lg:p-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+      <div className="mb-1.5 text-[11.5px] font-semibold" style={{ color: C.mute }}>{n} · cliente às {quando}</div>
+      {balao(p.cliente, C.bg)}
+      <div className="mt-2.5 grid gap-2.5 md:grid-cols-2">
+        <div>
+          <div className="mb-1 text-[11.5px] font-bold uppercase tracking-wide" style={{ color: C.mute }}>Respondeu de verdade</div>
+          {p.original ? balao(p.original, "#EEF6F1") : <p className="text-[12.5px]" style={{ color: C.laranja }}>Ninguém respondeu.</p>}
+        </div>
+        <div>
+          <div className="mb-1 text-[11.5px] font-bold uppercase tracking-wide" style={{ color: C.roxo }}>A {nome} responderia</div>
+          {prop ? (
+            <div className="space-y-1.5">
+              {prop.mensagens.map((m, i) => <div key={i}>{balao(m, C.roxoFraco)}</div>)}
+              {prop.agendar && (
+                <p className="text-[12px] font-semibold" style={{ color: C.verde }}>
+                  Marcaria: {prop.agendar.slice(8, 10)}/{prop.agendar.slice(5, 7)} às {prop.agendar.slice(11, 16)}
+                </p>
+              )}
+              {prop.fora_da_lista && (
+                <p className="text-[12px]" style={{ color: C.laranja }}>Tentou marcar um horário que a loja não oferece — o sistema barrou.</p>
+              )}
+              {prop.encerrar && <p className="text-[12px]" style={{ color: C.mute }}>Encerraria a conversa.</p>}
+            </div>
+          ) : (
+            <button onClick={aoRedigir} disabled={ocupado} className="rounded-lg px-3 py-2 text-[13px] font-semibold"
+              style={{ background: C.roxoFraco, color: C.roxo }}>{ocupado ? "Redigindo…" : `Ver o que a ${nome} diria`}</button>
+          )}
+        </div>
+      </div>
+      {t && (
+        <div className="mt-3 border-t pt-2.5" style={{ borderColor: C.line }}>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {NOTAS_TREINO.map(([k, rot]) => (
+              <button key={k} onClick={() => aoAvaliar({ nota: t.nota === k ? null : k })}
+                className="rounded-full px-2.5 py-1 text-[12px] font-semibold"
+                style={{ background: t.nota === k ? C.roxo : C.bg, color: t.nota === k ? "#fff" : C.ink }}>
+                {rot.replace("IA nova", nome)}
+              </button>
+            ))}
+            <button onClick={aoRedigir} disabled={ocupado} className="ml-auto text-[12px] font-semibold" style={{ color: C.mute }}>
+              {ocupado ? "Redigindo…" : "refazer"}
+            </button>
+          </div>
+          <label className="mt-2 block">
+            <Rotulo>Resposta ideal — ensina a {nome}</Rotulo>
+            <textarea rows={3} className={`${inputCls} mt-[2px] text-[14px]`} style={inputSty} value={texto}
+              placeholder="Opcional. Escreva o que a loja deveria ter respondido aqui."
+              onChange={(e) => setTexto(e.target.value)} />
+          </label>
+          {texto.trim() !== String(t.correcao || "").trim() && (
+            <button onClick={() => aoAvaliar({ correcao: texto.trim() || null })}
+              className="mt-1.5 rounded-lg px-3 py-1.5 text-[13px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>
+              Salvar a resposta ideal
+            </button>
+          )}
+          {t.correcao && texto.trim() === String(t.correcao).trim() && (
+            <p className="mt-1 text-[12px]" style={{ color: C.verde }}>Guardada: a {nome} vai usar como exemplo.</p>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
 /** Equipe, metas e importação — o que era a sanfona da gestão. */
 function TelaGestao({ perfil, comp }) {
   const [importando, setImportando] = useState(false);
@@ -21379,6 +21614,7 @@ function App() {
         <TelaConversas alvo={conversaAlvo} aoConsumirAlvo={() => setConversaAlvo(null)} />
       )}
       {tela === "whatsapp" && perfil && perfil.papel === "gerente" && <TelaWhatsApp />}
+      {tela === "treino_ia" && perfil && perfil.papel === "gerente" && <TelaTreinoIA />}
       {ABA_FIN[tela] && <TelaFinanceiro perfil={perfil} comp={compOuAtual} mes={mes} aba={ABA_FIN[tela]}
         aoMudarMes={setComp} aoIrPara={(aba) => setTela(DESTINO_FIN[aba])} />}
       {tela === "lojistas" && podeGestao && <TelaVendaLojistas perfil={perfil} />}

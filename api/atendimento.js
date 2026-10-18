@@ -309,6 +309,184 @@ async function tatica(req, res, tok) {
 const texto0 = (v) => String(v == null ? "" : v).trim().slice(0, 600);
 
 /**
+ * ===== o treino da Flávia (0069) =====
+ *
+ * A Flávia ainda não manda nada a ninguém — a ponte só escuta (decisão
+ * 48). O que ela faz desde já é o REPLAY: num ponto de uma conversa
+ * real da Ana ou da Camila, ela redige o que responderia, e o gerente
+ * compara com o que foi respondido de verdade. O roteiro mora em
+ * `ia/flavia.js`, que é a base `ia/base-atendimento-lead.md` virada
+ * instrução.
+ *
+ *   GET                       as conversas das IAs, as que levaram o
+ *                             cliente à loja primeiro
+ *   GET   ?conversa_id=       os pontos daquela conversa, com o que a
+ *                             IA respondeu e o rascunho da Flávia
+ *   POST  {conversa_id, mensagem_id}   redige o ponto (refazer apaga a
+ *                             avaliação, que julgou o texto anterior)
+ *   PATCH {id, nota, correcao}         a avaliação do gerente
+ *
+ * **A correção é o que ensina**: as mais recentes voltam à Flávia como
+ * exemplo a cada rascunho novo. É aprendizado por exemplo no prompt, e
+ * não fine-tuning — com dezessete conversas que deram certo, não há
+ * volume para treinar modelo, e o exemplo muda o comportamento no
+ * clique seguinte, sem deploy.
+ *
+ * **Só o gerente.** A RLS da 0069 já recusa os outros; a conferência
+ * aqui é para a lista de conversas, que a equipe enxerga, não virar a
+ * porta de uma tela que ela não deveria abrir.
+ */
+const FLAVIA = require("../ia/flavia.js");
+// O modelo da Flávia pode ser outro que o das táticas: redigir para o
+// cliente pede mais cuidado que dizer o nome de uma manobra. Sem a
+// variável, vale o mesmo Haiku.
+const IA_MODELO_FLAVIA = process.env.IA_MODELO_FLAVIA || IA_MODELO;
+// Quantas correções voltam como exemplo. Cada uma é texto pago a cada
+// rascunho; oito cobrem os casos que se repetem sem dobrar a conta.
+const FLAVIA_EXEMPLOS = 8;
+
+// Os mesmos oito dígitos do `chaveFone()` do funil (decisão 49): DDD +
+// os oito últimos, porque o nono aparece num lado e falta no outro.
+const chaveFone = (t) => {
+  let d = String(t || "").replace(/\D/g, "");
+  if (d.length > 11 && d.startsWith("55")) d = d.slice(2);
+  return d.length >= 10 ? d.slice(0, 2) + d.slice(-8) : null;
+};
+
+async function flavia(req, res, tok) {
+  const eu = donoDoToken(tok);
+  const p = await banco(`${REST("perfil")}?id=eq.${encodeURIComponent(eu || "")}&select=papel`, { headers: cabecalhos(tok) });
+  if (!(Array.isArray(p) && p[0] && p[0].papel === "gerente")) {
+    return res.status(403).json({ erro: "O treino da Flávia é do gerente." });
+  }
+
+  if (req.method === "GET" && !req.query.conversa_id) {
+    const canais = await banco(`${REST("wa_canal")}?atendente=eq.ia&select=id,nome,slug`, { headers: cabecalhos(tok) }) || [];
+    if (!canais.length) return res.status(200).json({ conversas: [] });
+    const ids = canais.map((c) => c.id).join(",");
+    const [conv, leads, ats, treinos] = await Promise.all([
+      banco(`${REST("wa_conversa")}?canal_id=in.(${ids})&select=id,canal_id,nome,telefone,lead_id,primeira_em,ultima_em&order=ultima_em.desc&limit=2000`, { headers: cabecalhos(tok) }),
+      banco(`${REST("lead")}?select=id,telefone,status,atendimento_id&excluido_em=is.null&limit=5000`, { headers: cabecalhos(tok) }),
+      banco(`${REST("atendimento")}?select=cliente_telefone,criado_em&order=criado_em.desc&limit=3000`, { headers: cabecalhos(tok) }),
+      banco(`${REST("ia_treino")}?select=conversa_id,nota&limit=10000`, { headers: cabecalhos(tok) }),
+    ]);
+    const canalDe = Object.fromEntries(canais.map((c) => [c.id, c.nome]));
+    const leadId = {}, leadFone = {};
+    (leads || []).forEach((l) => { leadId[l.id] = l; const k = chaveFone(l.telefone); if (k) leadFone[k] = l; });
+    const atFone = {};
+    (ats || []).forEach((a) => { const k = chaveFone(a.cliente_telefone); if (k && !atFone[k]) atFone[k] = a.criado_em; });
+    const tr = {};
+    (treinos || []).forEach((t) => { const x = (tr[t.conversa_id] = tr[t.conversa_id] || { feitos: 0, avaliados: 0 }); x.feitos++; if (t.nota) x.avaliados++; });
+    // O mesmo critério da base: na loja é lead que compareceu ou virou
+    // atendimento, ou atendimento aberto com o mesmo telefone depois da
+    // primeira mensagem.
+    const ORDEM = { na_loja: 0, agendou: 1, conversou: 2 };
+    const lista = (conv || []).map((c) => {
+      const k = chaveFone(c.telefone);
+      const l = leadId[c.lead_id] || (k && leadFone[k]) || null;
+      const naLoja = (l && (l.status === "compareceu" || l.atendimento_id)) || (k && atFone[k] && atFone[k] >= String(c.primeira_em).slice(0, 10));
+      const resultado = naLoja ? "na_loja" : l && ["agendado", "confirmado", "nao_compareceu"].includes(l.status) ? "agendou" : "conversou";
+      return { id: c.id, nome: c.nome || null, canal: canalDe[c.canal_id] || "", ultima_em: c.ultima_em, resultado, ...(tr[c.id] || { feitos: 0, avaliados: 0 }) };
+    }).sort((a, b) => ORDEM[a.resultado] - ORDEM[b.resultado] || String(b.ultima_em).localeCompare(String(a.ultima_em)));
+    const corr = await banco(`${REST("ia_treino")}?correcao=not.is.null&select=id`, { headers: cabecalhos(tok) });
+    return res.status(200).json({ conversas: lista, correcoes: (corr || []).length });
+  }
+
+  const cid = String((req.query && req.query.conversa_id) || "");
+
+  if (req.method === "GET") {
+    if (!RX_UUID.test(cid)) return res.status(400).json({ erro: "conversa_id inválido." });
+    const [msgs, treinos] = await Promise.all([
+      banco(`${REST("wa_mensagem")}?conversa_id=eq.${cid}&select=id,eco,tipo,texto,anexo,quando&order=quando.asc&limit=1000`, { headers: cabecalhos(tok) }),
+      banco(`${REST("ia_treino")}?conversa_id=eq.${cid}&select=*`, { headers: cabecalhos(tok) }),
+    ]);
+    const por = Object.fromEntries((treinos || []).map((t) => [t.mensagem_id, t]));
+    const pontos = FLAVIA.pontosDe(msgs || []).map((p) => ({ ...p, treino: por[p.mensagem_id] || null }));
+    return res.status(200).json({ pontos });
+  }
+
+  if (req.method === "POST") {
+    if (!IA_CHAVE) return res.status(501).json({ erro: "A IA não está ligada: falta a variável ANTHROPIC_API_KEY." });
+    const c = await lerCorpo(req) || {};
+    const conversa = String(c.conversa_id || ""), mid = String(c.mensagem_id || "");
+    if (!RX_UUID.test(conversa) || !RX_UUID.test(mid)) return res.status(400).json({ erro: "conversa_id e mensagem_id são obrigatórios." });
+
+    const msgs = await banco(`${REST("wa_mensagem")}?conversa_id=eq.${conversa}&select=id,eco,tipo,texto,anexo,quando&order=quando.asc&limit=1000`, { headers: cabecalhos(tok) }) || [];
+    const ponto = FLAVIA.pontosDe(msgs).find((p) => p.mensagem_id === mid);
+    if (!ponto) return res.status(404).json({ erro: "Esse ponto não existe nesta conversa." });
+    // A conversa ATÉ o ponto: a Flávia não pode ver a resposta que ela
+    // está tentando escrever, nem o que o cliente disse depois.
+    const ate = msgs.filter((m) => m.quando <= ponto.quando);
+    const agora = FLAVIA.paredeDe(ponto.quando);
+
+    const [cfgL, ocup, ex] = await Promise.all([
+      banco(`${REST("config_loja")}?id=eq.1&select=*`, { headers: cabecalhos(tok) }).catch(() => []),
+      // Os agendados de HOJE. Num replay de duas semanas atrás isso é
+      // aproximado — a agenda daquele dia já mudou —, e só pesa no
+      // horário que já tinha gente demais.
+      banco(`${REST("lead")}?status=in.(agendado,confirmado)&agendado_para=gte.${agora.slice(0, 10)}&select=agendado_para&limit=2000`, { headers: cabecalhos(tok) }).catch(() => []),
+      banco(`${REST("ia_treino")}?correcao=not.is.null&mensagem_id=neq.${mid}&select=cliente,correcao&order=avaliado_em.desc&limit=${FLAVIA_EXEMPLOS}`, { headers: cabecalhos(tok) }).catch(() => []),
+    ]);
+    const linha = (Array.isArray(cfgL) && cfgL[0]) || {};
+    const cfg = { ...FLAVIA.CONFIG_PADRAO };
+    Object.keys(cfg).forEach((k) => { if (linha[k] !== undefined) cfg[k] = typeof linha[k] === "string" ? linha[k].slice(0, 5) : linha[k]; });
+    if (linha.ia_nome) cfg.ia_nome = linha.ia_nome;
+    const livres = FLAVIA.horariosLivres(cfg, agora, (ocup || []).map((o) => o.agendado_para));
+    const sistema = FLAVIA.instrucao(cfg, agora, livres, ex || []);
+
+    let r;
+    try {
+      r = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": IA_CHAVE, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: IA_MODELO_FLAVIA, max_tokens: 700, system: sistema,
+          messages: [{ role: "user", content: FLAVIA.conversaEmTexto(ate) }],
+        }),
+      });
+    } catch (e) { return res.status(502).json({ erro: "Não consegui falar com a IA." }); }
+    const corpo = await r.text();
+    if (!r.ok) return res.status(502).json({ erro: r.status === 401 ? "A chave da IA foi recusada." : "A IA não respondeu." });
+    let saidaTxt = "", uso = null;
+    try { const d = JSON.parse(corpo); saidaTxt = ((d.content || []).find((x) => x.type === "text") || {}).text || ""; uso = d.usage || null; } catch (e) {}
+    const proposta = FLAVIA.lerSaida(saidaTxt, livres);
+    if (!proposta) return res.status(502).json({ erro: "A Flávia respondeu fora do formato. Tente de novo." });
+
+    // Refazer zera a avaliação: a nota julgou o texto anterior.
+    const salvo = await banco(`${REST("ia_treino")}?on_conflict=mensagem_id`, {
+      method: "POST",
+      headers: json(tok, { Prefer: "resolution=merge-duplicates,return=representation" }),
+      body: JSON.stringify({
+        conversa_id: conversa, mensagem_id: mid, cliente: ponto.cliente, original: ponto.original || null,
+        proposta, modelo: IA_MODELO_FLAVIA, uso, nota: null, correcao: null,
+        avaliado_por: null, avaliado_em: null, criado_por: eu, criado_em: new Date().toISOString(),
+      }),
+    });
+    return res.status(200).json({ treino: (Array.isArray(salvo) ? salvo[0] : salvo) || null });
+  }
+
+  if (req.method === "PATCH") {
+    const c = await lerCorpo(req) || {};
+    const id = String(c.id || "");
+    if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido." });
+    const nota = c.nota == null || c.nota === "" ? null : String(c.nota);
+    if (nota && !["flavia", "original", "empate", "ruim"].includes(nota)) return res.status(400).json({ erro: "Nota desconhecida." });
+    const correcao = String(c.correcao || "").trim().slice(0, 2000) || null;
+    const salvo = await banco(`${REST("ia_treino")}?id=eq.${id}`, {
+      method: "PATCH",
+      headers: json(tok, { Prefer: "return=representation" }),
+      body: JSON.stringify({ nota, correcao, avaliado_por: nota || correcao ? eu : null, avaliado_em: nota || correcao ? new Date().toISOString() : null }),
+    });
+    const t = (Array.isArray(salvo) ? salvo[0] : salvo) || null;
+    if (!t) return res.status(403).json({ erro: "O banco não deixou gravar a avaliação." });
+    return res.status(200).json({ treino: t });
+  }
+
+  res.setHeader("Allow", "GET, POST, PATCH");
+  return res.status(405).json({ erro: "Use GET, POST ou PATCH." });
+}
+
+/**
  * ===== o resumo da conversa =====
  *
  * O gestor não lê transcrição. Meia hora de fala vira duas mil
@@ -2226,6 +2404,11 @@ module.exports = async function handler(req, res) {
 
   if (String(req.query.recurso || "") === "agenda") {
     try { return await agenda(req, res, tok); }
+    catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Falhou." }); }
+  }
+
+  if (String(req.query.recurso || "") === "flavia") {
+    try { return await flavia(req, res, tok); }
     catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Falhou." }); }
   }
 

@@ -37,6 +37,8 @@ api/checklist.js                 GET/PUT — o check list digital do negócio
                                  ?recurso=ponte — o que a ponte do WhatsApp manda (sem login)
                                  ?recurso=wa — a tela do QR, pelo token do gerente
 workers/ponte-whatsapp/          a ponte do WhatsApp: Worker + container com Baileys
+ia/flavia.js                     a IA de atendimento: prompt e regras (decisão 60)
+ia/base-atendimento-lead.md      a base dela: o que deu certo com a Ana e a Camila
 documentos.js                    CÓPIA MORTA: o que roda é o bloco colado no index.html
 supabase/migrations/*.sql        esquema do banco, versionado
 PENDENCIAS.md                    o que está em aberto e o que destrava cada coisa
@@ -2618,6 +2620,63 @@ então a função não precisa de segredo, só de não abrir mais nada.
 como **último agendamento às 13h**, igual ao "último 18h" da semana.
 Se 13h é a hora em que a loja FECHA, o último horário certo é 12h30 —
 é um campo em Equipe e metas, sem deploy.
+
+### 60. O treino da IA: replay sobre as conversas da Ana e da Camila
+
+O Derek, em 17/10/2026: *"vou usar as duas IA pra servir de base pro
+aprendizado da nossa propria"* — e no dia seguinte: *"faça o que
+precisa pra poder começar a treinar nossa IA"*.
+
+**Treinar aqui é exemplo no prompt, não fine-tuning.** Dezessete
+conversas levaram o cliente à loja, e onze servem; não há volume para
+treinar modelo, e um modelo treinado não muda até o próximo
+treinamento. A correção que o gerente escreve volta à IA no rascunho
+seguinte, sem deploy.
+
+**A IA ainda não fala com ninguém, e o treino não precisa disso.** A
+ponte só escuta (decisão 48). O que se faz é REPLAY: em cada ponto de
+uma conversa real em que o cliente escreveu, a IA redige o que
+responderia, vendo a conversa **só até ali**, e a tela põe lado a lado
+com o que a Ana ou a Camila responderam. O gerente dá a nota e, quando
+quer ensinar, escreve a resposta ideal.
+
+**O ponto é a ÚLTIMA mensagem do bloco do cliente** (`pontosDe()`): o
+cliente manda "boa tarde" e "quero vender meu Gol" em duas mensagens,
+e é depois da segunda que alguém responde. Mensagem da loja antes de o
+cliente falar (lembrete, prospecção) não é ponto; cliente que ficou sem
+resposta é.
+
+**Refazer apaga a avaliação** (0069). A nota julgou aquele texto; ficar
+com ela em cima de um texto novo seria avaliação que ninguém fez.
+
+**O que o modelo não decide mora em `ia/flavia.js`, testado em
+`ferramentas-flavia.js`**: os horários que existem (a mesma conta do
+agendador, lida da 0068), o relógio de Joinville, os pontos da conversa
+e a leitura da saída. **Agendamento fora da lista de horários livres é
+descartado e marcado** — modelo que inventa hora põe cliente na agenda
+num horário que a loja não tem, e ele não tem como perceber.
+
+**O arquivo mora fora de `api/`** porque lá dentro seria a 13ª função
+da Vercel; importado pelo `api/atendimento.js`, não conta. E fora da
+lista do `.assetsignore` ele não é publicado.
+
+**O prompt é a base `ia/base-atendimento-lead.md` virada instrução.**
+Quem muda o roteiro muda os dois.
+
+**Número longo sai antes de ir ao modelo** (`semNumeros`), a mesma
+régua da decisão 31: telefone, CPF e conta não mudam a resposta.
+
+**`IA_MODELO_FLAVIA`** troca o modelo só da IA de atendimento; sem ela,
+vale o `IA_MODELO` das táticas. Redigir para o cliente pode pedir mais
+que o Haiku — é a primeira coisa a testar se as notas vierem baixas.
+
+**Aproximação conhecida:** num replay de dias atrás, os horários livres
+saem da agenda de HOJE. Só pesa no horário que já tinha gente demais.
+
+**Perguntas em aberto para o Derek:** quantos clientes cabem no mesmo
+horário (`POR_HORARIO = 2`, chute meu); e a IA ainda não manda os
+lembretes nem lê áudio — no treino ela só responde ao que o cliente
+escreveu.
 
 ## Convenções do código
 
