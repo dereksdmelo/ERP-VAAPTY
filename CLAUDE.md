@@ -24,6 +24,7 @@ api/foto.js                      POST/GET/PATCH/DELETE — imagens no Storage
 api/documento.js                 POST/GET — registro dos documentos gerados
 api/perfil.js                    GET  — quem sou eu; para gerente, a equipe
                                  ?recurso=config — URL e chave anônima (sem login)
+                                 ?recurso=config-loja — nome da IA e horários da loja
 api/financeiro.js                área restrita: lançamentos, DRE, carros, folha
 api/atendimento.js               GET/POST/PATCH — a lista do CRM
                                  ?recurso=indicacoes — os leads da etapa E
@@ -1921,6 +1922,8 @@ passou a ser só "fora desta semana".
 expediente da loja, e meia hora porque é assim que os horários reais
 aparecem nas conversas (09:30, 14:30, 16:30). Só hora cheia empurraria
 a pré-venda para o campo "outra" o tempo todo.
+**Desde 17/10/2026 eles vêm da configuração da loja** (decisão 59):
+sábado só até 13h, domingo nada.
 
 **A agenda mostra a semana, de segunda a sábado.** A lista por dia
 responde "o que tem hoje"; a semana responde "como está minha semana",
@@ -2551,6 +2554,70 @@ recarregava tudo, a tabela virava "Carregando…" e a rolagem voltava ao
 topo — *"página carrega a cada atualização, ruim pq se perde"*. A linha
 muda na hora e os números chegam por baixo; só trocar de conta ou de
 mês limpa a tela.
+
+### 59. Os horários da loja e o nome da IA são configuração, não código
+
+O Derek decidiu em 17/10/2026, ao trocar a Ana e a Camila pela IA
+própria: *a loja abre 8h30, mas os agendamentos começam às 9h; sábado
+se atende das 9h às 13h; o nome da IA e os horários precisam ser
+configuráveis, sem deploy*. A IA ainda não existe — esta é a primeira
+peça dela (ver `ia/base-atendimento-lead.md`, seção 7).
+
+**Uma linha só, `config_loja` (0068), com `id` travado em 1.** É a
+configuração de UMA loja; duas linhas obrigariam toda leitura a
+decidir qual vale, e a resposta erraria no dia em que alguém
+inserisse a segunda.
+
+**Abrir e agendar são campos diferentes, e é por isso que são três
+por dia** (abre, primeiro e último agendamento). A loja abre 8h30 para
+quem passa; o agendado é marcado a partir das 9h, com a equipe pronta.
+Um campo só faria a IA mentir numa das duas frases — "a loja abre
+às…" e os horários oferecidos —, que é o desencontro entre a Ana e a
+Camila.
+
+**Dia fechado é o grupo inteiro nulo.** Domingo nasce assim; abrir um
+domingo é preencher três campos, sem migração. O banco recusa grupo
+pela metade, e o servidor diz qual dia antes de o banco dizer o nome
+da constraint.
+
+**O agendador da tela lê a MESMA linha**, e isso é a metade da
+decisão que importa hoje. O `HORARIOS` fixo oferecia 9h–18h todos os
+dias — **sábado às 16h com a loja fechada**. Se a IA e a tela lerem
+de lugares diferentes, a pré-venda e a Flávia vão marcar em horários
+que a outra não oferece. Agora `horariosDoDia()` monta os chips pelo
+dia escolhido, o dia fechado aparece apagado com "fechado" no chip, e
+a hora livre ao lado continua para a exceção. Hora escolhida que o dia
+novo não oferece (16h, e depois troca para sábado) deixa de valer —
+senão o botão agendaria sábado às 16h com o chip desmarcado.
+
+**Leitura que falha cai nos valores de 17/10/2026, não em lista
+vazia.** Agendador sem horário trava a pré-venda no meio da ligação,
+e os valores de fábrica são os que a loja pratica. Eles moram em
+`CONFIG_LOJA_PADRAO` nos dois lados (tela e `api/perfil.js`) — **quem
+mudar um muda o outro**. Sem linha no banco, o servidor responde
+`padrao: true` e o bloco do gerente diz que ninguém gravou ainda.
+
+**Uma leitura por página, não por agendador.** A configuração muda uma
+vez por mês; o agendador abre sessenta vezes por dia. Salvar em Equipe
+e metas atualiza a aba de quem salvou; as outras pegam na próxima
+abertura.
+
+**Mora em `api/perfil.js?recurso=config-loja`**, ao lado da meta da
+loja — a outra coisa da loja que só o gerente define. A RLS é a da
+`meta_loja` (0018): a equipe lê, o gerente escreve; upsert que volta
+vazio é a RLS recusando, e vira 403 legível.
+
+**O que fica para quando a IA existir:** ela roda no servidor, sem
+token de usuário (a ponte não tem login, decisão 48), e a política de
+leitura é `e_equipe()`. Vai precisar de uma função `security definer`
+estreita que devolva esta linha — não da chave de serviço (decisão 9).
+O dado é público por natureza (horário de loja e nome de atendente),
+então a função não precisa de segredo, só de não abrir mais nada.
+
+**Pergunta em aberto para o Derek:** "sábado das 9h às 13h" foi lido
+como **último agendamento às 13h**, igual ao "último 18h" da semana.
+Se 13h é a hora em que a loja FECHA, o último horário certo é 12h30 —
+é um campo em Equipe e metas, sem deploy.
 
 ## Convenções do código
 

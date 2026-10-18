@@ -763,6 +763,24 @@ async function gravarMetaLoja(dados, competencia) {
   return d.meta;
 }
 
+/* ----------- configuração da loja e da IA (0068) ----------- */
+// Mora em /api/perfil pelo teto de 12 funções, ao lado da meta da
+// loja, que é a outra coisa da loja que só o gerente define.
+async function lerConfigLoja() {
+  const r = await fetchAut("/api/perfil?recurso=config-loja");
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui ler os horários da loja.");
+  return d;
+}
+async function gravarConfigLoja(dados) {
+  const r = await fetchAut("/api/perfil?recurso=config-loja", {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui salvar os horários da loja.");
+  return d.config;
+}
+
 /* ----------- leads de indicação (0011) ----------- */
 // Moram sob /api/atendimento porque a Vercel do Hobby para em 12
 // funções e nós estamos nas 12. O `?recurso=` é o mesmo truque dos
@@ -12262,13 +12280,71 @@ const LEAD_ROT = {
   novo: "Novo", em_contato: "Em contato", agendado: "Agendado", confirmado: "Confirmado",
   compareceu: "Compareceu", nao_compareceu: "Não veio", perdido: "Perdido",
 };
-const HORARIOS = (() => {
+/* OS HORÁRIOS DO AGENDADOR VÊM DA CONFIGURAÇÃO DA LOJA (0068).
+ *
+ * Eram fixos, 9h–18h todo dia — e ofereciam sábado às 16h com a loja
+ * fechada. Agora são os da linha que o gerente edita em Equipe e
+ * metas, **a mesma que a IA de atendimento lê**: se a tela e a Flávia
+ * lessem de lugares diferentes, a pré-venda e a IA marcariam em
+ * horários que a outra não oferece (decisão 59).
+ *
+ * **Leitura que falha cai nos valores de 17/10/2026**, não em lista
+ * vazia: agendador sem horário nenhum trava a pré-venda no meio da
+ * ligação, e os valores de fábrica são os que a loja pratica.
+ */
+const CONFIG_LOJA_PADRAO = {
+  ia_nome: "Flávia",
+  semana_abre: "08:30", semana_primeiro: "09:00", semana_ultimo: "18:00",
+  sabado_abre: "09:00", sabado_primeiro: "09:00", sabado_ultimo: "13:00",
+  domingo_abre: null, domingo_primeiro: null, domingo_ultimo: null,
+  intervalo_min: 30,
+};
+// Uma leitura por carregamento da página, dividida por todos os
+// agendadores abertos — a configuração muda uma vez por mês, não a
+// cada lead.
+let configLojaAtual = null;
+let configLojaPromessa = null;
+function carregarConfigLoja() {
+  if (configLojaAtual) return Promise.resolve(configLojaAtual);
+  if (!configLojaPromessa) {
+    configLojaPromessa = lerConfigLoja()
+      .then((d) => (configLojaAtual = { ...CONFIG_LOJA_PADRAO, ...(d.config || {}) }))
+      // Falhou, não guarda: a próxima abertura tenta de novo.
+      .catch(() => { configLojaPromessa = null; return CONFIG_LOJA_PADRAO; });
+  }
+  return configLojaPromessa;
+}
+function useConfigLoja() {
+  const [cfg, setCfg] = useState(configLojaAtual || CONFIG_LOJA_PADRAO);
+  useEffect(() => {
+    let vivo = true;
+    carregarConfigLoja().then((c) => { if (vivo) setCfg(c); });
+    return () => { vivo = false; };
+  }, []);
+  return cfg;
+}
+// 0 domingo … 6 sábado → o grupo da configuração.
+const grupoDoDia = (iso) => {
+  const d = new Date(`${String(iso).slice(0, 10)}T12:00:00`).getDay();
+  return d === 0 ? "domingo" : d === 6 ? "sabado" : "semana";
+};
+const minutosDe = (h) => {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(h || ""));
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+};
+/** Os horários oferecidos naquele dia. Dia fechado devolve lista vazia. */
+function horariosDoDia(cfg, iso) {
+  const c = cfg || CONFIG_LOJA_PADRAO;
+  const g = grupoDoDia(iso);
+  const de = minutosDe(c[`${g}_primeiro`]), ate = minutosDe(c[`${g}_ultimo`]);
+  const passo = Number(c.intervalo_min) || 30;
   const h = [];
-  for (let m = 9 * 60; m <= 18 * 60; m += 30) {
+  if (de == null || ate == null) return h;
+  for (let m = de; m <= ate; m += passo) {
     h.push(`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
   }
   return h;
-})();
+}
 
 const soDigitos = (t) => String(t || "").replace(/\D/g, "");
 const telBR = (t) => {
@@ -12422,7 +12498,12 @@ function Agendador({ lead, equipe, aoFechar, aoAgendar }) {
   const [neg, setNeg] = useState(lead.negociador_id || "");
   const [outra, setOutra] = useState("");
   const dias = proximosDias(7);
-  const pronto = dia && (hora || outra);
+  const cfg = useConfigLoja();
+  const horarios = horariosDoDia(cfg, dia);
+  // Trocar de dia pode deixar a hora escolhida fora da lista nova
+  // (16h e depois sábado): ela só vale se o dia a oferece.
+  const horaOk = hora && horarios.indexOf(hora) >= 0 ? hora : "";
+  const pronto = dia && (horaOk || outra);
   const chip = (ativo) => ({
     background: ativo ? C.roxo : C.bg, color: ativo ? "#fff" : C.ink,
     border: `1px solid ${ativo ? C.roxo : C.line}`, fontWeight: ativo ? 700 : 500,
@@ -12437,19 +12518,28 @@ function Agendador({ lead, equipe, aoFechar, aoAgendar }) {
 
         <div className="mt-3 text-[11px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Dia</div>
         <div className="rolar mt-1 flex gap-1.5 overflow-x-auto pb-1">
-          {dias.map((d) => (
-            <button key={d.iso} onClick={() => setDia(d.iso)} className="shrink-0 rounded-lg px-3 py-2 text-[13px]" style={chip(dia === d.iso)}>
-              {d.rot}<span className="block text-[10px] font-normal" style={{ opacity: 0.75 }}>{d.dia}</span>
-            </button>
-          ))}
+          {dias.map((d) => {
+            const fechado = !horariosDoDia(cfg, d.iso).length;
+            return (
+              <button key={d.iso} onClick={() => setDia(d.iso)} className="shrink-0 rounded-lg px-3 py-2 text-[13px]"
+                style={{ ...chip(dia === d.iso), opacity: fechado && dia !== d.iso ? 0.45 : 1 }}>
+                {d.rot}<span className="block text-[10px] font-normal" style={{ opacity: 0.75 }}>{fechado ? "fechado" : d.dia}</span>
+              </button>
+            );
+          })}
           <input type="date" value={dia} onChange={(e) => setDia(e.target.value)} className="shrink-0 rounded-lg border px-2 text-[13px] outline-none" style={inputSty} />
         </div>
 
         <div className="mt-3 text-[11px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Hora</div>
         <div className="mt-1 flex flex-wrap gap-1.5">
-          {HORARIOS.map((h) => (
-            <button key={h} onClick={() => { setHora(h); setOutra(""); }} className="rounded-lg px-3 py-2 text-[14px]" style={chip(hora === h && !outra)}>{h}</button>
+          {horarios.map((h) => (
+            <button key={h} onClick={() => { setHora(h); setOutra(""); }} className="rounded-lg px-3 py-2 text-[14px]" style={chip(horaOk === h && !outra)}>{h}</button>
           ))}
+          {!horarios.length && (
+            <span className="self-center text-[13px]" style={{ color: C.laranja }}>
+              A loja não agenda neste dia{dia ? ` (${diaDaSemana(dia)})` : ""}. Se for exceção, digite a hora ao lado.
+            </span>
+          )}
           <input type="time" value={outra} onChange={(e) => { setOutra(e.target.value); setHora(""); }}
             className="rounded-lg border px-2 py-1 text-[14px] outline-none" style={inputSty} />
         </div>
@@ -12463,9 +12553,9 @@ function Agendador({ lead, equipe, aoFechar, aoAgendar }) {
         <BotaoPrimario className="mt-4 w-full" disabled={!pronto}
           onClick={() => {
             const n = (equipe || []).filter((x) => x.id === neg)[0];
-            aoAgendar({ agendado_para: `${dia}T${outra || hora}:00`, negociador_id: neg || null, negociador_nome: n ? n.nome : null });
+            aoAgendar({ agendado_para: `${dia}T${outra || horaOk}:00`, negociador_id: neg || null, negociador_nome: n ? n.nome : null });
           }}>
-          {lead.agendado_para ? "Remarcar" : "Agendar"} {dia && (hora || outra) ? `· ${dias.filter((d) => d.iso === dia)[0] ? dias.filter((d) => d.iso === dia)[0].rot : diaBR(dia)} ${outra || hora}` : ""}
+          {lead.agendado_para ? "Remarcar" : "Agendar"} {dia && (horaOk || outra) ? `· ${dias.filter((d) => d.iso === dia)[0] ? dias.filter((d) => d.iso === dia)[0].rot : diaBR(dia)} ${outra || horaOk}` : ""}
         </BotaoPrimario>
       </div>
     </div>
@@ -20982,6 +21072,117 @@ function PainelGestor({ perfil, comp }) {
   );
 }
 
+/**
+ * O nome da IA e os horários da loja (0068), editados pelo gerente.
+ *
+ * **Abrir e primeiro agendamento são campos diferentes**: a loja abre
+ * 8h30 para quem passa, e o agendado só é marcado a partir das 9h,
+ * com a equipe pronta. A prévia embaixo mostra os horários que o
+ * agendador vai oferecer — é o que a pessoa precisa conferir, e
+ * conferir três números de cabeça é como se erra o último.
+ *
+ * Componente de topo, não declarado dentro da tela: declarado dentro,
+ * o React o remontaria a cada render e o campo perderia o foco a cada
+ * tecla (decisão 32).
+ */
+const DIAS_CONFIG = [["semana", "Segunda a sexta"], ["sabado", "Sábado"], ["domingo", "Domingo"]];
+function ConfigLoja() {
+  const [c, setC] = useState(null);
+  const [padrao, setPadrao] = useState(false);
+  const [erro, setErro] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  const [salvo, setSalvo] = useState(false);
+  useEffect(() => {
+    lerConfigLoja()
+      .then((d) => { setC({ ...CONFIG_LOJA_PADRAO, ...(d.config || {}) }); setPadrao(!!d.padrao); })
+      .catch((e) => setErro(e.message));
+  }, []);
+  if (!c) return <p className="text-[13px]" style={{ color: erro ? C.laranja : C.mute }}>{erro || "Carregando…"}</p>;
+
+  const muda = (k, v) => { setSalvo(false); setC((x) => ({ ...x, [k]: v })); };
+  const fechado = (g) => !c[`${g}_primeiro`];
+  const alternar = (g) => {
+    setSalvo(false);
+    setC((x) => fechado(g)
+      ? { ...x, [`${g}_abre`]: "09:00", [`${g}_primeiro`]: "09:00", [`${g}_ultimo`]: "12:00" }
+      : { ...x, [`${g}_abre`]: null, [`${g}_primeiro`]: null, [`${g}_ultimo`]: null });
+  };
+  const salvar = async () => {
+    setSalvando(true); setErro("");
+    try {
+      const novo = await gravarConfigLoja(c);
+      setC({ ...CONFIG_LOJA_PADRAO, ...novo });
+      // O agendador desta aba passa a oferecer o novo na hora; as
+      // outras abas leem na próxima abertura da página.
+      configLojaAtual = { ...CONFIG_LOJA_PADRAO, ...novo };
+      setPadrao(false); setSalvo(true);
+    } catch (e) { setErro(e.message); }
+    setSalvando(false);
+  };
+  // Uma data qualquer de cada grupo, só para a prévia.
+  const exemplo = { semana: "2026-10-14", sabado: "2026-10-17", domingo: "2026-10-18" };
+  const campoHora = (k) => (
+    <input type="time" step={300} className={`${inputCls} mt-[2px]`} style={inputSty}
+      value={c[k] || ""} onChange={(e) => muda(k, e.target.value || null)} />
+  );
+
+  return (
+    <div className="space-y-3">
+      {padrao && (
+        <p className="text-[12.5px] leading-snug" style={{ color: C.laranja }}>
+          Ninguém gravou ainda: são os horários de 17/10/2026. Salve para valer.
+        </p>
+      )}
+      <label className="block">
+        <Rotulo>Nome da IA de atendimento</Rotulo>
+        <input className={`${inputCls} mt-[2px]`} style={inputSty} value={c.ia_nome || ""} maxLength={40}
+          onChange={(e) => muda("ia_nome", e.target.value)} />
+      </label>
+      {DIAS_CONFIG.map(([g, rot]) => {
+        const lista = horariosDoDia(c, exemplo[g]);
+        return (
+          <div key={g} className="rounded-lg p-2.5" style={{ background: C.bg }}>
+            <div className="flex items-center justify-between">
+              <span className="text-[13px] font-bold">{rot}</span>
+              <button onClick={() => alternar(g)} className="text-[12px] font-semibold" style={{ color: C.roxo }}>
+                {fechado(g) ? "abrir este dia" : "fechar este dia"}
+              </button>
+            </div>
+            {fechado(g) ? (
+              <p className="mt-1 text-[12.5px]" style={{ color: C.mute }}>Fechado: o agendador não oferece horário.</p>
+            ) : (
+              <>
+                <div className="mt-1.5 grid grid-cols-3 gap-1.5">
+                  <label><Rotulo>Abre</Rotulo>{campoHora(`${g}_abre`)}</label>
+                  <label><Rotulo>1º agend.</Rotulo>{campoHora(`${g}_primeiro`)}</label>
+                  <label><Rotulo>Último</Rotulo>{campoHora(`${g}_ultimo`)}</label>
+                </div>
+                <p className="mt-1.5 text-[11.5px] leading-snug" style={{ color: C.mute }}>
+                  {lista.length ? `Oferece ${lista.length} horários: ${lista[0]} a ${lista[lista.length - 1]}.` : "Nenhum horário: o primeiro vem depois do último."}
+                </p>
+              </>
+            )}
+          </div>
+        );
+      })}
+      <label className="block">
+        <Rotulo>Intervalo entre horários</Rotulo>
+        <select className={`${inputCls} mt-[2px]`} style={inputSty} value={c.intervalo_min}
+          onChange={(e) => muda("intervalo_min", Number(e.target.value))}>
+          {[15, 20, 30, 45, 60].map((m) => <option key={m} value={m}>{m} min</option>)}
+        </select>
+      </label>
+      {erro && <p className="text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
+      <BotaoPrimario className="w-full" disabled={salvando} onClick={salvar}>
+        {salvando ? "Salvando…" : salvo ? "Salvo" : "Salvar horários"}
+      </BotaoPrimario>
+      <p className="text-[11.5px] leading-snug" style={{ color: C.mute }}>
+        O agendador da pré-venda e a IA leem daqui. Mudar não pede deploy.
+      </p>
+    </div>
+  );
+}
+
 /** Equipe, metas e importação — o que era a sanfona da gestão. */
 function TelaGestao({ perfil, comp }) {
   const [importando, setImportando] = useState(false);
@@ -20996,6 +21197,9 @@ function TelaGestao({ perfil, comp }) {
         <div className="space-y-4">
           <Bloco titulo="Quem entra no sistema" sub="Conta nova nasce desativada. Libere aqui.">
             <Acessos perfil={perfil} />
+          </Bloco>
+          <Bloco titulo="Horários da loja e IA" sub="O que o agendador oferece e como a IA de atendimento se apresenta.">
+            <ConfigLoja />
           </Bloco>
           <Bloco titulo="Planilha do CRM" sub="Cole o que copiou do Google Sheets. Cada linha vira um atendimento.">
             {importando

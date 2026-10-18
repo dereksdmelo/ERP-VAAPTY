@@ -34,6 +34,16 @@
  *   PUT                grava { valor, volume }
  *
  * A meta da loja é independente da soma das individuais — ver 0018.
+ *
+ * ---------------------------------------------------------------------
+ * /api/perfil?recurso=config-loja
+ *
+ *   GET   o nome da IA de atendimento e os horários da loja (0068)
+ *   PUT   grava — só gerente, e quem decide é a RLS
+ *
+ * A IA e o agendador da pré-venda leem a MESMA linha: se cada um
+ * tivesse a sua, a Flávia e a pré-venda marcariam em horários que a
+ * outra não oferece (decisão 59).
  */
 
 const URL_BASE = (process.env.SUPABASE_URL || "").replace(/\/+$/, "");
@@ -534,6 +544,89 @@ async function metaLoja(req, res, tok) {
   return res.status(405).json({ erro: "Use GET ou PUT." });
 }
 
+/**
+ * A configuração da loja e da IA (0068).
+ *
+ * Sem linha no banco, devolve os valores de 17/10/2026 e diz que
+ * caiu neles (`padrao: true`) — a tela precisa saber que ninguém
+ * gravou ainda, em vez de achar que aquilo foi escolhido.
+ */
+const CONFIG_LOJA_PADRAO = {
+  ia_nome: "Flávia",
+  semana_abre: "08:30", semana_primeiro: "09:00", semana_ultimo: "18:00",
+  sabado_abre: "09:00", sabado_primeiro: "09:00", sabado_ultimo: "13:00",
+  domingo_abre: null, domingo_primeiro: null, domingo_ultimo: null,
+  intervalo_min: 30,
+};
+const GRUPOS_DIA = ["semana", "sabado", "domingo"];
+// O Postgres devolve "09:00:00"; a tela fala "09:00".
+const horaCurta = (v) => {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(v || ""));
+  if (!m) return null;
+  const h = Number(m[1]), mi = Number(m[2]);
+  if (h > 23 || mi > 59) return null;
+  return `${String(h).padStart(2, "0")}:${m[2]}`;
+};
+function configDaLinha(l) {
+  const c = { ...CONFIG_LOJA_PADRAO };
+  if (!l) return c;
+  c.ia_nome = texto(l.ia_nome) || CONFIG_LOJA_PADRAO.ia_nome;
+  GRUPOS_DIA.forEach((g) => ["abre", "primeiro", "ultimo"].forEach((k) => {
+    c[`${g}_${k}`] = horaCurta(l[`${g}_${k}`]);
+  }));
+  c.intervalo_min = Number(l.intervalo_min) || CONFIG_LOJA_PADRAO.intervalo_min;
+  c.atualizado_em = l.atualizado_em || null;
+  return c;
+}
+
+async function configLoja(req, res, tok) {
+  const base = `${URL_BASE}/rest/v1/config_loja`;
+  const cab = { apikey: ANON, Authorization: tok };
+
+  if (req.method === "GET") {
+    const r = await fetch(`${base}?select=*&id=eq.1`, { headers: cab });
+    if (!r.ok) return res.status(r.status === 401 ? 401 : 502).json({ erro: "Não consegui ler a configuração da loja." });
+    const d = await r.json().catch(() => []);
+    const linha = (Array.isArray(d) ? d[0] : d) || null;
+    return res.status(200).json({ config: configDaLinha(linha), padrao: !linha });
+  }
+
+  if (req.method === "PUT") {
+    const c = await lerCorpo(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    const nome = texto(c.ia_nome);
+    if (!nome || nome.length > 40) return res.status(400).json({ erro: "O nome da IA precisa ter de 1 a 40 letras." });
+    const intervalo = Math.trunc(numero(c.intervalo_min) || 0);
+    if (intervalo < 10 || intervalo > 120) return res.status(400).json({ erro: "O intervalo vai de 10 a 120 minutos." });
+    const linha = { id: 1, ia_nome: nome, intervalo_min: intervalo,
+      atualizado_em: new Date().toISOString(), atualizado_por: donoDoToken(tok) };
+    const ROT = { semana: "Segunda a sexta", sabado: "Sábado", domingo: "Domingo" };
+    for (const g of GRUPOS_DIA) {
+      const v = ["abre", "primeiro", "ultimo"].map((k) => horaCurta(c[`${g}_${k}`]));
+      const preenchidos = v.filter(Boolean).length;
+      // O grupo inteiro ou nada — a mesma regra do check da 0068, dita
+      // aqui com o nome do dia em vez do nome da constraint.
+      if (preenchidos && preenchidos < 3) return res.status(400).json({ erro: `${ROT[g]}: preencha abertura, primeiro e último horário, ou deixe os três vazios para fechado.` });
+      if (preenchidos && v[1] > v[2]) return res.status(400).json({ erro: `${ROT[g]}: o primeiro horário vem depois do último.` });
+      linha[`${g}_abre`] = v[0]; linha[`${g}_primeiro`] = v[1]; linha[`${g}_ultimo`] = v[2];
+    }
+    const r = await fetch(`${base}?on_conflict=id`, {
+      method: "POST",
+      headers: { ...cab, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=representation" },
+      body: JSON.stringify(linha),
+    });
+    if (!r.ok) return res.status(r.status === 401 ? 401 : 502).json({ erro: "O banco recusou a gravação." });
+    const d = await r.json().catch(() => []);
+    const salvo = Array.isArray(d) ? d[0] : d;
+    // Upsert que volta vazio é a RLS recusando: só gerente escreve.
+    if (!salvo) return res.status(403).json({ erro: "Só o gerente muda os horários da loja." });
+    return res.status(200).json({ ok: true, config: configDaLinha(salvo), padrao: false });
+  }
+
+  res.setHeader("Allow", "GET, PUT");
+  return res.status(405).json({ erro: "Use GET ou PUT." });
+}
+
 module.exports = async function handler(req, res) {
   if (!URL_BASE || !ANON) {
     return res.status(500).json({ erro: "SUPABASE_URL ou SUPABASE_ANON_KEY não configurados." });
@@ -565,6 +658,11 @@ module.exports = async function handler(req, res) {
 
   if (String(req.query.recurso || "") === "meta-loja") {
     try { return await metaLoja(req, res, tok); }
+    catch (e) { return res.status(502).json({ erro: "Não consegui falar com o banco." }); }
+  }
+
+  if (String(req.query.recurso || "") === "config-loja") {
+    try { return await configLoja(req, res, tok); }
     catch (e) { return res.status(502).json({ erro: "Não consegui falar com o banco." }); }
   }
 

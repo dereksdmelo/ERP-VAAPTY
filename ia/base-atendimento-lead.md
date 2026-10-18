@@ -258,11 +258,13 @@ marcado é 9h, para a equipe estar pronta quando o agendado chega.
 Uma chave só faria a IA mentir numa das duas frases — que é
 exatamente o desencontro entre a Ana e a Camila (erro 8).
 
-**O agendador da tela tem que ler a mesma configuração.** Hoje ele
-usa `HORARIOS` fixo em `index.html` (9h–18h todos os dias, decisão
-51), o que oferece sábado às 16h com a loja fechada. Se a IA e a tela
-lerem de lugares diferentes, a pré-venda e a Flávia vão marcar em
-horários que a outra não oferece.
+**O agendador da tela lê a mesma configuração** — desde 17/10/2026,
+pela tabela `config_loja` (0068) e `api/perfil.js?recurso=config-loja`,
+editada pelo gerente em Equipe e metas (decisão 59 do CLAUDE.md).
+Antes ele usava `HORARIOS` fixo (9h–18h todos os dias), o que oferecia
+sábado às 16h com a loja fechada. A IA tem que ler dali também; se a
+IA e a tela lerem de lugares diferentes, a pré-venda e a Flávia vão
+marcar em horários que a outra não oferece.
 
 ---
 
