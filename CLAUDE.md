@@ -2678,7 +2678,10 @@ resposta — e na seguinte perguntava o período em vez de oferecer; a
 folga de uma hora apagou o 12h que o cliente pediu às 11h37 (a Ana
 tinha oferecido, e ele foi), e caiu para 20 minutos; e texto solto,
 fora do JSON, passou a valer no treino marcado como fora do formato,
-sem agendar nada. **Quem mexer no prompt roda uma conversa inteira
+sem agendar nada. Numa conversa da Camila, o cliente contou das
+parcelas atrasadas, da entrada e do cunhado — e não disse o modelo; a
+Flávia perguntou o modelo quatro vezes seguidas. Agora nenhuma
+pergunta se repete, e sem o modelo ela vai para o horário. **Quem mexer no prompt roda uma conversa inteira
 antes de dar por pronto** — é assim que essas aparecem.
 
 **Aproximação conhecida:** num replay de dias atrás, os horários livres
