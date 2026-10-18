@@ -92,6 +92,7 @@ confere("o nome vem da configuração", ins.includes("Você é a Marta"), true);
 confere("os horários livres estão lá", ins.includes("sábado 17/10 (2026-10-17): 09:00"), true);
 confere("o sábado diz até 13h", ins.includes("Sábado: a loja abre às 09:00; agendamentos de 09:00 a 13:00"), true);
 confere("a correção do gerente vira exemplo", ins.includes("Resposta aprovada: O valor sai da avaliação."), true);
+confere("dois horários, nunca a agenda inteira", ins.includes("Listar mais de DOIS horários"), true);
 confere("intermediação, não compra", ins.includes("Nunca diga que \"a loja compra\""), true);
 
 console.log(falhas ? `\n${falhas} falha(s)` : "\ntudo certo");
