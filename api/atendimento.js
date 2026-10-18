@@ -450,7 +450,10 @@ async function flavia(req, res, tok) {
     let saidaTxt = "", uso = null;
     try { const d = JSON.parse(corpo); saidaTxt = ((d.content || []).find((x) => x.type === "text") || {}).text || ""; uso = d.usage || null; } catch (e) {}
     const proposta = FLAVIA.lerSaida(saidaTxt, livres);
-    if (!proposta) return res.status(502).json({ erro: "A Flávia respondeu fora do formato. Tente de novo." });
+    // O começo do que veio volta junto: sem ele, "fora do formato" não
+    // diz se faltou fechar o JSON, se veio cortado ou se veio outra
+    // coisa. A tela é do gerente e o texto é o que a IA escreveu.
+    if (!proposta) return res.status(502).json({ erro: "A Flávia respondeu fora do formato. Tente de novo.", bruto: saidaTxt.slice(0, 600), parou: (() => { try { return JSON.parse(corpo).stop_reason; } catch (e) { return null; } })() });
 
     // Refazer zera a avaliação: a nota julgou o texto anterior.
     const salvo = await banco(`${REST("ia_treino")}?on_conflict=mensagem_id`, {
