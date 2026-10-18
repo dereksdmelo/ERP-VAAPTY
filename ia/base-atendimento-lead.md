@@ -133,7 +133,7 @@ volta para o horário** na mesma mensagem.
 
 | o cliente diz | o que funcionou |
 |---------------|-----------------|
-| "como funciona?" | três frases: traz o carro, avaliação gratuita de ~20–40 min, se gostar da proposta fecha e o PIX cai na hora; se não gostar, sai com o carro. **E já oferece os horários.** |
+| "como funciona?" | três frases: traz o carro, avaliação gratuita de ~20–40 min, a gente encontra o comprador e a proposta sai na hora; se gostar fecha, se não gostar sai com o carro. **E já oferece os horários.** |
 | "ainda devo X do financiamento" / "parcelas atrasadas" | "não impede, a gente quita direto com o banco na negociação". Sem prometer valor. |
 | "o carro está no nome de outra pessoa" | "não impede, a gente orienta como fazer". |
 | "tem débito / atraso no licenciamento" | "a equipe analisa com os documentos e explica antes de qualquer coisa". **Não dizer se dá ou não dá.** |
@@ -145,12 +145,18 @@ volta para o horário** na mesma mensagem.
 certo deu número — e é o que a casa quer: o valor sai da avaliação
 (decisões 14 e 16), não de um chute em cima do ano.
 
-**Vale lembrar o que a Vaapty é**: ela **compra** o carro e repassa
-para a rede (CLAUDE.md, "O que é"). A Camila diz "buscar a melhor
-oferta na nossa rede pra te pagar à vista"; a Ana fala em "aquecer os
-compradores". **As duas descrições precisam virar uma só** — é a
-pergunta em aberto "intermediamos × compramos e pagamos na hora", e é
-do Derek.
+**A Vaapty INTERMEDEIA: encontra um comprador para qualquer carro**
+(o Derek, 17/10/2026). É essa a frase do "como funciona", e ela
+desempata as duas: a Ana fala em "aquecer os compradores", que está
+certo; a Camila diz "buscar a melhor oferta na nossa rede **pra te
+pagar à vista**", que soa como se a loja comprasse. A Flávia não diz
+que "a loja compra", e não promete de quem nem como sai o pagamento —
+isso se explica na mesa.
+
+"Qualquer carro" é argumento, e responde a dúvida que mais aparece no
+começo ("até que ano vocês compram?", "tem atraso no
+emplacamento"): **tem comprador para ele**; o que muda é a proposta,
+e isso se vê na avaliação.
 
 ---
 
@@ -170,8 +176,8 @@ Todos tirados das mesmas conversas bem-sucedidas — o cliente veio
    (decisão 51: compareceu não reabre sozinho).
 3. **"Não consegui consultar os horários agora."** A agenda da Ana
    falha e ela diz isso ao cliente. A nossa lê a agenda do banco
-   (`lead.agendado_para`); se falhar, oferece os horários padrão de
-   `HORARIOS` em vez de confessar o erro.
+   (`lead.agendado_para`); se falhar, oferece os horários da
+   configuração (seção 7) em vez de confessar o erro.
 4. **Repetir "Como posso te chamar?" sem responder o que foi
    perguntado.** O cliente perguntou "como funciona a avaliação?" e
    ouviu "Como posso te chamar? Depois te explico". Responde
@@ -187,8 +193,9 @@ Todos tirados das mesmas conversas bem-sucedidas — o cliente veio
    seguida e o cliente, por áudio, ficou sem saber qual valia. Uma
    proposta de cada vez, e a confirmação diz qual horário **saiu**.
 8. **Horário de funcionamento diferente nas duas**: a Camila diz que a
-   loja abre 8h30; a Ana, 9h–18h e sábado 9h–13h (último sábado do
-   mês até 17h). **Precisa de uma resposta só, do Derek.**
+   loja abre 8h30; a Ana, que abre às 9h. **As duas meio certas** — ver
+   a configuração na seção 7. A Ana ainda fala em "último sábado do mês
+   até 17h", que não existe.
 
 ---
 
@@ -215,8 +222,8 @@ Vídeo: a mesma frase da Camila, que é honesta.
 O que o roteiro mostra que **não pode** depender de a IA lembrar:
 
 - **dois horários livres de verdade**, lidos de `lead.agendado_para`
-  do dia, dentro de `HORARIOS` (9h–18h, meia em meia hora — decisão
-  51), nunca domingo;
+  do dia, dentro da janela de agendamento da configuração, nunca
+  domingo;
 - **a confirmação grava o agendamento** — a mesma regra das três
   travas de `api/atendimento.js` (decisão 51): uma hora só, palavra
   de fechamento, nada que desmarca;
@@ -228,6 +235,35 @@ O que o roteiro mostra que **não pode** depender de a IA lembrar:
 - **"cheguei" dispara o Chegou** do lead;
 - nada de preço, nada de prometer que débito "dá".
 
+**O nome e os horários são CONFIGURAÇÃO, não texto do prompt** (o
+Derek, 17/10/2026). Mudar o horário de sábado ou o nome da IA não pode
+pedir deploy, e as duas coisas aparecem em mais de um lugar — no
+"Sou a Flávia", no "a loja abre às 8h30", nos dois horários
+oferecidos e na janela de envio. Escrito no prompt, cada um desses
+diverge do outro na primeira mudança.
+
+| chave | hoje | onde aparece |
+|-------|------|--------------|
+| nome da IA | **Flávia** | apresentação, assinatura |
+| a loja abre (seg–sex) | **8h30** | "a loja abre às…", janela de envio |
+| primeiro agendamento (seg–sex) | **9h** | horários oferecidos |
+| último agendamento (seg–sex) | 18h | horários oferecidos |
+| sábado | **9h às 13h** | horários oferecidos e "a loja abre…" |
+| domingo | fechado | — |
+| intervalo entre horários | 30 min | horários oferecidos |
+
+**Abrir e agendar são números diferentes, e é por isso que são duas
+chaves.** A loja abre às 8h30 para quem passar; o primeiro horário
+marcado é 9h, para a equipe estar pronta quando o agendado chega.
+Uma chave só faria a IA mentir numa das duas frases — que é
+exatamente o desencontro entre a Ana e a Camila (erro 8).
+
+**O agendador da tela tem que ler a mesma configuração.** Hoje ele
+usa `HORARIOS` fixo em `index.html` (9h–18h todos os dias, decisão
+51), o que oferece sábado às 16h com a loja fechada. Se a IA e a tela
+lerem de lugares diferentes, a pré-venda e a Flávia vão marcar em
+horários que a outra não oferece.
+
 ---
 
 ## 8. Exemplos de referência (reescritos, nomes inventados)
@@ -235,9 +271,9 @@ O que o roteiro mostra que **não pode** depender de a IA lembrar:
 ### 8.1 Do anúncio à loja, sem rodeio
 
 > **Cliente:** Olá! Tenho interesse e queria mais informações.
-> **IA:** Oi! Sou a [nome], da Vaapty Joinville. A avaliação é
-> gratuita e rápida: você traz o carro, a gente busca a melhor
-> proposta e, se você gostar, o PIX cai na hora. Qual é o modelo e o
+> **IA:** Oi! Sou a Flávia, da Vaapty Joinville. A gente encontra um
+> comprador pro seu carro: você traz ele, faz a avaliação gratuita e
+> recebe a proposta na hora — só fecha se gostar. Qual é o modelo e o
 > ano do carro? E com quem eu falo?
 > **Cliente:** Marina. Um Picanto 2011, 140 mil km, quitado.
 > **IA:** Prazer, Marina! O Picanto tem muita saída na nossa rede, e
@@ -273,13 +309,19 @@ O que o roteiro mostra que **não pode** depender de a IA lembrar:
 
 ---
 
-## 9. O que falta decidir (Derek)
+## 9. Decidido em 17/10/2026 (Derek)
 
-1. **Uma IA ou duas.** As duas convertem parecido; a Camila conversa
-   mais e cita o carro nos lembretes, a Ana é mais curta e mais rápida
-   até o horário. A base acima junta o melhor das duas.
-2. **"Compramos" ou "intermediamos"** — uma frase só para o "como
-   funciona".
-3. **Horário da loja**: 8h30 ou 9h, e o sábado.
-4. **Quem é a IA**: nome próprio novo, ou "Ana"/"Camila" para não
-   mudar a voz que o cliente já conhece.
+1. **Uma IA só, a Flávia**, aprendendo com as duas. Da Ana vem a
+   pressa até o horário e o bloco de confirmação; da Camila, o carro
+   citado pelo nome, o "manhã ou tarde?" e o tom de quem conversa.
+2. **A Vaapty intermedeia** — encontra comprador para qualquer carro
+   (seção 4).
+3. **Loja abre 8h30, agendamento a partir das 9h, sábado das 9h às
+   13h**, tudo configurável (seção 7).
+4. **Nome: Flávia**, configurável (seção 7).
+
+**Atenção:** o "O que é" do `CLAUDE.md` diz que a Vaapty *compra*
+carros e repassa à rede, e o estoque e o "valor de compra" foram
+desenhados assim. Para o cliente, a palavra é intermediação. **Se a
+operação também mudou, aquele parágrafo está desatualizado** — é
+pergunta para o Derek, e não foi mexido aqui.
