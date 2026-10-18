@@ -2670,6 +2670,17 @@ régua da decisão 31: telefone, CPF e conta não mudam a resposta.
 vale o `IA_MODELO` das táticas. Redigir para o cliente pode pedir mais
 que o Haiku — é a primeira coisa a testar se as notas vierem baixas.
 
+**O primeiro replay (18/10/2026) corrigiu quatro coisas**, numa
+conversa que levou o cliente à loja: ela se reapresentava, porque as
+mensagens da loja na conversa eram da Ana e ela não as tratava como
+suas; perguntava "manhã ou tarde?" e oferecia horários na mesma
+resposta — e na seguinte perguntava o período em vez de oferecer; a
+folga de uma hora apagou o 12h que o cliente pediu às 11h37 (a Ana
+tinha oferecido, e ele foi), e caiu para 20 minutos; e texto solto,
+fora do JSON, passou a valer no treino marcado como fora do formato,
+sem agendar nada. **Quem mexer no prompt roda uma conversa inteira
+antes de dar por pronto** — é assim que essas aparecem.
+
 **Aproximação conhecida:** num replay de dias atrás, os horários livres
 saem da agenda de HOJE. Só pesa no horário que já tinha gente demais.
 

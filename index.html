@@ -21376,6 +21376,7 @@ function PontoTreino({ n, p, nome, ocupado, aoRedigir, aoAvaliar }) {
                 <p className="text-[12px]" style={{ color: C.laranja }}>Tentou marcar um horário que a loja não oferece — o sistema barrou.</p>
               )}
               {prop.encerrar && <p className="text-[12px]" style={{ color: C.mute }}>Encerraria a conversa.</p>}
+              {prop.formato_livre && <p className="text-[12px]" style={{ color: C.laranja }}>Escreveu fora do formato: o texto vale para julgar, mas ela não marcaria nada.</p>}
             </div>
           ) : (
             <button onClick={aoRedigir} disabled={ocupado} className="rounded-lg px-3 py-2 text-[13px] font-semibold"

@@ -44,8 +44,11 @@ const POR_HORARIO = 2;
 // cliente que esfria antes de chegar.
 const DIAS_A_FRENTE = 3;
 // Nada antes disto a partir de agora: oferecer "às 14h" às 13h50 é
-// marcar um horário que o cliente não consegue cumprir.
-const FOLGA_MIN = 60;
+// marcar um horário que o cliente não consegue cumprir. Era uma hora,
+// e o primeiro replay mostrou o custo: às 11h37 o cliente pediu 12h —
+// a Ana tinha oferecido, ele foi à loja — e para a Flávia o horário
+// não existia.
+const FOLGA_MIN = 20;
 
 /* ------------------------- relógio ------------------------- */
 
@@ -205,14 +208,17 @@ A Vaapty INTERMEDEIA a venda de carros: encontra um comprador para qualquer carr
 Levar o cliente até a loja com um horário marcado. Você não negocia, não avalia e não dá preço.
 
 ## O roteiro
-1. Se ainda não se apresentou nesta conversa, apresente-se numa linha ("Oi! Sou a ${nome}, da Vaapty Joinville").
+As mensagens LOJA na conversa são da loja — trate como suas, mesmo que assinadas com outro nome. Não se apresente de novo se a loja já se apresentou, e não repita pergunta que a loja já fez.
+
+1. Se a loja ainda não se apresentou nesta conversa, apresente-se numa linha ("Oi! Sou a ${nome}, da Vaapty Joinville").
 2. Pergunte o carro: modelo e ano. Junto, na mesma mensagem, pergunte com quem você fala. Não repita a pergunta do nome se o cliente não respondeu — siga sem ele.
-3. Elogie o carro em UMA frase, com motivo ("tem muita saída na nossa rede", "quitado ajuda bastante").
-4. Se o cliente não deu pista de período, pergunte "manhã ou tarde?". Se deu, pule.
-5. Ofereça DOIS horários concretos da lista de horários livres, do período que ele quer. Nunca pergunte "qual horário fica bom?" sem dar opções.
-6. Quando ele escolher um horário da lista, confirme NA MESMA RESPOSTA, em bloco: dia da semana e data, hora, o endereço (${ENDERECO}), o que trazer (manual, chave reserva e o documento de transferência — se não tiver, não tem problema, o importante é trazer o carro) e o pedido de avisar com 2 horas de antecedência se não puder vir. Nunca diga que o horário "ainda não está confirmado".
-7. Se ele avisar que vai atrasar: "sem problema, já avisei o pessoal, vem com calma". Não remarque por atraso pequeno.
-8. Se ele disser que chegou: diga que já avisou a equipe e que alguém vai recebê-lo.
+3. Assim que souber o carro, elogie em UMA frase, com motivo ("tem muita saída na nossa rede", "quitado ajuda bastante"), e na MESMA resposta ofereça DOIS horários concretos da lista de horários livres — do período que ele pediu, se pediu; senão, os dois mais próximos. Não pergunte "manhã ou tarde?" e ofereça horários na mesma resposta: ofereça os horários. Nunca pergunte "qual horário fica bom?" sem dar opções. A cidade não é obrigatória: não segure o horário por causa dela.
+4. Se ele pedir um horário que não está na lista, ofereça os dois mais próximos que estão.
+5. Quando ele escolher um horário da lista, confirme NA MESMA RESPOSTA, em bloco: dia da semana e data, hora, o endereço (${ENDERECO}), o que trazer (manual, chave reserva e o documento de transferência — se não tiver, não tem problema, o importante é trazer o carro) e o pedido de avisar com 2 horas de antecedência se não puder vir. Nunca diga que o horário "ainda não está confirmado".
+6. Se ele avisar que vai atrasar: "sem problema, já avisei o pessoal, vem com calma". Não remarque por atraso pequeno.
+7. Se ele disser que chegou: diga que já avisou a equipe e que alguém vai recebê-lo.
+
+8. Se ele só agradeceu ou disse "ok" depois de tudo combinado, responda numa frase curta.
 
 Os lembretes da véspera e do dia são automáticos — não precisa prometê-los.
 
@@ -275,6 +281,13 @@ function lerSaida(texto, livres) {
   const i = s.indexOf("{"), j = s.lastIndexOf("}");
   let o = null;
   if (i >= 0 && j > i) { try { o = JSON.parse(s.slice(i, j + 1)); } catch (e) {} }
+  // Texto solto, sem JSON nenhum, é resposta escrita fora do formato:
+  // no treino vale mostrar — o gerente julga o texto — marcado, e sem
+  // agendar nada, porque o agendamento só existe no campo dele.
+  if (!o && i < 0) {
+    const livre = s.replace(/```\w*/g, "").trim();
+    return livre ? { mensagens: [livre.slice(0, 1500)], agendar: "", encerrar: false, fora_da_lista: false, formato_livre: true } : null;
+  }
   if (!o || !Array.isArray(o.mensagens)) return null;
   const mensagens = o.mensagens.map((m) => String(m == null ? "" : m).trim()).filter(Boolean).slice(0, 3);
   if (!mensagens.length) return null;

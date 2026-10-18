@@ -36,17 +36,19 @@ confere("domingo fechado", F.horariosDoDia(cfg, "2026-10-18"), []);
 confere("intervalo de uma hora", F.horariosDoDia({ ...cfg, intervalo_min: 60 }, "2026-10-19").length, 10);
 
 console.log("horários livres");
-// Sexta 16/10, 16h40: hoje sobra só 18h (folga de uma hora), depois
-// sábado, e domingo é pulado.
-const l1 = F.horariosLivres(cfg, "2026-10-16T16:40", []);
-confere("hoje respeita a folga de uma hora", l1[0].horarios, ["18:00"]);
+// Sexta 16/10, 17h05: hoje sobram 17h30 e 18h (folga de 20 minutos),
+// depois sábado, e domingo é pulado.
+const l1 = F.horariosLivres(cfg, "2026-10-16T17:05", []);
+confere("hoje respeita a folga de 20 minutos", l1[0].horarios, ["17:30", "18:00"]);
 confere("pula o domingo", l1.map((d) => d.iso), ["2026-10-16", "2026-10-17", "2026-10-19"]);
 confere("marca hoje e amanhã", [l1[0].hoje, l1[1].amanha], [true, true]);
-// Às 17h10 de sexta não sobra nada hoje: o primeiro dia é o sábado.
-confere("dia sem horário sai da lista", F.horariosLivres(cfg, "2026-10-16T17:10", [])[0].iso, "2026-10-17");
+// Às 17h50 de sexta não sobra nada hoje: o primeiro dia é o sábado.
+confere("dia sem horário sai da lista", F.horariosLivres(cfg, "2026-10-16T17:50", [])[0].iso, "2026-10-17");
+// O caso do replay: 11h37, o cliente pede 12h.
+confere("meio-dia ainda cabe às 11h37", F.horariosLivres(cfg, "2026-10-13T11:37", [])[0].horarios[0], "12:00");
 const cheio = Array(F.POR_HORARIO).fill("2026-10-17T09:00:00");
-confere("horário lotado não é oferecido", F.horariosLivres(cfg, "2026-10-16T17:10", cheio)[0].horarios[0], "09:30");
-confere("um a menos que o teto ainda cabe", F.horariosLivres(cfg, "2026-10-16T17:10", cheio.slice(1))[0].horarios[0], "09:00");
+confere("horário lotado não é oferecido", F.horariosLivres(cfg, "2026-10-16T17:50", cheio)[0].horarios[0], "09:30");
+confere("um a menos que o teto ainda cabe", F.horariosLivres(cfg, "2026-10-16T17:50", cheio.slice(1))[0].horarios[0], "09:00");
 
 console.log("pontos da conversa");
 const M = (id, eco, texto, quando, tipo) => ({ id, eco, tipo: tipo || "texto", texto, quando });
@@ -79,7 +81,9 @@ const fora = F.lerSaida('{"mensagens":["Fechado!"],"agendar":"2026-10-17T15:00"}
 confere("hora inventada não agenda, e fica marcada", [fora.agendar, fora.fora_da_lista], ["", true]);
 confere("no máximo três mensagens", F.lerSaida('{"mensagens":["1","2","3","4"]}', livres).mensagens.length, 3);
 confere("sem mensagem não é resposta", F.lerSaida('{"mensagens":[]}', livres), null);
-confere("texto solto não é resposta", F.lerSaida("Claro, posso ajudar!", livres), null);
+const solto = F.lerSaida("Claro, posso ajudar!", livres);
+confere("texto solto vale, marcado e sem agendar", [solto.mensagens, solto.formato_livre, solto.agendar], [["Claro, posso ajudar!"], true, ""]);
+confere("JSON quebrado não é resposta", F.lerSaida('{"mensagens": ["oi"', livres), null);
 
 console.log("a instrução");
 const ins = F.instrucao({ ...cfg, ia_nome: "Marta" }, "2026-10-16T10:00", livres, [{ cliente: "quanto vale?", correcao: "O valor sai da avaliação." }]);
