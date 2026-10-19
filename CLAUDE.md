@@ -1817,6 +1817,16 @@ pendente obriga a procurar o que falta fazer. E **"o que falta" é o
 mesmo texto que o lojista lê** na consulta do protocolo — sem isso,
 "pendente" não diz o que cobrar.
 
+**Cada passo mostra quando aconteceu, e quem marcou** (19/10/2026, o
+financeiro: *"ali aparece a data do preenchimento mas não quando foi
+pra cartório"*). O banco carimbava os três desde a 0057; as telas só
+mostravam a bolinha. Agora a consulta do protocolo diz o dia e a hora
+de cada passo e de quando o pedido foi feito — data não é dado do
+comprador, então cabe na régua do mínimo acima —, e a fila do
+administrativo mostra a trilha com o primeiro nome de quem marcou.
+O nome **não** vai para a consulta pública: quem tem o protocolo não
+precisa saber quem da equipe mexeu.
+
 **O que ficou de fora:** as 1.278 respostas antigas não foram
 importadas. Elas estão fechadas (o papel já circulou), e trazê-las
 encheria a fila de trabalho que ninguém vai fazer. Se o histórico for

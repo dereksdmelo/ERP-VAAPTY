@@ -81,6 +81,7 @@
   .trilha li.ok{color:var(--tinta)}
   .trilha li::before{content:"○";position:absolute;left:0;color:var(--linha)}
   .trilha li.ok::before{content:"●";color:var(--verde)}
+  .trilha .quando{color:var(--mute);font-size:12.5px}
 </style>
 </head>
 <body>
@@ -301,11 +302,25 @@ async function consultar() {
     // "Só reconhecer" pula o preenchimento: mostrar aquele passo
     // apagado faria o pedido parecer travado quando ele está em dia.
     const passos = PASSOS.filter((s) => !(x.tipo === "reconhecer" && s[0] === "preenchido"));
+    /* A DATA DE CADA PASSO (19/10/2026). O banco sempre carimbou quando
+     * cada etapa aconteceu, e a consulta só mostrava a bolinha — o
+     * lojista perguntava "quando foi para o cartório?" e ninguém tinha
+     * a resposta na tela. O relógio é o de Joinville: um passo das 22h
+     * cairia no dia seguinte em UTC. */
+    const quando = { recebido: x.criado_em, preenchido: x.preenchido_em, reconhecido: x.reconhecido_em, entregue: x.entregue_em };
     const feito = { recebido: true, preenchido: !!x.preenchido_em, reconhecido: !!x.reconhecido_em, entregue: !!x.entregue_em };
+    const dataHora = (v) => {
+      if (!v) return "";
+      const d = new Date(v);
+      if (isNaN(d)) return "";
+      const fmt = (o) => d.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", ...o });
+      return `${fmt({ day: "2-digit", month: "2-digit", year: "numeric" })} às ${fmt({ hour: "2-digit", minute: "2-digit" })}`;
+    };
     alvo.innerHTML = `<div class="estado">
       <b>${x.protocolo}</b> · placa ${x.placa}
+      ${x.criado_em ? `<div class="sub">Pedido feito em ${dataHora(x.criado_em)}</div>` : ""}
       ${x.pendencia ? `<div class="aviso">Falta: ${x.pendencia}</div>` : ""}
-      <ul class="trilha">${passos.map((s) => `<li class="${feito[s[0]] ? "ok" : ""}">${s[1]}</li>`).join("")}</ul>
+      <ul class="trilha">${passos.map((s) => `<li class="${feito[s[0]] ? "ok" : ""}">${s[1]}${feito[s[0]] && quando[s[0]] ? ` <span class="quando">· ${dataHora(quando[s[0]])}</span>` : ""}</li>`).join("")}</ul>
       ${x.rastreio ? `<p class="sub">Rastreio: <span class="cod">${x.rastreio}</span></p>` : ""}
     </div>`;
   } catch (e) {

@@ -18380,6 +18380,36 @@ const proximoPasso = (p) => {
   return null;
 };
 
+// Data e hora em Joinville: um passo marcado às 22h cairia no dia
+// seguinte em UTC (a armadilha da decisão 22).
+const dataHoraJoinville = (v) => {
+  if (!v) return "";
+  const d = new Date(v);
+  if (isNaN(d)) return "";
+  const f = (o) => d.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", ...o });
+  return `${f({ day: "2-digit", month: "2-digit" })} ${f({ hour: "2-digit", minute: "2-digit" })}`;
+};
+function TrilhaDut({ p }) {
+  const nome = (x) => (x && (Array.isArray(x) ? x[0] : x) && (Array.isArray(x) ? x[0] : x).nome) || "";
+  const passos = [
+    ["Pedido", p.criado_em, ""],
+    ...(p.tipo === "reconhecer" ? [] : [["Preenchido", p.preenchido_em, nome(p.preenchido_por_perfil)]]),
+    ["Cartório", p.reconhecido_em, nome(p.reconhecido_por_perfil)],
+    ["Entregue", p.entregue_em, nome(p.entregue_por_perfil)],
+  ];
+  return (
+    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px]">
+      {passos.map(([rot, em, quem]) => (
+        <span key={rot} style={{ color: em ? C.ink : C.mute, opacity: em ? 1 : 0.6 }}>
+          <span style={{ color: em ? C.verde : C.mute }}>{em ? "●" : "○"}</span> {rot}{" "}
+          <span style={{ fontVariantNumeric: "tabular-nums", color: C.mute }}>{em ? dataHoraJoinville(em) : "—"}</span>
+          {quem && <span style={{ color: C.mute }}> · {String(quem).split(" ")[0]}</span>}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function CartaoDut({ p, aoMudar }) {
   const [aberto, setAberto] = useState(false);
   const [ocupado, setOcupado] = useState(false);
@@ -18424,6 +18454,14 @@ function CartaoDut({ p, aoMudar }) {
             style={{ borderColor: C.line, color: C.ink }}>WhatsApp</a>
         )}
       </div>
+
+      {/* A DATA DE CADA PASSO, e quem marcou (19/10/2026). O financeiro:
+          "ali aparece a data do preenchimento mas não quando foi pra
+          cartório e tais". O banco carimbava os três desde a 0057; a tela
+          só mostrava o do pedido. O que ainda não aconteceu aparece
+          apagado, para o buraco se ver — mesma régua da grade do "Meu
+          dia" (decisão 41). */}
+      <TrilhaDut p={p} />
 
       {p.pendencia && p.situacao === "pendente" && (
         <p className="mt-2 rounded-lg px-3 py-2 text-[13px]" style={{ background: "#FFF6F0", color: C.laranja }}>

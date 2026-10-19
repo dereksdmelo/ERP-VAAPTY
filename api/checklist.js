@@ -381,8 +381,16 @@ async function dutFila(req, res, tok) {
     const q = String(req.query.q || "").trim().replace(/[(),*]/g, " ").trim();
     if (q) f.push(`or=(placa.ilike.*${q}*,protocolo.ilike.*${q}*,lojista_nome.ilike.*${q}*,comprador_nome.ilike.*${q}*)`);
     const lim = Math.min(300, Math.max(1, Number(req.query.limite) || 80));
-    const r = await fetch(`${REST_DUT}?select=*,dut_anexo(id,rotulo,nome,tipo)&order=criado_em.desc&limit=${lim}${f.length ? `&${f.join("&")}` : ""}`,
-      { headers: cabecalhos(tok) });
+    /* QUEM marcou cada passo vem junto (19/10/2026): o financeiro pediu
+     * "um relatório de quando foi atualizado", e a data sem o nome não
+     * responde a pergunta que vem logo depois. São três chaves para a
+     * mesma `perfil`, então cada embutido diz por qual coluna vai. Se o
+     * PostgREST não aceitar a dica, a fila volta sem os nomes em vez de
+     * não voltar. */
+    const resto = `&order=criado_em.desc&limit=${lim}${f.length ? `&${f.join("&")}` : ""}`;
+    const QUEM = ",preenchido_por_perfil:perfil!preenchido_por(nome),reconhecido_por_perfil:perfil!reconhecido_por(nome),entregue_por_perfil:perfil!entregue_por(nome)";
+    let r = await fetch(`${REST_DUT}?select=*,dut_anexo(id,rotulo,nome,tipo)${QUEM}${resto}`, { headers: cabecalhos(tok) });
+    if (!r.ok && r.status !== 401) r = await fetch(`${REST_DUT}?select=*,dut_anexo(id,rotulo,nome,tipo)${resto}`, { headers: cabecalhos(tok) });
     if (!r.ok) return res.status(r.status === 401 ? 401 : 502).json({ erro: "Não consegui ler a fila." });
     return res.status(200).json({ pedidos: await r.json().catch(() => []) });
   }
