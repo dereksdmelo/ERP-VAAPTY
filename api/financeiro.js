@@ -11,6 +11,8 @@
  *   ?recurso=vale          GET ?competencia= · POST · PATCH ?id=
  *   ?recurso=folha         GET ?competencia= · PUT     salário + comissão + bonificação − vales
  *   ?recurso=pendencias    GET                         tudo que pede ação, num lugar só (0066)
+ *   ?recurso=saldos        GET                         o saldo de hoje de cada conta (0070)
+ *   ?recurso=lancamento&acao=transferir  POST { de, para, valor, data }   duas linhas, Transferência
  *   ?recurso=recebimentos  GET ?competencia= · POST ?acao=automatico|casar|explicar · DELETE ?id=   (0067)
  *
  * Quem decide o acesso é a RLS (e_financeiro): esta função só repassa
@@ -172,9 +174,12 @@ const favorecido = cadastro("fin_favorecido",
   [["nome", texto], ["documento", documento], ["tipo", texto], ["observacao", texto], ["ativo", bool]],
   "nome.asc");
 
+// `tipo` e `descricao` (0070): a caixinha da gaveta e o caixa da casa
+// do Derek são contas como o Itaú, só que sem extrato.
+const tipoConta = (v) => (String(v) === "dinheiro" ? "dinheiro" : "banco");
 const conta = cadastro("fin_conta",
   [["nome", texto], ["banco", texto], ["empresa", texto], ["saldo_inicial", (v) => decimal(v) || 0],
-   ["saldo_inicial_em", dataISO], ["ativa", bool]], "nome.asc");
+   ["saldo_inicial_em", dataISO], ["ativa", bool], ["tipo", tipoConta], ["descricao", texto]], "nome.asc");
 const TIPOS_CUSTO = ["receita", "variavel", "fixa", "fora"];
 const tipoCusto = (v) => (TIPOS_CUSTO.indexOf(String(v)) >= 0 ? String(v) : "fixa");
 const categoria = cadastro("fin_categoria",
@@ -346,6 +351,46 @@ async function lancamento(req, res, tok) {
     if (!um(r)) return recusado(res);
     return res.status(201).json({ ok: true, lancamento: um(r) });
   }
+  /* TRANSFERÊNCIA ENTRE CONTAS (0070). O dinheiro da caixinha sai de um
+   * saque no banco; sem isto seriam dois lançamentos digitados à mão, e
+   * o segundo é o que ninguém lembra. São duas linhas — sai de uma conta,
+   * entra na outra — na categoria Transferência (fora do DRE: mudar
+   * dinheiro de lugar não é receita nem despesa), amarradas pelo
+   * `grupo_id`.
+   *
+   * Quando o extrato do banco trouxer o saque, a segunda rede da
+   * importação (decisão 29: mesma conta, data e valor) o reconhece como
+   * já lançado e não duplica. */
+  if (req.method === "POST" && String(req.query.acao || "") === "transferir") {
+    const c = await corpoDe(req) || {};
+    const de = idOuNulo(c.de), para = idOuNulo(c.para);
+    const valor = Math.abs(decimal(c.valor) || 0);
+    const data = dataISO(c.data) || hojeAqui();
+    if (!de || !para) return res.status(400).json({ erro: "Escolha a conta de onde sai e para onde vai." });
+    if (de === para) return res.status(400).json({ erro: "As duas contas são a mesma." });
+    if (!(valor > 0)) return res.status(400).json({ erro: "Informe o valor." });
+    const [cats, cts] = await Promise.all([
+      supa(`${base("fin_categoria")}?select=id&grupo=eq.transferencia&order=ordem&limit=1`, { headers: cab(tok) }),
+      supa(`${base("fin_conta")}?select=id,nome&id=in.(${de},${para})`, { headers: cab(tok) }),
+    ]);
+    const nomeDe = ((cts || []).find((x) => x.id === de) || {}).nome || "outra conta";
+    const nomePara = ((cts || []).find((x) => x.id === para) || {}).nome || "outra conta";
+    const catId = (um(cats) || {}).id || null;
+    const obs = texto(c.descricao);
+    const grupo = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : null;
+    const linha = (contaId, deb, cred, desc) => ({
+      conta_id: contaId, data, competencia: competenciaDe(data), categoria_id: catId,
+      descricao: desc, debito: deb, credito: cred, situacao: "efetivado", conciliado: true,
+      origem: "manual", observacao: obs, grupo_id: grupo,
+    });
+    const r = await supa(base("fin_lancamento"), { method: "POST", headers: cab(tok, REP), body: JSON.stringify([
+      linha(de, valor, 0, `Transferência para ${nomePara}`),
+      linha(para, 0, valor, `Transferência de ${nomeDe}`),
+    ]) });
+    if ((r || []).length !== 2) return recusado(res);
+    return res.status(201).json({ ok: true });
+  }
+
   if (req.method === "PATCH" && String(req.query.acao || "") === "lote") {
     // Vários de uma vez: aplicar sugestões de categoria, conciliar o mês.
     const c = await corpoDe(req);
@@ -442,6 +487,9 @@ async function importar(req, res, tok) {
   const casar = (data, deb, cred) => {
     const cand = (abertos || []).filter((t) =>
       !usados[t.id] &&
+      // Título marcado para sair de OUTRA conta (a caixinha, por
+      // exemplo) não é pago por este extrato, por mais que o valor bata.
+      (!t.conta_id || t.conta_id === contaId) &&
       Math.abs((Number(t.debito) || 0) - deb) < 0.005 &&
       Math.abs((Number(t.credito) || 0) - cred) < 0.005 &&
       t.vencimento && diasEntre(t.vencimento, data) <= 7);
@@ -939,7 +987,9 @@ async function titulo(req, res, tok) {
       d.setUTCMonth(d.getUTCMonth() + i);
       const venc = d.toISOString().slice(0, 10);
       novos.push({
-        conta_id: null, data: venc, competencia: competenciaDe(venc),
+        // A conta prevista vai junto: o aluguel que sai do Itaú sai do
+        // Itaú nos doze meses.
+        conta_id: base0.conta_id || null, data: venc, competencia: competenciaDe(venc),
         categoria_id: base0.categoria_id, descricao: base0.descricao,
         favorecido: base0.favorecido, favorecido_id: base0.favorecido_id,
         debito: Number(base0.debito) > 0 ? cada : 0,
@@ -1784,6 +1834,34 @@ async function recebimentos(req, res, tok) {
   return res.status(405).json({ erro: "Use GET, POST ou DELETE." });
 }
 
+/**
+ * O saldo de hoje de cada conta (0070): abertura + o que se moveu desde
+ * ela, pela mesma régua da lista de lançamentos (decisão 58). É o que a
+ * tela "Contas e caixas" mostra ao lado de cada uma — quanto tem na
+ * gaveta, quanto tem na casa do Derek, quanto tem no banco.
+ */
+async function saldos(req, res, tok) {
+  if (req.method !== "GET") { res.setHeader("Allow", "GET"); return res.status(405).json({ erro: "Use GET." }); }
+  const hoje = hojeAqui();
+  const [contas, movs] = await Promise.all([
+    supa(`${base("fin_conta")}?select=id,saldo_inicial,saldo_inicial_em`, { headers: cab(tok) }),
+    supa(`${base("fin_lancamento")}?select=conta_id,data,debito,credito&situacao=eq.efetivado&conta_id=not.is.null&data=lte.${hoje}&limit=100000`, { headers: cab(tok) }),
+  ]);
+  const por = {};
+  (contas || []).forEach((c) => {
+    por[c.id] = { saldo: Number(c.saldo_inicial) || 0, inicio: c.saldo_inicial_em ? String(c.saldo_inicial_em).slice(0, 10) : "", ultimo: null };
+  });
+  (movs || []).forEach((m) => {
+    const c = por[m.conta_id];
+    if (!c || (c.inicio && String(m.data) < c.inicio)) return;
+    c.saldo += (Number(m.credito) || 0) - (Number(m.debito) || 0);
+    if (!c.ultimo || m.data > c.ultimo) c.ultimo = m.data;
+  });
+  const out = {};
+  Object.keys(por).forEach((k) => { out[k] = { saldo: r2(por[k].saldo), ultimo_movimento: por[k].ultimo }; });
+  return res.status(200).json({ hoje, saldos: out });
+}
+
 async function estoqueLista(req, res, tok) {
   const lista = await supa(`${base("estoque")}?select=id,situacao,veiculo(placa,marca_modelo)&order=entrou_em.desc&limit=400`, { headers: cab(tok) });
   return res.status(200).json({ estoque: (lista || []).map((e) => ({ id: e.id, situacao: e.situacao, placa: e.veiculo && e.veiculo.placa, carro: e.veiculo && e.veiculo.marca_modelo })) });
@@ -1825,7 +1903,7 @@ async function pendencias(req, res, tok) {
 }
 
 const RECURSOS = { conta, categoria, funcionario, favorecido, lancamento, importar, dre, carros, vale, folha,
-                   fechamento, orcamento, rateio, negociacao, titulo, fluxo, log, recibo, pendencias, recebimentos,
+                   fechamento, orcamento, rateio, negociacao, titulo, fluxo, log, recibo, pendencias, recebimentos, saldos,
                    estoque: estoqueLista };
 
 module.exports = async function handler(req, res) {

@@ -15047,7 +15047,7 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
    * favorecido ainda se editam dentro de Lançamentos, e um grupo com um
    * atalho para a mesma tela seria menu que promete o que não tem. */
   const TITULO = { pendencias: "Pendências", lancamentos: "Lançamentos", recebimentos: "Recebimentos", contas: "A pagar / receber",
-    carros: "Carros", fechamento: "Fechamento", dre: "DRE", folha: "Folha" };
+    carros: "Carros", fechamento: "Fechamento", dre: "DRE", folha: "Folha", caixas: "Contas e caixas" };
   const SUB = {
     pendencias: "Tudo que pede ação, num lugar só.",
     lancamentos: "O extrato do banco: categorizar, ligar ao carro, fechar o mês.",
@@ -15057,6 +15057,7 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
     fechamento: "Previsto × realizado do mês.",
     dre: "O resultado: quanto entrou, quanto custou, quanto sobrou.",
     folha: "Salário, comissão, bonificação e vales.",
+    caixas: "Os bancos e o dinheiro em espécie: quanto tem em cada lugar.",
   };
   // Quem vem de uma pendência chega no MÊS dela: o lançamento sem
   // categoria de agosto não está na tela de outubro.
@@ -15072,6 +15073,7 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
       {aba === "dre" && <FinDRE comp={comp} />}
       {aba === "carros" && <FinCarros comp={comp} />}
       {aba === "folha" && <FinFolha comp={comp} />}
+      {aba === "caixas" && <FinCaixas />}
     </div>
   );
 }
@@ -15453,7 +15455,14 @@ function FinLancamentos({ comp }) {
   const [historico, setHistorico] = useState("");
 
   useEffect(() => {
-    fin("conta").then((x) => { setContas(x.lista); if (!conta && x.lista[0]) setConta(x.lista[0].id); }).catch((e) => setErro(e.message));
+    // Abre no banco, não na ordem alfabética: "Caixinha" e "Caixa casa
+    // Derek" (0070) vêm antes de "Conta principal" e passariam a ser a
+    // tela de todo dia de quem confere o extrato.
+    fin("conta").then((x) => {
+      setContas(x.lista);
+      const ini = x.lista.find((c) => c.ativa !== false && c.tipo !== "dinheiro") || x.lista.find((c) => c.ativa !== false) || x.lista[0];
+      if (!conta && ini) setConta(ini.id);
+    }).catch((e) => setErro(e.message));
     fin("categoria").then((x) => setCats(x.lista)).catch(() => {});
     fin("estoque").then((x) => setCarros(x.estoque)).catch(() => {});
     fin("funcionario").then((x) => setFuncs(x.lista)).catch(() => {});
@@ -15541,7 +15550,7 @@ function FinLancamentos({ comp }) {
       <div className="flex flex-wrap items-center gap-2">
         <select className="rounded-lg border px-3 py-2 text-[14px] outline-none" style={{ ...inputSty, fontWeight: 600 }}
           value={conta} onChange={(e) => setConta(e.target.value)}>
-          {contas.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.empresa ? ` · ${c.empresa}` : ""}</option>)}
+          {contas.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.tipo === "dinheiro" ? " · dinheiro" : c.empresa ? ` · ${c.empresa}` : ""}{c.ativa === false ? " (desativada)" : ""}</option>)}
         </select>
         <select className="rounded-lg border px-3 py-2 text-[13px] outline-none" style={inputSty} value={filtroCat} onChange={(e) => setFiltroCat(e.target.value)}>
           <option value="">Todas as categorias</option>
@@ -15557,7 +15566,11 @@ function FinLancamentos({ comp }) {
             </button>
           )}
           <button onClick={exportar} style={{ color: C.mute, fontWeight: 600 }}>CSV</button>
-          <button onClick={() => setImportando(!importando)} style={{ color: C.roxo, fontWeight: 600 }}>importar extrato</button>
+          {/* Dinheiro em espécie não tem extrato (0070): tudo nela é
+              lançado à mão, pelo "+ lançamento" ao lado. */}
+          {(contas.find((c) => c.id === conta) || {}).tipo === "dinheiro"
+            ? <span style={{ color: C.mute }}>dinheiro em espécie · sem extrato</span>
+            : <button onClick={() => setImportando(!importando)} style={{ color: C.roxo, fontWeight: 600 }}>importar extrato</button>}
           <button onClick={() => setNovo({ data: hojeEmSP(), competencia: comp, descricao: "", debito: "", credito: "", categoria_id: "" })} style={{ color: C.roxo, fontWeight: 600 }}>+ lançamento</button>
         </span>
       </div>
@@ -16100,6 +16113,221 @@ function HistoricoLanc({ id, aoFechar }) {
  * trouxer o pagamento, ela vira `efetivado` sozinha — e acende
  * "revisar", porque acerto automático sem aviso é acerto invisível.
  */
+/* ---------------- contas e caixas (0070) ---------------- */
+
+/**
+ * O cadastro das contas, e quanto tem em cada uma.
+ *
+ * O Derek, em 19/10/2026: *"preciso poder cadastrar contas bancárias e
+ * selecioná-las nos títulos… Caixinha — dinheiro que fica na gaveta do
+ * financeiro; Caixa casa Derek — dinheiro que fica na casa do Derek"*.
+ * Até aqui a única conta tinha nascido da importação do extrato, e não
+ * havia onde criar outra.
+ *
+ * **Dinheiro em espécie é conta como as outras**: abertura, lançamentos,
+ * títulos que saem dela. O que muda é que não tem extrato — tudo nela é
+ * à mão — e a tela diz isso no lugar do botão de importar.
+ *
+ * **Transferir é um gesto só** porque o dinheiro da caixinha sai de um
+ * saque no banco, e o segundo lançamento, digitado à mão, é o que
+ * ninguém lembra. Quando o extrato trouxer o saque, a importação o
+ * reconhece como já lançado (mesma conta, data e valor — decisão 29).
+ *
+ * **Desativar, não apagar**: conta com lançamento apagada levaria o
+ * histórico junto. Desativada, some das listas de escolha e o passado
+ * fica de pé.
+ */
+function FinCaixas() {
+  const [contas, setContas] = useState(null); const [saldos, setSaldos] = useState({});
+  const [erro, setErro] = useState(""); const [nova, setNova] = useState(null);
+  const [transf, setTransf] = useState(null); const [feito, setFeito] = useState("");
+  const [editando, setEditando] = useState(null);
+  const carregar = () => {
+    setErro("");
+    fin("conta").then((x) => setContas(x.lista || [])).catch((e) => setErro(e.message));
+    fin("saldos").then((x) => setSaldos(x.saldos || {})).catch(() => {});
+  };
+  useEffect(carregar, []);
+
+  const gravarNova = async () => {
+    setErro(""); setFeito("");
+    try {
+      await fin("conta", null, finJson("POST", {
+        nome: nova.nome.trim(), tipo: nova.tipo, descricao: nova.descricao, banco: nova.tipo === "banco" ? nova.banco : null,
+        saldo_inicial: nova.saldo || 0, saldo_inicial_em: nova.desde || hojeEmSP(), ativa: true,
+      }));
+      setFeito(`${nova.nome.trim()} cadastrada.`); setNova(null); carregar();
+    } catch (e) { setErro(e.message); }
+  };
+  const mexer = async (c, mud) => {
+    setErro(""); setFeito("");
+    try { await fin("conta", { id: c.id }, finJson("PATCH", mud)); setEditando(null); carregar(); }
+    catch (e) { setErro(e.message); }
+  };
+  const transferir = async () => {
+    setErro(""); setFeito("");
+    try {
+      await fin("lancamento", { acao: "transferir" }, finJson("POST", transf));
+      const de = (contas || []).find((c) => c.id === transf.de), para = (contas || []).find((c) => c.id === transf.para);
+      setFeito(`Transferido R$ ${transf.valor} de ${de ? de.nome : "?"} para ${para ? para.nome : "?"}.`);
+      setTransf(null); carregar();
+    } catch (e) { setErro(e.message); }
+  };
+
+  if (erro && !contas) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
+  if (!contas) return <p className="text-[13px]" style={{ color: C.mute }}>Carregando as contas…</p>;
+  const ativas = contas.filter((c) => c.ativa !== false);
+  const inativas = contas.filter((c) => c.ativa === false);
+  const total = ativas.reduce((t, c) => t + ((saldos[c.id] && saldos[c.id].saldo) || 0), 0);
+  const TIPO = { banco: "banco", dinheiro: "dinheiro em espécie" };
+  const sel = "rounded-lg border px-2 py-1.5 text-[13px] outline-none";
+
+  const cartao = (c) => {
+    const sd = saldos[c.id];
+    const ed = editando && editando.id === c.id;
+    return (
+      <div key={c.id} className="rounded-xl p-3.5" style={{ background: C.paper, border: `1px solid ${C.line}`, opacity: c.ativa === false ? 0.6 : 1 }}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-baseline gap-2">
+              <span className="text-[15px] font-semibold">{c.nome}</span>
+              <span className="rounded px-1.5 text-[10.5px] font-semibold"
+                style={{ background: c.tipo === "dinheiro" ? AMARELO.fundo : "#EEF2F8", color: c.tipo === "dinheiro" ? AMARELO.texto : "#3B5578" }}>
+                {TIPO[c.tipo] || "banco"}
+              </span>
+              {c.ativa === false && <span className="text-[11px]" style={{ color: C.mute }}>desativada</span>}
+            </div>
+            <div className="text-[12px]" style={{ color: C.mute }}>
+              {[c.descricao, c.banco, c.empresa].filter(Boolean).join(" · ") || "sem descrição"}
+            </div>
+            <div className="text-[11.5px]" style={{ color: C.mute }}>
+              {c.saldo_inicial_em ? `abertura em ${diaBR(c.saldo_inicial_em)}/${String(c.saldo_inicial_em).slice(0, 4)} com R$ ${rs2(c.saldo_inicial)}` : "sem saldo de abertura"}
+              {sd && sd.ultimo_movimento ? ` · último movimento ${diaBR(sd.ultimo_movimento)}` : ""}
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="text-[18px] font-bold" style={{ fontFamily: F.mono, color: sd && sd.saldo < 0 ? C.laranja : C.ink }}>{sd ? rs2(sd.saldo) : "—"}</div>
+            <div className="text-[11px]" style={{ color: C.mute }}>saldo hoje</div>
+          </div>
+        </div>
+        {ed ? (
+          <div className="mt-2 grid gap-2 rounded-lg p-2.5 lg:grid-cols-4" style={{ background: C.bg }}>
+            <label><Rotulo>Nome</Rotulo><input className={inputCls} style={inputSty} value={editando.nome} onChange={(e) => setEditando({ ...editando, nome: e.target.value })} /></label>
+            <label className="lg:col-span-2"><Rotulo>Para que serve</Rotulo><input className={inputCls} style={inputSty} value={editando.descricao || ""} onChange={(e) => setEditando({ ...editando, descricao: e.target.value })} /></label>
+            <label><Rotulo>Tipo</Rotulo>
+              <select className={inputCls} style={inputSty} value={editando.tipo || "banco"} onChange={(e) => setEditando({ ...editando, tipo: e.target.value })}>
+                <option value="banco">Banco</option><option value="dinheiro">Dinheiro em espécie</option>
+              </select></label>
+            <div className="flex items-center gap-2 lg:col-span-4">
+              <BotaoPrimario disabled={!String(editando.nome || "").trim()} onClick={() => mexer(c, { nome: editando.nome.trim(), descricao: editando.descricao, tipo: editando.tipo })}>Salvar</BotaoPrimario>
+              <button onClick={() => setEditando(null)} className="text-[13px]" style={{ color: C.mute }}>cancelar</button>
+              <span className="text-[11px]" style={{ color: C.mute }}>O saldo de abertura se ajusta na primeira linha de Lançamentos.</span>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-2 flex flex-wrap gap-3 text-[12.5px]">
+            <button onClick={() => setEditando({ id: c.id, nome: c.nome, descricao: c.descricao || "", tipo: c.tipo || "banco" })} style={{ color: C.roxo, fontWeight: 600 }}>editar</button>
+            <button onClick={() => mexer(c, { ativa: c.ativa === false })} style={{ color: C.mute }}>{c.ativa === false ? "reativar" : "desativar"}</button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="rounded-xl px-4 py-2.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+          <span className="block text-[12px]" style={{ color: C.mute }}>Total nas contas ativas</span>
+          <b className="text-[18px]" style={{ fontVariantNumeric: "tabular-nums" }}>R$ {rs2(total)}</b>
+        </span>
+        <span className="ml-auto flex gap-3 text-[13px]">
+          {ativas.length >= 2 && (
+            <button onClick={() => { setNova(null); setTransf({ de: ativas[0].id, para: ativas[1].id, valor: "", data: hojeEmSP(), descricao: "" }); }}
+              style={{ color: C.roxo, fontWeight: 600 }}>transferir entre contas</button>
+          )}
+          <button onClick={() => { setTransf(null); setNova({ nome: "", tipo: "dinheiro", descricao: "", banco: "", saldo: "", desde: hojeEmSP() }); }}
+            style={{ color: C.roxo, fontWeight: 600 }}>+ nova conta</button>
+        </span>
+      </div>
+
+      {feito && <p className="rounded-lg px-3 py-2 text-[12.5px]" style={{ background: "#E8F3EE", color: C.verde }}>✓ {feito}</p>}
+      {erro && <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+
+      {nova && (
+        <div className="rounded-xl p-4" style={{ background: C.paper, border: `1px solid ${C.roxo}` }}>
+          <div className="text-[14px] font-semibold">Nova conta</div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {[["dinheiro", "Dinheiro em espécie"], ["banco", "Conta no banco"]].map(([v, r]) => (
+              <button key={v} onClick={() => setNova({ ...nova, tipo: v })} className="rounded-full border px-3 py-1 text-[12.5px] font-semibold"
+                style={{ borderColor: nova.tipo === v ? C.roxo : C.line, background: nova.tipo === v ? C.roxo : C.paper, color: nova.tipo === v ? "#fff" : C.ink }}>{r}</button>
+            ))}
+          </div>
+          <div className="mt-2 grid gap-2 lg:grid-cols-4">
+            <label><Rotulo req>Nome</Rotulo>
+              <input className={inputCls} style={inputSty} placeholder={nova.tipo === "dinheiro" ? "Caixinha" : "Itaú"} value={nova.nome} onChange={(e) => setNova({ ...nova, nome: e.target.value })} /></label>
+            <label className="lg:col-span-2"><Rotulo>Para que serve</Rotulo>
+              <input className={inputCls} style={inputSty} placeholder={nova.tipo === "dinheiro" ? "Dinheiro que fica na gaveta do financeiro" : "Conta corrente da loja"}
+                value={nova.descricao} onChange={(e) => setNova({ ...nova, descricao: e.target.value })} /></label>
+            {nova.tipo === "banco" && (
+              <label><Rotulo>Banco</Rotulo><input className={inputCls} style={inputSty} value={nova.banco} onChange={(e) => setNova({ ...nova, banco: e.target.value })} /></label>
+            )}
+            <label><Rotulo>Saldo hoje</Rotulo>
+              <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal" placeholder="0,00" value={nova.saldo} onChange={(e) => setNova({ ...nova, saldo: e.target.value })} /></label>
+            <label><Rotulo>Em</Rotulo>
+              <input type="date" className={inputCls} style={inputSty} value={nova.desde} onChange={(e) => setNova({ ...nova, desde: e.target.value })} /></label>
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <BotaoPrimario disabled={!nova.nome.trim()} onClick={gravarNova}>Cadastrar</BotaoPrimario>
+            <button onClick={() => setNova(null)} className="text-[13px]" style={{ color: C.mute }}>cancelar</button>
+            <span className="text-[11px]" style={{ color: C.mute }}>
+              {nova.tipo === "dinheiro" ? "Conte o dinheiro e digite o valor: é dele que o saldo parte." : "O saldo que o banco mostra no começo desse dia."}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {transf && (
+        <div className="rounded-xl p-4" style={{ background: C.paper, border: `1px solid ${C.roxo}` }}>
+          <div className="text-[14px] font-semibold">Transferir entre contas</div>
+          <div className="mt-2 flex flex-wrap items-end gap-2">
+            <label><Rotulo>Sai de</Rotulo>
+              <select className={sel} style={inputSty} value={transf.de} onChange={(e) => setTransf({ ...transf, de: e.target.value })}>
+                {ativas.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+              </select></label>
+            <label><Rotulo>Entra em</Rotulo>
+              <select className={sel} style={inputSty} value={transf.para} onChange={(e) => setTransf({ ...transf, para: e.target.value })}>
+                {ativas.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+              </select></label>
+            <label><Rotulo req>Valor</Rotulo>
+              <input className={`${sel} w-32 text-right`} style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal" value={transf.valor} onChange={(e) => setTransf({ ...transf, valor: e.target.value })} /></label>
+            <label><Rotulo>Quando</Rotulo>
+              <input type="date" className={sel} style={inputSty} value={transf.data} onChange={(e) => setTransf({ ...transf, data: e.target.value })} /></label>
+            <label className="min-w-[200px] flex-1"><Rotulo>Observação</Rotulo>
+              <input className={`${sel} w-full`} style={inputSty} placeholder="saque para a caixinha" value={transf.descricao} onChange={(e) => setTransf({ ...transf, descricao: e.target.value })} /></label>
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <BotaoPrimario disabled={!transf.valor || transf.de === transf.para} onClick={transferir}>Transferir</BotaoPrimario>
+            <button onClick={() => setTransf(null)} className="text-[13px]" style={{ color: C.mute }}>cancelar</button>
+            <span className="text-[11px]" style={{ color: C.mute }}>
+              {transf.de === transf.para ? "Escolha duas contas diferentes." : "Vira dois lançamentos na categoria Transferência — fora do DRE."}
+            </span>
+          </div>
+        </div>
+      )}
+
+      <div className="grid gap-2 lg:grid-cols-2">{ativas.map(cartao)}</div>
+      {!ativas.length && <p className="text-[13px]" style={{ color: C.mute }}>Nenhuma conta ativa. Cadastre a primeira em "+ nova conta".</p>}
+      {!!inativas.length && (
+        <div>
+          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.05em]" style={{ color: C.mute }}>Desativadas</div>
+          <div className="grid gap-2 lg:grid-cols-2">{inativas.map(cartao)}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FinContas({ comp }) {
   const [d, setD] = useState(null);
   const [erro, setErro] = useState("");
@@ -16152,6 +16380,7 @@ function FinContas({ comp }) {
 
   const hoje = hojeEmSP();
   const titulos = d ? d.titulos : [];
+  const contasAtivas = contas.filter((c) => c.ativa !== false);
 
   return (
     <div className="space-y-3">
@@ -16214,6 +16443,15 @@ function FinContas({ comp }) {
                 <option value="">— categoria —</option>
                 {cats.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
               </select></label>
+            {/* A conta de onde sai (ou onde entra) — a caixinha, o caixa
+                da casa, o banco (0070). Opcional: quem ainda não sabe
+                escolhe na baixa. Marcada, ela vira o padrão do "Paguei", e
+                o extrato de OUTRA conta não baixa este título sozinho. */}
+            <label className="lg:col-span-2"><Rotulo>{novo.tipo === "pagar" ? "Sai de" : "Entra em"}</Rotulo>
+              <select className={inputCls} style={inputSty} value={novo.conta_id || ""} onChange={(e) => setNovo({ ...novo, conta_id: e.target.value || null })}>
+                <option value="">— escolher na baixa —</option>
+                {contasAtivas.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.tipo === "dinheiro" ? " (dinheiro)" : ""}</option>)}
+              </select></label>
           </div>
           <div className="mt-2 flex items-center gap-2">
             <BotaoPrimario onClick={gravar} disabled={!novo.valor || !novo.vencimento}>Lançar título</BotaoPrimario>
@@ -16249,6 +16487,7 @@ function FinContas({ comp }) {
                   <div className="mt-0.5 text-[12px]" style={{ color: vencido ? C.laranja : C.mute, fontWeight: vencido ? 700 : 400 }}>
                     {venc ? `vence ${diaBR(venc)}${vencido ? " · vencido" : ""}` : "sem vencimento"}
                     {l.parcelas > 1 && <span style={{ color: C.mute, fontWeight: 400 }}> · {l.parcela}/{l.parcelas}</span>}
+                    {l.fin_conta && <span style={{ color: C.mute, fontWeight: 400 }}> · {pagar ? "sai de" : "entra em"} {l.fin_conta.nome}</span>}
                   </div>
                 </div>
                 <div className="text-right">
@@ -16260,7 +16499,7 @@ function FinContas({ comp }) {
               </div>
 
               {baixando === l.id ? (
-                <BaixarTitulo l={l} contas={contas} aoFechar={() => setBaixando(null)} aoBaixar={baixar} />
+                <BaixarTitulo l={l} contas={contasAtivas} aoFechar={() => setBaixando(null)} aoBaixar={baixar} />
               ) : (
                 <div className="mt-2 flex flex-wrap items-center gap-3 text-[13px]">
                   <button onClick={() => setBaixando(l.id)} className="rounded-lg px-3.5 py-2 font-semibold" style={{ background: C.roxo, color: "#fff" }}>
@@ -16311,13 +16550,17 @@ function Repetir({ l, aoFechar, aoRepetir }) {
 
 /** Baixar exige dizer de qual banco saiu — é a informação que falta. */
 function BaixarTitulo({ l, contas, aoFechar, aoBaixar }) {
-  const [conta, setConta] = useState(contas[0] ? contas[0].id : "");
+  // A conta marcada no título é o padrão; a pessoa ainda pode trocar,
+  // porque o pagamento às vezes sai de onde não estava previsto.
+  const prevista = l.conta_id && contas.some((c) => c.id === l.conta_id) ? l.conta_id : "";
+  const [conta, setConta] = useState(prevista || (contas[0] ? contas[0].id : ""));
   const [quando, setQuando] = useState(hojeEmSP());
+  const pagar = Number(l.debito) > 0;
   return (
     <div className="mt-2 flex flex-wrap items-end gap-2 rounded-lg p-2.5" style={{ background: C.bg }}>
-      <label><Rotulo req>De qual banco</Rotulo>
+      <label><Rotulo req>{pagar ? "Saiu de" : "Entrou em"}</Rotulo>
         <select className="rounded-lg border px-2 py-1.5 text-[13px] outline-none" style={inputSty} value={conta} onChange={(e) => setConta(e.target.value)}>
-          {contas.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.empresa ? ` · ${c.empresa}` : ""}</option>)}
+          {contas.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.tipo === "dinheiro" ? " (dinheiro)" : c.empresa ? ` · ${c.empresa}` : ""}</option>)}
         </select></label>
       <label><Rotulo>Quando</Rotulo>
         <input type="date" className="rounded-lg border px-2 py-1.5 text-[13px] outline-none" style={inputSty} value={quando} onChange={(e) => setQuando(e.target.value)} /></label>
@@ -19590,6 +19833,7 @@ function destinosPara(perfil) {
       { id: "fin_fechamento",  rot: "Fechamento",        curto: "Financ.", area: "financeiro", aba: "fechamento",  grupo: "fim do mês", icone: "financeiro" },
       { id: "fin_dre",         rot: "DRE",               curto: "Financ.", area: "financeiro", aba: "dre",         grupo: "fim do mês", icone: "financeiro" },
       { id: "fin_folha",       rot: "Folha",             curto: "Financ.", area: "financeiro", aba: "folha",       grupo: "fim do mês", icone: "financeiro" },
+      { id: "fin_caixas",      rot: "Contas e caixas",   curto: "Financ.", area: "financeiro", aba: "caixas",      grupo: "cadastros",  icone: "financeiro" },
     ] : []),
 
     // ---- o papel e a operação ----
@@ -21490,7 +21734,7 @@ function TelaGestao({ perfil, comp }) {
 // razão: o menu e o roteador precisam concordar.
 const ABA_FIN = {
   fin_pendencias: "pendencias", fin_lancamentos: "lancamentos", fin_recebimentos: "recebimentos", fin_contas: "contas",
-  fin_carros: "carros", fin_fechamento: "fechamento", fin_dre: "dre", fin_folha: "folha",
+  fin_carros: "carros", fin_fechamento: "fechamento", fin_dre: "dre", fin_folha: "folha", fin_caixas: "caixas",
 };
 const DESTINO_FIN = Object.fromEntries(Object.entries(ABA_FIN).map(([d, a]) => [a, d]));
 

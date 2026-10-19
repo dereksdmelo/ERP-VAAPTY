@@ -2464,9 +2464,8 @@ dia*, *fim do mês*), **uma vez, quando muda** — e vale para qualquer área
 que queira agrupar. O destino único `financeiro` deixou de existir; a
 última tela não é guardada, então nada antigo cai em branco.
 
-**Não há grupo de "cadastros" ainda**: conta, categoria e favorecido se
-editam dentro de Lançamentos, e um grupo com um atalho para a mesma tela
-seria menu que promete o que não tem.
+**O grupo "cadastros" nasceu com a primeira tela própria** (decisão 61,
+Contas e caixas). Categoria e favorecido continuam dentro de Lançamentos.
 
 **`ferramentas-sintaxe.js` valida que o `index.html` transpila**, usando
 o `esbuild` que já está nas dependências da ponte. Um erro de JSX não
@@ -2701,6 +2700,37 @@ saem da agenda de HOJE. Só pesa no horário que já tinha gente demais.
 horário (`POR_HORARIO = 2`, chute meu); e a IA ainda não manda os
 lembretes nem lê áudio — no treino ela só responde ao que o cliente
 escreveu.
+
+### 61. Contas e caixas: o dinheiro da gaveta também é conta
+
+O Derek, em 19/10/2026: *"preciso poder cadastrar contas bancárias e
+selecioná-las nos títulos… Caixinha — dinheiro que fica na gaveta do
+financeiro; Caixa casa Derek — dinheiro que fica na casa do Derek"*. A
+única conta existente tinha nascido da importação do extrato, e não
+havia tela para criar outra.
+
+**Dinheiro em espécie é conta como o banco** (0070, `tipo` e
+`descricao`): tem saldo de abertura (decisão 58), lançamentos e títulos.
+O que muda é que não tem extrato — tudo nela é à mão —, e a tela de
+Lançamentos troca o "importar extrato" por *"dinheiro em espécie · sem
+extrato"*. A decisão 56 tinha deixado o caixa em dinheiro de fora
+porque *"o Vaapty opera por PIX"*; o pedido mostrou que não só.
+
+**A conta vai no título, opcional.** Marcada, ela é o padrão do
+"Paguei/Recebi", e **o extrato de outra conta não baixa aquele título
+sozinho** — sem isso, uma conta paga da gaveta seria "paga" pelo PIX de
+mesmo valor que passou no banco na mesma semana. Sem conta marcada, o
+título casa como antes. A série (repetir) leva a conta junto.
+
+**Transferir é um gesto só**, porque o dinheiro da caixinha sai de um
+saque no banco e o segundo lançamento é o que ninguém lembra. São duas
+linhas em Transferência (fora do DRE), amarradas por `grupo_id`; quando
+o extrato trouxer o saque, a segunda rede da importação (decisão 29) o
+reconhece como já lançado.
+
+**Desativar, não apagar**: conta com lançamento apagada levaria o
+histórico junto. **Lançamentos abre na primeira conta de banco ativa**,
+não na ordem alfabética — "Caixinha" vem antes de "Conta principal".
 
 ## Convenções do código
 
