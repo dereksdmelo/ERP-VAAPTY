@@ -11482,7 +11482,7 @@ const semanaDe = (e) => {
   return d ? Math.min(5, Math.floor((d - 1) / 7) + 1) : null;
 };
 
-function Rentabilidade({ vendidos, comp }) {
+function Rentabilidade({ vendidos, comp, aoAbrir }) {
   const rs = (v) => (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const linhas = vendidos.map((e) => ({ e, r: rentabilidadeDe(e), semana: semanaDe(e), dias: diasNoPatio(e) }));
 
@@ -11555,7 +11555,8 @@ function Rentabilidade({ vendidos, comp }) {
               {linhas.map(({ e, r, semana, dias }) => {
                 const v = e.veiculo || {};
                 return (
-                  <tr key={e.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                  <tr key={e.id} onClick={aoAbrir ? () => aoAbrir(e.id) : undefined} title="Abrir a ficha do carro"
+                    className={aoAbrir ? "cursor-pointer hover:bg-[#F7F5FA]" : ""} style={{ borderBottom: `1px solid ${C.line}` }}>
                     {td(diaBR(e.entrou_em), { dir: "left" })}
                     {td(dias != null ? dias : "—")}
                     {td(v.marca_modelo || "—", { dir: "left" })}
@@ -11895,7 +11896,7 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
       {/* A rentabilidade é a planilha do mês: só carros vendidos, do mês
           escolhido no cabeçalho. Vendido sem data cai no mês de entrada. */}
       {filtro === "vendido" && lista !== null && (
-        <Rentabilidade comp={comp}
+        <Rentabilidade comp={comp} aoAbrir={(id) => setAbrindo(id)}
           vendidos={lista.filter((e) => e.situacao === "vendido" && String(e.vendido_em || e.entrou_em || "").slice(0, 7) === String(comp).slice(0, 7))} />
       )}
 
