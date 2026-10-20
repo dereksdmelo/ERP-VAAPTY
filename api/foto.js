@@ -540,6 +540,125 @@ async function shinkai(req, res, tok) {
   });
 }
 
+/* ---------------------------------------------------------------
+ * A VENDA VAI AO SHINKAI (0071, 20/10/2026).
+ *
+ *   POST ?recurso=shinkai-venda&estoque_id=   { acao: "vendido" | "cancelado", motivo?, substituir? }
+ *
+ * O formato é o do Mateus (`POST /api/public/venda`, a mesma chave da
+ * entrada de veículos): placa, valor, data e comprador. O comprador vai
+ * COMO ESTÁ no cadastro — o casamento lá é DDD + os 8 últimos dígitos, e
+ * ele pediu para não completar o 9 aqui, para não mexer no dado da
+ * origem. Sem DDD, sem telefone ou fora da base, lá vira "por fora do
+ * CRM" com aviso, e isso NÃO é erro: a venda nunca se perde porque o
+ * cadastro está diferente nos dois lados.
+ *
+ * Mora aqui pelo mesmo motivo do envio do veículo (decisão 36): é o
+ * arquivo onde a `SHINKAI_API_KEY` vive. A leitura do carro vai pelo
+ * token do usuário — se a RLS não devolver a linha, nada sai.
+ *
+ * **Comissão de indicação não vai** (decisão 57): o carro nunca foi
+ * nosso, e normalmente nem existe no estoque deles.
+ *
+ * **409 é o carro vendido lá para OUTRO comprador.** Não se resolve
+ * sozinho: a tela pergunta, e com `substituir` manda o cancelamento e a
+ * venda nova, na ordem que o Mateus pediu. Trocar o comprador do lado
+ * de lá sem ninguém decidir apagaria uma venda que alguém registrou.
+ * --------------------------------------------------------------- */
+const SHINKAI_VENDA_URL = "https://www.shinkai.com.br/api/public/venda";
+
+async function shinkaiVenda(req, res, tok) {
+  if (req.method !== "POST") { res.setHeader("Allow", "POST"); return res.status(405).json({ erro: "Use POST." }); }
+  if (!SHINKAI_KEY) return res.status(503).json({ erro: "A chave do Shinkai não está configurada (SHINKAI_API_KEY)." });
+  const eid = String(req.query.estoque_id || "");
+  if (!RX_UUID.test(eid)) return res.status(400).json({ erro: "estoque_id inválido." });
+  let c = req.body;
+  if (typeof c === "string") { try { c = JSON.parse(c); } catch (err) { c = null; } }
+  c = c && typeof c === "object" ? c : {};
+  const acao = c.acao === "cancelado" ? "cancelado" : "vendido";
+
+  const achado = await banco(
+    `${REST("estoque")}?select=id,natureza,situacao,valor_venda,vendido_em,veiculo(placa),comprador(id,nome,telefone)&id=eq.${eid}&limit=1`,
+    { headers: cabecalhos(tok) });
+  const e = Array.isArray(achado) ? achado[0] : null;
+  if (!e || !e.veiculo || !e.veiculo.placa) return res.status(404).json({ erro: "Carro não encontrado no estoque." });
+  if (e.natureza === "indicacao") return res.status(200).json({ ok: true, pulado: "indicacao" });
+
+  const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+  const cancelamento = { placa: e.veiculo.placa, status: "cancelado", motivo: String(c.motivo || "venda desfeita no ERP").slice(0, 200) };
+  let corpo = cancelamento;
+  if (acao === "vendido") {
+    if (e.situacao !== "vendido") return res.status(409).json({ erro: "O carro não está como vendido aqui." });
+    const comp = e.comprador || {};
+    const dia = e.vendido_em ? String(e.vendido_em).slice(0, 10) : null;
+    corpo = {
+      placa: e.veiculo.placa, status: "vendido",
+      valor: Number(e.valor_venda) || undefined,
+      // Data futura o Shinkai recusa; sem data, vale a hora do envio.
+      data_venda: dia && dia <= hoje ? dia : undefined,
+      comprador: { telefone: comp.telefone || undefined, nome: comp.nome || undefined },
+    };
+  }
+
+  const mandar = async (b) => {
+    let r;
+    try {
+      r = await fetch(SHINKAI_VENDA_URL, {
+        method: "POST", headers: { "x-api-key": SHINKAI_KEY, "content-type": "application/json" }, body: JSON.stringify(b),
+      });
+    } catch (err) {
+      console.error("shinkai-venda: fetch falhou", err && err.name);
+      return { status: 0, d: null };
+    }
+    const t = await r.text();
+    let d = null; try { d = t ? JSON.parse(t) : null; } catch (err) {}
+    return { status: r.status, d };
+  };
+
+  let resp;
+  if (acao === "vendido" && c.substituir) {
+    const can = await mandar(cancelamento);
+    if (can.status && can.status !== 200) return res.status(502).json({ erro: `O Shinkai não desfez a venda anterior (${can.status}).` });
+  }
+  resp = await mandar(corpo);
+  const { status, d } = resp;
+
+  if (status === 0) return res.status(502).json({ erro: "Não consegui falar com o Shinkai. A venda aqui está gravada; tente mandar de novo." });
+  if (status === 401) return res.status(502).json({ erro: `O Shinkai recusou a chave (401). A guardada aqui é "${formaDaChave()}".` });
+  // Carro que não está no estoque deles (nunca foi enviado): a venda
+  // daqui vale do mesmo jeito, e a tela só avisa.
+  if (status === 404) {
+    const aviso = "Este carro não está no estoque do Shinkai — nada a marcar lá.";
+    await banco(`${REST("estoque")}?id=eq.${eid}`, { method: "PATCH", headers: json(tok),
+      body: JSON.stringify({ shinkai_venda_acao: "fora_do_shinkai", shinkai_venda_origem: null, shinkai_venda_avisos: [aviso], shinkai_venda_em: new Date().toISOString() }) }).catch(() => {});
+    return res.status(200).json({ ok: false, acao: "fora_do_shinkai", avisos: [aviso] });
+  }
+  if (status === 409) {
+    return res.status(409).json({ conflito: true,
+      erro: "No Shinkai este carro já está vendido para OUTRO comprador. Confirme para desfazer a venda de lá e registrar esta." });
+  }
+  if (status < 200 || status >= 300) {
+    const detalhe = d && Array.isArray(d.erros) ? d.erros.join(" · ") : "";
+    return res.status(502).json({ erro: limpar(`O Shinkai respondeu ${status}.${detalhe ? ` ${detalhe}` : ""}`) });
+  }
+
+  const avisos = (d && Array.isArray(d.avisos)) ? d.avisos.map((x) => limpar(String(x))).slice(0, 10) : [];
+  await banco(`${REST("estoque")}?id=eq.${eid}`, { method: "PATCH", headers: json(tok),
+    body: JSON.stringify({
+      shinkai_venda_acao: (d && d.acao) || acao, shinkai_venda_origem: (d && d.origem) || null,
+      shinkai_venda_avisos: avisos, shinkai_venda_em: new Date().toISOString(),
+    }) }).catch(() => {});
+  // O id do lojista que eles casaram fica no cadastro do comprador: é a
+  // prova de que os dois lados falam da mesma loja (o `shinkai_id` existe
+  // desde a 0019 e nunca tinha sido preenchido).
+  const lojista = d && d.comprador && d.comprador.lojista_id;
+  if (acao === "vendido" && lojista && e.comprador && e.comprador.id) {
+    await banco(`${REST("comprador")}?id=eq.${e.comprador.id}`, { method: "PATCH", headers: json(tok),
+      body: JSON.stringify({ shinkai_id: String(lojista).slice(0, 120) }) }).catch(() => {});
+  }
+  return res.status(200).json({ ok: true, acao: d && d.acao, origem: d && d.origem, avisos, comprador: d && d.comprador ? { nome: d.comprador.nome } : null });
+}
+
 const ZAPSIGN = "https://api.zapsign.com.br/api/v1";
 const ZAP_TOKEN = process.env.ZAPSIGN_TOKEN || "";
 
@@ -1009,6 +1128,11 @@ module.exports = async function handler(req, res) {
   if (String(req.query.recurso || "") === "dut-arquivo") {
     try { return await dutArquivo(req, res, tok); }
     catch (e) { return res.status(502).json({ erro: "Não consegui abrir o arquivo." }); }
+  }
+
+  if (String(req.query.recurso || "") === "shinkai-venda") {
+    try { return await shinkaiVenda(req, res, tok); }
+    catch (e) { return res.status(e.status || 500).json({ erro: limpar(e.message) || "Falha ao mandar a venda ao Shinkai." }); }
   }
 
   if (String(req.query.recurso || "") === "shinkai") {

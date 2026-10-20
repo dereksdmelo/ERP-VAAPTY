@@ -2732,6 +2732,52 @@ reconhece como já lançado.
 histórico junto. **Lançamentos abre na primeira conta de banco ativa**,
 não na ordem alfabética — "Caixinha" vem antes de "Conta principal".
 
+### 62. A venda confirmada aqui sai como vendida no Shinkai
+
+O Derek perguntou em 19/10/2026 se vender no ERP marcava vendido no
+Shinkai. Não marcava: a API pública só criava e atualizava o carro, e
+lá ele continuava sendo ofertado à rede. Olhei o painel deles antes de
+propor — ele grava direto no banco com o login do usuário — e copiar
+esse caminho exigiria guardar a senha do Derek no nosso servidor
+(decisão 30) e depender de uma tabela que não é contrato de ninguém. O
+Mateus estendeu a API em 20/10/2026: `POST /api/public/venda`, mesma
+chave, por placa, com venda e cancelamento.
+
+**A venda daqui grava PRIMEIRO e vale sozinha** (`venderEMandar`). Se o
+Shinkai falhar, a tela diz o que houve e oferece "mandar de novo" na
+ficha do carro — a venda não se desfaz por causa de outro sistema.
+
+**O comprador vai como está no cadastro.** O casamento lá é DDD + os 8
+últimos dígitos, ignorando o 55 e o 9 a mais; o Mateus pediu para não
+completar nada aqui. **Sem DDD ou sem telefone vira "por fora do CRM",
+com aviso, e não é erro.** Em 20/10/2026 eram 24 compradores sem DDD e
+15 sem telefone (27 dos 220 que compraram em 2026); o "Confirmar a
+venda" avisa antes e deixa corrigir o telefone ali mesmo
+(`TelefoneParaShinkai`). **O 47 não é posto sozinho** — lojista de fora
+de Joinville ficaria com o DDD errado.
+
+**409 é o carro vendido lá para OUTRO comprador, e a pessoa decide.**
+Com o "sim", vai o cancelamento e depois a venda nova, na ordem que o
+Mateus pediu. Trocar o comprador de lá sem ninguém decidir apagaria uma
+venda que alguém registrou. **404 é carro que nunca foi ao Shinkai**:
+fica anotado e a venda daqui segue.
+
+**O resultado fica no carro** (0071, `shinkai_venda_*`), como o
+`shinkai_*` da 0030: sem ele, o aviso de comprador não encontrado
+sumiria ao recarregar. O `lojista_id` que eles devolvem vai para o
+`comprador.shinkai_id`, vazio desde a 0019.
+
+**"A venda caiu — desfazer" existe agora**, e é o único caminho do
+cancelamento: volta o carro ao pátio aqui e manda `cancelado` lá, que
+devolve a melhor proposta em espera para a negociação.
+
+**Comissão de indicação não vai** (decisão 57): o carro nunca foi nosso.
+
+**O que ficou de fora:** os carros vendidos antes de 20/10/2026. O
+Shinkai lista 43 "vendidos sem registro de pra quem foi"; mandar a
+venda de cada um completaria o registro (`registro_completado`), mas é
+escrita em massa num sistema de fora e espera o Derek pedir.
+
 ## Convenções do código
 
 - **Português no domínio.** Estado, funções e rótulos em pt-BR

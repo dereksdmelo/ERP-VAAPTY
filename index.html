@@ -726,6 +726,65 @@ async function criarComprador(dados) {
   return d.comprador;
 }
 
+async function atualizarComprador(id, dados) {
+  const r = await fetchAut(`/api/veiculo?recurso=comprador&id=${encodeURIComponent(id)}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui salvar o comprador.");
+  return d.comprador;
+}
+
+/* A VENDA NO SHINKAI (0071). Devolve o que o servidor respondeu, com
+   `conflito` quando o carro já está vendido lá para outro comprador —
+   aí quem decide é a pessoa, nunca o sistema sozinho. */
+async function vendaNoShinkai(estoqueId, corpo) {
+  const r = await fetchAut(`/api/foto?recurso=shinkai-venda&estoque_id=${encodeURIComponent(estoqueId)}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo || { acao: "vendido" }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 409 && d.conflito) return { conflito: true, erro: d.erro };
+  if (!r.ok) throw new Error(d.erro || "Não consegui mandar a venda ao Shinkai.");
+  return d;
+}
+
+/* Confirmar a venda aqui e levá-la ao Shinkai, numa sequência só. A
+   venda daqui grava PRIMEIRO e vale sozinha: se o Shinkai falhar, ela
+   não se desfaz — a tela diz o que houve e oferece mandar de novo. */
+async function venderEMandar(e, dados) {
+  await atualizarEstoque(e.id, dados);
+  if (e.natureza === "indicacao") return { recado: "" };
+  try {
+    let r = await vendaNoShinkai(e.id, { acao: "vendido" });
+    if (r.conflito) {
+      if (!window.confirm(`${r.erro}\n\nDesfazer a venda de lá e registrar esta?`)) {
+        return { recado: "Venda gravada aqui. No Shinkai continua a venda anterior — resolva no painel deles ou mande de novo pela ficha do carro.", alerta: true };
+      }
+      r = await vendaNoShinkai(e.id, { acao: "vendido", substituir: true });
+    }
+    return { recado: recadoShinkai(r), alerta: !!(r.avisos && r.avisos.length) || r.ok === false };
+  } catch (ex) {
+    return { recado: `Venda gravada aqui, mas não chegou ao Shinkai: ${ex.message} Mande de novo pela ficha do carro.`, alerta: true };
+  }
+}
+const ORIGEM_SHINKAI = { proposta_crm: "pela proposta do CRM", lojista_base: "para um lojista da base", fora_crm: "por fora do CRM" };
+function recadoShinkai(r) {
+  if (!r) return "";
+  if (r.acao === "fora_do_shinkai") return (r.avisos && r.avisos[0]) || "Este carro não está no Shinkai.";
+  const base = r.acao === "venda_desfeita" ? "Venda desfeita no Shinkai."
+    : r.acao === "nada_a_desfazer" ? "No Shinkai o carro já não estava vendido."
+    : `No Shinkai: vendido ${ORIGEM_SHINKAI[r.origem] || ""}`.trim() + ".";
+  return [base].concat(r.avisos || []).join(" ");
+}
+// Telefone que o Shinkai consegue casar: com DDD. O casamento lá é DDD
+// + os 8 últimos dígitos, e ignora o 55 e o 9 a mais (o Mateus,
+// 20/10/2026) — então basta ter 10 ou 11 dígitos depois de tirar o 55.
+const telefoneCasaNoShinkai = (t) => {
+  let d = String(t || "").replace(/\D/g, "");
+  if ((d.length === 12 || d.length === 13) && d.startsWith("55")) d = d.slice(2);
+  return d.length === 10 || d.length === 11;
+};
+
 /* ----------- meta da loja (0018) ----------- */
 // A meta da loja é independente da soma das individuais: somar
 // pressupõe que todo mundo bate a sua, o que não acontece em mês
@@ -11918,6 +11977,34 @@ function FichaEstoque({ id, perfil, aoVoltar }) {
   const [erro, setErro] = useState("");
   const [novo, setNovo] = useState(null);
   const [vendendo, setVendendo] = useState(false);
+  const [recado, setRecado] = useState(null);
+  const [mandando, setMandando] = useState(false);
+  // Mandar de novo, ou desfazer a venda dos dois lados (0071).
+  const mandarDeNovo = async () => {
+    setMandando(true); setErro(""); setRecado(null);
+    try {
+      let r = await vendaNoShinkai(e.id, { acao: "vendido" });
+      if (r.conflito && window.confirm(`${r.erro}\n\nDesfazer a venda de lá e registrar esta?`)) r = await vendaNoShinkai(e.id, { acao: "vendido", substituir: true });
+      if (!r.conflito) setRecado({ recado: recadoShinkai(r), alerta: !!(r.avisos && r.avisos.length) || r.ok === false });
+      await carregar();
+    } catch (ex) { setErro(ex.message); }
+    setMandando(false);
+  };
+  const desfazerVenda = async () => {
+    const motivo = window.prompt("Por que a venda caiu? (vai para o Shinkai, que devolve o carro para a negociação)", "");
+    if (motivo === null) return;
+    setMandando(true); setErro(""); setRecado(null);
+    try {
+      await atualizarEstoque(e.id, { situacao: "em_estoque", comprador_id: null, valor_venda: null, vendido_em: null });
+      let rec = { recado: "Venda desfeita aqui. O carro voltou para o pátio." };
+      if (e.natureza !== "indicacao" && e.shinkai_venda_acao && e.shinkai_venda_acao !== "fora_do_shinkai") {
+        try { const r = await vendaNoShinkai(e.id, { acao: "cancelado", motivo: motivo || "venda desfeita no ERP" }); rec = { recado: `${rec.recado} ${recadoShinkai(r)}` }; }
+        catch (ex) { rec = { recado: `${rec.recado} Mas o Shinkai não desfez: ${ex.message}`, alerta: true }; }
+      }
+      setRecado(rec); await carregar();
+    } catch (ex) { setErro(ex.message); }
+    setMandando(false);
+  };
   const eGerente = !!(perfil && perfil.papel === "gerente");
 
   const carregar = async () => {
@@ -12091,12 +12178,34 @@ function FichaEstoque({ id, perfil, aoVoltar }) {
             <span style={{ color: C.mute }}> sobre um custo de {brl(c.atual)}</span>
           </div>
           {e.nota_venda && <p className="mt-1 text-[12px]" style={{ color: C.mute }}>{e.nota_venda}</p>}
+          {/* O que o Shinkai fez com a venda (0071), guardado no carro:
+              sem isso o aviso de "comprador não encontrado" sumiria ao
+              recarregar, e o carro ficaria lá ofertado sem ninguém ver. */}
+          {e.natureza !== "indicacao" && (
+            <div className="mt-2 rounded-md px-2.5 py-2 text-[12px]"
+              style={{ background: !e.shinkai_venda_em ? AMARELO.fundo : (e.shinkai_venda_avisos || []).length ? AMARELO.fundo : "#E8F3EE",
+                       color: !e.shinkai_venda_em || (e.shinkai_venda_avisos || []).length ? AMARELO.texto : C.verde }}>
+              {!e.shinkai_venda_em
+                ? "Esta venda ainda não foi ao Shinkai — lá o carro pode continuar sendo ofertado."
+                : recadoShinkai({ acao: e.shinkai_venda_acao, origem: e.shinkai_venda_origem, avisos: e.shinkai_venda_avisos || [] })}
+              {e.shinkai_venda_em && <span style={{ color: C.mute }}> · {diaBR(e.shinkai_venda_em)}</span>}
+            </div>
+          )}
+          {recado && <p className="mt-2 text-[12px]" style={{ color: recado.alerta ? AMARELO.texto : C.verde }}>{recado.recado}</p>}
+          <div className="mt-2 flex flex-wrap gap-3 text-[12.5px]">
+            {e.natureza !== "indicacao" && (
+              <button disabled={mandando} onClick={mandarDeNovo} style={{ color: C.roxo, fontWeight: 600 }}>
+                {mandando ? "mandando…" : e.shinkai_venda_em ? "mandar ao Shinkai de novo" : "mandar ao Shinkai"}
+              </button>
+            )}
+            <button disabled={mandando} onClick={desfazerVenda} style={{ color: C.laranja }}>a venda caiu — desfazer</button>
+          </div>
         </div>
       ) : vendendo ? (
         <VenderCarro e={e} aoFechar={() => setVendendo(false)}
           aoVender={async (dados) => {
-            setErro("");
-            try { await atualizarEstoque(e.id, dados); setVendendo(false); await carregar(); }
+            setErro(""); setRecado(null);
+            try { const r = await venderEMandar(e, dados); setRecado(r.recado ? r : null); setVendendo(false); await carregar(); }
             catch (ex) { setErro(ex.message); }
           }} />
       ) : (
@@ -14988,7 +15097,11 @@ function TelaVendaLojistas({ perfil }) {
                 <div className="mt-2">
                   <VenderCarro e={e} aoFechar={() => setVendendo(null)}
                     aoVender={async (dados) => {
-                      try { await atualizarEstoque(e.id, dados); setVendendo(null); carregar(); }
+                      try {
+                        const r = await venderEMandar(e, dados); setVendendo(null);
+                        if (r.recado) window.alert(`Venda confirmada. ${r.recado}`);
+                        carregar();
+                      }
                       catch (ex) { setErro(ex.message); }
                     }} />
                 </div>
@@ -18436,6 +18549,35 @@ const VISTOS_DOC = ["adm", "gerencia", "financeiro"];
  * leva dezenas de carros — sem cadastro, "AUTO CENTER SUL" e "Auto
  * Center Sul" viram dois compradores e o histórico se parte no meio.
  */
+// Componente de topo: declarado dentro do VenderCarro, o campo perderia
+// o foco a cada tecla (decisão 7).
+function TelefoneParaShinkai({ comprador, aoSalvar }) {
+  const [tel, setTel] = useState(comprador.telefone || "");
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState("");
+  const salvar = async () => {
+    setSalvando(true); setErro("");
+    try { const novo = await atualizarComprador(comprador.id, { telefone: tel.trim() }); aoSalvar(novo || { telefone: tel.trim() }); }
+    catch (ex) { setErro(ex.message); }
+    setSalvando(false);
+  };
+  return (
+    <div className="mt-2 rounded-md px-2.5 py-2 text-[12px]" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
+      {comprador.telefone
+        ? <>O telefone deste comprador está sem DDD ({comprador.telefone}). No Shinkai a venda vai entrar como <b>por fora do CRM</b>.</>
+        : <>Este comprador não tem telefone. No Shinkai a venda vai entrar como <b>por fora do CRM</b>.</>}
+      <div className="mt-1.5 flex items-center gap-2">
+        <input className="w-44 rounded border px-2 py-1 text-[13px] outline-none" style={inputSty} inputMode="tel"
+          placeholder="(47) 99999-8888" value={tel} onChange={(ev) => setTel(ev.target.value)} />
+        <button disabled={salvando || !telefoneCasaNoShinkai(tel)} onClick={salvar} className="font-semibold"
+          style={{ color: telefoneCasaNoShinkai(tel) ? C.roxo : C.mute }}>{salvando ? "salvando…" : "corrigir o telefone"}</button>
+        <span style={{ color: C.mute }}>ou confirme assim mesmo</span>
+      </div>
+      {erro && <div className="mt-1" style={{ color: C.laranja }}>{erro}</div>}
+    </div>
+  );
+}
+
 function VenderCarro({ e, aoVender, aoFechar }) {
   const [busca, setBusca] = useState("");
   const [achados, setAchados] = useState([]);
@@ -18552,6 +18694,15 @@ function VenderCarro({ e, aoVender, aoFechar }) {
             style={inputSty} value={quando} onChange={(ev) => setQuando(ev.target.value)} />
         </label>
       </div>
+
+      {/* TELEFONE SEM DDD VIRA "POR FORA" NO SHINKAI (0071). O casamento
+          lá é pelo DDD + os 8 últimos dígitos; sem o DDD a venda entra
+          sem lojista e não conta para a loja certa. Corrigir aqui conserta
+          todas as próximas vendas desse comprador. Nada é completado
+          sozinho — o 47 num lojista de Curitiba seria pior que nada. */}
+      {escolhido && e.natureza !== "indicacao" && !telefoneCasaNoShinkai(escolhido.telefone) && (
+        <TelefoneParaShinkai comprador={escolhido} aoSalvar={(novo) => setEscolhido({ ...escolhido, ...novo })} />
+      )}
 
       {/* A margem aparece ANTES de confirmar, e é de propósito: é a
           última chance de ver que o carro está saindo no prejuízo. */}
