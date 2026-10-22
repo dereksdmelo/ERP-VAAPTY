@@ -2868,6 +2868,65 @@ que tem cliente na loja.
 loja. Responder cliente pela ponte é a outra conversa (a Flávia no
 número da TV), com o risco de banimento que ela traz.
 
+### 64. A Flávia responde de verdade, começando pelo número da TV
+
+O Derek, em 22/10/2026: *"estamos sem pré-vendas na empresa, pelo
+menos tem alguém respondendo lá"*. Escolheu a resposta automática
+direto, sem a fase de rascunho aprovado — sabendo que o primeiro erro
+dela chega ao cliente.
+
+**Quem responde é o cron do ERP, a cada minuto** (`ia/atender.js`,
+chamado pelo `scheduled` do `worker/index.js`; o despertador da ponte
+continua nos minutos múltiplos de cinco). A redação é a MESMA do treino
+(`ia/flavia.js`): instrução, horários livres, correções do gerente. O
+que se ensina no treino vale aqui no rascunho seguinte, sem deploy.
+
+**O cron não tem usuário, e a chave de serviço continua confinada**
+(decisão 9). As funções da 0075 (`ia_fila`, `ia_contexto`,
+`ia_reservar`, `ia_concluir`) exigem o `IA_SEGREDO`, segredo do Worker
+guardado no banco só como hash (`servidor_chave`, sem política: a API
+não lê). Sem ele, a chave anônima — que é pública — não lê conversa
+nenhuma.
+
+**As regras da fila, e por que cada uma existe:**
+
+- **40 segundos de silêncio** antes de responder: o cliente manda
+  "boa tarde" e "quero vender meu Gol" em duas mensagens (decisão 60).
+- **Só o que chegou depois de ligar** (`ia_desde`) e nas últimas 12
+  horas: ligar não pode responder a fila de dias atrás, e a ponte que
+  volta de uma parada (21/10) não pode virar rajada.
+- **Pessoa da loja respondeu → ela sai da conversa por 12 horas.** O
+  que separa a mensagem dela da de uma pessoa são os ids que o WhatsApp
+  devolveu ao envio (`ia_resposta.wa_ids`). Por isso os ids são
+  gravados ANTES de a mensagem entrar na conversa — na ordem inversa, a
+  volta seguinte veria uma mensagem "da loja" que não é dela e calaria
+  a conversa sozinha.
+- **Até 20 respostas por conversa em 24 horas**, contra laço.
+- **`unique (mensagem_id)`**: duas voltas do cron não respondem a mesma
+  mensagem.
+
+**O ritmo é de gente**: "digitando…" antes de cada mensagem, de 1,5 a
+6 segundos conforme o tamanho, e uma de cada vez. Número que dispara em
+rajada é o que o WhatsApp bane — e a conexão por QR não é a API
+oficial.
+
+**A ponte não devolve o eco do que ela mesma mandou**, então quem grava
+a mensagem na conversa é o `ia/atender.js`, por `wa_receber`. Horário
+confirmado (`agendar`, que `lerSaida` só aceita de dentro da lista)
+leva o lead a AGENDADO pela mesma `wa_lead_avanca` da 0059.
+
+**Resposta fora do formato não sai.** No treino ela é mostrada marcada,
+porque o gerente julga; aqui não há ninguém antes do cliente.
+
+**O interruptor é por número e é do gerente**, no cartão de Números do
+WhatsApp. Desligar é imediato e sem pergunta — é o botão de emergência.
+
+**O que ainda não existe:** ela não lê a mídia que chega ao vivo (a
+leitura da 0073 roda com o token de quem abre o treino) — foto e áudio
+aparecem como "ainda não lidos", e a instrução manda perguntar o carro.
+Nem os lembretes da véspera e do dia, que a instrução diz serem
+automáticos.
+
 ## Convenções do código
 
 - **Português no domínio.** Estado, funções e rótulos em pt-BR

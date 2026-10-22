@@ -9471,6 +9471,17 @@ function CartaoCanal({ canal, aoMudar, aoApagar }) {
     catch (x) { setErro(x.message); }
     setOcupado("");
   };
+  /* A FLÁVIA RESPONDE ESTE NÚMERO (decisão 64, 0075). Ligar pergunta
+   * antes: daqui para a frente ela fala com cliente de verdade, em nome
+   * da loja. Desligar é na hora e sem pergunta — é o botão de emergência. */
+  const virarIa = async () => {
+    const ligar = !canal.ia_responde;
+    if (ligar && !confirm(`Ligar a ${"Flávia"} em "${canal.nome}"?\n\nEla passa a responder sozinha quem escrever para este número daqui para a frente (o que já estava esperando fica como está). Se alguém da loja responder uma conversa pelo celular, ela sai daquela conversa por 12 horas.`)) return;
+    setOcupado("ia");
+    try { await aoMudar(canal.slug, { ia_responde: ligar }); setErro(""); }
+    catch (x) { setErro(x.message); }
+    setOcupado("");
+  };
   const apagar = async () => {
     if (!confirm(`Apagar "${canal.nome}"? Só dá para apagar número que nunca recebeu conversa.`)) return;
     setOcupado("apagar");
@@ -9509,6 +9520,24 @@ function CartaoCanal({ canal, aoMudar, aoApagar }) {
           Fora de serviço: o que chegar neste número não é registrado. O que já
           foi guardado continua aqui.
         </p>
+      )}
+
+      {canal.ativo && canal.comercial !== false && canal.telefone && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg px-3 py-2"
+          style={{ background: canal.ia_responde ? C.roxoFraco : C.bg }}>
+          <span className="flex-1 text-[13px] leading-snug" style={{ color: canal.ia_responde ? C.roxo : C.mute }}>
+            {canal.ia_responde
+              ? <><b>A Flávia está respondendo</b> este número desde {new Date(canal.ia_desde).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}. Conversa em que alguém da loja responde fica com a pessoa por 12 horas.</>
+              : "Ninguém responde automaticamente neste número."}
+          </span>
+          <button onClick={virarIa} disabled={!!ocupado}
+            className="rounded-lg px-3 py-1.5 text-[13px] font-semibold"
+            style={canal.ia_responde
+              ? { border: `1px solid ${C.laranja}`, color: C.laranja, background: C.paper, opacity: ocupado ? 0.5 : 1 }
+              : { background: C.roxo, color: "#fff", opacity: ocupado ? 0.5 : 1 }}>
+            {ocupado === "ia" ? "…" : canal.ia_responde ? "Desligar a Flávia" : "Ligar a Flávia"}
+          </button>
+        </div>
       )}
 
       {editando && (

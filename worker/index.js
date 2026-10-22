@@ -28,6 +28,7 @@ import perfil from "../api/perfil.js";
 import placa from "../api/placa.js";
 import proposta from "../api/proposta.js";
 import veiculo from "../api/veiculo.js";
+import { atenderFila } from "../ia/atender.js";
 
 const ROTAS = { atendimento, checklist, documento, financeiro, fipe, foto,
                 funil, importar, perfil, placa, proposta, veiculo };
@@ -172,7 +173,20 @@ export default {
    * A lista vem de `wa_canais_para_acordar()` (0072), pela chave
    * anônima: o cron não tem usuário, e a chave de serviço continua
    * confinada (decisão 9). */
+  /* E A FLÁVIA ATENDENDO (22/10/2026, decisão 64): o cron passou a
+   * rodar a cada MINUTO por causa dela — o cliente que escreve não
+   * espera cinco. O despertador continua de cinco em cinco, nos
+   * minutos múltiplos de cinco. Um não espera o outro, e a falha de um
+   * não derruba o outro. */
   async scheduled(evento, env, ctx) {
+    const minuto = new Date(evento && evento.scheduledTime ? evento.scheduledTime : Date.now()).getUTCMinutes();
+    const tarefas = [atenderFila(env).catch((e) => console.error("flavia:", String((e && e.message) || e).slice(0, 200)))];
+    if (minuto % 5 === 0) tarefas.push(despertar(env));
+    await Promise.all(tarefas);
+  },
+};
+
+async function despertar(env) {
     if (!env.PONTE || !env.PONTE_SEGREDO || !env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return;
     const r = await fetch(`${env.SUPABASE_URL}/rest/v1/rpc/wa_canais_para_acordar`, {
       method: "POST",
@@ -190,5 +204,4 @@ export default {
         if (!p.ok && p.status !== 503) console.error("despertador:", canal, p.status);
       } catch (e) { console.error("despertador:", canal, String((e && e.message) || e).slice(0, 150)); }
     }));
-  },
-};
+}

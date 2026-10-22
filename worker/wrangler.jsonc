@@ -38,8 +38,9 @@
   // Workers AI cobra por uso, dentro da conta do Cloudflare -- sem chave
   // nova e sem o áudio sair para outro fornecedor.
   "ai": { "binding": "AI" },
-  // O despertador da ponte (ver `scheduled` no index.js): sem ele os
-  // containers do WhatsApp dormem em 15 minutos e param de escutar.
-  "triggers": { "crons": ["*/5 * * * *"] },
+  // A cada minuto: a Flávia responde quem escreveu (ia/atender.js), e
+  // nos minutos múltiplos de cinco o despertador da ponte pergunta o
+  // estado dos números — sem ele os containers dormem em 15 minutos.
+  "triggers": { "crons": ["* * * * *"] },
   "observability": { "enabled": true }
 }

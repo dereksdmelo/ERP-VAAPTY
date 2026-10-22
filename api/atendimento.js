@@ -2575,6 +2575,12 @@ module.exports = async function handler(req, res) {
       if (c2.atendente === "ia" || c2.atendente === "humano") mud.atendente = c2.atendente;
       if (typeof c2.ativo === "boolean") mud.ativo = c2.ativo;
       if (typeof c2.comercial === "boolean") mud.comercial = c2.comercial;
+      // A Flávia responde este número (0075). Ligar marca o momento: ela
+      // só responde o que chegar DEPOIS, nunca a fila que já estava lá.
+      if (typeof c2.ia_responde === "boolean") {
+        mud.ia_responde = c2.ia_responde;
+        if (c2.ia_responde) mud.ia_desde = new Date().toISOString();
+      }
       if (!Object.keys(mud).length) return res.status(400).json({ erro: "nada para mudar" });
       const r = await banco(`${REST_C}?slug=eq.${encodeURIComponent(canal)}`, {
         method: "PATCH",
