@@ -146,4 +146,45 @@ export default {
     }
     return espera;
   },
+
+  /* O DESPERTADOR DA PONTE DO WHATSAPP (21/10/2026).
+   *
+   * Cada número é um container, e o container dorme depois de 15
+   * minutos sem pergunta (`sleepAfter` na ponte). Dormindo, ele não
+   * escuta o WhatsApp. O comentário da ponte dizia que "o cron do ERP
+   * pergunta o estado a cada minuto" — e esse cron NUNCA EXISTIU. A
+   * ponte parou em 15/10 de madrugada e só acordou em 21/10 às 21h,
+   * quando alguém abriu a tela dos números. Foram seis dias sem conversa
+   * nova, sem lead novo e sem agendamento lido, e a tela dizia
+   * "conectado" o tempo todo, porque perguntar o estado é justamente o
+   * que acorda o container.
+   *
+   * A cada cinco minutos, pergunta o estado de cada número que já leu o
+   * QR. Cinco e não um: o sono é de quinze, e se o Cloudflare reiniciar
+   * o container no meio, o que se perde são no máximo cinco minutos — o
+   * WhatsApp reentrega o que chegou nesse intervalo quando a sessão
+   * volta, como se viu na própria recuperação de 21/10.
+   *
+   * A lista vem de `wa_canais_para_acordar()` (0072), pela chave
+   * anônima: o cron não tem usuário, e a chave de serviço continua
+   * confinada (decisão 9). */
+  async scheduled(evento, env, ctx) {
+    if (!env.PONTE || !env.PONTE_SEGREDO || !env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return;
+    const r = await fetch(`${env.SUPABASE_URL}/rest/v1/rpc/wa_canais_para_acordar`, {
+      method: "POST",
+      headers: { apikey: env.SUPABASE_ANON_KEY, Authorization: `Bearer ${env.SUPABASE_ANON_KEY}`, "Content-Type": "application/json" },
+      body: "{}",
+    });
+    if (!r.ok) { console.error("despertador: não li os números", r.status); return; }
+    const canais = (await r.json().catch(() => [])) || [];
+    await Promise.all(canais.map(async (c) => {
+      const canal = typeof c === "string" ? c : c && c.wa_canais_para_acordar;
+      if (!canal) return;
+      try {
+        const p = await env.PONTE.fetch(`https://ponte/estado?canal=${encodeURIComponent(canal)}`,
+          { headers: { "x-ponte-segredo": env.PONTE_SEGREDO } });
+        if (!p.ok && p.status !== 503) console.error("despertador:", canal, p.status);
+      } catch (e) { console.error("despertador:", canal, String((e && e.message) || e).slice(0, 150)); }
+    }));
+  },
 };

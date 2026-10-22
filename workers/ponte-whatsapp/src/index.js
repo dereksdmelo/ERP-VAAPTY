@@ -18,7 +18,9 @@ const CARREGADOR = "(async()=>{const r=await fetch(process.env.PONTE_URL+'/_codi
 
 export class Ponte extends Container {
   defaultPort = 8080;
-  sleepAfter = "15m";   // o cron do ERP pergunta o estado a cada minuto: na pratica, nunca dorme
+  // O cron do ERP (worker/index.js, `scheduled`) pergunta o estado a cada 5 minutos: na pratica,
+  // nunca dorme. ATE 21/10/2026 ESSE CRON NAO EXISTIA, e a ponte dormiu de 15/10 a 21/10 sem aviso.
+  sleepAfter = "15m";
 
   constructor(ctx, env) {
     super(ctx, env);

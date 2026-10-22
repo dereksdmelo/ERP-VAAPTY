@@ -34,5 +34,8 @@
   // A ponte do WhatsApp, por binding. **Não por URL**: fetch de Worker
   // para Worker pelo endereço `workers.dev` não chega do outro lado.
   "services": [{ "binding": "PONTE", "service": "vaapty-ponte-whatsapp" }],
+  // O despertador da ponte (ver `scheduled` no index.js): sem ele os
+  // containers do WhatsApp dormem em 15 minutos e param de escutar.
+  "triggers": { "crons": ["*/5 * * * *"] },
   "observability": { "enabled": true }
 }

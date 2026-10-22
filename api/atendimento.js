@@ -353,6 +353,42 @@ const chaveFone = (t) => {
   return d.length >= 10 ? d.slice(0, 2) + d.slice(-8) : null;
 };
 
+/* O ATENDIMENTO ABERTO À MÃO FECHA O LEAD QUE ESTAVA AGENDADO (21/10/2026).
+ *
+ * O "chegou" da pré-venda é um caminho; o outro é o negociador abrir o
+ * atendimento direto, com o cliente na frente. Pelo segundo, o lead
+ * ficava "agendado" para sempre — e a visita que a pré-venda marcou não
+ * contava no funil dela. Entre 09/10 e 21/10 nenhum "chegou" foi
+ * marcado, e cinco clientes agendados vieram e foram atendidos assim.
+ *
+ * O casamento é pelo telefone, com a chave do funil (DDD + os oito
+ * últimos), e só com lead que tinha hora marcada: agendado, confirmado
+ * ou não veio. Novo e em contato ficam de fora — não houve visita
+ * combinada, e dar à pré-venda um "compareceu" que ela não marcou nem
+ * agendou inflaria a nota dela (decisão 49). Lead que já tem
+ * atendimento não é tocado. Havendo dois, vale o de hora mais recente.
+ *
+ * Falha em silêncio: o atendimento é o que a pessoa veio fazer, e um
+ * erro aqui não pode aparecer como se ele não tivesse sido salvo. */
+async function leadQueVeio(tok, at) {
+  try {
+    const k = chaveFone(at && at.cliente_telefone);
+    if (!k || !at.id) return null;
+    const padrao = "*" + k.slice(-8).split("").join("*") + "*";
+    const ls = await banco(`${REST("lead")}?select=id,telefone,status,agendado_para,criado_em` +
+      `&status=in.(agendado,confirmado,nao_compareceu)&atendimento_id=is.null&excluido_em=is.null` +
+      `&telefone=like.${encodeURIComponent(padrao)}&limit=20`, { headers: cabecalhos(tok) }) || [];
+    const certos = ls.filter((l) => chaveFone(l.telefone) === k)
+      .sort((a, b) => String(b.agendado_para || b.criado_em).localeCompare(String(a.agendado_para || a.criado_em)));
+    if (!certos.length) return null;
+    const r = await banco(`${REST("lead")}?id=eq.${certos[0].id}&atendimento_id=is.null`, {
+      method: "PATCH", headers: json(tok, { Prefer: "return=representation" }),
+      body: JSON.stringify({ status: "compareceu", atendimento_id: at.id }),
+    });
+    return ((Array.isArray(r) ? r[0] : r) || {}).id || null;
+  } catch (e) { return null; }
+}
+
 async function flavia(req, res, tok) {
   const eu = donoDoToken(tok);
   const p = await banco(`${REST("perfil")}?id=eq.${encodeURIComponent(eu || "")}&select=papel`, { headers: cabecalhos(tok) });
@@ -2519,7 +2555,8 @@ module.exports = async function handler(req, res) {
         body: JSON.stringify(linha),
       });
       const salvo = Array.isArray(r) ? r[0] : r;
-      return res.status(201).json({ ok: true, atendimento: salvo });
+      const lead = salvo ? await leadQueVeio(tok, salvo) : null;
+      return res.status(201).json({ ok: true, atendimento: salvo, lead_ligado: lead });
     }
 
     if (req.method === "PATCH") {
@@ -2543,7 +2580,9 @@ module.exports = async function handler(req, res) {
       const salvo = Array.isArray(r) ? r[0] : r;
       // A RLS deixa ler e recusa escrever: o PATCH volta vazio, sem erro.
       if (!salvo) return res.status(403).json({ erro: "Este atendimento é de outro negociador." });
-      return res.status(200).json({ ok: true, atendimento: salvo });
+      // Telefone digitado depois de abrir o atendimento também liga o lead.
+      const lead = linha.cliente_telefone ? await leadQueVeio(tok, salvo) : null;
+      return res.status(200).json({ ok: true, atendimento: salvo, lead_ligado: lead });
     }
 
     res.setHeader("Allow", "GET, POST, PATCH");

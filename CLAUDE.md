@@ -1518,6 +1518,21 @@ programa é baixado ao LIGAR, então o que já está rodando continua com
 a versão anterior — `/_reiniciar` resolve, e a sessão guardada no
 Durable Object faz os números voltarem sem QR.
 
+**O CONTAINER DORME, E O DESPERTADOR NÃO EXISTIA.** O `sleepAfter`
+da ponte é 15 minutos, e o comentário ao lado dizia que "o cron do ERP
+pergunta o estado a cada minuto" — **esse cron nunca foi escrito**. A
+ponte parou em 15/10/2026 de madrugada e voltou em 21/10 às 21h,
+quando o Derek abriu a tela dos números: seis dias sem conversa, sem
+lead e sem agendamento lido, com a tela dizendo "conectado" — porque
+perguntar o estado é justamente o que acorda o container. O Derek
+perguntou se o WhatsApp das IAs estava desligado. Agora o `scheduled`
+do `worker/index.js` pergunta a cada cinco minutos, pela lista de
+`wa_canais_para_acordar()` (0072, estreita e pela chave anônima — o
+cron não tem usuário). **Comentário que promete uma peça que não
+existe é pior que comentário nenhum**: foi ele que fez isto parecer
+resolvido. Ao acordar, o WhatsApp reentregou os seis dias (8.158
+mensagens), então nada se perdeu, só atrasou.
+
 **Os três canais são cadastro (0056).** `wa_receber()` recusa canal que
 não existe, de propósito: a ponte não inventa canal. E o número que
 cada um virou só se sabe depois do QR — vem da ponte, que não tem
@@ -3308,6 +3323,18 @@ ação o botão trocava só o status — o lead saía da fila da pré-venda e
 vazamento do "não veio" descrito acima. Os três caminhos passam pelo
 mesmo endpoint, que é idempotente: clicar duas vezes devolve o mesmo
 atendimento.
+
+**E o atendimento aberto à mão fecha o lead agendado** (21/10/2026).
+De 09/10 a 21/10 ninguém marcou "chegou" — a conta da pré-venda
+estava desativada —, e o negociador abria o atendimento direto com o
+cliente na frente. O lead ficava "agendado" para sempre e a visita não
+contava para a pré-venda. Agora `leadQueVeio()` liga, no POST e no
+PATCH que traz telefone, o lead **com hora marcada** (agendado,
+confirmado, não veio) do mesmo telefone — chave do funil, DDD + oito
+últimos. Novo e em contato ficam de fora: sem visita combinada, o
+"compareceu" seria crédito que a pré-venda não fez. Doze leads antigos
+foram ligados assim no mesmo dia, todos com atendimento aberto no dia
+da hora marcada.
 
 **A tela NÃO pula para o atendimento criado.** Quem marca está
 trabalhando uma fila, e ser jogado para outra tela a cada nome faz
