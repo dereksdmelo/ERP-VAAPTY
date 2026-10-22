@@ -10938,6 +10938,12 @@ function CadastroNegociadores({ perfil, competencia, aoMudarMetaLoja }) {
   );
 }
 
+// As linhas que a lista de Atendimentos pinta inteiras.
+const COR_LINHA = {
+  fechado: { fundo: "#DDF2E5", borda: "#BFE3CD" },
+  vendeu_fora: { fundo: "#FBE1E1", borda: "#F0BFBF" },
+};
+
 function CRM({ perfil, aoAbrir, mes }) {
   const { comp, setComp, MESES } = mes;
   const [lista, setLista] = useState([]);
@@ -11125,12 +11131,13 @@ function CRM({ perfil, aoAbrir, mes }) {
                   const td = "whitespace-nowrap px-2.5 py-2 text-[12px]";
                   const num = { fontFamily: F.mono, textAlign: "right" };
                   return (
-                    // Negócio fechado pinta a linha inteira de verde (o Derek,
-                    // 21/10/2026): na lista do mês, o que virou carro tem que
-                    // saltar aos olhos sem ler a coluna de status.
+                    // Negócio fechado pinta a linha inteira de verde, e vendeu
+                    // fora de vermelho (o Derek, 21/10/2026): na lista do mês,
+                    // o carro que virou nosso e o que foi para a concorrência
+                    // têm que saltar aos olhos sem ler a coluna de status.
                     <tr key={a.id} onClick={() => aoAbrir(a.id)}
-                      style={{ borderBottom: `1px solid ${a.status === "fechado" ? "#BFE3CD" : C.line}`, cursor: "pointer",
-                               background: a.status === "fechado" ? "#DDF2E5" : undefined }}>
+                      style={{ borderBottom: `1px solid ${(COR_LINHA[a.status] || {}).borda || C.line}`, cursor: "pointer",
+                               background: (COR_LINHA[a.status] || {}).fundo }}>
                       <td className={td} style={{ fontFamily: F.mono, color: C.mute }}>{soData(a.data)}</td>
                       <td className={td}>{a.negociador_nome || "—"}</td>
                       <td className={td} style={{ color: C.mute }}>{a.prospec || "—"}</td>
