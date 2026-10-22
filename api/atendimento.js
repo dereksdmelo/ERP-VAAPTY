@@ -433,7 +433,7 @@ async function flavia(req, res, tok) {
   if (req.method === "GET") {
     if (!RX_UUID.test(cid)) return res.status(400).json({ erro: "conversa_id inválido." });
     const [msgs, treinos] = await Promise.all([
-      banco(`${REST("wa_mensagem")}?conversa_id=eq.${cid}&select=id,eco,tipo,texto,anexo,quando&order=quando.asc&limit=1000`, { headers: cabecalhos(tok) }),
+      banco(`${REST("wa_mensagem")}?conversa_id=eq.${cid}&select=id,eco,tipo,texto,anexo,leitura,quando&order=quando.asc&limit=1000`, { headers: cabecalhos(tok) }),
       banco(`${REST("ia_treino")}?conversa_id=eq.${cid}&select=*`, { headers: cabecalhos(tok) }),
     ]);
     const por = Object.fromEntries((treinos || []).map((t) => [t.mensagem_id, t]));
@@ -447,12 +447,17 @@ async function flavia(req, res, tok) {
     const conversa = String(c.conversa_id || ""), mid = String(c.mensagem_id || "");
     if (!RX_UUID.test(conversa) || !RX_UUID.test(mid)) return res.status(400).json({ erro: "conversa_id e mensagem_id são obrigatórios." });
 
-    const msgs = await banco(`${REST("wa_mensagem")}?conversa_id=eq.${conversa}&select=id,eco,tipo,texto,anexo,quando&order=quando.asc&limit=1000`, { headers: cabecalhos(tok) }) || [];
-    const ponto = FLAVIA.pontosDe(msgs).find((p) => p.mensagem_id === mid);
+    const msgs = await banco(`${REST("wa_mensagem")}?conversa_id=eq.${conversa}&select=id,eco,tipo,texto,anexo,leitura,quando&order=quando.asc&limit=1000`, { headers: cabecalhos(tok) }) || [];
+    let ponto = FLAVIA.pontosDe(msgs).find((p) => p.mensagem_id === mid);
     if (!ponto) return res.status(404).json({ erro: "Esse ponto não existe nesta conversa." });
     // A conversa ATÉ o ponto: a Flávia não pode ver a resposta que ela
     // está tentando escrever, nem o que o cliente disse depois.
     const ate = msgs.filter((m) => m.quando <= ponto.quando);
+    // As mídias do cliente até aqui que ainda não foram lidas são lidas
+    // agora, e o ponto é remontado: o "cliente escreveu" do treino
+    // passa a dizer o que estava na foto ou no áudio.
+    const lidas = await lerMidias(req, tok, eu, ate);
+    if (lidas) ponto = FLAVIA.pontosDe(msgs).find((p) => p.mensagem_id === mid) || ponto;
     const agora = FLAVIA.paredeDe(ponto.quando);
 
     const [cfgL, ocup, ex] = await Promise.all([
@@ -523,6 +528,124 @@ async function flavia(req, res, tok) {
 
   res.setHeader("Allow", "GET, POST, PATCH");
   return res.status(405).json({ erro: "Use GET, POST ou PATCH." });
+}
+
+/* ===== a leitura das mídias (0073) =====
+ *
+ * O Derek, 22/10/2026: a IA precisa abrir foto, vídeo, documento e
+ * áudio, e com isso saber de que carro o cliente está falando. Cada
+ * mídia é lida UMA vez e a leitura fica na mensagem:
+ *
+ *   foto e PDF   o próprio Claude lê (imagem e documento)
+ *   áudio        o Whisper do Cloudflare transcreve (Workers AI)
+ *   vídeo        o Claude não aceita vídeo: só a fala é transcrita, e
+ *                a Flávia pergunta o carro se a fala não disser
+ *
+ * **Só as do cliente**, e no máximo `MIDIAS_POR_VEZ` por rascunho: uma
+ * conversa com doze fotos leria tudo de uma vez e o rascunho levaria
+ * um minuto. As que sobram são lidas no próximo ponto.
+ *
+ * **A leitura não traz CPF, RG, nome do dono nem RENAVAM** — a
+ * instrução manda deixar de fora, e o `semNumeros` da Flávia corta o
+ * que escapar. O que interessa é o carro.
+ *
+ * **Falhar não derruba o rascunho.** Mídia que não deu para ler vira
+ * leitura que diz isso, e a Flávia pergunta ao cliente.
+ */
+const MIDIAS_POR_VEZ = 4;
+const IMAGEM_IA = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+// O teto da API para imagem é 5 MB; o arquivo do WhatsApp já vem
+// comprimido e quase nunca passa disso.
+const IMAGEM_MAX = 5 * 1024 * 1024;
+
+const INSTRUCAO_LEITURA = [
+  "Um cliente mandou este arquivo pelo WhatsApp a uma loja de Joinville que intermedeia a venda de carros usados.",
+  "Diga, em até três frases curtas em português, o que importa para a loja saber QUAL É O CARRO dele:",
+  "o que é o arquivo (foto do carro, CRLV, ATPV, print de anúncio, outro), e o que aparecer de marca, modelo, versão,",
+  "ano de fabricação/modelo, cor, combustível e placa; e, se for foto do carro, o estado que se vê (amassado, pneu, interior).",
+  "NUNCA escreva CPF, RG, nome do proprietário, endereço, RENAVAM, chassi ou número de documento — mesmo que apareçam.",
+  "Não chute: se não der para saber o carro, comece a resposta com 'NÃO IDENTIFICADO:' e diga o que se vê.",
+].join("\n");
+
+async function lerComClaude(item) {
+  const bloco = item.mime === "application/pdf"
+    ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: item.base64 } }
+    : { type: "image", source: { type: "base64", media_type: item.mime, data: item.base64 } };
+  const r = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "x-api-key": IA_CHAVE, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
+    body: JSON.stringify({ model: IA_MODELO_FLAVIA, max_tokens: 300, system: INSTRUCAO_LEITURA,
+      messages: [{ role: "user", content: [bloco, { type: "text", text: "O que é, e qual é o carro?" }] }] }),
+  });
+  if (!r.ok) return null;
+  const d = await r.json().catch(() => ({}));
+  return ((d.content || []).find((x) => x.type === "text") || {}).text || null;
+}
+
+/* O Whisper roda no próprio Cloudflare, pelo binding `AI` que o
+ * adaptador do Worker entrega em `req.ai`. Na Vercel não existe, e aí o
+ * áudio fica sem leitura — dito na própria leitura, para a Flávia
+ * pedir que o cliente escreva. O turbo pede base64; o antigo, os
+ * bytes — tenta um e cai no outro. */
+async function transcrever(ai, item) {
+  if (!ai) return null;
+  try {
+    const d = await ai.run("@cf/openai/whisper-large-v3-turbo", { audio: item.base64, language: "pt" });
+    if (d && d.text) return String(d.text).trim();
+  } catch (e) {}
+  try {
+    const d = await ai.run("@cf/openai/whisper", { audio: [...Buffer.from(item.base64, "base64")] });
+    if (d && d.text) return String(d.text).trim();
+  } catch (e) {}
+  return null;
+}
+
+async function lerMidias(req, tok, eu, msgs) {
+  const falta = (msgs || []).filter((m) => !m.eco && m.tipo === "midia" && !m.leitura
+    && m.anexo && m.anexo.tipo !== "sticker").slice(0, MIDIAS_POR_VEZ);
+  if (!falta.length) return 0;
+  const arquivos = await require("./foto.js").midiaParaIA(tok, falta.map((m) => m.id));
+  const porId = Object.fromEntries(arquivos.map((a) => [a.id, a]));
+  let feitas = 0;
+  for (const m of falta) {
+    const a = porId[m.id] || { erro: "sem arquivo guardado" };
+    const tipo = (m.anexo && m.anexo.tipo) || a.tipo || "";
+    let leitura = null, modelo = null;
+    try {
+      if (a.erro) {
+        leitura = `NÃO LIDO: ${a.erro}.`;
+      } else if (tipo === "audio") {
+        const t = await transcrever(req.ai, a);
+        leitura = t ? `Áudio transcrito: "${t.slice(0, 1500)}"` : "NÃO LIDO: o áudio não pôde ser transcrito.";
+        modelo = t ? "whisper" : null;
+      } else if (tipo === "video") {
+        const t = await transcrever(req.ai, a);
+        leitura = "Vídeo: a imagem não pode ser vista" + (t ? `; a fala transcrita: "${t.slice(0, 1200)}"` : ", e não deu para ouvir a fala") + ".";
+        modelo = t ? "whisper" : null;
+      } else if (IA_CHAVE && ((IMAGEM_IA.has(a.mime) && a.bytes <= IMAGEM_MAX) || a.mime === "application/pdf")) {
+        const t = await lerComClaude(a);
+        leitura = t ? t.slice(0, 1500) : "NÃO LIDO: a leitura falhou.";
+        modelo = t ? IA_MODELO_FLAVIA : null;
+      } else {
+        leitura = `NÃO LIDO: arquivo ${a.mime || tipo || "desconhecido"} não é lido aqui.`;
+      }
+    } catch (e) { leitura = "NÃO LIDO: a leitura falhou."; }
+    m.leitura = leitura;
+    // Falhou por motivo que pode passar (rede, modelo fora do ar): não
+    // grava, para tentar de novo no próximo ponto. Falha definitiva
+    // (sem arquivo, tipo que não se lê) grava, para não insistir.
+    const definitiva = !/falhou|não pôde ser transcrito|não deu para ouvir/.test(leitura) || modelo;
+    if (definitiva) {
+      try {
+        await banco(`${REST("wa_mensagem")}?id=eq.${m.id}`, {
+          method: "PATCH", headers: json(tok, { Prefer: "return=minimal" }),
+          body: JSON.stringify({ leitura, leitura_em: new Date().toISOString(), leitura_modelo: modelo }),
+        });
+      } catch (e) {}
+    }
+    feitas++;
+  }
+  return feitas;
 }
 
 /**

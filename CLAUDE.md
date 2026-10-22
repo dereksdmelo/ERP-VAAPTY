@@ -2708,13 +2708,46 @@ Flávia perguntou o modelo quatro vezes seguidas. Agora nenhuma
 pergunta se repete, e sem o modelo ela vai para o horário. **Quem mexer no prompt roda uma conversa inteira
 antes de dar por pronto** — é assim que essas aparecem.
 
+**Ela lê foto, documento e áudio (0073, 22/10/2026).** O Derek: *"preciso
+que a IA consiga abrir fotos, videos e principalmente documentos… e
+com isso consiga decifrar qual o carro"* — e logo depois, *"ela precisa
+entender audio também"*. Cada mídia do cliente é lida **uma vez** e a
+leitura fica em `wa_mensagem.leitura`: refazer o rascunho não paga de
+novo, e a mesma leitura vai servir quando ela atender de verdade.
+
+| mídia | quem lê |
+|-------|---------|
+| foto, PDF (CRLV, ATPV, print) | o próprio Claude, que lê imagem e documento |
+| áudio | o Whisper do Workers AI (binding `AI` no `wrangler.jsonc`) |
+| vídeo | **ninguém vê a imagem** — a API não aceita vídeo; só a fala é transcrita |
+
+**A chave de serviço continua em `api/foto.js`** (decisão 9): o
+arquivo é baixado por `midiaParaIA()`, exportada de lá, que lê a
+mensagem pelo token do usuário antes de a chave tocar o bucket. O
+`api/atendimento.js` recebe os bytes, nunca a chave.
+
+**A leitura não traz CPF, RG, nome do dono, RENAVAM nem chassi** — a
+instrução manda deixar de fora, e o `semNumeros` corta o que escapar.
+**Ele cortava o ano do carro também** ("2019/2020" tem oito dígitos e
+uma barra): passou a cortar só o que tem nove dígitos ou mais.
+
+**Quando a leitura não diz o carro, ela pergunta — uma vez.** Leitura
+"NÃO IDENTIFICADO", "NÃO LIDO", vídeo e mídia ainda não lida levam a
+pedir modelo e ano; carro que a foto ou o CRLV já mostraram não é
+perguntado de novo. **No máximo quatro mídias por rascunho**, para o
+rascunho não levar um minuto numa conversa de doze fotos.
+
+**Falha que pode passar não é gravada** (rede, modelo fora do ar), para
+tentar de novo; falha definitiva (sem arquivo guardado, tipo que não se
+lê) é, para não insistir. Mídia de antes de 06/10/2026 não tem arquivo
+(decisão 48) e vira "NÃO LIDO".
+
 **Aproximação conhecida:** num replay de dias atrás, os horários livres
 saem da agenda de HOJE. Só pesa no horário que já tinha gente demais.
 
 **Perguntas em aberto para o Derek:** quantos clientes cabem no mesmo
 horário (`POR_HORARIO = 2`, chute meu); e a IA ainda não manda os
-lembretes nem lê áudio — no treino ela só responde ao que o cliente
-escreveu.
+lembretes — no treino ela só responde ao que o cliente mandou.
 
 ### 61. Contas e caixas: o dinheiro da gaveta também é conta
 

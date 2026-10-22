@@ -211,6 +211,9 @@ Corrige a análise de 05/10, que dizia que nenhuma lia áudio ou foto:
 - **nenhuma abre vídeo**, e a Camila diz isso ao cliente ("vídeo eu
   não consigo abrir, manda foto ou escreve").
 
+**Feito em 22/10/2026** (decisão 60 do CLAUDE.md): a Flávia lê foto e
+documento pelo próprio modelo e o áudio pelo Whisper; vídeo, só a fala.
+
 Para a nossa: a mídia já é guardada desde 06/10 (decisão 48). Áudio
 pede transcrição antes do modelo; foto vai direto (Haiku lê imagem).
 Vídeo: a mesma frase da Camila, que é honesta.

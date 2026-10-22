@@ -70,7 +70,18 @@ confere("cliente sem resposta também é ponto", [pts[1].mensagem_id, pts[1].ori
 console.log("a conversa que vai ao modelo");
 const txt = F.conversaEmTexto([M("x", false, "meu fone é 47 99624-1555 e o cpf 123.456.789-09", "2026-10-07T20:01:00Z")]);
 confere("telefone e CPF não saem daqui", /99624|456\.789/.test(txt), false);
+confere("o ano do carro não some", F.conversaEmTexto([M("y", false, "Onix 2019/2020", "2026-10-07T20:01:00Z")]).includes("2019/2020"), true);
 confere("a hora é a de Joinville", txt.includes("07/10 17:01"), true);
+
+console.log("a mídia lida");
+const midia = (leitura, tipo, texto) => ({ id: "m", eco: false, tipo: "midia", texto: texto || null, anexo: { tipo }, leitura, quando: "2026-10-07T20:01:00Z" });
+const lida = F.conversaEmTexto([midia("CRLV de um Onix LT 2019/2020 prata.", "document")]);
+confere("a leitura entra na conversa", lida.includes("mandou um documento. Leitura do arquivo: CRLV de um Onix LT 2019/2020 prata."), true);
+confere("mídia sem leitura não finge que foi vista", F.conversaEmTexto([midia(null, "image")]).includes("o arquivo ainda não foi lido"), true);
+confere("a legenda vai junto", F.conversaEmTexto([midia(null, "image", "esse é o carro")]).includes('com a legenda "esse é o carro"'), true);
+confere("número longo da leitura também some", /12345678909/.test(F.conversaEmTexto([midia("CPF 12345678909 no documento", "document")])), false);
+const pm = F.pontosDe([midia("Áudio transcrito: \"quero vender meu Gol\"", "audio")]);
+confere("o ponto do treino mostra o que o áudio disse", pm[0].cliente.includes("quero vender meu Gol"), true);
 
 console.log("a saída do modelo");
 const livres = F.horariosLivres(cfg, "2026-10-16T10:00", []);
@@ -93,6 +104,7 @@ confere("os horários livres estão lá", ins.includes("sábado 17/10 (2026-10-1
 confere("o sábado diz até 13h", ins.includes("Sábado: a loja abre às 09:00; agendamentos de 09:00 a 13:00"), true);
 confere("a correção do gerente vira exemplo", ins.includes("Resposta aprovada: O valor sai da avaliação."), true);
 confere("dois horários, nunca a agenda inteira", ins.includes("Listar mais de DOIS horários"), true);
+confere("ela usa a leitura e pergunta só se faltar", ins.includes("NÃO IDENTIFICADO") && ins.includes("peça com naturalidade o modelo e o ano"), true);
 confere("intermediação, não compra", ins.includes("Nunca diga que \"a loja compra\""), true);
 
 console.log(falhas ? `\n${falhas} falha(s)` : "\ntudo certo");

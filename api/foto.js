@@ -1274,3 +1274,40 @@ module.exports = async function handler(req, res) {
     return res.status(e.status || 500).json({ erro: limpar(e.message) || "Falha na operação com a foto." });
   }
 };
+
+/* A MÍDIA LIDA PELA IA (22/10/2026). A Flávia precisa ver a foto, o
+ * documento e ouvir o áudio que o cliente mandou — e o arquivo está no
+ * bucket privado, que só a chave de serviço abre (decisão 9).
+ *
+ * **Por isso a função mora aqui e é exportada, em vez de a chave ir
+ * para o api/atendimento.js.** Quem chama passa o token do usuário, e a
+ * ordem é a de sempre: a mensagem é lida PELO TOKEN, a RLS da 0054
+ * decide o que ele enxerga, e só então a chave baixa o arquivo — e só
+ * os arquivos das mensagens que a RLS devolveu, na pasta `wa/`.
+ *
+ * Devolve os bytes em base64, não um link: o modelo de voz não aceita
+ * endereço, e o da Anthropic aceita os dois do mesmo jeito. */
+async function midiaParaIA(tok, ids, teto) {
+  const lista = (ids || []).filter((x) => RX_UUID.test(String(x))).slice(0, 10);
+  if (!lista.length || !URL_BASE || !CHAVE) return [];
+  const r = await fetch(`${URL_BASE}/rest/v1/wa_mensagem?select=id,anexo&id=in.(${lista.join(",")})`,
+    { headers: { apikey: ANON, Authorization: tok } });
+  if (!r.ok) return [];
+  const linhas = await r.json().catch(() => []);
+  const saida = [];
+  for (const l of linhas) {
+    const a = l.anexo || {};
+    const chave = String(a.chave || "");
+    if (!chave || chave.slice(0, PASTA_WA.length + 1) !== `${PASTA_WA}/`) { saida.push({ id: l.id, erro: "sem arquivo guardado" }); continue; }
+    try {
+      const b = await fetch(`${STORAGE()}/object/${BUCKET_DOC}/${paraURL(chave)}`, { headers: hArquivo() });
+      if (!b.ok) { saida.push({ id: l.id, erro: "arquivo não baixou" }); continue; }
+      const buf = Buffer.from(await b.arrayBuffer());
+      if (buf.length > (teto || MAX_DOC)) { saida.push({ id: l.id, erro: "arquivo grande demais" }); continue; }
+      const mime = String(a.mime || b.headers.get("content-type") || "").split(";")[0];
+      saida.push({ id: l.id, tipo: a.tipo || "", mime, voz: !!a.voz, bytes: buf.length, base64: buf.toString("base64") });
+    } catch (e) { saida.push({ id: l.id, erro: "arquivo não baixou" }); }
+  }
+  return saida;
+}
+module.exports.midiaParaIA = midiaParaIA;

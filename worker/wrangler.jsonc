@@ -34,6 +34,10 @@
   // A ponte do WhatsApp, por binding. **Não por URL**: fetch de Worker
   // para Worker pelo endereço `workers.dev` não chega do outro lado.
   "services": [{ "binding": "PONTE", "service": "vaapty-ponte-whatsapp" }],
+  // O Whisper que transcreve o áudio do cliente para a Flávia (0073).
+  // Workers AI cobra por uso, dentro da conta do Cloudflare -- sem chave
+  // nova e sem o áudio sair para outro fornecedor.
+  "ai": { "binding": "AI" },
   // O despertador da ponte (ver `scheduled` no index.js): sem ele os
   // containers do WhatsApp dormem em 15 minutos e param de escutar.
   "triggers": { "crons": ["*/5 * * * *"] },

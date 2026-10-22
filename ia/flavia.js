@@ -118,7 +118,11 @@ function horariosLivres(cfg, agora, ocupados) {
 // Número longo é telefone, CPF, conta ou placa de financiamento: não
 // muda a resposta e não precisa sair daqui (decisão 31 — só o texto
 // vai, e o texto sem o que identifica).
-const semNumeros = (t) => String(t || "").replace(/\d[\d .\-/]{7,}\d/g, "[número]");
+// Só corta o que tem nove dígitos ou mais: "2019/2020" é o ano do
+// carro, e é justamente o que a Flávia precisa ler — a primeira versão
+// o apagava junto com o telefone.
+const semNumeros = (t) => String(t || "").replace(/\d[\d .\-/]{7,}\d/g,
+  (x) => (x.replace(/\D/g, "").length >= 9 ? "[número]" : x));
 
 const MIDIA = { image: "uma foto", audio: "um áudio", video: "um vídeo", document: "um documento", sticker: "uma figurinha" };
 function linhaDa(m) {
@@ -129,7 +133,12 @@ function linhaDa(m) {
   if (m.tipo === "reacao") return `${quem} (${rot}): [reagiu com um emoji]`;
   const tipo = (m.anexo && (m.anexo.tipo || m.anexo.mimetype || "")) || "";
   const qual = MIDIA[String(tipo).split("/")[0]] || "um arquivo";
-  return `${quem} (${rot}): [mandou ${qual}${m.texto ? `: ${semNumeros(m.texto)}` : ""} — você não consegue abrir]`;
+  const legenda = m.texto || (m.anexo && m.anexo.legenda) || "";
+  const junto = legenda ? `, com a legenda "${semNumeros(legenda)}"` : "";
+  // A leitura (0073) é o que a IA viu ou ouviu no arquivo. Sem ela, a
+  // mídia ainda não foi lida — e a Flávia não pode fingir que viu.
+  if (m.leitura) return `${quem} (${rot}): [mandou ${qual}${junto}. Leitura do arquivo: ${semNumeros(m.leitura)}]`;
+  return `${quem} (${rot}): [mandou ${qual}${junto} — o arquivo ainda não foi lido]`;
 }
 
 /** A conversa até o ponto, em texto. As mais antigas caem primeiro
@@ -245,7 +254,10 @@ Os lembretes da véspera e do dia são automáticos — não precisa prometê-lo
 - Se o cliente disser que não quer mais, que já vendeu ou pedir para parar: agradeça numa frase e encerre, sem insistir.
 
 ## Mídia
-Você não abre foto, áudio, vídeo nem documento. Se o cliente mandar, diga com naturalidade que não consegue abrir aqui e peça para escrever o que precisa — e siga o roteiro.
+Foto, documento e áudio do cliente chegam lidos: a conversa traz, junto da mídia, a "Leitura do arquivo" — o que se viu na foto ou no documento, ou o áudio transcrito. Use como se você mesma tivesse visto ou ouvido, com naturalidade ("vi aqui o documento do seu Onix 2019").
+- O carro que estiver na leitura vale como resposta à pergunta do carro: não pergunte de novo o que a foto ou o CRLV já disseram.
+- Leitura que começa com "NÃO IDENTIFICADO" ou "NÃO LIDO", vídeo (você não vê a imagem de vídeo, só ouve a fala) e mídia "ainda não lida": se o carro ainda não está claro na conversa, peça com naturalidade o modelo e o ano — uma vez — e siga para o horário. Não diga que "não consegue abrir" o arquivo; diga o que precisa.
+- Nunca repita para o cliente placa, nome do dono ou número de documento que apareça na leitura.
 
 ## Jeito de escrever
 WhatsApp: mensagens curtas, português do Brasil, tom simpático e direto, sem formalidade. No máximo um emoji por resposta. Responda o que o cliente perguntou ANTES de perguntar outra coisa. Use o nome dele quando souber.

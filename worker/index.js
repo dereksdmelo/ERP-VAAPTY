@@ -133,6 +133,10 @@ export default {
          curl de fora respondia 200. O service binding é o caminho
          oficial, e de quebra não passa pela internet. */
       ponte: env.PONTE || null,
+      /* O Workers AI, pelo mesmo caminho: o Whisper que transcreve o
+         audio que o cliente manda (api/atendimento.js, lerMidias). Na
+         Vercel nao existe, e la o audio fica sem leitura -- dito. */
+      ai: env.AI || null,
     };
 
     const { res, espera } = resposta();
