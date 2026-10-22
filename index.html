@@ -950,6 +950,15 @@ async function waApagarCanal(slug) {
   if (!r.ok) throw new Error(d.erro || "Não consegui apagar o número.");
   return true;
 }
+// O aviso de chegada no grupo (0074) grava à parte dos horários: PATCH.
+async function gravarAvisoChegada(dados) {
+  const r = await fetchAut("/api/perfil?recurso=config-loja", {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui salvar o aviso.");
+  return d.config;
+}
 async function waEstado(canal, acao) {
   const r = await fetchAut(`/api/atendimento?recurso=wa&canal=${encodeURIComponent(canal)}&acao=${acao || "estado"}`,
     acao && acao !== "estado" ? { method: "POST" } : undefined);
@@ -4176,6 +4185,17 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
             local: null, estado: "ok", erro: "",
           }));
         } catch (e) { setErroFoto(e.message); }
+      }
+
+      // A hora em que a janela do "Chegou" registrou o cliente (0074)
+      // preenche a hora de chegada da Abordagem — só se ela estiver
+      // vazia: o que alguém digitou aqui não muda sozinho (decisão 43).
+      const hc = atendimento && atendimento.chegada_em
+        ? new Date(atendimento.chegada_em).toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" })
+        : "";
+      if (hc && !(fRef.current || {}).chegada) {
+        fRef.current = { ...(fRef.current || VAZIO), chegada: hc };
+        setF((x) => (x.chegada ? x : { ...x, chegada: hc }));
       }
 
       aplicar(() => [...doServidor, ...pendentes]);
@@ -9646,6 +9666,92 @@ function NovoCanal({ aoCriar, aoFechar }) {
   );
 }
 
+/* O AVISO DE CHEGADA NO GRUPO (decisão 63, 0074).
+ *
+ * Quando o "Chegou" abre um atendimento, a loja manda no grupo de
+ * atendimento do WhatsApp o NOME, o VEÍCULO, a DATA e quem ATENDEU.
+ * Aqui o gerente escolhe de qual número sai e para qual grupo. A lista
+ * de grupos vem da própria ponte — os grupos de que aquele número é
+ * membro —, porque o id do grupo não é coisa que alguém saiba digitar.
+ * Só número ligado (com telefone) aparece: os outros não mandam nada. */
+function AvisoDeChegada({ canais }) {
+  const [cfg, setCfg] = useState(null);
+  const [canal, setCanal] = useState("");
+  const [grupos, setGrupos] = useState(null);
+  const [grupo, setGrupo] = useState("");
+  const [msg, setMsg] = useState("");
+  const [indo, setIndo] = useState(false);
+  const ligados = (canais || []).filter((c) => c.ativo && c.telefone);
+
+  useEffect(() => {
+    lerConfigLoja().then((d) => {
+      const c = d.config || {};
+      setCfg(c); setCanal(c.aviso_canal || ""); setGrupo(c.aviso_grupo || "");
+    }).catch((e) => setMsg(e.message));
+  }, []);
+
+  const buscar = async (slug) => {
+    setGrupos(null); setMsg("");
+    if (!slug) return;
+    try {
+      const d = await waEstado(slug, "grupos");
+      if (!d.ok) { setMsg(d.erro || "A ponte não devolveu os grupos."); return; }
+      setGrupos(d.grupos || []);
+    } catch (e) {
+      setMsg(/caminho desconhecido/.test(e.message)
+        ? "Este número ainda roda a versão antiga da ponte. Use “reiniciar” no cartão dele e tente de novo em um minuto."
+        : e.message);
+    }
+  };
+  useEffect(() => { if (canal) buscar(canal); }, [canal]);
+
+  const salvar = async (desligar) => {
+    setIndo(true); setMsg("");
+    try {
+      const g = (grupos || []).filter((x) => x.id === grupo)[0];
+      const novo = await gravarAvisoChegada(desligar ? { aviso_canal: null, aviso_grupo: null }
+        : { aviso_canal: canal, aviso_grupo: grupo, aviso_grupo_nome: g ? g.nome : (cfg && cfg.aviso_grupo_nome) });
+      setCfg(novo);
+      if (desligar) { setCanal(""); setGrupo(""); setGrupos(null); }
+      setMsg(desligar ? "Aviso desligado." : "Salvo. O próximo “Chegou” avisa o grupo.");
+    } catch (e) { setMsg(e.message); }
+    setIndo(false);
+  };
+
+  const ativo = cfg && cfg.aviso_canal && cfg.aviso_grupo;
+  const mudou = cfg && (canal !== (cfg.aviso_canal || "") || grupo !== (cfg.aviso_grupo || ""));
+  return (
+    <div className="mb-4 rounded-xl border p-4" style={{ borderColor: C.line, background: C.paper }}>
+      <div className="text-[15px] font-semibold">Aviso de chegada no grupo</div>
+      <p className="mt-1 text-[13px]" style={{ color: C.mute }}>
+        {ativo
+          ? <>Ligado: sai pelo número <b>{(canais.filter((c) => c.slug === cfg.aviso_canal)[0] || {}).nome || cfg.aviso_canal}</b> para o grupo <b>{cfg.aviso_grupo_nome || "escolhido"}</b>, a cada “Chegou”.</>
+          : "Desligado. Escolha o número que manda e o grupo de atendimento."}
+      </p>
+      <div className="mt-3 grid gap-2 lg:grid-cols-2">
+        <select className={inputCls} style={inputSty} value={canal} onChange={(e) => { setCanal(e.target.value); setGrupo(""); }}>
+          <option value="">Número que manda</option>
+          {ligados.map((c) => <option key={c.slug} value={c.slug}>{c.nome}</option>)}
+        </select>
+        <select className={inputCls} style={inputSty} value={grupo} disabled={!grupos} onChange={(e) => setGrupo(e.target.value)}>
+          <option value="">{canal && !grupos && !msg ? "buscando os grupos…" : "Grupo de atendimento"}</option>
+          {(grupos || []).map((g) => <option key={g.id} value={g.id}>{g.nome} · {g.membros} pessoas</option>)}
+          {grupo && grupos && !grupos.some((g) => g.id === grupo) && <option value={grupo}>{(cfg && cfg.aviso_grupo_nome) || "grupo salvo"} (este número não está mais nele)</option>}
+        </select>
+      </div>
+      {grupos && !grupos.length && <p className="mt-2 text-[12.5px]" style={{ color: C.laranja }}>Este número não está em nenhum grupo. Adicione-o ao grupo de atendimento no WhatsApp.</p>}
+      <p className="mt-2 text-[12px]" style={{ color: C.mute }}>
+        Sai assim: <span style={{ fontFamily: F.mono }}>NOME: DJONATHAN · VEÍCULO: KWID · DATA: 22/10 · TIAGO ATENDEU</span>, uma informação por linha.
+      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <BotaoPrimario disabled={!canal || !grupo || !mudou || indo} onClick={() => salvar(false)}>Salvar</BotaoPrimario>
+        {ativo && <button className="rounded-lg border px-4 py-2 text-[14px]" style={{ borderColor: C.line }} disabled={indo} onClick={() => salvar(true)}>Desligar o aviso</button>}
+        {msg && <span className="text-[13px]" style={{ color: /Salvo|desligado/.test(msg) ? C.verde : C.laranja }}>{msg}</span>}
+      </div>
+    </div>
+  );
+}
+
 function TelaWhatsApp() {
   const [canais, setCanais] = useState(null);
   const [erro, setErro] = useState("");
@@ -9687,15 +9793,14 @@ function TelaWhatsApp() {
           <NovoCanal aoCriar={criar} aoFechar={() => setCadastrando(false)} />
         </div>
       )}
+      {canais && <AvisoDeChegada canais={canais} />}
       <div className="grid gap-4 lg:grid-cols-2">
         {(canais || []).map((c) => <CartaoCanal key={c.slug} canal={c} aoMudar={mudar} aoApagar={apagar} />)}
       </div>
       <div className="mt-4">
         <Pendente>
-          Por enquanto a ponte só ESCUTA: ela registra o que chega e o que a loja
-          responde, e não manda mensagem. A tela da caixa de entrada — todas as
-          conversas num lugar só — vem em seguida, em cima do que estiver
-          registrado aqui.
+          Fora o aviso de chegada no grupo, a ponte só ESCUTA: ela registra o que
+          chega e o que a loja responde, e não manda mensagem para cliente.
         </Pendente>
       </div>
     </div>
@@ -12614,6 +12719,105 @@ function QuandoVoltar({ titulo, valor, aoEscolher, aoFechar }) {
   );
 }
 
+/* A JANELA DO "CHEGOU" (22/10/2026, o Derek).
+ *
+ * Marcar que o cliente chegou abre esta janela em vez de criar o
+ * atendimento direto: quem vai atender, o nome e o carro — já
+ * preenchidos com o que a pré-venda sabia, e corrigíveis ali, porque é
+ * na porta que se descobre que o "marysantinha710" se chama Mary — e
+ * a data e a hora do momento. As duas mudam para quem registra depois
+ * (retroativo); futuro não vale.
+ *
+ * É ela que chama o servidor, e o servidor manda o aviso no grupo de
+ * atendimento (decisão 63). Se o aviso falhar, a janela NÃO fecha
+ * sozinha: mostra o texto pronto para alguém mandar à mão. Fechar
+ * calada deixaria o grupo sem saber que tem cliente na loja. */
+function JanelaChegou({ lead, equipe, aoFechar, aoPronto }) {
+  const agora = () => new Date().toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
+  const negs = (equipe || []).filter((n) => n.ativo && n.papel === "negociador");
+  const [neg, setNeg] = useState(negs.some((n) => n.id === lead.negociador_id) ? lead.negociador_id : "");
+  const [nome, setNome] = useState(lead.nome || "");
+  const [carro, setCarro] = useState(lead.carro || "");
+  const [dia, setDia] = useState(hojeEmSP());
+  const [hora, setHora] = useState(agora());
+  const [indo, setIndo] = useState(false);
+  const [erro, setErro] = useState("");
+  const [semAviso, setSemAviso] = useState(null);
+  const n = negs.filter((x) => x.id === neg)[0];
+  const futuro = dia > hojeEmSP() || (dia === hojeEmSP() && hora > agora());
+  const pronto = n && nome.trim() && dia && hora && !futuro;
+
+  const confirmar = async () => {
+    setIndo(true); setErro("");
+    try {
+      const d = await leadCompareceu(lead.id, {
+        negociador_id: n.id, negociador_nome: n.nome,
+        cliente_nome: nome.trim(), carro: carro.trim(), chegada: `${dia}T${hora}`,
+      });
+      const av = d.aviso || {};
+      if (av.configurado && !av.enviado) {
+        setSemAviso({ d, erro: av.erro || "",
+          texto: [`NOME: ${nome.trim().toUpperCase()}`, `VEÍCULO: ${(carro.trim() || "não informado").toUpperCase()}`,
+                  `DATA: ${dia.slice(8, 10)}/${dia.slice(5, 7)}`, `${n.nome.toUpperCase()} ATENDEU`].join("\n") });
+      } else aoPronto(d);
+    } catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center lg:items-center" style={{ background: "rgba(24,18,33,0.45)" }}
+      onClick={() => (semAviso ? aoPronto(semAviso.d) : aoFechar())}>
+      <div className="w-full max-w-md rounded-t-2xl p-4 lg:rounded-2xl" style={{ background: C.paper }} onClick={(e) => e.stopPropagation()}>
+        {semAviso ? (
+          <div>
+            <div className="text-[17px] font-bold">{nome.trim()} virou atendimento</div>
+            <p className="mt-2 text-[13.5px]" style={{ color: C.laranja }}>
+              Mas o grupo de atendimento <b>não foi avisado</b>{semAviso.erro ? ` (${semAviso.erro})` : ""}. Mande à mão:
+            </p>
+            <pre className="mt-2 whitespace-pre-wrap rounded-lg border p-3 text-[13px]" style={{ fontFamily: F.mono, borderColor: C.line, background: C.bg }}>{semAviso.texto}</pre>
+            <div className="mt-3 flex gap-2">
+              <BotaoPrimario className="flex-1" onClick={() => { try { navigator.clipboard.writeText(semAviso.texto); } catch (e) {} }}>Copiar o texto</BotaoPrimario>
+              <button className="rounded-lg border px-4 text-[14px]" style={{ borderColor: C.line }} onClick={() => aoPronto(semAviso.d)}>Fechar</button>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <div className="flex items-baseline justify-between">
+              <span className="text-[17px] font-bold">O cliente chegou</span>
+              <button onClick={aoFechar} className="text-[13px]" style={{ color: C.mute }}>fechar</button>
+            </div>
+            <Campo label="Quem vai atender">
+              <select className={inputCls} style={{ ...inputSty, borderColor: neg ? C.line : C.laranja }} value={neg} onChange={(e) => setNeg(e.target.value)} autoFocus>
+                <option value="">Escolha o negociador</option>
+                {negs.map((x) => <option key={x.id} value={x.id}>{x.nome}</option>)}
+              </select>
+            </Campo>
+            <Campo label="Nome do cliente">
+              <input className={inputCls} style={inputSty} value={nome} onChange={(e) => setNome(e.target.value)} />
+            </Campo>
+            <Campo label="Carro">
+              <input className={inputCls} style={inputSty} value={carro} placeholder="ex.: Kwid" onChange={(e) => setCarro(e.target.value)} />
+            </Campo>
+            <div className="grid grid-cols-2 gap-2">
+              <Campo label="Data">
+                <input type="date" className={inputCls} style={inputSty} value={dia} max={hojeEmSP()} onChange={(e) => setDia(e.target.value)} />
+              </Campo>
+              <Campo label="Hora da chegada">
+                <input type="time" className={inputCls} style={inputSty} value={hora} onChange={(e) => setHora(e.target.value)} />
+              </Campo>
+            </div>
+            {futuro && <p className="text-[12.5px]" style={{ color: C.laranja }}>A chegada não pode estar no futuro.</p>}
+            {erro && <p className="text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
+            <BotaoPrimario className="mt-3 w-full" disabled={!pronto || indo} onClick={confirmar}>
+              {indo ? "abrindo o atendimento…" : "Abrir o atendimento"}
+            </BotaoPrimario>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Agendador({ lead, equipe, aoFechar, aoAgendar }) {
   const [dia, setDia] = useState(String(lead.agendado_para || "").slice(0, 10) || hojeEmSP());
   const [hora, setHora] = useState(horaBR(lead.agendado_para) || "");
@@ -12807,13 +13011,10 @@ function TelaAcoes({ equipe, aoVerConversa }) {
    * sentando na mesa, e dali em diante ele é do negociador. O endpoint
    * leva o que a pré-venda já perguntou — ninguém redigita com o
    * cliente parado na frente (decisão 27). */
-  const chegou = async (l) => {
-    try {
-      await leadCompareceu(l.id, { negociador_id: l.negociador_id, negociador_nome: l.negociador_nome });
-      setAviso(`${l.nome} virou atendimento.`);
-      carregar();
-    } catch (e) { setErro(e.message); }
-  };
+  // "Veio" abre a janela do Chegou (quem atende, nome, carro e hora).
+  const [chegando, setChegando] = useState(null);
+  const chegou = (l) => setChegando(l);
+  const chegouFeito = (l) => { setChegando(null); setAviso(`${l.nome} virou atendimento.`); carregar(); };
 
   const listas = (d && d.listas) || [];
   const total = listas.reduce((t, x) => t + x.total, 0);
@@ -12972,6 +13173,9 @@ function TelaAcoes({ equipe, aoVerConversa }) {
         <Ligar para={ligando.telefone} nome={ligando.nome} chamadas={ligando.ligacoes}
           aoLigar={async () => { try { await registrarLigacao(ligando.id); carregar(); } catch (e) {} }}
           aoFechar={() => setLigando(null)} />
+      )}
+      {chegando && (
+        <JanelaChegou lead={chegando} equipe={equipe || []} aoFechar={() => setChegando(null)} aoPronto={(d) => chegouFeito(chegando)} />
       )}
       {agendando && (
         <Agendador lead={agendando} equipe={equipe || []} aoFechar={() => setAgendando(null)}
@@ -13770,12 +13974,15 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
     } catch (e) { setErro(e.message); }
   };
 
-  const chegou = async (l) => {
+  // "Compareceu" abre a janela do Chegou; o cartão só muda de coluna
+  // quando o atendimento existe de verdade.
+  const [chegando, setChegando] = useState(null);
+  const chegou = (l) => setChegando(l);
+  const chegouFeito = (l) => {
+    setChegando(null);
     setLista((ls) => (ls || []).map((x) => (x.id === l.id ? { ...x, status: "compareceu" } : x)));
-    try {
-      await leadCompareceu(l.id, { negociador_id: l.negociador_id, negociador_nome: l.negociador_nome });
-      setAviso(`${l.nome} virou atendimento.`);
-    } catch (e) { setErro(e.message); carregar(); }
+    setAviso(`${l.nome} virou atendimento.`);
+    carregar();
   };
 
   /* MOVER PARA UMA COLUNA NÃO É SÓ TROCAR O STATUS.
@@ -14216,6 +14423,9 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
             setExcluindo(null);
           }} />
       )}
+      {chegando && (
+        <JanelaChegou lead={chegando} equipe={equipe || []} aoFechar={() => setChegando(null)} aoPronto={(d) => chegouFeito(chegando)} />
+      )}
       {agendando && (
         <Agendador lead={agendando} equipe={equipe || []} aoFechar={() => setAgendando(null)}
           aoAgendar={async (mud) => { await mexer(agendando, { ...mud, status: "agendado", proximo_contato: null }); setAgendando(null); }} />
@@ -14530,14 +14740,14 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
     try { await atualizarLead(l.id, mud); carregar(); }
     catch (e) { setErro(e.message); carregar(); }
   };
-  const chegou = async (l) => {
-    setIndo(l.id); setErro("");
-    try {
-      const d = await leadCompareceu(l.id, { negociador_id: l.negociador_id, negociador_nome: l.negociador_nome });
-      carregar();
-      if (aoAbrirAtendimento && d.atendimento_id) aoAbrirAtendimento(d.atendimento_id);
-    } catch (e) { setErro(e.message); }
-    setIndo("");
+  // "Chegou" abre a janela (quem atende, nome, carro e hora); o
+  // atendimento nasce quando ela confirma, e abre em seguida.
+  const [chegando, setChegando] = useState(null);
+  const chegou = (l) => setChegando(l);
+  const chegouFeito = (d) => {
+    setChegando(null);
+    carregar();
+    if (aoAbrirAtendimento && d && d.atendimento_id) aoAbrirAtendimento(d.atendimento_id);
   };
 
   const hoje = hojeEmSP();
@@ -14788,6 +14998,9 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
         <Ligar para={ligando.telefone} nome={ligando.nome} chamadas={ligando.ligacoes}
           aoLigar={async () => { try { await registrarLigacao(ligando.id); carregar(); } catch (e) {} }}
           aoFechar={() => setLigando(null)} />
+      )}
+      {chegando && (
+        <JanelaChegou lead={chegando} equipe={equipe} aoFechar={() => setChegando(null)} aoPronto={(d) => chegouFeito(d)} />
       )}
       {agendando && (
         <Agendador lead={agendando} equipe={equipe} aoFechar={() => setAgendando(null)}

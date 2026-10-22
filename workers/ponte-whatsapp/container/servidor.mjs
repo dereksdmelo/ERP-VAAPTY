@@ -306,6 +306,10 @@ async function ligar() {
    endereco (onWhatsApp), tentando com e sem o 9; guarda por 1 dia. Numero que nao tem WhatsApp vira ERRO. */
 const _jids = new Map();
 async function jidDe(para) {
+  /* GRUPO VAI PELO ID, COMO VEIO (22/10/2026). O aviso de chegada do ERP vai para o grupo de atendimento da loja,
+     e o id de grupo (`120363...@g.us`) nao e telefone: tirar o que nao e digito e perguntar ao onWhatsApp o
+     transformaria num numero que nao existe. So passa grupo de que este numero e membro (`/grupos`). */
+  if (/^[\d-]+@g\.us$/.test(String(para))) return String(para);
   const d = String(para).replace(/\D/g, "");
   const c = _jids.get(d); if (c && Date.now() - c.q < 86400000) return c.jid;
   const tenta = [d];
@@ -387,6 +391,15 @@ http.createServer(async (req, res) => {
     if (canal && !CANAL) { CANAL = canal; ligar(); }
     if (u.pathname === "/estado") { if (!sock && !ligando && CANAL) ligar(); return json(res, 200, Object.assign({ ok: true, canal: CANAL, lids: lidPn.size, pulados: pulados.slice(0, 10), testeBotoes: testeLog.slice(0, 9) }, st)); }
     if (u.pathname === "/enviar" && req.method === "POST") { const b = JSON.parse(await lerCorpo(req) || "{}"); return json(res, 200, await enviar(b.para, b.conteudo || {})); }
+    /* OS GRUPOS DESTE NUMERO (22/10/2026), para o gerente escolher na tela para onde vai o aviso de chegada.
+       So id, nome e quantos participantes: os numeros de quem esta no grupo nao saem daqui. */
+    if (u.pathname === "/grupos") {
+      if (!sock || st.estado !== "conectado") return json(res, 200, { ok: false, erro: "O número está desconectado — escaneie o QR code." });
+      const g = await sock.groupFetchAllParticipating();
+      const grupos = Object.values(g || {}).map((x) => ({ id: x.id, nome: x.subject || "(sem nome)", membros: (x.participants || []).length }))
+        .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+      return json(res, 200, { ok: true, grupos });
+    }
     if (u.pathname === "/sair" && req.method === "POST") { try { await sock.logout(); } catch (e) {} await authZerar(); return json(res, 200, { ok: true }); }
     return json(res, 404, { ok: false, erro: "caminho desconhecido" });
   } catch (e) { return json(res, 500, { ok: false, erro: String((e && e.message) || e).slice(0, 200) }); }

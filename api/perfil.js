@@ -575,6 +575,10 @@ function configDaLinha(l) {
     c[`${g}_${k}`] = horaCurta(l[`${g}_${k}`]);
   }));
   c.intervalo_min = Number(l.intervalo_min) || CONFIG_LOJA_PADRAO.intervalo_min;
+  // O aviso de chegada no grupo do WhatsApp (0074): sem os dois, não sai.
+  c.aviso_canal = texto(l.aviso_canal) || null;
+  c.aviso_grupo = texto(l.aviso_grupo) || null;
+  c.aviso_grupo_nome = texto(l.aviso_grupo_nome) || null;
   c.atualizado_em = l.atualizado_em || null;
   return c;
 }
@@ -623,8 +627,33 @@ async function configLoja(req, res, tok) {
     return res.status(200).json({ ok: true, config: configDaLinha(salvo), padrao: false });
   }
 
-  res.setHeader("Allow", "GET, PUT");
-  return res.status(405).json({ erro: "Use GET ou PUT." });
+  /* O AVISO DE CHEGADA (0074) grava à parte dos horários: são dois
+     blocos da tela, e salvar um não pode apagar o outro. PATCH na linha
+     que já existe — sem ela, não há loja configurada para avisar. */
+  if (req.method === "PATCH") {
+    const c = await lerCorpo(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    const canal = texto(c.aviso_canal) || null;
+    const grupo = texto(c.aviso_grupo) || null;
+    if (canal && !/^[a-z0-9_-]{2,40}$/.test(canal)) return res.status(400).json({ erro: "Número desconhecido." });
+    if (grupo && !/^[\d-]+@g\.us$/.test(grupo)) return res.status(400).json({ erro: "Grupo desconhecido." });
+    if (!!canal !== !!grupo) return res.status(400).json({ erro: "Escolha o número e o grupo, ou desligue o aviso." });
+    const linha = { aviso_canal: canal, aviso_grupo: grupo, aviso_grupo_nome: grupo ? (texto(c.aviso_grupo_nome) || "").slice(0, 120) || null : null,
+      atualizado_em: new Date().toISOString(), atualizado_por: donoDoToken(tok) };
+    const r = await fetch(`${base}?id=eq.1`, {
+      method: "PATCH",
+      headers: { ...cab, "Content-Type": "application/json", Prefer: "return=representation" },
+      body: JSON.stringify(linha),
+    });
+    if (!r.ok) return res.status(r.status === 401 ? 401 : 502).json({ erro: "O banco recusou a gravação." });
+    const d = await r.json().catch(() => []);
+    const salvo = Array.isArray(d) ? d[0] : d;
+    if (!salvo) return res.status(403).json({ erro: "Só o gerente muda o aviso — e os horários da loja precisam ter sido gravados antes." });
+    return res.status(200).json({ ok: true, config: configDaLinha(salvo), padrao: false });
+  }
+
+  res.setHeader("Allow", "GET, PUT, PATCH");
+  return res.status(405).json({ erro: "Use GET, PUT ou PATCH." });
 }
 
 module.exports = async function handler(req, res) {

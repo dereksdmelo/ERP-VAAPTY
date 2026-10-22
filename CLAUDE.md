@@ -2826,6 +2826,48 @@ Shinkai lista 43 "vendidos sem registro de pra quem foi"; mandar a
 venda de cada um completaria o registro (`registro_completado`), mas é
 escrita em massa num sistema de fora e espera o Derek pedir.
 
+### 63. O "Chegou" abre uma janela, e o grupo de atendimento é avisado
+
+O Derek, em 22/10/2026: marcar que o cliente chegou abre uma janela
+com **quem vai atender, o nome do cliente e o carro**, e a data e a
+hora do momento — editáveis, para quem registra depois. E a loja manda
+no grupo de atendimento do WhatsApp o texto que a equipe já mandava à
+mão:
+
+```
+NOME: DJONATHAN
+VEÍCULO: KWID
+DATA: 22/10
+TIAGO ATENDEU
+```
+
+**A janela é uma só (`JanelaChegou`), nos três lugares do "Chegou"**:
+Agendamentos, quadro e Ações. Três versões da mesma pergunta divergem
+no primeiro acréscimo. O nome corrigido ali vale para o lead também.
+
+**A hora fica no atendimento (`chegada_em`, 0074).** Até aqui a hora
+de chegada morava só na ficha da Abordagem (`f.chegada`), área de
+trabalho do aparelho, e se perdia entre o "chegou" da pré-venda e o
+negociador digitá-la de novo. Agora ela preenche a Abordagem quando
+está vazia (nunca por cima do que alguém digitou, decisão 43).
+Retroativo pode; futuro, não.
+
+**O aviso sai pela ponte, e é a primeira coisa que ela MANDA.** O
+número e o grupo são configuração (`config_loja`, 0074), escolhidos em
+Números do WhatsApp; a lista de grupos vem da própria ponte (`/grupos`),
+porque o id do grupo (`…@g.us`) não é coisa que alguém saiba digitar.
+**Grupo vai pelo id, não pelo telefone**: `jidDe()` tirava tudo que não
+é dígito e perguntaria ao WhatsApp por um número que não existe.
+
+**O aviso nunca derruba o "Chegou".** O atendimento já existe quando
+ele sai. Se falhar, a janela não fecha sozinha: mostra o texto pronto
+para copiar e mandar à mão — fechar calada deixaria o grupo sem saber
+que tem cliente na loja.
+
+**Para mandar a cliente, nada mudou**: a ponte só fala com o grupo da
+loja. Responder cliente pela ponte é a outra conversa (a Flávia no
+número da TV), com o risco de banimento que ela traz.
+
 ## Convenções do código
 
 - **Português no domínio.** Estado, funções e rótulos em pt-BR

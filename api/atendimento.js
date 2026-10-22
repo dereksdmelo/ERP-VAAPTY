@@ -370,6 +370,52 @@ const chaveFone = (t) => {
  *
  * Falha em silêncio: o atendimento é o que a pessoa veio fazer, e um
  * erro aqui não pode aparecer como se ele não tivesse sido salvo. */
+/* O AVISO NO GRUPO DE ATENDIMENTO (22/10/2026, decisão 63).
+ *
+ * A loja avisa no grupo do WhatsApp quando um cliente chega, e o Derek
+ * mandou o formato que a equipe já usa à mão:
+ *
+ *     NOME: DJONATHAN
+ *     VEÍCULO: KWID
+ *     DATA: 22/10
+ *     TIAGO ATENDEU
+ *
+ * Sai pelo número escolhido em Números do WhatsApp (`config_loja`,
+ * 0074), pela ponte. Sem número ou sem grupo configurado, não sai nada.
+ *
+ * NUNCA DERRUBA O "CHEGOU". O atendimento já foi criado quando isto
+ * roda; a ponte fora do ar ou o número desconectado viram um aviso na
+ * tela ("o grupo não foi avisado"), para alguém mandar à mão. */
+function textoDaChegada(at) {
+  const caixa = (v) => String(v || "").trim().toLocaleUpperCase("pt-BR");
+  const [, mes, dia] = /^\d{4}-(\d{2})-(\d{2})/.exec(String(at.data || "")) || [];
+  return [
+    `NOME: ${caixa(at.cliente_nome) || "SEM NOME"}`,
+    `VEÍCULO: ${caixa(at.carro_descricao) || "NÃO INFORMADO"}`,
+    `DATA: ${dia ? `${dia}/${mes}` : ""}`,
+    at.negociador_nome ? `${caixa(at.negociador_nome)} ATENDEU` : "QUEM ATENDE: A DEFINIR",
+  ].join("\n");
+}
+async function avisoDeChegada(req, tok, at) {
+  try {
+    const cfg = ((await banco(`${REST("config_loja")}?id=eq.1&select=aviso_canal,aviso_grupo`, { headers: cabecalhos(tok) })) || [])[0];
+    if (!cfg || !cfg.aviso_canal || !cfg.aviso_grupo) return { configurado: false };
+    const segredo = process.env.PONTE_SEGREDO || "";
+    const base = process.env.PONTE_URL || "";
+    if (!segredo || (!req.ponte && !base)) return { configurado: true, enviado: false, erro: "a ponte do WhatsApp não está configurada" };
+    const alvo = `${base || "https://ponte"}/enviar?canal=${encodeURIComponent(cfg.aviso_canal)}`;
+    const pedido = {
+      method: "POST", headers: { "x-ponte-segredo": segredo, "Content-Type": "application/json" },
+      body: JSON.stringify({ para: cfg.aviso_grupo, conteudo: { type: "text", text: { body: textoDaChegada(at) } } }),
+    };
+    const r = req.ponte ? await req.ponte.fetch(alvo, pedido) : await fetch(alvo, pedido);
+    const d = await r.json().catch(() => ({}));
+    return d && d.ok ? { configurado: true, enviado: true } : { configurado: true, enviado: false, erro: limpar((d && d.erro) || `a ponte respondeu ${r.status}`) };
+  } catch (e) {
+    return { configurado: true, enviado: false, erro: "a ponte não respondeu" };
+  }
+}
+
 async function leadQueVeio(tok, at) {
   try {
     const k = chaveFone(at && at.cliente_telefone);
@@ -1112,11 +1158,22 @@ async function leads(req, res, tok) {
     // telefone. É o ponto inteiro desta tela: ninguém redigita nome,
     // telefone e carro com o cliente parado na frente da mesa.
     const corpo = await lerCorpo(req) || {};
+    /* A JANELA DO "CHEGOU" (22/10/2026): quem atende, o nome e o carro
+       como estão na frente da pessoa, e a hora da chegada — a do
+       momento, ou outra para quem registra depois. A hora vem como
+       parede de Joinville ("2026-10-22T14:30") e é guardada como
+       instante, com o -03:00 que o Brasil não troca desde 2019. */
+    const nome = texto(corpo.cliente_nome) || atual.nome;
+    const carro = texto(corpo.carro) || atual.carro;
+    const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})$/.exec(String(corpo.chegada || ""));
+    const chegadaEm = m ? `${m[1]}T${m[2]}:00-03:00` : new Date().toISOString();
+    if (m && Date.parse(chegadaEm) > Date.now() + 10 * 60000) return res.status(400).json({ erro: "A chegada está no futuro." });
     const novoAt = {
-      data: hojeAqui(),
-      cliente_nome: atual.nome,
+      data: m ? m[1] : hojeAqui(),
+      chegada_em: chegadaEm,
+      cliente_nome: nome,
       cliente_telefone: atual.telefone,
-      carro_descricao: atual.carro,
+      carro_descricao: carro,
       origem: atual.origem || "outro",
       status: "cliente_na_loja",
       negociador_id: await idDePerfil(tok, corpo.negociador_id),
@@ -1130,11 +1187,14 @@ async function leads(req, res, tok) {
     const at = Array.isArray(criado) ? criado[0] : criado;
     if (!at) return res.status(403).json({ erro: "O banco recusou a criação do atendimento." });
 
+    // O nome corrigido na janela vale para o lead também: é o mesmo
+    // cliente, e o quadro continuaria chamando-o pelo apelido do WhatsApp.
     await banco(`${base}?id=eq.${id}`, {
       method: "PATCH", headers: cabJson,
-      body: JSON.stringify({ status: "compareceu", atendimento_id: at.id }),
+      body: JSON.stringify({ status: "compareceu", atendimento_id: at.id, nome, carro }),
     });
-    return res.status(201).json({ ok: true, atendimento: at, atendimento_id: at.id });
+    const aviso = await avisoDeChegada(req, tok, at);
+    return res.status(201).json({ ok: true, atendimento: at, atendimento_id: at.id, aviso });
   }
 
   if (req.method === "POST") {
@@ -2554,11 +2614,13 @@ module.exports = async function handler(req, res) {
     }
 
     const acao = String(req.query.acao || "estado");
-    const CAMINHO = { estado: "/estado", reiniciar: "/_reiniciar", sair: "/sair" };
+    // `grupos`: os grupos de que o número é membro, para escolher para
+    // onde vai o aviso de chegada (0074). Só id, nome e tamanho.
+    const CAMINHO = { estado: "/estado", reiniciar: "/_reiniciar", sair: "/sair", grupos: "/grupos" };
     if (!CAMINHO[acao]) return res.status(400).json({ erro: "ação desconhecida" });
     try {
       const alvo = `${base || "https://ponte.invalido"}${CAMINHO[acao]}?canal=${encodeURIComponent(canal)}`;
-      const pedido = { method: acao === "estado" ? "GET" : "POST", headers: { "x-ponte-segredo": segredo } };
+      const pedido = { method: acao === "estado" || acao === "grupos" ? "GET" : "POST", headers: { "x-ponte-segredo": segredo } };
       const r = req.ponte ? await req.ponte.fetch(alvo, pedido) : await fetch(alvo, pedido);
       const d = await r.json().catch(() => ({}));
       // 503 é a ponte LIGANDO, não erro: o container leva uns segundos
