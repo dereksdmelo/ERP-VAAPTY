@@ -565,6 +565,13 @@ const INSTRUCAO_LEITURA = [
   "ano de fabricação/modelo, cor, combustível e placa; e, se for foto do carro, o estado que se vê (amassado, pneu, interior).",
   "NUNCA escreva CPF, RG, nome do proprietário, endereço, RENAVAM, chassi ou número de documento — mesmo que apareçam.",
   "Não chute: se não der para saber o carro, comece a resposta com 'NÃO IDENTIFICADO:' e diga o que se vê.",
+  // O primeiro teste (22/10/2026) leu "ano 2014, conforme placa UK14"
+  // numa foto de um Fiat Pulse, que nem existia em 2014, e chamou de
+  // Tiguan a foto de um Polo Track. Ano errado e modelo errado são
+  // piores que nenhum: a Flávia repete para o cliente.
+  "ANO: só escreva o ano se ele estiver ESCRITO no documento ou no anúncio. Nunca deduza ano pela placa, pela aparência ou pelo modelo.",
+  "MODELO: em foto, só diga marca e modelo se der para reconhecer com segurança (emblema, nome escrito, desenho inconfundível); na dúvida, diga só a marca ou 'NÃO IDENTIFICADO'.",
+  "Texto corrido, sem negrito nem marcadores.",
 ].join("\n");
 
 async function lerComClaude(item) {
@@ -619,12 +626,17 @@ async function lerMidias(req, tok, eu, msgs) {
         leitura = t ? `Áudio transcrito: "${t.slice(0, 1500)}"` : "NÃO LIDO: o áudio não pôde ser transcrito.";
         modelo = t ? "whisper" : null;
       } else if (tipo === "video") {
+        /* A fala do vídeo só entra quando é frase de verdade. O
+         * Whisper "ouve" frases no barulho de motor e de rua — no
+         * primeiro teste saiu "A CIDADE NO BRASIL" de um vídeo do
+         * carro —, e a Flávia trataria isso como o cliente falando. */
         const t = await transcrever(req.ai, a);
-        leitura = "Vídeo: a imagem não pode ser vista" + (t ? `; a fala transcrita: "${t.slice(0, 1200)}"` : ", e não deu para ouvir a fala") + ".";
-        modelo = t ? "whisper" : null;
+        const fala = t && t.split(/\s+/).filter(Boolean).length >= 6 ? t : null;
+        leitura = "Vídeo: a imagem não pode ser vista aqui" + (fala ? `; a fala transcrita: "${fala.slice(0, 1200)}"` : "") + ".";
+        modelo = "whisper";
       } else if (IA_CHAVE && ((IMAGEM_IA.has(a.mime) && a.bytes <= IMAGEM_MAX) || a.mime === "application/pdf")) {
         const t = await lerComClaude(a);
-        leitura = t ? t.slice(0, 1500) : "NÃO LIDO: a leitura falhou.";
+        leitura = t ? t.replace(/\*\*|__|^#+\s*/gm, "").replace(/\s*\n+\s*/g, " ").trim().slice(0, 1500) : "NÃO LIDO: a leitura falhou.";
         modelo = t ? IA_MODELO_FLAVIA : null;
       } else {
         leitura = `NÃO LIDO: arquivo ${a.mime || tipo || "desconhecido"} não é lido aqui.`;
