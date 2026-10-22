@@ -11125,7 +11125,12 @@ function CRM({ perfil, aoAbrir, mes }) {
                   const td = "whitespace-nowrap px-2.5 py-2 text-[12px]";
                   const num = { fontFamily: F.mono, textAlign: "right" };
                   return (
-                    <tr key={a.id} onClick={() => aoAbrir(a.id)} style={{ borderBottom: `1px solid ${C.line}`, cursor: "pointer" }}>
+                    // Negócio fechado pinta a linha inteira de verde (o Derek,
+                    // 21/10/2026): na lista do mês, o que virou carro tem que
+                    // saltar aos olhos sem ler a coluna de status.
+                    <tr key={a.id} onClick={() => aoAbrir(a.id)}
+                      style={{ borderBottom: `1px solid ${a.status === "fechado" ? "#BFE3CD" : C.line}`, cursor: "pointer",
+                               background: a.status === "fechado" ? "#DDF2E5" : undefined }}>
                       <td className={td} style={{ fontFamily: F.mono, color: C.mute }}>{soData(a.data)}</td>
                       <td className={td}>{a.negociador_nome || "—"}</td>
                       <td className={td} style={{ color: C.mute }}>{a.prospec || "—"}</td>
