@@ -115,7 +115,7 @@ const FONTE = {
   origem: "origem", status: "status", carro_descricao: "carro_descricao",
   pretensao: "pretensao", valor_fechado: "valor_fechado",
   forma_fechamento: "forma_fechamento", proximo_contato: "proximo_contato",
-  observacoes: "observacoes",
+  observacoes: "observacoes", chegada_em: "chegada_em",
 };
 
 function paraColunas(c) {
@@ -152,6 +152,8 @@ function paraColunas(c) {
     forma_fechamento: texto(c.forma_fechamento),
     proximo_contato: data(c.proximo_contato),
     observacoes: texto(c.observacoes),
+    // A hora em que o cliente chegou (0074), com o fuso: "…T14:30:00-03:00".
+    chegada_em: /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?([+-]\d{2}:\d{2}|Z)$/.test(String(c.chegada_em || "")) ? c.chegada_em : null,
   };
 }
 
@@ -2759,7 +2761,9 @@ module.exports = async function handler(req, res) {
       });
       const salvo = Array.isArray(r) ? r[0] : r;
       const lead = salvo ? await leadQueVeio(tok, salvo) : null;
-      return res.status(201).json({ ok: true, atendimento: salvo, lead_ligado: lead });
+      // O cliente de fluxo (decisão 63) avisa o grupo como o "Chegou".
+      const aviso = salvo && corpo.avisar_grupo === true ? await avisoDeChegada(req, tok, salvo) : undefined;
+      return res.status(201).json({ ok: true, atendimento: salvo, lead_ligado: lead, aviso });
     }
 
     if (req.method === "PATCH") {

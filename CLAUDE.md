@@ -2864,6 +2864,17 @@ ele sai. Se falhar, a janela não fecha sozinha: mostra o texto pronto
 para copiar e mandar à mão — fechar calada deixaria o grupo sem saber
 que tem cliente na loja.
 
+**O cliente de fluxo usa a mesma janela** (23/10/2026), pelo botão
+"+ Cliente de fluxo" no alto da Agenda, com o telefone a mais. Ele
+**não vira lead**: não passou pela pré-venda, e um lead inventado
+contaria na nota dela uma visita que ela não trouxe (decisão 49). É
+atendimento direto — origem fluxo de loja, PROSPEC "FLUXO", como na
+planilha (0004) — e aparece na grade da semana **na hora em que
+chegou, em azul**, lido à parte e mesclado ao desenhar (decisão 41).
+Ao lado, "+ Agendamento" cria o lead com nome, telefone, carro e de
+onde veio, e abre o agendador: quem liga na loja ou marca no balcão
+não tinha por onde entrar na agenda.
+
 **Para mandar a cliente, nada mudou**: a ponte só fala com o grupo da
 loja. Responder cliente pela ponte é a outra conversa (a Flávia no
 número da TV), com o risco de banimento que ela traz.

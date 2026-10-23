@@ -12761,11 +12761,19 @@ function QuandoVoltar({ titulo, valor, aoEscolher, aoFechar }) {
  * atendimento (decisão 63). Se o aviso falhar, a janela NÃO fecha
  * sozinha: mostra o texto pronto para alguém mandar à mão. Fechar
  * calada deixaria o grupo sem saber que tem cliente na loja. */
-function JanelaChegou({ lead, equipe, aoFechar, aoPronto }) {
+/* E O CLIENTE DE FLUXO (23/10/2026) usa a mesma janela, com `fluxo`:
+ * quem entrou pela porta sem agendamento não tem lead — não passou pela
+ * pré-venda, e um lead inventado contaria uma visita que ela não
+ * trouxe (decisão 49). Vira atendimento direto, com origem "fluxo de
+ * loja" e PROSPEC "FLUXO" (a convenção da planilha, 0004), e aparece
+ * na agenda na hora em que chegou, com outra cor. */
+function JanelaChegou({ lead, equipe, aoFechar, aoPronto, fluxo }) {
+  lead = lead || {};
   const agora = () => new Date().toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
   const negs = (equipe || []).filter((n) => n.ativo && n.papel === "negociador");
   const [neg, setNeg] = useState(negs.some((n) => n.id === lead.negociador_id) ? lead.negociador_id : "");
   const [nome, setNome] = useState(lead.nome || "");
+  const [telefone, setTelefone] = useState(lead.telefone || "");
   const [carro, setCarro] = useState(lead.carro || "");
   const [dia, setDia] = useState(hojeEmSP());
   const [hora, setHora] = useState(agora());
@@ -12779,10 +12787,26 @@ function JanelaChegou({ lead, equipe, aoFechar, aoPronto }) {
   const confirmar = async () => {
     setIndo(true); setErro("");
     try {
-      const d = await leadCompareceu(lead.id, {
-        negociador_id: n.id, negociador_nome: n.nome,
-        cliente_nome: nome.trim(), carro: carro.trim(), chegada: `${dia}T${hora}`,
-      });
+      let d;
+      if (fluxo) {
+        const r = await fetchAut("/api/atendimento", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            cliente_nome: nome.trim(), cliente_telefone: telefone.trim() || null, carro_descricao: carro.trim() || null,
+            origem: "fluxo_loja", status: "cliente_na_loja", prospec: "FLUXO",
+            negociador_id: n.id, negociador_nome: n.nome,
+            data: dia, chegada_em: `${dia}T${hora}:00-03:00`, avisar_grupo: true,
+          }),
+        });
+        const x = await r.json().catch(() => ({}));
+        if (!r.ok || !x.atendimento) throw new Error(x.erro || "Não consegui abrir o atendimento.");
+        d = { atendimento_id: x.atendimento.id, atendimento: x.atendimento, aviso: x.aviso };
+      } else {
+        d = await leadCompareceu(lead.id, {
+          negociador_id: n.id, negociador_nome: n.nome,
+          cliente_nome: nome.trim(), carro: carro.trim(), chegada: `${dia}T${hora}`,
+        });
+      }
       const av = d.aviso || {};
       if (av.configurado && !av.enviado) {
         setSemAviso({ d, erro: av.erro || "",
@@ -12812,7 +12836,7 @@ function JanelaChegou({ lead, equipe, aoFechar, aoPronto }) {
         ) : (
           <div>
             <div className="flex items-baseline justify-between">
-              <span className="text-[17px] font-bold">O cliente chegou</span>
+              <span className="text-[17px] font-bold">{fluxo ? "Cliente de fluxo" : "O cliente chegou"}</span>
               <button onClick={aoFechar} className="text-[13px]" style={{ color: C.mute }}>fechar</button>
             </div>
             <Campo label="Quem vai atender">
@@ -12824,6 +12848,11 @@ function JanelaChegou({ lead, equipe, aoFechar, aoPronto }) {
             <Campo label="Nome do cliente">
               <input className={inputCls} style={inputSty} value={nome} onChange={(e) => setNome(e.target.value)} />
             </Campo>
+            {fluxo && (
+              <Campo label="Telefone" nota="Opcional, mas é com ele que se liga depois se o negócio não fechar hoje.">
+                <input className={inputCls} style={inputSty} value={telefone} inputMode="tel" placeholder="(47) 9…" onChange={(e) => setTelefone(e.target.value)} />
+              </Campo>
+            )}
             <Campo label="Carro">
               <input className={inputCls} style={inputSty} value={carro} placeholder="ex.: Kwid" onChange={(e) => setCarro(e.target.value)} />
             </Campo>
@@ -12842,6 +12871,56 @@ function JanelaChegou({ lead, equipe, aoFechar, aoPronto }) {
             </BotaoPrimario>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/* O AGENDAMENTO À MÃO (23/10/2026, o Derek). A agenda só recebia quem
+ * passava pelo WhatsApp ou pela barra de captura dos Leads; quem liga
+ * na loja ou marca no balcão não tinha por onde entrar AQUI, que é onde
+ * se olha a semana. O lead nasce com nome, telefone, carro e de onde
+ * veio, e o agendador de três toques abre em seguida (decisão 27). */
+function NovoAgendamento({ aoFechar, aoCriado }) {
+  const [nome, setNome] = useState("");
+  const [telefone, setTelefone] = useState("");
+  const [carro, setCarro] = useState("");
+  const [origem, setOrigem] = useState("");
+  const [indo, setIndo] = useState(false);
+  const [erro, setErro] = useState("");
+  const seguir = async () => {
+    setIndo(true); setErro("");
+    try {
+      const l = await criarLead({ nome: nome.trim(), telefone: telefone.trim() || null, carro: carro.trim() || null, origem: origem || "outro", status: "em_contato" });
+      aoCriado(l);
+    } catch (e) { setErro(e.message); setIndo(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center lg:items-center" style={{ background: "rgba(24,18,33,0.45)" }} onClick={aoFechar}>
+      <div className="w-full max-w-md rounded-t-2xl p-4 lg:rounded-2xl" style={{ background: C.paper }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-baseline justify-between">
+          <span className="text-[17px] font-bold">Novo agendamento</span>
+          <button onClick={aoFechar} className="text-[13px]" style={{ color: C.mute }}>fechar</button>
+        </div>
+        <Campo label="Nome do cliente">
+          <input className={inputCls} style={inputSty} value={nome} autoFocus onChange={(e) => setNome(e.target.value)} />
+        </Campo>
+        <Campo label="Telefone">
+          <input className={inputCls} style={inputSty} value={telefone} inputMode="tel" placeholder="(47) 9…" onChange={(e) => setTelefone(e.target.value)} />
+        </Campo>
+        <Campo label="Carro">
+          <input className={inputCls} style={inputSty} value={carro} placeholder="ex.: Kwid 2019" onChange={(e) => setCarro(e.target.value)} />
+        </Campo>
+        <Campo label="De onde veio">
+          <select className={inputCls} style={{ ...inputSty, borderColor: origem ? C.line : C.laranja }} value={origem} onChange={(e) => setOrigem(e.target.value)}>
+            <option value="">Escolha</option>
+            {ORIGENS.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
+          </select>
+        </Campo>
+        {erro && <p className="text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
+        <BotaoPrimario className="mt-3 w-full" disabled={!nome.trim() || !origem || indo} onClick={seguir}>
+          {indo ? "gravando…" : "Escolher dia e hora"}
+        </BotaoPrimario>
       </div>
     </div>
   );
@@ -14748,6 +14827,10 @@ function FunilLeads({ perfil, equipe, aoVerConversa }) {
  * pronta — é o que a pré-venda faz na véspera, sessenta vezes seguidas.
  * "Chegou" cria o atendimento com o que já foi perguntado ao telefone.
  */
+// O cliente de fluxo na agenda: azul, para não se confundir com o
+// agendado (branco), o confirmado (verde) e o que passou (laranja).
+const COR_FLUXO = { fundo: "#E5F0FA", borda: "#2F7CC4", texto: "#1F5C96" };
+
 function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
@@ -14778,6 +14861,11 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
     carregar();
     if (aoAbrirAtendimento && d && d.atendimento_id) aoAbrirAtendimento(d.atendimento_id);
   };
+
+  // Os dois botões do topo (23/10/2026): cliente de fluxo e agendamento à mão.
+  const [deFluxo, setDeFluxo] = useState(false);
+  const [novoAg, setNovoAg] = useState(false);
+  const [novoLead, setNovoLead] = useState(null);
 
   const hoje = hojeEmSP();
   const grupos = {};
@@ -14810,6 +14898,22 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
     });
   };
   const semana = semanaDe(hoje);
+
+  /* O CLIENTE DE FLUXO NA AGENDA (23/10/2026, o Derek: *"deve aparecer
+   * na agenda, no horário que ele chegou, com uma cor diferente"*). Ele
+   * não é lead — é atendimento —, então não vem na fila da agenda: é
+   * lido à parte, só da semana à vista, e entra na grade na hora da
+   * chegada. Mesma régua do "Meu dia" (decisão 41): mescla na hora de
+   * desenhar, nada é copiado. Só os que têm `chegada_em` e PROSPEC
+   * "FLUXO" — os importados da planilha não têm hora, e o fluxo que
+   * veio de lead já aparece como o lead que era. */
+  const [fluxos, setFluxos] = useState([]);
+  const lerFluxos = () => listarAtendimentos({ origem: "fluxo_loja", de: semana[0], ate: semana[5] })
+    .then((xs) => setFluxos((xs || []).filter((a) => a.chegada_em && String(a.prospec || "").toUpperCase() === "FLUXO")))
+    .catch(() => {});
+  useEffect(() => { lerFluxos(); }, [semana[0]]);
+  const diaSP = (t) => new Date(t).toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+  const horaSP = (t) => new Date(t).toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
   // Fora da semana à vista, nada some: a lista de baixo continua
   // mostrando tudo o que está em aberto.
   const dias = Object.keys(grupos).sort();
@@ -14828,6 +14932,12 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
       {/* A SEMANA À VISTA. O vazio é o que ela mostra e a lista não:
           dia sem ninguém marcado é o buraco que se preenche na segunda
           de manhã. */}
+      <div className="flex flex-wrap gap-2">
+        <button onClick={() => setDeFluxo(true)} className="rounded-lg px-3.5 py-2 text-[13.5px] font-semibold"
+          style={{ background: COR_FLUXO.borda, color: "#fff" }}>+ Cliente de fluxo</button>
+        <button onClick={() => setNovoAg(true)} className="rounded-lg px-3.5 py-2 text-[13.5px] font-semibold text-white"
+          style={{ background: C.roxo }}>+ Agendamento</button>
+      </div>
       {lista && (
         <div>
           <div className="mb-2 flex items-center justify-between">
@@ -14850,6 +14960,10 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
             <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(6, minmax(130px, 1fr))" }}>
               {semana.map((d) => {
                 const doDia = (grupos[d] || []).slice().sort((x, y) => String(x.agendado_para).localeCompare(String(y.agendado_para)));
+                const itens = [
+                  ...doDia.map((l) => ({ k: "l", h: horaBR(l.agendado_para) || "", l })),
+                  ...fluxos.filter((a) => diaSP(a.chegada_em) === d).map((a) => ({ k: "f", h: horaSP(a.chegada_em), a })),
+                ].sort((x, y) => x.h.localeCompare(y.h));
                 const eHoje = d === hoje;
                 return (
                   <div key={d} className="rounded-xl p-2"
@@ -14865,7 +14979,24 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
                           interativa)"*. Antes eram duas listas da mesma
                           coisa: a grade mostrava e a de baixo agia, e a
                           pessoa olhava numa e trabalhava na outra. */}
-                      {doDia.map((l) => {
+                      {itens.map((it) => {
+                        if (it.k === "f") {
+                          const a = it.a;
+                          return (
+                            <button key={`f-${a.id}`} onClick={() => aoAbrirAtendimento && aoAbrirAtendimento(a.id)}
+                              className="w-full rounded-lg px-2 py-1.5 text-left"
+                              style={{ background: COR_FLUXO.fundo, border: `1px solid ${COR_FLUXO.borda}` }}>
+                              <div className="flex items-center gap-1.5 text-[11.5px] font-bold" style={{ fontFamily: F.mono, color: COR_FLUXO.texto }}>
+                                {it.h}<span className="rounded px-1 text-[9.5px] tracking-[0.06em]" style={{ fontFamily: F.body, background: COR_FLUXO.borda, color: "#fff" }}>FLUXO</span>
+                              </div>
+                              <div className="truncate text-[12px]">{a.cliente_nome || "Sem nome"}</div>
+                              <div className="truncate text-[11px]" style={{ color: C.mute, opacity: a.carro_descricao ? 1 : 0.55 }}>
+                                {a.carro_descricao || "sem carro"}{a.negociador_nome ? ` · ${a.negociador_nome}` : ""}
+                              </div>
+                            </button>
+                          );
+                        }
+                        const l = it.l;
                         const conf = l.status === "confirmado";
                         const passou = Date.parse(l.agendado_para) < Date.now();
                         const aberto = cartao === l.id;
@@ -15030,6 +15161,19 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
       )}
       {chegando && (
         <JanelaChegou lead={chegando} equipe={equipe} aoFechar={() => setChegando(null)} aoPronto={(d) => chegouFeito(d)} />
+      )}
+      {deFluxo && (
+        <JanelaChegou fluxo equipe={equipe} aoFechar={() => setDeFluxo(false)}
+          aoPronto={(d) => { setDeFluxo(false); lerFluxos(); if (aoAbrirAtendimento && d && d.atendimento_id) aoAbrirAtendimento(d.atendimento_id); }} />
+      )}
+      {novoAg && <NovoAgendamento aoFechar={() => setNovoAg(false)} aoCriado={(l) => { setNovoAg(false); setNovoLead(l); }} />}
+      {novoLead && (
+        <Agendador lead={novoLead} equipe={equipe} aoFechar={() => { setNovoLead(null); carregar(); }}
+          aoAgendar={async (dados) => {
+            try { await atualizarLead(novoLead.id, { ...dados, status: "agendado" }); }
+            catch (e) { setErro(e.message); }
+            setNovoLead(null); carregar();
+          }} />
       )}
       {agendando && (
         <Agendador lead={agendando} equipe={equipe} aoFechar={() => setAgendando(null)}
