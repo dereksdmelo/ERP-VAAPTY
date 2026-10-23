@@ -707,6 +707,12 @@ Negociação (compacto), que é onde o "vou pensar" acontece. **Carro que
 subiu de tabela aparece subindo, em verde**: dizer que perdeu seria
 mentira na frente do cliente.
 
+**Os recortes — 6, 12, 24 meses e desde o topo — saem da série, e a
+tela abre no que mais caiu.** O primeiro teste com carro real (uma Biz
+2013) mostrou o porquê: em 12 meses a tabela subiu 8%, e desde o topo,
+em junho, caiu R$ 631. Só o "12 meses" diria "subiu" a quem está
+perdendo valor agora. Todos são verdade; verde só quando nenhum caiu.
+
 **Cache de 7 dias na borda:** a tabela FIPE muda uma vez por mês e a
 consulta gasta cota. O endpoint é aberto, como `/api/placa` — os dois
 precisam de login junto, quando for a hora.
