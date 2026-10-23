@@ -2780,6 +2780,22 @@ tentar de novo; falha definitiva (sem arquivo guardado, tipo que não se
 lê) é, para não insistir. Mídia de antes de 06/10/2026 não tem arquivo
 (decisão 48) e vira "NÃO LIDO".
 
+**A "resposta ideal" virou NOTA DO GERENTE (23/10/2026).** Ela nasceu
+como a mensagem que o cliente deveria ter recebido, para a Flávia
+imitar. Das 17 primeiras que o Derek escreveu, quase todas eram
+orientação — *"não precisa avisar pra cancelar c 2 hrs de
+antecedencia"*, *"não recisa falar 'vem com calma'"*, *"não dizer pra
+cliente que não consegue abrir videos"* — e, apresentadas como fala a
+imitar, ela copiaria o recado. Agora vão até 20 (treino e ao vivo, a
+0078), as mais recentes primeiro, como notas: regra se segue, resposta
+pronta se imita no jeito, comentário sobre o sistema se ignora. **Nota
+vale mais que o roteiro quando contradiz** — e as que contradiziam
+viraram o próprio roteiro: confirmação em três mensagens (horário, só
+o endereço, o que trazer), sem aviso de 2 horas nem jeito de cancelar,
+sem "vem com calma", "intermedia", elogio do carro uma vez só, horário
+de atendimento (não o da porta) ao cliente, pós-venda sem se meter, e
+cliente longe sem promessa de negociar à distância.
+
 **Aproximação conhecida:** num replay de dias atrás, os horários livres
 saem da agenda de HOJE. Só pesa no horário que já tinha gente demais.
 

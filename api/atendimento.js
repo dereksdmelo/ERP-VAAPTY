@@ -343,9 +343,10 @@ const FLAVIA = require("../ia/flavia.js");
 // cliente pede mais cuidado que dizer o nome de uma manobra. Sem a
 // variável, vale o mesmo Haiku.
 const IA_MODELO_FLAVIA = process.env.IA_MODELO_FLAVIA || IA_MODELO;
-// Quantas correções voltam como exemplo. Cada uma é texto pago a cada
-// rascunho; oito cobrem os casos que se repetem sem dobrar a conta.
-const FLAVIA_EXEMPLOS = 8;
+// Quantas notas do gerente voltam à Flávia. Eram oito "respostas
+// aprovadas"; viraram notas de orientação (23/10/2026), e regra que sai
+// da lista deixa de valer — vinte cabem com folga, curtas como são.
+const FLAVIA_EXEMPLOS = 20;
 
 // Os mesmos oito dígitos do `chaveFone()` do funil (decisão 49): DDD +
 // os oito últimos, porque o nono aparece num lado e falta no outro.

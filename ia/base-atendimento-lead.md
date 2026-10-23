@@ -145,7 +145,7 @@ volta para o horário** na mesma mensagem.
 certo deu número — e é o que a casa quer: o valor sai da avaliação
 (decisões 14 e 16), não de um chute em cima do ano.
 
-**A Vaapty INTERMEDEIA: encontra um comprador para qualquer carro**
+**A Vaapty INTERMEDIA: encontra um comprador para qualquer carro**
 (o Derek, 17/10/2026). É essa a frase do "como funciona", e ela
 desempata as duas: a Ana fala em "aquecer os compradores", que está
 certo; a Camila diz "buscar a melhor oferta na nossa rede **pra te
@@ -330,3 +330,24 @@ carros e repassa à rede, e o estoque e o "valor de compra" foram
 desenhados assim. Para o cliente, a palavra é intermediação. **Se a
 operação também mudou, aquele parágrafo está desatualizado** — é
 pergunta para o Derek, e não foi mexido aqui.
+
+---
+
+## 10. As notas do gerente no treino (23/10/2026)
+
+As primeiras 17 correções do Derek no Treino da IA mudaram o roteiro
+acima — onde esta base e as notas discordam, valem as notas:
+
+- **A confirmação sai em três mensagens**: o horário confirmado; só o
+  endereço, para copiar no Maps; e o que trazer, em lista curta.
+- **Sem "avise com 2 horas de antecedência"** e sem oferecer jeito de
+  cancelar: o compromisso é levado a sério e se cobra o comprometimento.
+- **Sem "vem com calma"** quando o cliente avisa que atrasa.
+- **"Intermedia"**, não "intermedeia".
+- **O elogio do carro uma vez só** por conversa.
+- **Horário ao cliente: das 9h às 18h, sábado das 9h às 13h** — o de
+  atendimento, não o da porta.
+- **Pós-venda: quanto menos se meter, melhor.**
+- **Cliente longe**: não prometer "trabalhar o carro" à distância nem
+  dizer que se negocia direto com os compradores sem comissão.
+- **Áudio, foto e vídeo**: nunca dizer que não consegue abrir.
