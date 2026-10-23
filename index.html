@@ -9080,6 +9080,39 @@ const rotuloDoDia = (dia) => {
   return `${dia.slice(8, 10)}/${dia.slice(5, 7)}/${dia.slice(0, 4)}`;
 };
 
+/* A CARA DO WHATSAPP (23/10/2026, o Derek: *"deixa mais parecido com o
+ * whats de verdade"*). Quem trabalha a fila passa o dia no WhatsApp; uma
+ * tela que se lê do mesmo jeito — balão verde à direita, branco à
+ * esquerda, fundo bege, o dia num selo no meio — não pede para ninguém
+ * reaprender a ler conversa. As cores são as do WhatsApp Web claro, de
+ * propósito: aqui a referência é ele, não a identidade da Vaapty. */
+const WA = {
+  fundo: "#EFEAE2", barra: "#F0F2F5", linha: "#E9EDEF", texto: "#111B21", mute: "#667781",
+  meu: "#D9FDD3", dele: "#FFFFFF", verde: "#00A884", azul: "#53BDEB", hover: "#F5F6F6", sel: "#F0F2F5",
+};
+// A textura do fundo, em CSS: pontinhos leves, como o papel de parede padrão.
+const WA_FUNDO = {
+  backgroundColor: WA.fundo,
+  backgroundImage: "radial-gradient(rgba(0,0,0,0.035) 1px, transparent 1.2px), radial-gradient(rgba(0,0,0,0.025) 1px, transparent 1.2px)",
+  backgroundSize: "22px 22px, 22px 22px", backgroundPosition: "0 0, 11px 11px",
+};
+const CORES_AVATAR = ["#25D366", "#34B7F1", "#7E57C2", "#EF6C00", "#E53935", "#00897B", "#5C6BC0", "#C2185B", "#6D4C41", "#43A047"];
+function Avatar({ nome, tam }) {
+  const t = String(nome || "").replace(/[^\p{L}\p{N} ]/gu, " ").trim();
+  const partes = t.split(/\s+/).filter(Boolean);
+  const ini = partes.length ? (partes[0][0] + (partes.length > 1 ? partes[partes.length - 1][0] : "")).toUpperCase() : "";
+  let h = 0; for (const ch of t) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const z = tam || 46;
+  return (
+    <div className="flex shrink-0 items-center justify-center rounded-full font-semibold text-white"
+      style={{ width: z, height: z, fontSize: z * 0.38, background: ini && !/^\d/.test(ini) ? CORES_AVATAR[h % CORES_AVATAR.length] : "#DFE5E7" }}>
+      {ini && !/^\d/.test(ini) ? ini : (
+        <svg viewBox="0 0 24 24" width={z * 0.6} height={z * 0.6} fill="#fff" aria-hidden="true"><circle cx="12" cy="8" r="4.2" /><path d="M3.5 21c.8-4.6 4.3-7 8.5-7s7.7 2.4 8.5 7z" /></svg>
+      )}
+    </div>
+  );
+}
+
 function ListaDeBaloes({ msgs }) {
   let ultimo = "";
   return (msgs || []).map((m) => {
@@ -9089,9 +9122,9 @@ function ListaDeBaloes({ msgs }) {
     return (
       <React.Fragment key={m.id}>
         {novoDia && (
-          <div className="flex justify-center py-1">
-            <span className="rounded-full px-3 py-0.5 text-[11.5px] font-semibold"
-              style={{ background: C.bg, color: C.mute, border: `1px solid ${C.line}` }}>
+          <div className="flex justify-center py-1.5">
+            <span className="rounded-lg px-3 py-1 text-[12px] uppercase"
+              style={{ background: "#fff", color: "#54656F", boxShadow: "0 1px 0.5px rgba(11,20,26,0.13)" }}>
               {rotuloDoDia(dia)}
             </span>
           </div>
@@ -9126,9 +9159,14 @@ function Balao({ m }) {
   };
 
   return (
-    <div className={`flex ${meu ? "justify-end" : "justify-start"}`}>
-      <div className="max-w-[78%] rounded-xl px-3 py-2"
-        style={{ background: meu ? C.roxoFraco : C.paper, border: `1px solid ${C.line}` }}>
+    <div className={`flex ${meu ? "justify-end pl-10" : "justify-start pr-10"}`}>
+      <div className={`relative max-w-[85%] rounded-lg px-2.5 pb-1.5 pt-1.5 ${meu ? "rounded-tr-none" : "rounded-tl-none"}`}
+        style={{ background: meu ? WA.meu : WA.dele, color: WA.texto, boxShadow: "0 1px 0.5px rgba(11,20,26,0.13)" }}>
+        {/* o "rabinho" do balão, no canto de cima */}
+        <svg viewBox="0 0 8 13" width="8" height="13" className="absolute top-0" aria-hidden="true"
+          style={meu ? { right: -8 } : { left: -8, transform: "scaleX(-1)" }}>
+          <path d="M0 0h8L1.5 9.5C.9 10.3 0 9.9 0 8.9z" fill={meu ? WA.meu : WA.dele} />
+        </svg>
         {m.tipo === "midia" && (
           <div className="mb-1">
             {url && anexo.tipo === "image" && (
@@ -9167,10 +9205,14 @@ function Balao({ m }) {
         {m.tipo === "reacao" && (
           <div className="text-[15px]">{(m.anexo && m.anexo.emoji) || "reagiu"}</div>
         )}
-        {!!m.texto && <div className="whitespace-pre-wrap text-[14.5px] leading-snug">{m.texto}</div>}
-        <div className="mt-1 flex items-center justify-end gap-1.5 text-[11px]" style={{ color: C.mute }}>
+        {!!m.texto && <div className="whitespace-pre-wrap text-[14.2px] leading-[19px]">{m.texto}</div>}
+        <div className="-mb-0.5 mt-0.5 flex items-center justify-end gap-1 text-[11px]" style={{ color: WA.mute }}>
           {horaCurta(m.quando)}
-          {meu && m.estado && <span>{m.estado === "lida" ? "✓✓" : m.estado === "entregue" ? "✓✓" : "✓"}</span>}
+          {meu && m.estado && (
+            <span style={{ color: m.estado === "lida" ? WA.azul : WA.mute, letterSpacing: "-3px", paddingRight: 3 }}>
+              {m.estado === "lida" || m.estado === "entregue" ? "✓✓" : "✓"}
+            </span>
+          )}
         </div>
       </div>
     </div>
@@ -9233,76 +9275,71 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe }) {
   // dito agora, não o começo (mesma razão do quadro ao vivo, 45).
   useEffect(() => { if (fim.current) fim.current.scrollIntoView({ block: "end" }); }, [msgs && msgs.length]);
 
+  const operacao = conversa.canal && conversa.canal.comercial === false;
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-start justify-between gap-3 border-b pb-3" style={{ borderColor: C.line }}>
-        <div className="min-w-0">
-          <h3 className="truncate text-[17px]" style={{ fontFamily: F.disp, fontWeight: 700 }}>{waQuem(conversa)}</h3>
-          <p className="mt-0.5 text-[13px]" style={{ color: C.mute }}>
+    <div className="flex h-full min-h-0 flex-col">
+      {/* A BARRA DE CIMA, como a do WhatsApp: quem é, de onde veio, e as
+          três ações. */}
+      <div className="flex items-center gap-3 px-4 py-2.5" style={{ background: WA.barra, borderBottom: `1px solid ${WA.linha}` }}>
+        {aoVoltar && (
+          <button onClick={aoVoltar} className="-ml-1 px-1 text-[22px] leading-none lg:hidden" style={{ color: WA.mute }} aria-label="Voltar">‹</button>
+        )}
+        <Avatar nome={waQuem(conversa)} tam={40} />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[16px]" style={{ color: WA.texto }}>{waQuem(conversa)}</div>
+          <div className="truncate text-[12.5px]" style={{ color: WA.mute }}>
             {foneBonito(conversa.telefone)}
-            {conversa.canal && ` · chegou em ${conversa.canal.nome}`}
-          </p>
-          {conversa.canal && conversa.canal.comercial === false ? (
-            <span className="mt-1.5 inline-block text-[12px]" style={{ color: C.mute }}>
-              Número de operação — não entra no funil da pré-venda.
-            </span>
-          ) : (
-            <span className="mt-1.5 inline-block rounded-full px-2 py-0.5 text-[11.5px] font-semibold"
-              style={{ background: estagioDe(conversa).cor + "18", color: estagioDe(conversa).cor }}>
-              {estagioDe(conversa).rot}
-            </span>
-          )}
+            {conversa.canal && ` · ${conversa.canal.nome}`}
+            {!operacao && <> · <span style={{ color: estagioDe(conversa).cor, fontWeight: 600 }}>{estagioDe(conversa).rot}</span></>}
+            {operacao && " · número de operação, fora do funil"}
+          </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1.5">
           {/* O ELO QUE FALTAVA. Sem ele a conversa morre no WhatsApp e
               o canal não tem o que medir — em 03/10/2026 eram 205
-              conversas para seis leads. Pedir para redigitar nome e
-              telefone que já estão na tela é como o registro deixa de
-              ser feito (decisão 27). */}
-          {/* Número de operação não vira lead (0058): o administrativo
-              atende lojista, cartório e despachante. O botão some, e o
-              servidor recusa de qualquer jeito. */}
-          {!(conversa.canal && conversa.canal.comercial === false) && (
+              conversas para seis leads (decisão 27). Número de operação
+              não vira lead (0058): o botão some, e o servidor recusa. */}
+          {!operacao && (
             <button onClick={abrirAgenda} disabled={!!virando}
-              className="rounded-lg px-3 py-2 text-[13px] font-semibold text-white"
+              className="rounded-full px-3.5 py-1.5 text-[13px] font-semibold text-white"
               style={{ background: C.roxo, opacity: virando ? 0.5 : 1 }}>
               {virando ? "abrindo…" : conversa.lead && conversa.lead.agendado_para ? "Remarcar" : "Agendar"}
             </button>
           )}
           {/* Ligar sai do número em que a conversa chegou: é o que o
-              cliente conhece, e trocar de número no meio da conversa
-              faz a chamada parecer de desconhecido. */}
+              cliente conhece. */}
           <button onClick={() => setLigandoConv(true)}
-            className="rounded-lg px-3 py-2 text-[13px] font-semibold text-white" style={{ background: C.verde }}>
+            className="rounded-full px-3.5 py-1.5 text-[13px] font-semibold text-white" style={{ background: WA.verde }}>
             Ligar
           </button>
-          <a href={zap(conversa.telefone)} target="_blank" rel="noopener noreferrer"
-            className="rounded-lg border px-3 py-2 text-[13px] font-semibold"
-            style={{ borderColor: C.line, color: C.ink }}>Mensagem</a>
-          {aoVoltar && (
-            <button onClick={aoVoltar} className="rounded-lg border px-3 py-2 text-[13px] font-semibold lg:hidden"
-              style={{ borderColor: C.line, color: C.mute }}>Voltar</button>
-          )}
         </div>
       </div>
 
-      <div className="mt-3 flex-1 space-y-2 overflow-y-auto pr-1" style={{ maxHeight: "60vh" }}>
+      <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-[6%] py-3" style={WA_FUNDO}>
         {erro && <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
-        {!msgs && !erro && <p className="text-[13.5px]" style={{ color: C.mute }}>carregando…</p>}
+        {!msgs && !erro && <p className="text-center text-[13.5px]" style={{ color: WA.mute }}>carregando…</p>}
         {msgs && !msgs.length && (
-          <p className="text-[13.5px]" style={{ color: C.mute }}>
+          <div className="mx-auto max-w-md rounded-lg px-3 py-2 text-center text-[12.5px]" style={{ background: "#FFEECD", color: "#54656F" }}>
             Nada registrado ainda. A ponte guarda do momento em que o número foi ligado
             para frente — o que é mais antigo que isso continua só no celular.
-          </p>
+          </div>
         )}
         <ListaDeBaloes msgs={msgs} />
         <div ref={fim} />
       </div>
 
-      <p className="mt-3 border-t pt-3 text-[12.5px] leading-snug" style={{ borderColor: C.line, color: C.mute }}>
-        Daqui só dá para ler. Responder é no WhatsApp do número — o envio pela ponte
-        ainda não existe.
-      </p>
+      {/* NO LUGAR DA CAIXA DE DIGITAR: daqui só se lê. A resposta é no
+          WhatsApp do número, e o botão leva até lá — uma caixa que não
+          manda nada seria pior que caixa nenhuma (decisão 48). */}
+      <div className="flex items-center gap-2 px-4 py-2.5" style={{ background: WA.barra, borderTop: `1px solid ${WA.linha}` }}>
+        <div className="min-w-0 flex-1 truncate rounded-lg px-3 py-2 text-[13.5px]" style={{ background: "#fff", color: WA.mute }}>
+          Responder é no WhatsApp do número{conversa.canal ? ` (${conversa.canal.nome})` : ""}
+        </div>
+        <a href={zap(conversa.telefone)} target="_blank" rel="noopener noreferrer"
+          className="shrink-0 rounded-full px-4 py-2 text-[13.5px] font-semibold text-white" style={{ background: WA.verde }}>
+          Abrir no WhatsApp
+        </a>
+      </div>
 
       {ligandoConv && (
         <Ligar para={conversa.telefone} nome={waQuem(conversa)}
@@ -9397,108 +9434,103 @@ function TelaConversas({ alvo, aoConsumirAlvo }) {
 
       {erro && <p className="mb-4 text-[14px]" style={{ color: C.laranja }}>{erro}</p>}
 
-      <div className="mb-4 grid gap-3 lg:grid-cols-[1fr_auto]">
-        <div className="flex gap-2">
-          <input className={inputCls} style={inputSty} placeholder="Nome ou telefone"
-            value={digitado} onChange={(e) => setDigitado(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") setBusca(digitado.trim()); }} />
-          <button onClick={() => setBusca(digitado.trim())}
-            className="shrink-0 rounded-lg border px-4 text-[14px] font-semibold"
-            style={{ borderColor: C.line, color: C.ink }}>Buscar</button>
-        </div>
-        {!!canais.length && (
-          <select className={inputCls} style={inputSty} value={canal} onChange={(e) => setCanal(e.target.value)}>
-            <option value="">Todos os números</option>
-            {canais.map((c) => <option key={c.slug} value={c.slug}>{c.nome}</option>)}
-          </select>
-        )}
-      </div>
+      {/* O PAINEL DO WHATSAPP WEB: lista à esquerda, conversa à direita,
+          a altura da tela. No celular, um de cada vez. */}
+      <div className="flex overflow-hidden rounded-lg" style={{ height: "calc(100vh - 210px)", minHeight: 520, border: `1px solid ${WA.linha}`, background: "#fff" }}>
+        <div className={`${abertaViva ? "hidden lg:flex" : "flex"} w-full min-w-0 flex-col lg:w-[400px] lg:shrink-0`}
+          style={{ borderRight: `1px solid ${WA.linha}` }}>
+          <div className="space-y-2 px-3 py-2.5" style={{ background: "#fff", borderBottom: `1px solid ${WA.linha}` }}>
+            <div className="flex items-center gap-2 rounded-lg px-3" style={{ background: WA.barra }}>
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill={WA.mute} d="M15.5 14h-.8l-.3-.3A6.5 6.5 0 1 0 9.5 16a6.5 6.5 0 0 0 4.2-1.6l.3.3v.8l5 5 1.5-1.5zm-6 0a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z" /></svg>
+              <input className="w-full bg-transparent py-2 text-[14px] outline-none" placeholder="Pesquisar nome ou telefone"
+                value={digitado} onChange={(e) => setDigitado(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") setBusca(digitado.trim()); }}
+                onBlur={() => { if (digitado.trim() !== busca) setBusca(digitado.trim()); }} />
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[["esperando", `Não respondidas${esperando.length ? ` ${esperando.length}` : ""}`], ["todas", "Todas"]].map(([id, rot]) => (
+                <button key={id} onClick={() => setAba(id)}
+                  className="rounded-full px-3 py-1 text-[13px]"
+                  style={aba === id ? { background: "#E7FCE3", color: "#008069", fontWeight: 600 } : { background: WA.barra, color: WA.mute }}>
+                  {rot}
+                </button>
+              ))}
+              {!!canais.length && (
+                <select className="ml-auto max-w-[170px] rounded-full px-2.5 py-1 text-[12.5px] outline-none"
+                  style={{ background: WA.barra, color: WA.texto, border: "none" }} value={canal} onChange={(e) => setCanal(e.target.value)}>
+                  <option value="">Todos os números</option>
+                  {canais.map((c) => <option key={c.slug} value={c.slug}>{c.nome}</option>)}
+                </select>
+              )}
+            </div>
+          </div>
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        {[["esperando", `Esperando resposta${esperando.length ? ` (${esperando.length})` : ""}`], ["todas", "Todas"]].map(([id, rot]) => (
-          <button key={id} onClick={() => setAba(id)}
-            className="rounded-full px-3.5 py-1.5 text-[13.5px] font-semibold"
-            style={aba === id ? { background: C.roxo, color: "#fff" } : { background: C.paper, color: C.mute, border: `1px solid ${C.line}` }}>
-            {rot}
-          </button>
-        ))}
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
-        <div className={`${abertaViva ? "hidden lg:block" : ""}`}>
-          {!lista && !erro && <p className="text-[14px]" style={{ color: C.mute }}>carregando…</p>}
-              {lista && !mostradas.length && busca && (
-            <Bloco titulo="Nenhuma conversa com esse número">
-              <p className="text-[13.5px] leading-relaxed" style={{ color: C.mute }}>
-                Este lead não chegou pelo WhatsApp, ou chegou antes de o número
-                ser ligado — a ponte guarda do momento em que cada um foi ligado
-                para frente.
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {!lista && !erro && <p className="p-4 text-[14px]" style={{ color: WA.mute }}>carregando…</p>}
+            {lista && !mostradas.length && (
+              <p className="p-5 text-center text-[13.5px] leading-relaxed" style={{ color: WA.mute }}>
+                {busca
+                  ? "Nenhuma conversa com esse número. O lead não chegou pelo WhatsApp, ou chegou antes de o número ser ligado."
+                  : aba === "esperando"
+                    ? "Ninguém esperando: toda mensagem que chegou já foi respondida."
+                    : "As conversas entram sozinhas assim que alguém escreve para um dos números ligados."}
               </p>
-            </Bloco>
-          )}
-      {lista && !mostradas.length && (
-            <Bloco titulo={aba === "esperando" ? "Ninguém esperando" : "Nenhuma conversa ainda"}>
-              <p className="text-[13.5px] leading-relaxed" style={{ color: C.mute }}>
-                {aba === "esperando"
-                  ? "Toda mensagem que chegou já foi respondida."
-                  : "As conversas entram sozinhas assim que alguém escreve para um dos números ligados. Se nenhum estiver ligado, nada chega — isso se resolve em Números do WhatsApp."}
-              </p>
-            </Bloco>
-          )}
-          <div className="space-y-2">
-            {mostradas.map((c) => (
-              <button key={c.id} onClick={() => setAberta(c)}
-                className="block w-full rounded-xl p-3 text-left"
-                style={{ background: C.paper,
-                  border: `1px solid ${abertaViva && abertaViva.id === c.id ? C.roxo : C.line}` }}>
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="truncate text-[15px] font-semibold">{waQuem(c)}</span>
-                  <span className="shrink-0 text-[11.5px]" style={{ color: C.mute }}>{horaCurta(c.ultima_em)}</span>
-                </div>
-                <div className="mt-0.5 flex items-center gap-1.5">
-                  {c.esperando && (
-                    <span className="shrink-0 rounded-full px-1.5 py-0.5 text-[10.5px] font-bold"
-                      style={{ background: C.laranja + "1C", color: C.laranja }}>esperando</span>
-                  )}
-                  <span className="truncate text-[13px]" style={{ color: C.mute }}>
-                    {c.ultima && c.ultima.eco ? "você: " : ""}{resumoMsg(c.ultima) || foneBonito(c.telefone)}
-                  </span>
-                </div>
-                <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]" style={{ color: C.mute }}>
-                  {/* O estágio vem primeiro: numa fila, o que importa
-                      é o que já foi feito, não de onde veio. */}
-                  {!(c.canal && c.canal.comercial === false) && (
-                    <span className="rounded px-1.5 py-0.5 font-semibold"
-                      style={{ background: estagioDe(c).cor + "18", color: estagioDe(c).cor }}>{estagioDe(c).rot}</span>
-                  )}
-                  {c.canal && (
-                    <span className="rounded px-1.5 py-0.5" style={{ background: C.roxoFraco, color: C.roxo }}>{c.canal.nome}</span>
-                  )}
-                    {/* De qual anúncio veio, quando a primeira mensagem
-                        trouxe o clique-para-WhatsApp. É o que vai casar
-                        marketing com venda sem ninguém digitar origem. */}
-                  {c.anuncio && <span style={{ color: C.verde }}>veio de anúncio</span>}
-                </div>
-              </button>
-            ))}
+            )}
+            {mostradas.map((c) => {
+              const sel = abertaViva && abertaViva.id === c.id;
+              const op = c.canal && c.canal.comercial === false;
+              return (
+                <button key={c.id} onClick={() => setAberta(c)}
+                  className="flex w-full items-center gap-3 px-3 text-left"
+                  style={{ background: sel ? WA.sel : "#fff" }}
+                  onMouseEnter={(e) => { if (!sel) e.currentTarget.style.background = WA.hover; }}
+                  onMouseLeave={(e) => { if (!sel) e.currentTarget.style.background = "#fff"; }}>
+                  <Avatar nome={waQuem(c)} />
+                  <div className="min-w-0 flex-1 py-2.5" style={{ borderBottom: `1px solid ${WA.linha}` }}>
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="truncate text-[16px]" style={{ color: WA.texto }}>{waQuem(c)}</span>
+                      <span className="shrink-0 text-[12px]" style={{ color: c.esperando ? WA.verde : WA.mute, fontWeight: c.esperando ? 600 : 400 }}>{horaCurta(c.ultima_em)}</span>
+                    </div>
+                    <div className="mt-0.5 flex items-center gap-1.5">
+                      {c.ultima && c.ultima.eco && <span className="shrink-0 text-[13px]" style={{ color: WA.mute, letterSpacing: "-3px", paddingRight: 3 }}>✓✓</span>}
+                      <span className="min-w-0 flex-1 truncate text-[14px]" style={{ color: WA.mute }}>
+                        {resumoMsg(c.ultima) || foneBonito(c.telefone)}
+                      </span>
+                      {/* "Esperando" é a bolinha verde do não lido: a
+                          fila de quem escreveu e ninguém respondeu. */}
+                      {c.esperando && <span className="h-[18px] min-w-[18px] shrink-0 rounded-full" style={{ background: WA.verde }} title="esperando resposta" />}
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px]">
+                      {/* O estágio vem primeiro: numa fila, o que importa
+                          é o que já foi feito, não de onde veio. */}
+                      {!op && (
+                        <span className="rounded px-1.5 py-px font-semibold"
+                          style={{ background: estagioDe(c).cor + "18", color: estagioDe(c).cor }}>{estagioDe(c).rot}</span>
+                      )}
+                      {c.canal && <span className="rounded px-1.5 py-px" style={{ background: WA.barra, color: WA.mute }}>{c.canal.nome}</span>}
+                      {/* De qual anúncio veio: é o que vai casar marketing
+                          com venda sem ninguém digitar origem. */}
+                      {c.anuncio && <span style={{ color: "#008069" }}>veio de anúncio</span>}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        <div>
+        <div className={`${abertaViva ? "flex" : "hidden lg:flex"} min-w-0 flex-1 flex-col`}>
           {abertaViva ? (
-            <section className="rounded-xl p-4 lg:p-5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-              <Conversa conversa={abertaViva} aoVoltar={() => setAberta(null)} equipe={equipe}
-                aoVirarLead={(id, lead) => setLista((ls) => (ls || []).map((x) =>
-                  (x.id === id ? { ...x, lead_id: (lead && lead.id) || x.lead_id, lead: lead || x.lead } : x)))} />
-            </section>
+            <Conversa conversa={abertaViva} aoVoltar={() => setAberta(null)} equipe={equipe}
+              aoVirarLead={(id, lead) => setLista((ls) => (ls || []).map((x) =>
+                (x.id === id ? { ...x, lead_id: (lead && lead.id) || x.lead_id, lead: lead || x.lead } : x)))} />
           ) : (
-            <div className="hidden lg:block">
-              <Bloco titulo="Escolha uma conversa" sub="Ela abre aqui do lado." >
-                <p className="text-[13.5px] leading-relaxed" style={{ color: C.mute }}>
-                  A ponte guarda do momento em que cada número foi ligado para frente.
-                  O que é mais antigo que isso continua só no celular.
-                </p>
-              </Bloco>
+            <div className="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center" style={{ background: WA.barra, borderBottom: `6px solid ${WA.verde}` }}>
+              <div className="text-[28px]" style={{ color: "#41525D", fontWeight: 300 }}>Conversas da loja</div>
+              <p className="max-w-md text-[14px] leading-relaxed" style={{ color: WA.mute }}>
+                Escolha uma conversa à esquerda. Tudo que chega nos números da loja aparece aqui —
+                do momento em que cada número foi ligado para frente.
+              </p>
             </div>
           )}
         </div>
@@ -14025,7 +14057,7 @@ function ConversaPopup({ telefone, nome, aoFechar, aoLigar, aoRenomear, rotuloFe
             className="mt-3 w-full rounded-lg px-3 py-2.5 text-[14px] font-semibold text-white"
             style={{ background: C.verde }}>Ligar para {nome || telBR(telefone)}</button>
         )}
-        <div className="mt-3 flex-1 space-y-2 overflow-y-auto pr-1">
+        <div className="mt-3 flex-1 space-y-1 overflow-y-auto rounded-lg px-3 py-2" style={WA_FUNDO}>
           {erro && <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
           {!msgs && !erro && <p className="text-[13.5px]" style={{ color: C.mute }}>carregando…</p>}
           {msgs && !msgs.length && (
