@@ -36,7 +36,7 @@ async function atenderFila(env) {
 
   const rpc = async (nome, corpo) => {
     const r = await fetch(`${URL_BASE}/rest/v1/rpc/${nome}`, {
-      method: "POST",
+      method: "POST", signal: AbortSignal.timeout(20000),
       headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, "Content-Type": "application/json" },
       body: JSON.stringify(corpo),
     });
@@ -46,7 +46,7 @@ async function atenderFila(env) {
   };
   const ponte = async (caminho, canal, corpo) => {
     const r = await env.PONTE.fetch(`https://ponte${caminho}?canal=${encodeURIComponent(canal)}`, {
-      method: "POST", headers: { "x-ponte-segredo": env.PONTE_SEGREDO, "Content-Type": "application/json" },
+      method: "POST", signal: AbortSignal.timeout(40000), headers: { "x-ponte-segredo": env.PONTE_SEGREDO, "Content-Type": "application/json" },
       body: JSON.stringify(corpo),
     });
     return r.json().catch(() => ({ ok: false, erro: `a ponte respondeu ${r.status}` }));
@@ -76,7 +76,7 @@ async function atenderFila(env) {
       const sistema = FLAVIA.instrucao(cfg, agora, livres, (ctx && ctx.exemplos) || []);
 
       const r = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
+        method: "POST", signal: AbortSignal.timeout(45000),
         headers: { "x-api-key": CHAVE, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
         body: JSON.stringify({ model: MODELO, max_tokens: 700, system: sistema,
           messages: [{ role: "user", content: FLAVIA.conversaEmTexto(msgs) }] }),
@@ -125,6 +125,11 @@ async function atenderFila(env) {
   return { fila: fila.length, feitos };
 }
 
+/* TODA CHAMADA DE FORA TEM PRAZO (23/10/2026). Uma pergunta pendurada —
+ * um container da ponte que não responde — segurava a execução do cron
+ * e o Cloudflare não começava a seguinte: das 11h19 em diante não rodou
+ * mais nada, nem a Flávia. Banco 20 s, IA 45 s, ponte 40 s. */
+
 /* A LEITURA DO AGENDADO (23/10/2026, decisão 65): qual é o carro, e se
  * o cliente confirmou que vem.
  *
@@ -163,7 +168,7 @@ async function lerLeads(env) {
   const MODELO = env.IA_MODELO || "claude-haiku-4-5-20251001";
   const rpc = async (nome, corpo) => {
     const r = await fetch(`${URL_BASE}/rest/v1/rpc/${nome}`, {
-      method: "POST",
+      method: "POST", signal: AbortSignal.timeout(20000),
       headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, "Content-Type": "application/json" },
       body: JSON.stringify(corpo),
     });
@@ -178,7 +183,7 @@ async function lerLeads(env) {
     try {
       const marcado = String(l.agendado_para || "").slice(0, 16).replace("T", " às ");
       const r = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
+        method: "POST", signal: AbortSignal.timeout(45000),
         headers: { "x-api-key": CHAVE, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
         body: JSON.stringify({ model: MODELO, max_tokens: 120, system: INSTRUCAO_LEITURA,
           messages: [{ role: "user", content: `Horário marcado na agenda: ${marcado}.\n\n${FLAVIA.conversaEmTexto(l.msgs || [], 6000)}` }] }),

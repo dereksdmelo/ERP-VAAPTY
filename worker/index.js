@@ -194,7 +194,7 @@ export default {
 async function despertar(env) {
     if (!env.PONTE || !env.PONTE_SEGREDO || !env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return;
     const r = await fetch(`${env.SUPABASE_URL}/rest/v1/rpc/wa_canais_para_acordar`, {
-      method: "POST",
+      method: "POST", signal: AbortSignal.timeout(15000),
       headers: { apikey: env.SUPABASE_ANON_KEY, Authorization: `Bearer ${env.SUPABASE_ANON_KEY}`, "Content-Type": "application/json" },
       body: "{}",
     });
@@ -204,8 +204,10 @@ async function despertar(env) {
       const canal = typeof c === "string" ? c : c && c.wa_canais_para_acordar;
       if (!canal) return;
       try {
+        // Com prazo: container que não responde não pode segurar o cron
+        // inteiro (23/10/2026, das 11h19 em diante não rodou mais nada).
         const p = await env.PONTE.fetch(`https://ponte/estado?canal=${encodeURIComponent(canal)}`,
-          { headers: { "x-ponte-segredo": env.PONTE_SEGREDO } });
+          { headers: { "x-ponte-segredo": env.PONTE_SEGREDO }, signal: AbortSignal.timeout(20000) });
         if (!p.ok && p.status !== 503) console.error("despertador:", canal, p.status);
       } catch (e) { console.error("despertador:", canal, String((e && e.message) || e).slice(0, 150)); }
     }));
