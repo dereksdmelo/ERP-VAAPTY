@@ -22488,6 +22488,11 @@ function PontoTreino({ n, p, nome, ocupado, aoRedigir, aoAvaliar }) {
           )}
         </div>
       </div>
+      {t && t.cliente && t.cliente !== p.cliente && (
+        <p className="mt-2 rounded-lg px-3 py-2 text-[12.5px] leading-snug" style={{ background: "#FFF4E5", color: C.laranja }}>
+          Este rascunho foi feito antes de o arquivo ser lido. Clique em <b>refazer</b> para a {nome} responder ao que estava na foto ou no áudio.
+        </p>
+      )}
       {t && (
         <div className="mt-3 border-t pt-2.5" style={{ borderColor: C.line }}>
           <div className="flex flex-wrap items-center gap-1.5">
@@ -22505,7 +22510,7 @@ function PontoTreino({ n, p, nome, ocupado, aoRedigir, aoAvaliar }) {
           <label className="mt-2 block">
             <Rotulo>Resposta ideal — ensina a {nome}</Rotulo>
             <textarea rows={3} className={`${inputCls} mt-[2px] text-[14px]`} style={inputSty} value={texto}
-              placeholder="Opcional. Escreva o que a loja deveria ter respondido aqui."
+              placeholder="A mensagem que o cliente deveria ter recebido, como você mandaria no WhatsApp. Não é recado para a IA: ela copia o jeito do que estiver aqui."
               onChange={(e) => setTexto(e.target.value)} />
           </label>
           {texto.trim() !== String(t.correcao || "").trim() && (

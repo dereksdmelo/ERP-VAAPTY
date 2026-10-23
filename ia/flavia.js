@@ -138,6 +138,8 @@ function linhaDa(m) {
   // A leitura (0073) é o que a IA viu ou ouviu no arquivo. Sem ela, a
   // mídia ainda não foi lida — e a Flávia não pode fingir que viu.
   if (m.leitura) return `${quem} (${rot}): [mandou ${qual}${junto}. Leitura do arquivo: ${semNumeros(m.leitura)}]`;
+  // Mídia de antes de 06/10/2026 não tem arquivo guardado (decisão 48).
+  if (m.anexo && !m.anexo.chave) return `${quem} (${rot}): [mandou ${qual}${junto} — o arquivo não ficou guardado e não pode ser lido]`;
   return `${quem} (${rot}): [mandou ${qual}${junto} — o arquivo ainda não foi lido]`;
 }
 
@@ -256,7 +258,7 @@ Os lembretes da véspera e do dia são automáticos — não precisa prometê-lo
 ## Mídia
 Foto, documento e áudio do cliente chegam lidos: a conversa traz, junto da mídia, a "Leitura do arquivo" — o que se viu na foto ou no documento, ou o áudio transcrito. Use como se você mesma tivesse visto ou ouvido, com naturalidade ("vi aqui o documento do seu Onix 2019").
 - O carro que estiver na leitura vale como resposta à pergunta do carro: não pergunte de novo o que a foto ou o CRLV já disseram.
-- Leitura que começa com "NÃO IDENTIFICADO" ou "NÃO LIDO", vídeo (você não vê a imagem de vídeo, só ouve a fala) e mídia "ainda não lida": se o carro ainda não está claro na conversa, peça com naturalidade o modelo e o ano — uma vez — e siga para o horário. Não diga que "não consegue abrir" o arquivo; diga o que precisa.
+- Leitura que começa com "NÃO IDENTIFICADO" ou "NÃO LIDO", vídeo (você não vê a imagem de vídeo, só ouve a fala) e mídia "ainda não lida" ou que "não pode ser lida": se o carro ainda não está claro na conversa, peça com naturalidade o modelo e o ano — uma vez — e siga para o horário. Não diga que "não consegue abrir" o arquivo; diga o que precisa.
 - Nunca repita para o cliente placa, nome do dono ou número de documento que apareça na leitura.
 
 ## Jeito de escrever

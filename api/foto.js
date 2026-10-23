@@ -1293,14 +1293,35 @@ async function midiaParaIA(tok, ids, teto) {
   const r = await fetch(`${URL_BASE}/rest/v1/wa_mensagem?select=id,anexo&id=in.(${lista.join(",")})`,
     { headers: { apikey: ANON, Authorization: tok } });
   if (!r.ok) return [];
-  const linhas = await r.json().catch(() => []);
+  return baixarParaIA(await r.json().catch(() => []), teto);
+}
+
+/* O mesmo download, para a Flávia AO VIVO (0077, 23/10/2026). O cron não
+ * tem usuário, então quem diz quais mensagens podem ser baixadas é a
+ * `ia_midias()`, que exige o IA_SEGREDO e só devolve mídia DO CLIENTE.
+ * A chave de serviço continua só aqui, e só para o que aquela função
+ * devolveu — a mesma ordem da decisão 9, com o segredo no lugar do
+ * token. */
+async function midiaParaIAServidor(segredo, ids, teto) {
+  const lista = (ids || []).filter((x) => RX_UUID.test(String(x))).slice(0, 10);
+  if (!lista.length || !segredo || !URL_BASE || !CHAVE || !ANON) return [];
+  const r = await fetch(`${URL_BASE}/rest/v1/rpc/ia_midias`, {
+    method: "POST", signal: AbortSignal.timeout(20000),
+    headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ p_segredo: segredo, p_ids: lista }),
+  });
+  if (!r.ok) return [];
+  return baixarParaIA(await r.json().catch(() => []), teto);
+}
+
+async function baixarParaIA(linhas, teto) {
   const saida = [];
-  for (const l of linhas) {
+  for (const l of linhas || []) {
     const a = l.anexo || {};
     const chave = String(a.chave || "");
     if (!chave || chave.slice(0, PASTA_WA.length + 1) !== `${PASTA_WA}/`) { saida.push({ id: l.id, erro: "sem arquivo guardado" }); continue; }
     try {
-      const b = await fetch(`${STORAGE()}/object/${BUCKET_DOC}/${paraURL(chave)}`, { headers: hArquivo() });
+      const b = await fetch(`${STORAGE()}/object/${BUCKET_DOC}/${paraURL(chave)}`, { headers: hArquivo(), signal: AbortSignal.timeout(30000) });
       if (!b.ok) { saida.push({ id: l.id, erro: "arquivo não baixou" }); continue; }
       const buf = Buffer.from(await b.arrayBuffer());
       if (buf.length > (teto || MAX_DOC)) { saida.push({ id: l.id, erro: "arquivo grande demais" }); continue; }
@@ -1311,3 +1332,4 @@ async function midiaParaIA(tok, ids, teto) {
   return saida;
 }
 module.exports.midiaParaIA = midiaParaIA;
+module.exports.midiaParaIAServidor = midiaParaIAServidor;

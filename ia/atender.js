@@ -19,11 +19,14 @@
  * Sem usuário e sem a chave de serviço: tudo passa pelas funções
  * estreitas da 0075, com o `IA_SEGREDO`.
  *
- * O que ela NÃO faz ainda: ler mídia que chega no número ao vivo. A
- * leitura de foto, documento e áudio (0073) roda com o token de quem
- * abre o treino; aqui a mídia aparece como "ainda não lida", e a
- * instrução já manda perguntar o carro nesse caso. */
+ * **Ela lê a mídia antes de responder (0077, 23/10/2026).** O Derek viu
+ * no treino: *"como assim não consegue abrir áudio? precisa conseguir
+ * ouvir áudio"*. A foto, o documento e o áudio do cliente que ainda não
+ * foram lidos são lidos aqui, pela mesma `ia/midia.js` do treino; o
+ * arquivo vem pelo `api/foto.js` (a chave de serviço continua só lá),
+ * autorizado pelo IA_SEGREDO, e a leitura fica gravada na mensagem. */
 const FLAVIA = require("./flavia.js");
+const MIDIA = require("./midia.js");
 
 const ESPERA_ENTRE = (txt) => Math.min(6000, 1500 + 35 * String(txt || "").length);
 const DO_CANAL = { "prospeccao-ativa": "prospeccao", tv: "tv", loja: "fluxo_loja" };
@@ -65,6 +68,23 @@ async function atenderFila(env) {
     try {
       const ctx = await rpc("ia_contexto", { p_segredo: SEG, p_conversa: item.conversa_id });
       const msgs = (ctx && ctx.msgs) || [];
+      // O áudio, a foto e o documento que o cliente mandou: lidos antes
+      // de redigir, para ela responder ao que ele disse no áudio em vez
+      // de pedir que escreva. Falha aqui não segura a resposta.
+      try {
+        const falta = MIDIA.faltaLer(msgs);
+        if (falta.length) {
+          const arquivos = await require("../api/foto.js").midiaParaIAServidor(SEG, falta.map((m) => m.id));
+          const porId = Object.fromEntries(arquivos.map((a) => [a.id, a]));
+          for (const m of falta) {
+            const lido = await MIDIA.lerArquivo(m, porId[m.id] || { erro: "sem arquivo guardado" }, { ai: env.AI, chave: CHAVE, modelo: MODELO });
+            m.leitura = lido.leitura;
+            if (lido.definitiva) {
+              try { await rpc("ia_gravar_leitura", { p_segredo: SEG, p_mensagem: m.id, p_leitura: lido.leitura, p_modelo: lido.modelo }); } catch (e) {}
+            }
+          }
+        }
+      } catch (e) { console.error("flavia: leitura de mídia", String((e && e.message) || e).slice(0, 200)); }
       // A conversa é relida aqui, não a da fila: mensagem que o cliente
       // mandou nesse meio-tempo entra na resposta.
       const agora = FLAVIA.paredeDe(new Date().toISOString());

@@ -2970,11 +2970,21 @@ porque o gerente julga; aqui não há ninguém antes do cliente.
 **O interruptor é por número e é do gerente**, no cartão de Números do
 WhatsApp. Desligar é imediato e sem pergunta — é o botão de emergência.
 
-**O que ainda não existe:** ela não lê a mídia que chega ao vivo (a
-leitura da 0073 roda com o token de quem abre o treino) — foto e áudio
-aparecem como "ainda não lidos", e a instrução manda perguntar o carro.
-Nem os lembretes da véspera e do dia, que a instrução diz serem
-automáticos.
+**Ela lê áudio, foto e documento antes de responder (0077, 23/10/2026).**
+O Derek, no treino: *"como assim não consegue abrir áudio? precisa
+conseguir ouvir áudio"*. Até aqui a leitura da 0073 só rodava no
+treino, com o token de quem abre a tela — e com cliente de verdade ela
+pedia para escrever o que ele tinha acabado de falar. Agora a
+`atenderFila` lê as mídias do cliente que faltam (as quatro mais
+recentes) antes de redigir, pela mesma `ia/midia.js` do treino. O
+arquivo vem por `midiaParaIAServidor()`, no `api/foto.js` — a chave de
+serviço continua só lá —, e só o que a `ia_midias()` devolveu com o
+IA_SEGREDO; a leitura volta à mensagem por `ia_gravar_leitura()`.
+**Leitura que falha não segura a resposta**: ela sai como "não lida" e
+a instrução manda perguntar o carro.
+
+**O que ainda não existe:** os lembretes da véspera e do dia, que a
+instrução diz serem automáticos.
 
 ### 65. A IA lê o agendado: qual é o carro, e se ele confirmou
 

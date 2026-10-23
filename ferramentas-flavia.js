@@ -77,11 +77,21 @@ console.log("a mídia lida");
 const midia = (leitura, tipo, texto) => ({ id: "m", eco: false, tipo: "midia", texto: texto || null, anexo: { tipo }, leitura, quando: "2026-10-07T20:01:00Z" });
 const lida = F.conversaEmTexto([midia("CRLV de um Onix LT 2019/2020 prata.", "document")]);
 confere("a leitura entra na conversa", lida.includes("mandou um documento. Leitura do arquivo: CRLV de um Onix LT 2019/2020 prata."), true);
-confere("mídia sem leitura não finge que foi vista", F.conversaEmTexto([midia(null, "image")]).includes("o arquivo ainda não foi lido"), true);
+const guardada = { ...midia(null, "image"), anexo: { tipo: "image", chave: "wa/tv/1.jpg" } };
+confere("mídia sem leitura não finge que foi vista", F.conversaEmTexto([guardada]).includes("o arquivo ainda não foi lido"), true);
+confere("mídia sem arquivo diz que não pode ser lida", F.conversaEmTexto([midia(null, "image")]).includes("não ficou guardado"), true);
 confere("a legenda vai junto", F.conversaEmTexto([midia(null, "image", "esse é o carro")]).includes('com a legenda "esse é o carro"'), true);
 confere("número longo da leitura também some", /12345678909/.test(F.conversaEmTexto([midia("CPF 12345678909 no documento", "document")])), false);
 const pm = F.pontosDe([midia("Áudio transcrito: \"quero vender meu Gol\"", "audio")]);
 confere("o ponto do treino mostra o que o áudio disse", pm[0].cliente.includes("quero vender meu Gol"), true);
+
+console.log("quais mídias são lidas (ia/midia.js, o mesmo do treino e do ao vivo)");
+const MID = require("./ia/midia.js");
+const mm = (id, eco, tipo, chave, leitura) => ({ id, eco, tipo: "midia", anexo: { tipo, chave }, leitura: leitura || null });
+const fl = MID.faltaLer([mm("a", false, "audio", "wa/1"), mm("b", true, "image", "wa/2"), mm("c", false, "image", ""),
+  mm("d", false, "sticker", "wa/3"), mm("e", false, "document", "wa/4", "já lida"), mm("f", false, "image", "wa/5"),
+  mm("g", false, "image", "wa/6"), mm("h", false, "video", "wa/7"), mm("i", false, "audio", "wa/8")]);
+confere("só do cliente, com arquivo, sem figurinha e sem leitura — as quatro mais recentes", fl.map((x) => x.id), ["f", "g", "h", "i"]);
 
 console.log("a saída do modelo");
 const livres = F.horariosLivres(cfg, "2026-10-16T10:00", []);
