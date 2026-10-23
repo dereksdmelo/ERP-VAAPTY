@@ -2081,7 +2081,27 @@ não a exceção — sem essa guarda, um "obrigado!" do cliente devolveria
 o lead para o funil.
 
 **"Não veio" derruba a data junto.** Hora marcada que já passou não é
-compromisso, é ruído na agenda de quem vai remarcar. E a pergunta
+compromisso, é ruído na agenda de quem vai remarcar. **Mas o horário
+perdido fica no histórico** (23/10/2026): o servidor guarda em
+`remarcacoes` `{de, nao_veio: true}` antes de apagar a data, e a agenda
+o desenha no lugar onde estava — vermelho "não veio" enquanto ninguém
+remarcou (tocar abre o agendador), tracejado "remarcou · para 25/10 às
+10h" depois. Faltas de antes dessa data não têm o horário guardado.
+
+**Os estados do cartão na agenda** (`ESTADO_AGENDA`), cada um com cor
+E palavra — cor sozinha não se lê ao sol, palavra sozinha não se acha
+numa grade de 60: agendado (branco), confirmou (verde ✓), passou a
+hora e ninguém marcou (amarelo "veio?" — a pergunta, diferente do
+vermelho, que é a resposta), veio (roxo), fechou (verde cheio, pelo
+status do atendimento), não veio, remarcou e o fluxo (azul). Os de
+quem veio e de quem faltou vêm da fila `semana`, à parte da agenda em
+aberto.
+
+**"Já passou?" se compara pela hora de parede** (`jaPassou`). O
+`Date.parse` lia "…T14:00:00+00:00" como 14h UTC — 11h em Joinville —,
+e às 12h17 o agendamento das 14h já aparecia vermelho, e o quadro
+perguntava "veio?" três horas antes. Mesma armadilha da hora da IA,
+acima: **quem comparar agendamento com agora usa `jaPassou`.** E a pergunta
 "compareceu?" **só aparece depois da hora marcada**: perguntar três
 dias antes treina a pessoa a ignorar o botão, e aí ele deixa de valer
 no dia em que importa.

@@ -12646,6 +12646,17 @@ const zapApp = (tel) => {
   return `whatsapp://send?phone=${d.length <= 11 ? `55${d}` : d}`;
 };
 
+/* "JÁ PASSOU?" PELA HORA DE PAREDE (23/10/2026). O agendamento guarda
+ * a hora que se lê na parede de Joinville (decisão 51) — "14:00" vem
+ * do banco como "…T14:00:00+00:00". `Date.parse` lia isso como 14h UTC,
+ * que são 11h aqui: às 12h17 o das 14h já aparecia vermelho, "passou e
+ * ninguém marcou". Compara-se texto com texto, como `horaBR` lê. */
+const agoraParede = () => {
+  const d = new Date(Date.now() - 3 * 3600000).toISOString();
+  return d.slice(0, 16);
+};
+const jaPassou = (agendado) => !!agendado && String(agendado).slice(0, 16).replace(" ", "T") < agoraParede();
+
 const horaBR = (iso) => (iso ? String(iso).slice(11, 16) : "");
 const diaDaSemana = (iso) => ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"][new Date(`${String(iso).slice(0, 10)}T12:00:00`).getDay()];
 
@@ -13875,8 +13886,7 @@ function ConversaPopup({ telefone, nome, aoFechar, aoLigar, aoRenomear, rotuloFe
 }
 
 function CartaoLead({ l, onAbrir, onArrastar, onVeio }) {
-  const t = l.agendado_para ? Date.parse(l.agendado_para) : 0;
-  const atrasado = t && t < Date.now();
+  const atrasado = jaPassou(l.agendado_para);
   /* A PERGUNTA SÓ APARECE QUANDO ELA PODE SER RESPONDIDA: chegou a
    * hora marcada. Perguntar "veio?" três dias antes treina a pessoa a
    * ignorar o botão, e aí ele deixa de valer no dia em que importa. */
@@ -14827,9 +14837,27 @@ function FunilLeads({ perfil, equipe, aoVerConversa }) {
  * pronta — é o que a pré-venda faz na véspera, sessenta vezes seguidas.
  * "Chegou" cria o atendimento com o que já foi perguntado ao telefone.
  */
-// O cliente de fluxo na agenda: azul, para não se confundir com o
-// agendado (branco), o confirmado (verde) e o que passou (laranja).
+// O cliente de fluxo na agenda: azul, para não se confundir com os
+// estados do agendado (ESTADO_AGENDA).
 const COR_FLUXO = { fundo: "#E5F0FA", borda: "#2F7CC4", texto: "#1F5C96" };
+
+/* OS ESTADOS DO CARTÃO NA AGENDA (23/10/2026, o Derek: *"um jeito pra
+ * mostrar que confirmou, outro que veio e outro que fechou… e o cliente
+ * que não veio e não remarcou ainda do que não veio mas já remarcou"*).
+ *
+ * Cada estado é cor E palavra: cor sozinha não se lê no celular ao sol,
+ * e palavra sozinha não se acha de relance numa grade de 60 cartões.
+ * O amarelo é a pergunta em aberto (passou a hora e ninguém disse se
+ * veio) — é diferente do vermelho, que é a resposta "não veio". */
+const ESTADO_AGENDA = {
+  agendado:   { rot: "",                fundo: C.paper,   borda: C.line,    hora: C.ink },
+  confirmado: { rot: "confirmou",       fundo: C.paper,   borda: C.verde,   hora: C.verde },
+  passou:     { rot: "veio?",           fundo: "#FFF7E0", borda: "#D99A00", hora: "#9A6B00" },
+  veio:       { rot: "veio",            fundo: C.roxoFraco, borda: C.roxo,  hora: C.roxo },
+  fechou:     { rot: "fechou",          fundo: "#D6EFE0", borda: C.verde,   hora: C.verde },
+  naoVeio:    { rot: "não veio",        fundo: "#FBE1E1", borda: "#D64545", hora: "#B42318" },
+  remarcou:   { rot: "remarcou",        fundo: C.bg,      borda: C.line,    hora: C.mute },
+};
 
 function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
   const [lista, setLista] = useState(null);
@@ -14849,16 +14877,17 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
 
   const mexer = async (l, mud) => {
     setLista((ls) => ls.map((x) => (x.id === l.id ? { ...x, ...mud } : x)));
-    try { await atualizarLead(l.id, mud); carregar(); }
+    try { await atualizarLead(l.id, mud); carregar(); lerSemanaRef.current && lerSemanaRef.current(); }
     catch (e) { setErro(e.message); carregar(); }
   };
+  const lerSemanaRef = useRef(null);
   // "Chegou" abre a janela (quem atende, nome, carro e hora); o
   // atendimento nasce quando ela confirma, e abre em seguida.
   const [chegando, setChegando] = useState(null);
   const chegou = (l) => setChegando(l);
   const chegouFeito = (d) => {
     setChegando(null);
-    carregar();
+    carregar(); lerSemanaRef.current && lerSemanaRef.current();
     if (aoAbrirAtendimento && d && d.atendimento_id) aoAbrirAtendimento(d.atendimento_id);
   };
 
@@ -14908,6 +14937,12 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
    * "FLUXO" — os importados da planilha não têm hora, e o fluxo que
    * veio de lead já aparece como o lead que era. */
   const [fluxos, setFluxos] = useState([]);
+  // Quem veio e quem não veio, na semana à vista (fila "semana").
+  const [semanaFeita, setSemanaFeita] = useState({ vieram: [], faltaram: [] });
+  const lerSemana = () => fetchAut(`/api/atendimento?recurso=lead&fila=semana&de=${semana[0]}&ate=${semana[5]}`)
+    .then((r) => r.json()).then((d) => setSemanaFeita({ vieram: d.vieram || [], faltaram: d.faltaram || [] })).catch(() => {});
+  useEffect(() => { lerSemana(); }, [semana[0]]);
+  lerSemanaRef.current = lerSemana;
   const lerFluxos = () => listarAtendimentos({ origem: "fluxo_loja", de: semana[0], ate: semana[5] })
     .then((xs) => setFluxos((xs || []).filter((a) => a.chegada_em && String(a.prospec || "").toUpperCase() === "FLUXO")))
     .catch(() => {});
@@ -14956,12 +14991,28 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
                 style={{ borderColor: C.line, color: C.ink }}>›</button>
             </div>
           </div>
+          <div className="mb-2 flex flex-wrap gap-x-3 gap-y-1 text-[11.5px]" style={{ color: C.mute }}>
+            {[["agendado", "agendado"], ["confirmado", "confirmou"], ["passou", "passou a hora, ninguém marcou"], ["veio", "veio"],
+              ["fechou", "fechou"], ["naoVeio", "não veio, sem remarcar"], ["remarcou", "não veio, já remarcou"]].map(([k, r]) => (
+              <span key={k} className="flex items-center gap-1">
+                <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: ESTADO_AGENDA[k].fundo, border: `1.5px ${k === "remarcou" ? "dashed" : "solid"} ${ESTADO_AGENDA[k].borda}` }} />{r}
+              </span>
+            ))}
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: COR_FLUXO.fundo, border: `1.5px solid ${COR_FLUXO.borda}` }} />cliente de fluxo
+            </span>
+          </div>
           <div className="rolar overflow-x-auto pb-1">
             <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(6, minmax(130px, 1fr))" }}>
               {semana.map((d) => {
                 const doDia = (grupos[d] || []).slice().sort((x, y) => String(x.agendado_para).localeCompare(String(y.agendado_para)));
                 const itens = [
                   ...doDia.map((l) => ({ k: "l", h: horaBR(l.agendado_para) || "", l })),
+                  ...semanaFeita.vieram.filter((l) => String(l.agendado_para || "").slice(0, 10) === d)
+                    .map((l) => ({ k: "v", h: horaBR(l.agendado_para), l })),
+                  ...semanaFeita.faltaram.flatMap((l) => (l.remarcacoes || [])
+                    .filter((r) => r && r.nao_veio && String(r.de || "").slice(0, 10) === d)
+                    .map((r) => ({ k: "n", h: horaBR(r.de), l, r }))),
                   ...fluxos.filter((a) => diaSP(a.chegada_em) === d).map((a) => ({ k: "f", h: horaSP(a.chegada_em), a })),
                 ].sort((x, y) => x.h.localeCompare(y.h));
                 const eHoje = d === hoje;
@@ -14996,16 +15047,43 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
                             </button>
                           );
                         }
+                        /* Quem veio e quem não veio: cartão de leitura, com
+                           a ação que cabe — abrir o atendimento de quem veio,
+                           remarcar quem faltou e ainda não remarcou. */
+                        if (it.k === "v" || it.k === "n") {
+                          const l = it.l;
+                          const novaData = it.k === "n" && (l.status === "agendado" || l.status === "confirmado") && l.agendado_para;
+                          const e = ESTADO_AGENDA[it.k === "v" ? ((l.atendimento && l.atendimento.status) === "fechado" ? "fechou" : "veio") : novaData ? "remarcou" : "naoVeio"];
+                          const agir = it.k === "v" ? () => aoAbrirAtendimento && l.atendimento_id && aoAbrirAtendimento(l.atendimento_id)
+                            : !novaData ? () => setAgendando(l) : null;
+                          return (
+                            <button key={`${it.k}-${l.id}-${it.h}`} onClick={agir || undefined} disabled={!agir}
+                              className="w-full rounded-lg px-2 py-1.5 text-left"
+                              style={{ background: e.fundo, border: `1px ${it.k === "n" && novaData ? "dashed" : "solid"} ${e.borda}`, cursor: agir ? "pointer" : "default" }}>
+                              <div className="flex items-center gap-1.5 text-[11.5px] font-bold" style={{ fontFamily: F.mono, color: e.hora }}>
+                                <span style={{ textDecoration: it.k === "n" ? "line-through" : "none" }}>{it.h}</span>
+                                <span className="rounded px-1 text-[9.5px] uppercase tracking-[0.06em]" style={{ fontFamily: F.body, background: e.borda, color: "#fff" }}>{e.rot}</span>
+                              </div>
+                              <div className="truncate text-[12px]" style={{ color: novaData ? C.mute : C.ink }}>{l.nome}</div>
+                              <div className="truncate text-[11px]" style={{ color: C.mute }}>
+                                {novaData ? `para ${diaBR(String(l.agendado_para).slice(0, 10)).slice(0, 5)} às ${horaBR(l.agendado_para)}`
+                                  : it.k === "n" ? "toque para remarcar" : (l.carro || "sem carro")}
+                              </div>
+                            </button>
+                          );
+                        }
                         const l = it.l;
                         const conf = l.status === "confirmado";
-                        const passou = Date.parse(l.agendado_para) < Date.now();
+                        const passou = jaPassou(l.agendado_para);
+                        const e = ESTADO_AGENDA[passou ? "passou" : conf ? "confirmado" : "agendado"];
                         const aberto = cartao === l.id;
                         return (
                           <div key={l.id} className="rounded-lg"
-                            style={{ background: C.paper, border: `1px solid ${conf ? C.verde : passou ? C.laranja : C.line}` }}>
+                            style={{ background: e.fundo, border: `1px solid ${e.borda}` }}>
                             <button onClick={() => setCartao(aberto ? null : l.id)} className="w-full px-2 py-1.5 text-left">
-                              <div className="text-[11.5px] font-bold" style={{ fontFamily: F.mono, color: conf ? C.verde : passou ? C.laranja : C.ink }}>
+                              <div className="flex items-center gap-1.5 text-[11.5px] font-bold" style={{ fontFamily: F.mono, color: e.hora }}>
                                 {horaBR(l.agendado_para)}{conf ? " ✓" : ""}
+                                {e.rot && <span className="rounded px-1 text-[9.5px] uppercase tracking-[0.06em]" style={{ fontFamily: F.body, background: e.borda, color: "#fff" }}>{e.rot}</span>}
                               </div>
                               <div className="truncate text-[12px]">{l.nome}</div>
                               {/* O CARRO NO CARTÃO (o Diego, 07/10/2026: *"mostrar

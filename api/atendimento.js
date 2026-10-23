@@ -1038,6 +1038,29 @@ async function leads(req, res, tok) {
     // A agenda é o que tem hora marcada e ainda não foi resolvido; o
     // funil é o resto. Separar aqui evita a tela filtrar 500 linhas
     // para mostrar 8.
+    /* A SEMANA DA AGENDA, além do que está em aberto (23/10/2026, o
+     * Derek: *"mostrar que confirmou, outro que veio e outro que
+     * fechou… e o cliente que não veio e não remarcou ainda do que não
+     * veio mas já remarcou"*). Quem VEIO tem a hora marcada guardada e
+     * o atendimento ligado — o estado dele diz se fechou. Quem NÃO
+     * VEIO perde a data no lead (decisão 51), mas o horário perdido
+     * fica em `remarcacoes` com `nao_veio` — é de lá que a grade o
+     * desenha no lugar onde estava. */
+    if (fila === "semana") {
+      const de = data(req.query.de), ate = data(req.query.ate);
+      if (!de || !ate) return res.status(400).json({ erro: "Informe de e ate." });
+      const [vieram, faltaram] = await Promise.all([
+        banco(`${base}?select=${CAMPOS_LEAD},atendimento:atendimento_id(status)&status=eq.compareceu&excluido_em=is.null` +
+              `&agendado_para=gte.${de}T00:00:00&agendado_para=lte.${ate}T23:59:59&limit=300`, { headers: cabecalhos(tok) }),
+        banco(`${base}?select=${CAMPOS_LEAD}&excluido_em=is.null&remarcacoes=cs.${encodeURIComponent('[{"nao_veio":true}]')}` +
+              `&order=atualizado_em.desc&limit=500`, { headers: cabecalhos(tok) }),
+      ]);
+      const naSemana = (t) => { const d = String(t || "").slice(0, 10); return d >= de && d <= ate; };
+      return res.status(200).json({
+        vieram: vieram || [],
+        faltaram: (faltaram || []).filter((l) => (l.remarcacoes || []).some((r) => r && r.nao_veio && naSemana(r.de))),
+      });
+    }
     if (fila === "agenda") f.push("status=in.(agendado,confirmado)");
     // **Perdido tem fila própria, e não é lixeira.** É onde se confere
     // se o cliente foi mesmo embora — vendeu fora, ou não tem
@@ -1221,9 +1244,18 @@ async function leads(req, res, tok) {
     // Remarcar guarda a data antiga. Sem isso, "remarcou três vezes"
     // — que é o que diz se o cliente vem mesmo — some no primeiro
     // clique.
-    if (l.agendado_para !== undefined) {
+    if (l.agendado_para !== undefined || l.status === "nao_compareceu") {
       const atual = (await banco(`${base}?select=agendado_para,remarcacoes,status&id=eq.${id}`, { headers: cabecalhos(tok) }) || [])[0];
-      if (atual && atual.agendado_para && l.agendado_para && atual.agendado_para !== l.agendado_para) {
+      /* "NÃO VEIO" GUARDA O HORÁRIO QUE ELE PERDEU (23/10/2026). A data
+       * sai do lead, como sempre (decisão 51: hora que passou não é
+       * compromisso), mas fica no histórico marcada `nao_veio` — é o
+       * que deixa a agenda mostrar, no lugar dele, quem faltou e ainda
+       * não remarcou, separado de quem faltou e já remarcou. */
+      if (l.status === "nao_compareceu" && atual && atual.agendado_para) {
+        const hist = Array.isArray(atual.remarcacoes) ? atual.remarcacoes : [];
+        l.remarcacoes = hist.concat([{ de: atual.agendado_para, nao_veio: true, em: new Date().toISOString() }]);
+        l.agendado_para = null;
+      } else if (atual && atual.agendado_para && l.agendado_para && atual.agendado_para !== l.agendado_para) {
         const hist = Array.isArray(atual.remarcacoes) ? atual.remarcacoes : [];
         l.remarcacoes = hist.concat([{ de: atual.agendado_para, para: l.agendado_para, em: new Date().toISOString(), motivo: texto(c.motivo) }]);
         // Remarcou: a confirmação anterior não vale mais.
