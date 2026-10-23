@@ -1721,9 +1721,22 @@ const mesCurto = (m) => {
 };
 
 function GraficoDesval({ d, caiu, porMes, alto, grande }) {
+  // O viewBox acompanha a largura de verdade: com largura fixa e altura
+  // fixa, o SVG encolhia para caber e a curva ficava num terço da tela.
+  const caixa = useRef(null);
+  const [larg, setLarg] = useState(320);
+  useEffect(() => {
+    const el = caixa.current;
+    if (!el) return;
+    const medir = () => setLarg(Math.max(200, Math.round(el.getBoundingClientRect().width)));
+    medir();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(medir) : null;
+    if (ro) ro.observe(el);
+    return () => ro && ro.disconnect();
+  }, []);
   const N = d.serie.length;
   const proj = caiu ? 6 : 0;
-  const L = 320, A = alto || 120, mx = 8, my = 14;
+  const L = larg, A = alto || 120, mx = 8, my = 14;
   const vals = d.serie.map((x) => x.valor);
   const fimProj = d.atual.valor - proj * porMes;
   const min = Math.min(...vals, proj ? fimProj : Infinity), max = Math.max(...vals);
@@ -1736,7 +1749,8 @@ function GraficoDesval({ d, caiu, porMes, alto, grande }) {
   const fs = grande ? 11 : 9;
   const iPico = vals.indexOf(Math.max(...vals));
   return (
-    <svg viewBox={`0 0 ${L} ${A}`} className="block w-full" style={{ height: A }} role="img"
+    <div ref={caixa} className="w-full">
+    <svg viewBox={`0 0 ${L} ${A}`} width={L} height={A} className="block" role="img"
       aria-label={`Tabela FIPE de ${d.serie[0].mes} a ${d.atual.mes}`}>
       <defs>
         <linearGradient id={`desval-${grande ? "g" : "p"}`} x1="0" x2="0" y1="0" y2="1">
@@ -1759,6 +1773,7 @@ function GraficoDesval({ d, caiu, porMes, alto, grande }) {
       <circle cx={px(N - 1)} cy={py(d.atual.valor)} r={grande ? 5 : 3.5} fill={cor} />
       <text x={px(N - 1) - 4} y={Math.min(py(d.atual.valor) + fs + 5, A - 2)} fontSize={fs} fill={cor} fontFamily={F.mono} fontWeight="700" textAnchor="end">{brl(d.atual.valor)}</text>
     </svg>
+    </div>
   );
 }
 
@@ -1766,7 +1781,7 @@ function Desvalorizometro({ chave, modelo, compacto }) {
   const [d, setD] = useState(null);
   const [erro, setErro] = useState("");
   const [indo, setIndo] = useState(false);
-  const [periodo, setPeriodo] = useState("12");
+  const [periodo, setPeriodo] = useState("");
   const [cheio, setCheio] = useState(false);
 
   useEffect(() => {
@@ -1793,10 +1808,32 @@ function Desvalorizometro({ chave, modelo, compacto }) {
   if (erro) return <p className="mt-3 text-[11px]" style={{ color: C.laranja }}>{erro}</p>;
   if (!d || !d.serie || d.serie.length < 2) return null;
 
-  const opcoes = [["12", "12 meses", d.doze_meses], ["24", "24 meses", d.vinte_quatro_meses]].filter((o) => o[2]);
-  const escolha = (opcoes.filter((o) => o[0] === periodo)[0] || opcoes[0] || [])[2];
-  if (!escolha) return null;
-  const meses = (opcoes.filter((o) => o[2] === escolha)[0] || [])[0] || "12";
+  /* OS RECORTES SAEM DA SÉRIE, e a tela abre no que mais caiu. O
+   * primeiro teste com carro de verdade (uma Biz 2013, 23/10/2026)
+   * mostrou o problema: em 12 meses a tabela SUBIU 8%, e desde o topo,
+   * em 2026, CAIU R$ 631. Só o "12 meses" diria "subiu" a um cliente
+   * cujo carro está perdendo valor agora. Todos os recortes são verdade;
+   * a tela abre no de maior queda e deixa trocar. Verde ("subiu") só
+   * quando nenhum caiu. */
+  const S = d.serie, U = S[S.length - 1];
+  const recorte = (iAntes, n, rot) => {
+    const a = S[iAntes];
+    if (!a || !a.valor || n < 1) return null;
+    const reais = U.valor - a.valor;
+    return { k: rot, rot, n, de: a.mes, valor_antes: a.valor, reais, pct: Math.round((reais / a.valor) * 1000) / 10, por_mes: Math.round(reais / n) };
+  };
+  const iTopo = S.reduce((b, x, i) => (x.valor > S[b].valor ? i : b), 0);
+  const opcoesTodas = [
+    recorte(S.length - 1 - 6, 6, "6 meses"),
+    recorte(S.length - 1 - 12, 12, "12 meses"),
+    recorte(S.length - 1 - 24, 24, "24 meses"),
+    iTopo < S.length - 1 ? recorte(iTopo, S.length - 1 - iTopo, "desde o topo") : null,
+  ].filter(Boolean);
+  if (!opcoesTodas.length) return null;
+  const maiorQueda = opcoesTodas.reduce((a, b) => (b.reais < a.reais ? b : a));
+  const opcoes = opcoesTodas.map((o) => [o.k, o.rot, o]);
+  const escolha = opcoesTodas.filter((o) => o.k === periodo)[0] || maiorQueda;
+  const meses = escolha.k;
   const caiu = escolha.reais < 0;
   const perda = Math.abs(escolha.reais);
   const porMes = Math.abs(escolha.por_mes);
@@ -1819,7 +1856,9 @@ function Desvalorizometro({ chave, modelo, compacto }) {
   const titulo = (grande) => (
     <div>
       <div className={grande ? "text-[18px]" : "text-[12px]"} style={{ color: tom.texto, fontWeight: 600 }}>
-        {caiu ? `Em ${meses} meses, este carro perdeu` : `Em ${meses} meses, a tabela deste carro subiu`}
+        {escolha.k === "desde o topo"
+          ? (caiu ? `Desde o topo da tabela (${mesCurto(escolha.de)}), este carro perdeu` : "A tabela deste carro está no topo")
+          : (caiu ? `Em ${escolha.k}, este carro perdeu` : `Em ${escolha.k}, a tabela deste carro subiu`)}
       </div>
       <div className={grande ? "text-[64px] leading-none" : "text-[34px] leading-none"}
         style={{ fontFamily: F.mono, fontWeight: 800, color: tom.forte, letterSpacing: "-0.02em" }}>
