@@ -2970,6 +2970,23 @@ leitura só sobe agendado → confirmado, nunca desce, e só para horário
 que não passou. `confirmado_por` fica nulo — é como se sabe depois que
 foi a leitura, e não uma pessoa.
 
+**A primeira passada (23/10/2026) leu os 144 agendados da semana: 141
+saíram com carro**, conferidos contra a conversa ("Zafira 2009
+automática", "Zontes T350"). **A confirmação errou para mais na
+primeira versão**: "pode ser amanhã às 15 | ok", dito ao ESCOLHER o
+horário, virou ✓. A instrução passou a exigir uma troca POSTERIOR —
+quase sempre a resposta ao lembrete —, as 14 foram relidas e ficaram
+10, conferidas uma a uma. **Quem mexer nesta instrução confere assim**:
+lista os confirmados e lê as duas últimas mensagens do cliente.
+
+**O cron do Cloudflare pula minutos e trava com chamada pendurada.**
+Tarefa presa a "minuto múltiplo de cinco" rodou uma vez em meia hora;
+e um container da ponte que não respondia segurou uma execução, e o
+agendador não começou a seguinte — das 11h19 às 11h28 não rodou nada,
+nem a Flávia. Agora as três tarefas rodam em toda volta e **toda
+chamada de fora tem prazo** (`AbortSignal.timeout`). Quem acrescentar
+chamada ao `scheduled` põe prazo nela.
+
 **O que ela não faz:** marcar "não vem" quando o cliente desmarca. Ela
 deixa de confirmar, e o cartão fica sem ✓ — a pré-venda resolve.
 
