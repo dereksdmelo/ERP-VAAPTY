@@ -38,9 +38,10 @@
   // Workers AI cobra por uso, dentro da conta do Cloudflare -- sem chave
   // nova e sem o áudio sair para outro fornecedor.
   "ai": { "binding": "AI" },
-  // A cada minuto: a Flávia responde quem escreveu (ia/atender.js), e
-  // nos minutos múltiplos de cinco o despertador da ponte pergunta o
-  // estado dos números — sem ele os containers dormem em 15 minutos.
+  // A cada minuto: a Flávia responde quem escreveu, a leitura acha o
+  // carro e a confirmação dos agendados (ia/atender.js), e o despertador
+  // pergunta o estado dos números — sem ele os containers dormem em 15
+  // minutos. O Cloudflare pula minutos; por isso nada depende do minuto.
   "triggers": { "crons": ["* * * * *"] },
   "observability": { "enabled": true }
 }

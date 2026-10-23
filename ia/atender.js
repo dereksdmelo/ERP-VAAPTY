@@ -183,19 +183,26 @@ async function lerLeads(env) {
         body: JSON.stringify({ model: MODELO, max_tokens: 120, system: INSTRUCAO_LEITURA,
           messages: [{ role: "user", content: `Horário marcado na agenda: ${marcado}.\n\n${FLAVIA.conversaEmTexto(l.msgs || [], 6000)}` }] }),
       });
-      if (!r.ok) { feitos.push({ lead: l.lead_id, erro: `IA ${r.status}` }); continue; }   // não marca como lido: tenta na próxima
+      if (!r.ok) {   // não marca como lido: tenta na próxima
+        const corpo = await r.text().catch(() => "");
+        console.error("leitura: IA", r.status, corpo.slice(0, 300));
+        feitos.push({ lead: l.lead_id, erro: `IA ${r.status}` });
+        if (r.status === 401 || r.status === 400 || r.status === 404) break;   // erro de chave ou de modelo não melhora no lead seguinte
+        continue;
+      }
       const d = await r.json();
       const txt = ((d.content || []).find((x) => x.type === "text") || {}).text || "";
       const i = txt.indexOf("{"), j = txt.lastIndexOf("}");
       const o = i >= 0 && j > i ? JSON.parse(txt.slice(i, j + 1)) : {};
       carro = String(o.carro || "").replace(/\b[A-Z]{3}-?\d[A-Z0-9]\d{2}\b/gi, "").replace(/\s+/g, " ").trim().slice(0, 60);
       confirmou = o.confirmou === true;
-    } catch (e) { /* leitura que não veio legível: grava como lida, sem mudar nada */ }
+    } catch (e) { console.error("leitura: resposta ilegível", String((e && e.message) || e).slice(0, 200)); }
     try {
       await rpc("ia_lead_gravar", { p_segredo: SEG, p_lead: l.lead_id, p_carro: carro, p_confirmou: confirmou });
       feitos.push({ lead: l.lead_id, carro: carro || undefined, confirmou });
     } catch (e) { feitos.push({ lead: l.lead_id, erro: String(e.message || e).slice(0, 120) }); }
   }
+  if (leads.length) console.log("leitura:", leads.length, "leads,", feitos.filter((f) => !f.erro).length, "gravados", JSON.stringify(feitos.filter((f) => f.erro)).slice(0, 300));
   return { lidos: feitos };
 }
 

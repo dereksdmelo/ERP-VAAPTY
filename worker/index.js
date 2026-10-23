@@ -175,17 +175,19 @@ export default {
    * confinada (decisão 9). */
   /* E A FLÁVIA ATENDENDO (22/10/2026, decisão 64): o cron passou a
    * rodar a cada MINUTO por causa dela — o cliente que escreve não
-   * espera cinco. O despertador continua de cinco em cinco, nos
-   * minutos múltiplos de cinco. Um não espera o outro, e a falha de um
-   * não derruba o outro. */
+   * espera cinco. A falha de uma tarefa não derruba as outras. */
   async scheduled(evento, env, ctx) {
-    const minuto = new Date(evento && evento.scheduledTime ? evento.scheduledTime : Date.now()).getUTCMinutes();
-    const tarefas = [atenderFila(env).catch((e) => console.error("flavia:", String((e && e.message) || e).slice(0, 200)))];
-    if (minuto % 5 === 0) tarefas.push(despertar(env));
-    // A leitura do carro e da confirmação dos agendados (decisão 65),
-    // de cinco em cinco, fora do minuto do despertador.
-    if (minuto % 5 === 2) tarefas.push(lerLeads(env).catch((e) => console.error("leitura:", String((e && e.message) || e).slice(0, 200))));
-    await Promise.all(tarefas);
+    /* TUDO EM TODA VOLTA, e não "de cinco em cinco minutos": o cron do
+     * Cloudflare PULA minutos (em 23/10, das 11h00 às 11h13, rodou em 9
+     * dos 14), e a leitura presa ao minuto 2 rodou uma vez em meia hora.
+     * As três só fazem trabalho quando há o que fazer: a fila sai vazia,
+     * a leitura só pega conversa com mensagem nova, e o despertador são
+     * cinco perguntas de estado. */
+    await Promise.all([
+      atenderFila(env).catch((e) => console.error("flavia:", String((e && e.message) || e).slice(0, 200))),
+      lerLeads(env).catch((e) => console.error("leitura:", String((e && e.message) || e).slice(0, 200))),
+      despertar(env).catch((e) => console.error("despertador:", String((e && e.message) || e).slice(0, 200))),
+    ]);
   },
 };
 
