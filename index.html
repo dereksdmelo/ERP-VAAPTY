@@ -9114,11 +9114,15 @@ function Avatar({ nome, tam }) {
 }
 
 function ListaDeBaloes({ msgs }) {
-  let ultimo = "";
+  let ultimo = "", lado = null;
   return (msgs || []).map((m) => {
     const dia = diaDaMensagem(m.quando);
     const novoDia = !!dia && dia !== ultimo;
     if (dia) ultimo = dia;
+    // Como no WhatsApp: o rabinho e o respiro só no primeiro balão de
+    // cada vez que muda quem fala (ou o dia).
+    const primeiro = novoDia || lado !== !!m.eco;
+    lado = !!m.eco;
     return (
       <React.Fragment key={m.id}>
         {novoDia && (
@@ -9129,13 +9133,13 @@ function ListaDeBaloes({ msgs }) {
             </span>
           </div>
         )}
-        <Balao m={m} />
+        <Balao m={m} primeiro={primeiro} />
       </React.Fragment>
     );
   });
 }
 
-function Balao({ m }) {
+function Balao({ m, primeiro = true }) {
   const meu = !!m.eco;
   const anexo = m.anexo || {};
   const [url, setUrl] = useState("");
@@ -9159,14 +9163,16 @@ function Balao({ m }) {
   };
 
   return (
-    <div className={`flex ${meu ? "justify-end pl-10" : "justify-start pr-10"}`}>
-      <div className={`relative max-w-[85%] rounded-lg px-2.5 pb-1.5 pt-1.5 ${meu ? "rounded-tr-none" : "rounded-tl-none"}`}
+    <div className={`flex ${meu ? "justify-end pl-10" : "justify-start pr-10"}`} style={{ marginTop: primeiro ? 8 : 1 }}>
+      <div className={`relative max-w-[85%] rounded-lg px-2.5 pb-1.5 pt-1.5 ${primeiro ? (meu ? "rounded-tr-none" : "rounded-tl-none") : ""}`}
         style={{ background: meu ? WA.meu : WA.dele, color: WA.texto, boxShadow: "0 1px 0.5px rgba(11,20,26,0.13)" }}>
         {/* o "rabinho" do balão, no canto de cima */}
-        <svg viewBox="0 0 8 13" width="8" height="13" className="absolute top-0" aria-hidden="true"
-          style={meu ? { right: -8 } : { left: -8, transform: "scaleX(-1)" }}>
-          <path d="M0 0h8L1.5 9.5C.9 10.3 0 9.9 0 8.9z" fill={meu ? WA.meu : WA.dele} />
-        </svg>
+        {primeiro && (
+          <svg viewBox="0 0 8 13" width="8" height="13" className="absolute top-0" aria-hidden="true"
+            style={meu ? { right: -8 } : { left: -8, transform: "scaleX(-1)" }}>
+            <path d="M0 0h8L1.5 9.5C.9 10.3 0 9.9 0 8.9z" fill={meu ? WA.meu : WA.dele} />
+          </svg>
+        )}
         {m.tipo === "midia" && (
           <div className="mb-1">
             {url && anexo.tipo === "image" && (
@@ -9315,7 +9321,7 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe }) {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-[6%] py-3" style={WA_FUNDO}>
+      <div className="min-h-0 flex-1 overflow-y-auto px-[6%] py-3" style={WA_FUNDO}>
         {erro && <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
         {!msgs && !erro && <p className="text-center text-[13.5px]" style={{ color: WA.mute }}>carregando…</p>}
         {msgs && !msgs.length && (
@@ -14057,7 +14063,7 @@ function ConversaPopup({ telefone, nome, aoFechar, aoLigar, aoRenomear, rotuloFe
             className="mt-3 w-full rounded-lg px-3 py-2.5 text-[14px] font-semibold text-white"
             style={{ background: C.verde }}>Ligar para {nome || telBR(telefone)}</button>
         )}
-        <div className="mt-3 flex-1 space-y-1 overflow-y-auto rounded-lg px-3 py-2" style={WA_FUNDO}>
+        <div className="mt-3 flex-1 overflow-y-auto rounded-lg px-3 py-2" style={WA_FUNDO}>
           {erro && <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
           {!msgs && !erro && <p className="text-[13.5px]" style={{ color: C.mute }}>carregando…</p>}
           {msgs && !msgs.length && (
