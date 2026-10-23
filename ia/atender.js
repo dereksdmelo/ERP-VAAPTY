@@ -156,9 +156,11 @@ const INSTRUCAO_LEITURA = [
   "de foto ou documento. Se forem dois carros, os dois separados por \" e \". Se o carro não aparecer, \"\". Nunca invente.",
   "Nunca ponha placa, nome do dono ou número de documento.",
   "",
-  "\"confirmou\": true só se, DEPOIS de o horário estar marcado, o cliente disse com clareza que vem nesse horário —",
-  "normalmente respondendo a um lembrete (\"confirmado\", \"pode deixar\", \"tô indo\", \"estarei aí\", \"sim, vou\").",
-  "Escolher o horário NÃO é confirmar. Se depois ele disse que não pode, que vai remarcar, ou se ficou em dúvida: false.",
+  "\"confirmou\": true só se o horário JÁ ESTAVA COMBINADO e, numa troca de mensagens POSTERIOR, o cliente disse com",
+  "clareza que vem — quase sempre respondendo a um LEMBRETE ou a um pedido de confirmação da loja que veio depois",
+  "(\"confirmado\", \"pode deixar, tô indo\", \"estarei aí\", \"sim, vou\", \"amanhã eu vou\").",
+  "O \"ok\", \"pode ser\", \"combinado\" ou \"pode confirmar\" dito NA MESMA conversa em que o horário está sendo escolhido",
+  "é o AGENDAMENTO, não a confirmação: false. Se depois ele disse que não pode, que vai remarcar, ou ficou em dúvida: false.",
   "Na dúvida, false.",
 ].join("\n");
 
