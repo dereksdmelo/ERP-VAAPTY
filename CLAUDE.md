@@ -695,6 +695,18 @@ a campo e descartava o resto do retorno. Passou a devolver o não
 mapeado em `extras`, e a resposta apareceu na primeira consulta.
 `extras` continua lá para a próxima pergunta desse tipo.
 
+**O segundo desenho (23/10/2026)** — o Derek: *"mais evidente,
+principalmente mais claro para o cliente que o veículo desvalorizou"*.
+A perda em reais virou o título (grande, vermelho), traduzida em
+**por mês, por semana e por dia parado** — "R$ 18 por dia" é o custo
+de pensar mais um pouco —, com a projeção "se esperar" no mesmo ritmo,
+escrita como conta e não como previsão. **"Mostrar ao cliente" abre em
+tela cheia** para virar o celular: branca, letra grande, nada da casa
+— só a FIPE, com a fonte embaixo. Aparece na Pesquisa (completo) e na
+Negociação (compacto), que é onde o "vou pensar" acontece. **Carro que
+subiu de tabela aparece subindo, em verde**: dizer que perdeu seria
+mentira na frente do cliente.
+
 **Cache de 7 dias na borda:** a tabela FIPE muda uma vez por mês e a
 consulta gasta cota. O endpoint é aberto, como `/api/placa` — os dois
 precisam de login junto, quando for a hora.

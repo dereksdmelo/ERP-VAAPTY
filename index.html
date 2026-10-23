@@ -1690,12 +1690,84 @@ function ConferirFipe({ f, set }) {
  * qualquer argumento: o cliente ancora no que pagou, e a curva mostra
  * quanto custa continuar esperando.
  *
+ * O SEGUNDO DESENHO (23/10/2026, o Derek: *"preciso que o
+ * desvalorizômetro seja mais evidente, principalmente mais claro para o
+ * cliente que o veículo desvalorizou — impactar e mostrar o quanto"*).
+ * O primeiro era um gráfico de 70 px com dois números de 17 px: lia-se
+ * de perto, por quem já sabia o que procurar. Agora:
+ *
+ *  - **a perda em reais é o título**, grande e em vermelho — é o número
+ *    que o cliente repete em casa;
+ *  - **e vira tempo**: por mês, por semana, por dia. "R$ 6 mil por ano"
+ *    é abstrato; "R$ 18 por dia parado" é o custo de pensar mais um
+ *    pouco;
+ *  - **a projeção "se esperar"** é a mesma conta para a frente, no mesmo
+ *    ritmo, e a tela diz que é isso — não é previsão de mercado;
+ *  - **"Mostrar ao cliente"** abre em tela cheia, letra grande, para
+ *    virar o celular para ele. É dado público da FIPE, e a fonte vai
+ *    escrita embaixo — a credibilidade é a da tabela, não a da loja.
+ *
+ * **Carro que subiu de tabela aparece subindo, em verde.** Dizer que
+ * perdeu seria mentira na frente do cliente, e o argumento é outro: a
+ * tabela está a favor agora.
+ *
  * Gráfico em SVG na mão — o projeto não tem build nem biblioteca.
  */
-function Desvalorizometro({ chave }) {
+const VERMELHO_DESVAL = { fundo: "#FDECEC", borda: "#F3B4B4", forte: "#C0262D", texto: "#8E1B21" };
+const mesCurto = (m) => {
+  const t = String(m || "").trim();
+  const x = /^([A-Za-zçÇãÃéÉ]{3})[A-Za-zçÇãÃéÉ]*(?:\s+de)?\s*[\/ ]\s*(\d{4})$/.exec(t);
+  return x ? `${x[1].toLowerCase()}/${x[2]}` : t;
+};
+
+function GraficoDesval({ d, caiu, porMes, alto, grande }) {
+  const N = d.serie.length;
+  const proj = caiu ? 6 : 0;
+  const L = 320, A = alto || 120, mx = 8, my = 14;
+  const vals = d.serie.map((x) => x.valor);
+  const fimProj = d.atual.valor - proj * porMes;
+  const min = Math.min(...vals, proj ? fimProj : Infinity), max = Math.max(...vals);
+  const faixa = max - min || 1;
+  const px = (i) => mx + (i * (L - 2 * mx)) / (N - 1 + proj);
+  const py = (v) => my + (A - 2 * my) * (1 - (v - min) / faixa);
+  const linha = d.serie.map((x, i) => `${px(i).toFixed(1)},${py(x.valor).toFixed(1)}`).join(" ");
+  const area = `${px(0)},${A - my} ${linha} ${px(N - 1).toFixed(1)},${A - my}`;
+  const cor = caiu ? VERMELHO_DESVAL.forte : C.verde;
+  const fs = grande ? 11 : 9;
+  const iPico = vals.indexOf(Math.max(...vals));
+  return (
+    <svg viewBox={`0 0 ${L} ${A}`} className="block w-full" style={{ height: A }} role="img"
+      aria-label={`Tabela FIPE de ${d.serie[0].mes} a ${d.atual.mes}`}>
+      <defs>
+        <linearGradient id={`desval-${grande ? "g" : "p"}`} x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0" stopColor={cor} stopOpacity="0.28" />
+          <stop offset="1" stopColor={cor} stopOpacity="0.02" />
+        </linearGradient>
+      </defs>
+      <polygon points={area} fill={`url(#desval-${grande ? "g" : "p"})`} />
+      <polyline points={linha} fill="none" stroke={cor} strokeWidth={grande ? 2.5 : 2} strokeLinejoin="round" />
+      {proj > 0 && (
+        <line x1={px(N - 1)} y1={py(d.atual.valor)} x2={px(N - 1 + proj)} y2={py(fimProj)}
+          stroke={cor} strokeWidth={grande ? 2 : 1.5} strokeDasharray="4 4" opacity="0.8" />
+      )}
+      {iPico < N - 1 && (
+        <g>
+          <circle cx={px(iPico)} cy={py(vals[iPico])} r={grande ? 4 : 3} fill="#fff" stroke={cor} strokeWidth="1.5" />
+          <text x={Math.min(px(iPico), L - 70)} y={Math.max(py(vals[iPico]) - 5, fs)} fontSize={fs} fill={C.mute} fontFamily={F.mono}>{brl(vals[iPico])}</text>
+        </g>
+      )}
+      <circle cx={px(N - 1)} cy={py(d.atual.valor)} r={grande ? 5 : 3.5} fill={cor} />
+      <text x={px(N - 1) - 4} y={Math.min(py(d.atual.valor) + fs + 5, A - 2)} fontSize={fs} fill={cor} fontFamily={F.mono} fontWeight="700" textAnchor="end">{brl(d.atual.valor)}</text>
+    </svg>
+  );
+}
+
+function Desvalorizometro({ chave, modelo, compacto }) {
   const [d, setD] = useState(null);
   const [erro, setErro] = useState("");
   const [indo, setIndo] = useState(false);
+  const [periodo, setPeriodo] = useState("12");
+  const [cheio, setCheio] = useState(false);
 
   useEffect(() => {
     if (!chave) { setD(null); setErro(""); return; }
@@ -1708,79 +1780,120 @@ function Desvalorizometro({ chave }) {
     return () => { vivo = false; };
   }, [chave]);
 
+  // ESC fecha a tela cheia, como as outras janelas da casa.
+  useEffect(() => {
+    if (!cheio) return;
+    const k = (e) => { if (e.key === "Escape") setCheio(false); };
+    document.addEventListener("keydown", k);
+    return () => document.removeEventListener("keydown", k);
+  }, [cheio]);
+
   if (!chave) return null;
   if (indo) return <p className="mt-3 text-[11px]" style={{ color: C.mute }}>Carregando o histórico FIPE…</p>;
   if (erro) return <p className="mt-3 text-[11px]" style={{ color: C.laranja }}>{erro}</p>;
   if (!d || !d.serie || d.serie.length < 2) return null;
 
-  const L = 300, A = 70, m = 4;
-  const vals = d.serie.map((x) => x.valor);
-  const min = Math.min(...vals), max = Math.max(...vals);
-  const faixa = max - min || 1;
-  const px = (i) => m + (i * (L - 2 * m)) / (d.serie.length - 1);
-  const py = (v) => m + (A - 2 * m) * (1 - (v - min) / faixa);
-  const linha = d.serie.map((x, i) => `${px(i).toFixed(1)},${py(x.valor).toFixed(1)}`).join(" ");
-  const area = `${m},${A - m} ${linha} ${(L - m).toFixed(1)},${A - m}`;
+  const opcoes = [["12", "12 meses", d.doze_meses], ["24", "24 meses", d.vinte_quatro_meses]].filter((o) => o[2]);
+  const escolha = (opcoes.filter((o) => o[0] === periodo)[0] || opcoes[0] || [])[2];
+  if (!escolha) return null;
+  const meses = (opcoes.filter((o) => o[2] === escolha)[0] || [])[0] || "12";
+  const caiu = escolha.reais < 0;
+  const perda = Math.abs(escolha.reais);
+  const porMes = Math.abs(escolha.por_mes);
+  const porDia = porMes / 30;
+  const porSemana = porMes * 7 / 30;
+  const em3 = d.atual.valor - 3 * porMes, em6 = d.atual.valor - 6 * porMes;
+  const nome = modelo || [d.marca, d.modelo].filter(Boolean).join(" ");
+  const tom = caiu ? VERMELHO_DESVAL : { fundo: "#E6F4EC", borda: "#A9D9BC", forte: C.verde, texto: "#14593E" };
+  const rs = (v) => brl(Math.round(v));
 
-  const doze = d.doze_meses;
+  const seletor = opcoes.length > 1 && (
+    <div className="flex gap-1">
+      {opcoes.map(([k, r]) => (
+        <button key={k} onClick={() => setPeriodo(k)} className="rounded-full px-2.5 py-1 text-[11px] font-semibold"
+          style={meses === k ? { background: tom.forte, color: "#fff" } : { background: "#fff", color: C.mute, border: `1px solid ${C.line}` }}>{r}</button>
+      ))}
+    </div>
+  );
+
+  const titulo = (grande) => (
+    <div>
+      <div className={grande ? "text-[18px]" : "text-[12px]"} style={{ color: tom.texto, fontWeight: 600 }}>
+        {caiu ? `Em ${meses} meses, este carro perdeu` : `Em ${meses} meses, a tabela deste carro subiu`}
+      </div>
+      <div className={grande ? "text-[64px] leading-none" : "text-[34px] leading-none"}
+        style={{ fontFamily: F.mono, fontWeight: 800, color: tom.forte, letterSpacing: "-0.02em" }}>
+        {caiu ? "−" : "+"}{rs(perda)}
+      </div>
+      <div className={grande ? "mt-2 text-[17px]" : "mt-1 text-[11.5px]"} style={{ color: tom.texto }}>
+        {Math.abs(escolha.pct)}% · de {rs(escolha.valor_antes)} ({mesCurto(escolha.de)}) para {rs(d.atual.valor)} ({mesCurto(d.atual.mes)})
+      </div>
+    </div>
+  );
+
+  const custo = (grande) => caiu && (
+    <div className={`grid grid-cols-3 ${grande ? "gap-3" : "gap-1.5"}`}>
+      {[["por mês parado", porMes], ["por semana", porSemana], ["por dia", porDia]].map(([r, v]) => (
+        <div key={r} className="rounded-lg text-center" style={{ background: "#fff", border: `1px solid ${tom.borda}`, padding: grande ? "14px 6px" : "8px 4px" }}>
+          <div className={grande ? "text-[30px] leading-none" : "text-[16px] leading-none"} style={{ fontFamily: F.mono, fontWeight: 700, color: tom.forte }}>−{rs(v)}</div>
+          <div className={grande ? "mt-1.5 text-[14px]" : "mt-1 text-[10px]"} style={{ color: tom.texto }}>{r}</div>
+        </div>
+      ))}
+    </div>
+  );
+
+  const espera = (grande) => caiu && (
+    <div className={grande ? "text-[17px] leading-relaxed" : "text-[11.5px] leading-snug"} style={{ color: tom.texto }}>
+      <b>Se esperar</b>, no mesmo ritmo: daqui a 3 meses ≈ <b style={{ fontFamily: F.mono }}>{rs(em3)}</b>
+      {" "}· daqui a 6 meses ≈ <b style={{ fontFamily: F.mono }}>{rs(em6)}</b>.
+    </div>
+  );
+
+  const fonte = (grande) => (
+    <div className={grande ? "text-[13px]" : "text-[9.5px]"} style={{ color: C.mute }}>
+      Fonte: tabela FIPE, mês a mês ({d.meses_disponiveis} meses de histórico). A linha tracejada é a mesma queda continuando — conta, não previsão.
+    </div>
+  );
 
   return (
-    <div className="mt-3 rounded-md p-3" style={{ background: "#FBFAFC", border: `1px solid ${C.line}` }}>
-      <div className="text-[10px] uppercase tracking-[0.13em]" style={{ color: C.mute }}>
-        Desvalorizômetro · FIPE mês a mês
+    <div className="mt-3 rounded-xl p-3" style={{ background: tom.fundo, border: `1.5px solid ${tom.borda}` }}>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-[10px] font-bold uppercase tracking-[0.13em]" style={{ color: tom.texto }}>Desvalorizômetro · FIPE</span>
+        {seletor}
       </div>
+      {titulo(false)}
+      {!compacto && <div className="mt-3"><GraficoDesval d={d} caiu={caiu} porMes={porMes} /></div>}
+      <div className="mt-3">{custo(false)}</div>
+      {!compacto && <div className="mt-2">{espera(false)}</div>}
+      <button onClick={() => setCheio(true)} className="mt-3 w-full rounded-lg py-2.5 text-[13.5px] font-bold text-white"
+        style={{ background: tom.forte }}>Mostrar ao cliente</button>
+      {!compacto && <div className="mt-2">{fonte(false)}</div>}
 
-      <svg viewBox={`0 0 ${L} ${A}`} className="mt-2 block w-full" style={{ height: 70 }} preserveAspectRatio="none">
-        <polygon points={area} fill={C.roxoFraco} />
-        <polyline points={linha} fill="none" stroke={C.roxo} strokeWidth="1.5" strokeLinejoin="round" />
-        <circle cx={px(d.serie.length - 1)} cy={py(vals[vals.length - 1])} r="2.5" fill={C.roxo} />
-      </svg>
-
-      <div className="flex justify-between text-[9px]" style={{ color: C.mute, fontFamily: F.mono }}>
-        <span>{d.serie[0].mes}</span>
-        <span>{d.atual.mes}</span>
-      </div>
-
-      {doze && (() => {
-        // Carro velho no Brasil tem subido de tabela. Tratar tudo como
-        // perda seria mentira na frente do cliente — e o argumento de
-        // negociação é outro em cada caso.
-        const caiu = doze.reais < 0;
-        const cor = caiu ? C.laranja : C.verde;
-        return (
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            <div>
-              <div className="text-[9px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>
-                {caiu ? "Perdeu em 12 meses" : "Subiu em 12 meses"}
+      {/* A TELA DO CLIENTE: branca, letra grande, nada da casa nela —
+          só a tabela FIPE e a conta. É para virar o celular. */}
+      {cheio && (
+        <div className="fixed inset-0 z-50 overflow-y-auto" style={{ background: "#fff" }} onClick={() => setCheio(false)}>
+          <div className="mx-auto flex min-h-full max-w-2xl flex-col gap-5 p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[13px] font-bold uppercase tracking-[0.14em]" style={{ color: C.mute }}>Tabela FIPE do seu carro</div>
+                <div className="mt-1 text-[22px] font-bold leading-tight" style={{ color: C.ink }}>{nome}</div>
               </div>
-              <div className="text-[17px] leading-tight" style={{ fontFamily: F.mono, fontWeight: 700, color: cor }}>
-                {caiu ? "−" : "+"}{brl(Math.abs(doze.reais))}
-              </div>
-              <div className="text-[10px]" style={{ color: C.mute }}>
-                {Math.abs(doze.pct)}% desde {doze.de}
-              </div>
+              <button onClick={() => setCheio(false)} className="rounded-lg border px-3 py-1.5 text-[14px]" style={{ borderColor: C.line, color: C.mute }}>fechar</button>
             </div>
-            <div>
-              <div className="text-[9px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>
-                {caiu ? "Por mês parado" : "Por mês"}
-              </div>
-              <div className="text-[17px] leading-tight" style={{ fontFamily: F.mono, fontWeight: 700, color: cor }}>
-                {caiu ? "−" : "+"}{brl(Math.abs(doze.por_mes))}
-              </div>
-              <div className="text-[10px]" style={{ color: C.mute }}>
-                {caiu ? "é o custo de esperar" : "acompanhando a tabela"}
-              </div>
+            {seletor}
+            {titulo(true)}
+            <GraficoDesval d={d} caiu={caiu} porMes={porMes} alto={220} grande />
+            <div className="flex justify-between text-[12px]" style={{ color: C.mute, fontFamily: F.mono }}>
+              <span>{mesCurto(d.serie[0].mes)}</span><span>{mesCurto(d.atual.mes)}{caiu ? " → 6 meses" : ""}</span>
             </div>
+            {custo(true)}
+            {espera(true)}
+            {!caiu && <div className="text-[17px]" style={{ color: tom.texto }}>A tabela está a favor agora — é o melhor momento para vender pelo valor de hoje.</div>}
+            <div className="mt-auto">{fonte(true)}</div>
           </div>
-        );
-      })()}
-
-      <p className="mt-2 text-[10px] leading-relaxed" style={{ color: C.mute }}>
-        {d.desde_o_pico.reais < 0
-          ? `Do topo (${brl(d.pico.valor)}, ${d.pico.mes}) até hoje: ${brl(Math.abs(d.desde_o_pico.reais))} a menos — ${Math.abs(d.desde_o_pico.pct)}%.`
-          : `Está no maior valor da série (${d.pico.mes}).`}
-        {" "}São {d.meses_disponiveis} meses de tabela.
-      </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -5338,7 +5451,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 );
               })()}
 
-              <Desvalorizometro chave={f.fipeDesval} />
+              <Desvalorizometro chave={f.fipeDesval} modelo={f.modelo} />
             </Bloco>
 
             {blocoCliente}
@@ -5841,6 +5954,10 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
           return (
           <>
             <IndicacaoLojista atendimento={atendimento} f={f} perfil={perfil} />
+            {/* O desvalorizômetro também na mesa da negociação, compacto:
+                é aqui que o "vou pensar" aparece, e o custo de pensar é
+                o número dele. O botão abre a tela do cliente. */}
+            <Desvalorizometro chave={f.fipeDesval} modelo={f.modelo} compacto />
             {gap != null && (
               <div className="rounded-lg p-3" style={{ background: C.roxoFraco, border: `1px solid ${C.line}` }}>
                 <div className="text-[10px] uppercase tracking-[0.14em]" style={{ color: C.mute }}>Gap de abertura</div>
