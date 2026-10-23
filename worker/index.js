@@ -28,7 +28,7 @@ import perfil from "../api/perfil.js";
 import placa from "../api/placa.js";
 import proposta from "../api/proposta.js";
 import veiculo from "../api/veiculo.js";
-import { atenderFila } from "../ia/atender.js";
+import { atenderFila, lerLeads } from "../ia/atender.js";
 
 const ROTAS = { atendimento, checklist, documento, financeiro, fipe, foto,
                 funil, importar, perfil, placa, proposta, veiculo };
@@ -182,6 +182,9 @@ export default {
     const minuto = new Date(evento && evento.scheduledTime ? evento.scheduledTime : Date.now()).getUTCMinutes();
     const tarefas = [atenderFila(env).catch((e) => console.error("flavia:", String((e && e.message) || e).slice(0, 200)))];
     if (minuto % 5 === 0) tarefas.push(despertar(env));
+    // A leitura do carro e da confirmação dos agendados (decisão 65),
+    // de cinco em cinco, fora do minuto do despertador.
+    if (minuto % 5 === 2) tarefas.push(lerLeads(env).catch((e) => console.error("leitura:", String((e && e.message) || e).slice(0, 200))));
     await Promise.all(tarefas);
   },
 };

@@ -125,4 +125,78 @@ async function atenderFila(env) {
   return { fila: fila.length, feitos };
 }
 
-module.exports = { atenderFila };
+/* A LEITURA DO AGENDADO (23/10/2026, decisão 65): qual é o carro, e se
+ * o cliente confirmou que vem.
+ *
+ * O Derek viu a agenda com "sem carro" em quase todo cartão, e nenhum
+ * ✓ de confirmado, com as duas coisas escritas na conversa. Quem
+ * pergunta o carro é a Ana, a Camila ou a Flávia; quem confirma é o
+ * cliente respondendo o lembrete. O leitor por expressão da 0059 só
+ * procura data e hora — e modelo de carro em texto livre, ou um "pode
+ * deixar, tô indo", não se pega por expressão sem errar para os dois
+ * lados.
+ *
+ * **Confirmar não é agendar.** O cliente escolhendo o horário é o que
+ * MARCA; confirmar é ele dizer, depois de marcado, que vem — quase
+ * sempre respondendo o lembrete. Contar o primeiro como o segundo
+ * poria ✓ em todo agendamento, e o ✓ deixaria de dizer alguma coisa.
+ * Na dúvida, não confirma: a pré-venda liga, que é o que ela faz com
+ * quem não tem ✓ (decisão 27). */
+const INSTRUCAO_LEITURA = [
+  "Você lê a conversa de WhatsApp entre a loja (LOJA) e um cliente (CLIENTE) que quer vender o carro.",
+  "Responda SÓ um objeto JSON, sem cercas de código: {\"carro\": \"\", \"confirmou\": false}",
+  "",
+  "\"carro\": o carro que o cliente quer vender, como uma pessoa escreveria na agenda: marca ou modelo e o ano, se aparecer",
+  "(ex.: \"Onix LT 2019\", \"Gol G5 2010\", \"Hilux 2015 diesel\"). Vale o que o cliente disse e o que aparece na leitura",
+  "de foto ou documento. Se forem dois carros, os dois separados por \" e \". Se o carro não aparecer, \"\". Nunca invente.",
+  "Nunca ponha placa, nome do dono ou número de documento.",
+  "",
+  "\"confirmou\": true só se, DEPOIS de o horário estar marcado, o cliente disse com clareza que vem nesse horário —",
+  "normalmente respondendo a um lembrete (\"confirmado\", \"pode deixar\", \"tô indo\", \"estarei aí\", \"sim, vou\").",
+  "Escolher o horário NÃO é confirmar. Se depois ele disse que não pode, que vai remarcar, ou se ficou em dúvida: false.",
+  "Na dúvida, false.",
+].join("\n");
+
+async function lerLeads(env) {
+  const URL_BASE = env.SUPABASE_URL, ANON = env.SUPABASE_ANON_KEY, SEG = env.IA_SEGREDO, CHAVE = env.ANTHROPIC_API_KEY;
+  if (!URL_BASE || !ANON || !SEG || !CHAVE) return { pulado: "falta configuração" };
+  const MODELO = env.IA_MODELO || "claude-haiku-4-5-20251001";
+  const rpc = async (nome, corpo) => {
+    const r = await fetch(`${URL_BASE}/rest/v1/rpc/${nome}`, {
+      method: "POST",
+      headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, "Content-Type": "application/json" },
+      body: JSON.stringify(corpo),
+    });
+    const t = await r.text();
+    if (!r.ok) throw new Error(`${nome}: ${t.slice(0, 200)}`);
+    try { return t ? JSON.parse(t) : null; } catch (e) { return null; }
+  };
+  const leads = (await rpc("ia_leads_para_ler", { p_segredo: SEG })) || [];
+  const feitos = [];
+  for (const l of leads) {
+    let carro = "", confirmou = false;
+    try {
+      const marcado = String(l.agendado_para || "").slice(0, 16).replace("T", " às ");
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": CHAVE, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
+        body: JSON.stringify({ model: MODELO, max_tokens: 120, system: INSTRUCAO_LEITURA,
+          messages: [{ role: "user", content: `Horário marcado na agenda: ${marcado}.\n\n${FLAVIA.conversaEmTexto(l.msgs || [], 6000)}` }] }),
+      });
+      if (!r.ok) { feitos.push({ lead: l.lead_id, erro: `IA ${r.status}` }); continue; }   // não marca como lido: tenta na próxima
+      const d = await r.json();
+      const txt = ((d.content || []).find((x) => x.type === "text") || {}).text || "";
+      const i = txt.indexOf("{"), j = txt.lastIndexOf("}");
+      const o = i >= 0 && j > i ? JSON.parse(txt.slice(i, j + 1)) : {};
+      carro = String(o.carro || "").replace(/\b[A-Z]{3}-?\d[A-Z0-9]\d{2}\b/gi, "").replace(/\s+/g, " ").trim().slice(0, 60);
+      confirmou = o.confirmou === true;
+    } catch (e) { /* leitura que não veio legível: grava como lida, sem mudar nada */ }
+    try {
+      await rpc("ia_lead_gravar", { p_segredo: SEG, p_lead: l.lead_id, p_carro: carro, p_confirmou: confirmou });
+      feitos.push({ lead: l.lead_id, carro: carro || undefined, confirmou });
+    } catch (e) { feitos.push({ lead: l.lead_id, erro: String(e.message || e).slice(0, 120) }); }
+  }
+  return { lidos: feitos };
+}
+
+module.exports = { atenderFila, lerLeads };

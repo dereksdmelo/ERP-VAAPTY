@@ -2938,6 +2938,41 @@ aparecem como "ainda não lidos", e a instrução manda perguntar o carro.
 Nem os lembretes da véspera e do dia, que a instrução diz serem
 automáticos.
 
+### 65. A IA lê o agendado: qual é o carro, e se ele confirmou
+
+O Derek, em 23/10/2026, olhando a agenda com "sem carro" em quase
+todo cartão: *"a IA não está reconhecendo o carro, precisa reconhecer
+pra colocar automático na agenda… também precisa reconhecer
+automático se já confirmou ou não"*.
+
+**As duas coisas estavam escritas na conversa**, e ninguém lia: a Ana,
+a Camila e a Flávia perguntam o modelo, e o cliente responde o
+lembrete. O leitor da 0059 é por expressão e só procura data e hora —
+e "um gol bola 2010 prata" ou "pode deixar, tô indo" não se pegam por
+expressão sem errar para os dois lados.
+
+**De cinco em cinco minutos** (`lerLeads`, em `ia/atender.js`, no
+cron do ERP), o lead agendado ou confirmado da semana, sem carro ou
+sem confirmação, **cuja conversa teve mensagem depois da última
+leitura** (`ia_lido_em`, 0076), vai ao Haiku com o fim da conversa e
+volta com `{carro, confirmou}`. Conversa parada não paga leitura de
+novo.
+
+**O carro só entra onde estava vazio.** O que alguém digitou no lead
+não é trocado por palpite. Placa que venha junto é cortada.
+
+**Confirmar não é agendar.** Escolher o horário é o que MARCA;
+confirmar é o cliente dizer, depois, que vem — quase sempre
+respondendo o lembrete. Contar o primeiro como o segundo poria ✓ em
+todo cartão e o ✓ deixaria de dizer alguma coisa. **Na dúvida, não
+confirma**: a pré-venda liga para quem não tem ✓ (decisão 27). A
+leitura só sobe agendado → confirmado, nunca desce, e só para horário
+que não passou. `confirmado_por` fica nulo — é como se sabe depois que
+foi a leitura, e não uma pessoa.
+
+**O que ela não faz:** marcar "não vem" quando o cliente desmarca. Ela
+deixa de confirmar, e o cartão fica sem ✓ — a pré-venda resolve.
+
 ## Convenções do código
 
 - **Português no domínio.** Estado, funções e rótulos em pt-BR
