@@ -15082,7 +15082,7 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
                             style={{ background: e.fundo, border: `1px solid ${e.borda}` }}>
                             <button onClick={() => setCartao(aberto ? null : l.id)} className="w-full px-2 py-1.5 text-left">
                               <div className="flex items-center gap-1.5 text-[11.5px] font-bold" style={{ fontFamily: F.mono, color: e.hora }}>
-                                {horaBR(l.agendado_para)}{conf ? " ✓" : ""}
+                                {horaBR(l.agendado_para)}{conf && passou ? " ✓" : ""}
                                 {e.rot && <span className="rounded px-1 text-[9.5px] uppercase tracking-[0.06em]" style={{ fontFamily: F.body, background: e.borda, color: "#fff" }}>{e.rot}</span>}
                               </div>
                               <div className="truncate text-[12px]">{l.nome}</div>
