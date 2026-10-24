@@ -354,9 +354,28 @@ function sessaoDoLink() {
   return s;
 }
 
+/* VÁRIAS ABAS, UMA SESSÃO (24/10/2026). Cada aba guarda a sessão na
+ * memória, e o Supabase troca o `refresh_token` a cada renovação: quando
+ * uma aba renova, a chave que as outras têm na memória deixa de valer.
+ * A aba atrasada que tentava renovar com a chave velha levava recusa e
+ * APAGAVA a sessão guardada — que é a mesma de todas as abas — e o
+ * Derek caiu no login com seis abas abertas.
+ *
+ * Por isso, antes de renovar, e de novo antes de desistir, a aba relê a
+ * sessão guardada: se outra aba já renovou, usa aquela. Só apaga a
+ * sessão guardada se ela ainda for a mesma que acabou de ser recusada. */
+async function sessaoGuardada() {
+  try { const r = await window.storage.get("vaapty:sessao"); return r && r.value ? JSON.parse(r.value) : null; }
+  catch (e) { return null; }
+}
 async function renovarSessao() {
   const cfg = await carregarConfig();
   const atual = AUTH.sessao;
+  const guardada = await sessaoGuardada();
+  if (guardada && guardada.refresh_token && (!atual || guardada.refresh_token !== atual.refresh_token)) {
+    AUTH.sessao = guardada;
+    return guardada;
+  }
   if (!atual || !atual.refresh_token) throw new Error("Sessão expirada.");
   const r = await fetch(`${cfg.url}/auth/v1/token?grant_type=refresh_token`, {
     method: "POST",
@@ -364,7 +383,12 @@ async function renovarSessao() {
     body: JSON.stringify({ refresh_token: atual.refresh_token }),
   });
   const d = await r.json().catch(() => ({}));
-  if (!r.ok) { guardarSessao(null); throw new Error("Sessão expirada. Entre de novo."); }
+  if (!r.ok) {
+    const outra = await sessaoGuardada();
+    if (outra && outra.refresh_token && outra.refresh_token !== atual.refresh_token) { AUTH.sessao = outra; return outra; }
+    guardarSessao(null);
+    throw new Error("Sessão expirada. Entre de novo.");
+  }
   guardarSessao(d);
   return d;
 }

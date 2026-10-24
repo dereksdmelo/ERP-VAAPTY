@@ -597,6 +597,15 @@ consulta ao banco feita pelo usuário — se a RLS não devolver a linha,
 a função para antes de tocar no arquivo. Se um dia houver política em
 `storage.objects`, esta exceção sai.
 
+**Várias abas, uma sessão (24/10/2026).** O Supabase troca o
+`refresh_token` a cada renovação, e cada aba guarda a sessão na
+memória: a aba atrasada renovava com a chave velha, levava recusa e
+apagava a sessão guardada — a de todas as abas. `renovarSessao` relê a
+sessão guardada antes de renovar e antes de desistir, e só apaga se
+ela for a mesma que foi recusada. O defeito existia desde o login, e
+apareceu quando `fetchAut` passou a renovar também no "JWT expired"
+que vinha como 500.
+
 **Sessão morta renova uma vez.** O token dura uma hora. Em vez de
 vigiar relógio, `fetchAut()` deixa o 401 acontecer, renova e repete.
 Falhou de novo, é sessão morta: derruba para a tela de login.
