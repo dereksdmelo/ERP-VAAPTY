@@ -11377,45 +11377,39 @@ function CRM({ perfil, aoAbrir, mes }) {
         </div>
       )}
 
-      <div className="rounded-xl p-3 lg:p-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-        <form onSubmit={buscar} className="flex gap-2">
-          <input className={inputCls} style={inputSty} placeholder="Cliente, carro ou telefone"
+      {/* BUSCA E FILTROS NUMA LINHA SÓ (24/10/2026, o Derek: *"diminua e
+          simplifique a barra de pesquisa e filtros"*). Eram uma caixa com
+          a busca, o negociador embaixo e dezesseis pílulas de status em
+          duas linhas — um terço da tela antes do primeiro atendimento. O
+          status virou seletor: quem filtra sabe o que procura, e a cor da
+          linha (verde fechado, vermelho vendeu fora) já mostra o resto.
+          O negociador continua à vista, não num "mais filtros": "como foi
+          o mês do André" é pergunta de toda segunda-feira. */}
+      <form onSubmit={buscar} className="flex flex-wrap items-center gap-2">
+        <div className="flex min-w-[220px] flex-1 items-center gap-2 rounded-lg border px-2.5" style={{ ...inputSty, maxWidth: 420 }}>
+          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill={C.mute} d="M15.5 14h-.8l-.3-.3A6.5 6.5 0 1 0 9.5 16a6.5 6.5 0 0 0 4.2-1.6l.3.3v.8l5 5 1.5-1.5zm-6 0a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z" /></svg>
+          <input className="w-full bg-transparent py-1.5 text-[13.5px] outline-none" placeholder="Cliente, carro ou telefone"
             value={busca} onChange={(e) => setBusca(e.target.value)} />
-          <button type="submit" className="shrink-0 rounded-lg border px-4 text-[14px] font-semibold"
-            style={{ borderColor: C.line, color: C.roxo }}>Buscar</button>
-        </form>
-
-        {/* O negociador ao lado da busca, não escondido num "mais
-            filtros": "como foi o mês do André" é pergunta de toda
-            segunda-feira. */}
-        <div className="mt-2 flex items-center gap-2">
-          <span className="shrink-0 text-[12px]" style={{ color: C.mute }}>Negociador</span>
-          <select className="min-w-0 flex-1 rounded-lg border px-2 py-1.5 text-[13px] outline-none"
-            style={inputSty} value={neg} onChange={(e) => setNeg(e.target.value)}>
-            <option value="">Todos</option>
-            {nomesNeg.map((n) => <option key={n} value={n}>{n}</option>)}
-            <option value="__sem__">— sem negociador —</option>
-          </select>
-          {neg && (
-            <button onClick={() => setNeg("")} className="shrink-0 text-[12px] font-semibold" style={{ color: C.roxo }}>
-              limpar
-            </button>
-          )}
         </div>
-        {/* No celular a fila rola; no desktop cabe em duas linhas e
-            rolar seria esconder metade dos status. */}
-        <div className="rolar -mx-3 mt-3 flex gap-1.5 overflow-x-auto px-3 lg:mx-0 lg:flex-wrap lg:overflow-visible lg:px-0">
-          {[["", "Todos"]].concat(STATUS_AT.map((x) => [x[0], x[1]])).map(([v, r]) => (
-            <button key={v || "todos"} onClick={() => setStatus(v)}
-              className="shrink-0 rounded-full px-3 py-1.5 text-[13px]"
-              style={{ background: status === v ? C.roxo : C.bg, color: status === v ? "#fff" : C.ink, fontWeight: status === v ? 600 : 500 }}>
-              {r}
-            </button>
-          ))}
-        </div>
-      </div>
+        <select className="rounded-lg border px-2 py-1.5 text-[13px] outline-none" style={{ ...inputSty, color: neg ? C.ink : C.mute }}
+          value={neg} onChange={(e) => setNeg(e.target.value)} aria-label="Negociador">
+          <option value="">Todos os negociadores</option>
+          {nomesNeg.map((n) => <option key={n} value={n}>{n}</option>)}
+          <option value="__sem__">— sem negociador —</option>
+        </select>
+        <select className="rounded-lg border px-2 py-1.5 text-[13px] outline-none" style={{ ...inputSty, color: status ? C.ink : C.mute }}
+          value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Status">
+          <option value="">Todos os status</option>
+          {STATUS_AT.map((x) => <option key={x[0]} value={x[0]}>{x[1]}</option>)}
+        </select>
+        {(neg || status || busca) && (
+          <button type="button" onClick={() => { const soBusca = !neg && !status; setNeg(""); setStatus(""); setBusca(""); if (soBusca) carregar(filtrosAtuais({ q: "" })); }}
+            className="text-[12.5px] font-semibold" style={{ color: C.roxo }}>limpar</button>
+        )}
+        <button type="submit" className="hidden">Buscar</button>
+      </form>
 
-      <div className="mt-4 space-y-3">
+      <div className="mt-3 space-y-3">
         {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
         {carregando && <p className="text-[12px]" style={{ color: C.mute }}>Carregando…</p>}
 
