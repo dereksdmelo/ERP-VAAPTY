@@ -11828,7 +11828,17 @@ const semanaDe = (e) => {
   return d ? Math.min(5, Math.floor((d - 1) / 7) + 1) : null;
 };
 
-function Rentabilidade({ vendidos, comp, aoAbrir }) {
+/* A RENTABILIDADE COM CARA DE PLANILHA (24/10/2026, o Derek: *"vamos
+ * aproveitar melhor essa tela, ficou muito pequeno… preciso que lembre
+ * mais a nossa planilha de rentabilidade original… margens muito
+ * grandes"*). O gerente lê isto como lia a CONTROLE DE VEÍCULOS: linha
+ * por linha, coluna por coluna, somando de olho. Por isso grade em toda
+ * célula, cabeçalho cheio, as colunas NA ORDEM da planilha (as mesmas
+ * que o importador reconhece, `COLUNAS_RENTAB`), número com centavos e
+ * o total colado embaixo — e a tela inteira de largura. */
+const PLAN = { grade: "#D5D9DE", cab: "#2F3B4C", cabTexto: "#FFFFFF", total: "#FFF4CC", conta: "#EAF5EE", contaTexto: "#11683F", perda: "#B42318", zebra: "#FAFBFC" };
+
+function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar }) {
   const rs = (v) => (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const linhas = vendidos.map((e) => ({ e, r: rentabilidadeDe(e), semana: semanaDe(e), dias: diasNoPatio(e) }));
 
@@ -11843,66 +11853,87 @@ function Rentabilidade({ vendidos, comp, aoAbrir }) {
   const porNeg = {};
   linhas.forEach(({ e, r }) => {
     const n = String(e.negociador_nome || "sem negociador").toUpperCase();
-    porNeg[n] = porNeg[n] || { nome: n, carros: 0, liquida: 0 };
-    porNeg[n].carros += 1; porNeg[n].liquida += r.liquida;
+    porNeg[n] = porNeg[n] || { nome: n, carros: 0, venda: 0, liquida: 0 };
+    porNeg[n].carros += 1; porNeg[n].venda += r.venda; porNeg[n].liquida += r.liquida;
   });
   const negociadores = Object.keys(porNeg).map((k) => porNeg[k]).sort((a, b) => b.liquida - a.liquida);
 
-  const th = (t, dir) => (
-    <th className="whitespace-nowrap px-2 py-2 text-[11px] font-semibold uppercase tracking-[0.04em]"
-      style={{ color: C.mute, textAlign: dir || "right", borderBottom: `1px solid ${C.line}` }}>{t}</th>
+  const borda = `1px solid ${PLAN.grade}`;
+  const th = (t, dir, larg) => (
+    <th className="whitespace-nowrap px-2 py-1.5 text-[11.5px] font-bold uppercase tracking-[0.03em]"
+      style={{ background: PLAN.cab, color: PLAN.cabTexto, textAlign: dir || "right", border: `1px solid ${PLAN.cab}`, minWidth: larg,
+               position: "sticky", top: 0, zIndex: 1 }}>{t}</th>
   );
-  const td = (v, opts) => (
-    <td className="whitespace-nowrap px-2 py-1.5 text-[12px]"
-      style={{ textAlign: (opts && opts.dir) || "right", fontVariantNumeric: "tabular-nums",
-               color: (opts && opts.cor) || C.ink, fontWeight: (opts && opts.forte) ? 700 : 400 }}>
-      {v}
-    </td>
+  const td = (v, o) => {
+    o = o || {};
+    return (
+      <td className="whitespace-nowrap px-2 py-[5px] text-[13.5px]"
+        style={{ textAlign: o.dir || "right", fontVariantNumeric: "tabular-nums", border: borda,
+                 background: o.fundo, color: o.cor || C.ink, fontWeight: o.forte ? 700 : 400,
+                 fontFamily: o.dir === "left" ? undefined : F.mono, fontSize: o.dir === "left" ? 13.5 : 13 }}>
+        {v}
+      </td>
+    );
+  };
+  const corDe = (v) => (v >= 0 ? PLAN.contaTexto : PLAN.perda);
+
+  const resumo = (
+    <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-2">
+      <h1 className="text-[22px] leading-none tracking-tight" style={{ fontFamily: F.disp, fontWeight: 800 }}>Rentabilidade</h1>
+      {mes && (
+        <select className="rounded-md border px-2 py-1 text-[13.5px] outline-none" style={{ ...inputSty, fontWeight: 600 }}
+          value={mes.comp} onChange={(ev) => mes.setComp(ev.target.value)}>
+          {mes.MESES.map((m) => <option key={m} value={m}>{rotuloMes(m)}</option>)}
+        </select>
+      )}
+      {[["carros", linhas.length, null], ["faturamento", brl(total.venda), null],
+        ["bruta", brl(total.bruta), corDe(total.bruta)], ["líquida", brl(total.liquida), corDe(total.liquida)]].map(([rot, v, cor]) => (
+        <span key={rot} className="flex items-baseline gap-1.5">
+          <span className="text-[11.5px] uppercase tracking-[0.06em]" style={{ color: C.mute }}>{rot}</span>
+          <span className="text-[17px]" style={{ fontWeight: 800, color: cor || C.ink, fontVariantNumeric: "tabular-nums" }}>{v}</span>
+        </span>
+      ))}
+      {aoImportar && (
+        <button onClick={aoImportar} className="ml-auto text-[12.5px] font-semibold" style={{ color: C.roxo }}>importar planilha</button>
+      )}
+    </div>
   );
 
   if (!linhas.length) {
     return (
-      <div className="rounded-xl px-4 py-8 text-center" style={{ background: C.paper, border: `1px dashed ${C.line}` }}>
-        <p className="text-[15px] font-semibold">Nenhuma venda em {rotuloMes(comp)}.</p>
-        <p className="mt-1 text-[13px]" style={{ color: C.mute }}>
-          Carro vendido no estoque aparece aqui, com a rentabilidade calculada linha a linha.
-        </p>
+      <div>
+        {resumo}
+        <div className="rounded-md px-4 py-8 text-center" style={{ background: C.paper, border: `1px dashed ${PLAN.grade}` }}>
+          <p className="text-[15px] font-semibold">Nenhuma venda em {rotuloMes(comp)}.</p>
+          <p className="mt-1 text-[13px]" style={{ color: C.mute }}>
+            Carro vendido no estoque aparece aqui, com a rentabilidade calculada linha a linha.
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
-      {/* ---- o resumo, em cima: é o que se olha primeiro ---- */}
-      <div className="grid grid-cols-2 gap-3 rounded-xl p-4 lg:grid-cols-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-        {[["Carros vendidos", linhas.length, null],
-          ["Faturamento", brl(total.venda), null],
-          ["Rentabilidade bruta", brl(total.bruta), total.bruta >= 0 ? C.verde : C.laranja],
-          ["Rentabilidade líquida", brl(total.liquida), total.liquida >= 0 ? C.verde : C.laranja]].map(([rot, v, cor]) => (
-          <div key={rot}>
-            <div className="text-[12px]" style={{ color: C.mute }}>{rot}</div>
-            <div className="text-[22px] leading-tight tracking-tight" style={{ fontWeight: 700, color: cor || C.ink, fontVariantNumeric: "tabular-nums" }}>{v}</div>
-          </div>
-        ))}
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
-        {/* ---- a planilha ---- */}
-        <div className="rolar overflow-x-auto rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-          <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 1180 }}>
+    <div>
+      {resumo}
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_300px]">
+        {/* ---- CONTROLE DE VEÍCULOS / CLIENTES ---- */}
+        <div className="rolar overflow-auto" style={{ background: C.paper, border: borda, maxHeight: "calc(100dvh - 120px)" }}>
+          <table className="w-full" style={{ borderCollapse: "collapse" }}>
             <thead>
               <tr>
-                {th("Data", "left")}{th("Dias")}{th("Carro", "left")}{th("Placa", "left")}{th("Comprador", "left")}
-                {th("Venda")}{th("Cliente")}{th("Débitos")}{th("Quitação")}{th("Deduções")}{th("Bruta")}
-                {th("Cautelar")}{th("Custo")}{th("Com. ext.")}{th("Sem.")}{th("Líquida")}{th("Negociador", "left")}{th("Meio", "left")}
+                {th("Data", "left")}{th("Dias")}{th("Carro", "left", 110)}{th("Placa", "left")}{th("Comprador", "left", 160)}
+                {th("Valor de venda")}{th("Valor cliente")}{th("Débitos")}{th("Quitação")}{th("Deduções")}{th("Rent. bruta")}
+                {th("Cautelar")}{th("Comissão ext.")}{th("Rent. líquida")}{th("Sem.")}{th("Negociador", "left")}{th("Meio de alcance", "left")}{th("Prospector", "left")}
               </tr>
             </thead>
             <tbody>
-              {linhas.map(({ e, r, semana, dias }) => {
+              {linhas.map(({ e, r, semana, dias }, i) => {
                 const v = e.veiculo || {};
+                const z = i % 2 ? PLAN.zebra : undefined;
                 return (
                   <tr key={e.id} onClick={aoAbrir ? () => aoAbrir(e.id) : undefined} title="Abrir a ficha do carro"
-                    className={aoAbrir ? "cursor-pointer hover:bg-[#F7F5FA]" : ""} style={{ borderBottom: `1px solid ${C.line}` }}>
+                    className={aoAbrir ? "cursor-pointer hover:brightness-[0.97]" : ""} style={{ background: z }}>
                     {td(diaBR(e.entrou_em), { dir: "left" })}
                     {td(dias != null ? dias : "—")}
                     {td(v.marca_modelo || "—", { dir: "left" })}
@@ -11917,41 +11948,53 @@ function Rentabilidade({ vendidos, comp, aoAbrir }) {
                     {td(rs(r.debitos))}
                     {td(rs(r.quitacao))}
                     {td(rs(r.deducoes))}
-                    {td(rs(r.bruta), { cor: r.bruta >= 0 ? C.verde : C.laranja, forte: true })}
+                    {td(rs(r.bruta), { cor: corDe(r.bruta), forte: true, fundo: PLAN.conta })}
                     {td(rs(r.cautelar))}
-                    {td(rs(r.atual))}
                     {td(rs(r.comissaoExterna))}
+                    {td(rs(r.liquida), { cor: corDe(r.liquida), forte: true, fundo: PLAN.conta })}
                     {td(semana ? `${semana}ª` : "—")}
-                    {td(rs(r.liquida), { cor: r.liquida >= 0 ? C.verde : C.laranja, forte: true })}
                     {td(e.negociador_nome || "—", { dir: "left" })}
                     {td(e.meio_alcance || "—", { dir: "left" })}
+                    {td(e.prospector || "—", { dir: "left" })}
                   </tr>
                 );
               })}
-              <tr style={{ background: "#F3F7F4" }}>
-                {td("Total", { dir: "left", forte: true })}{td("")}{td("")}{td("")}{td("")}
-                {td(rs(total.venda), { forte: true })}{td(rs(total.compra))}{td(rs(total.debitos))}{td(rs(total.quitacao))}{td(rs(total.deducoes))}
-                {td(rs(total.bruta), { forte: true, cor: C.verde })}{td(rs(total.cautelar))}{td(rs(total.custo))}{td(rs(total.comissao))}{td("")}
-                {td(rs(total.liquida), { forte: true, cor: C.verde })}{td("")}{td("")}
+              <tr style={{ background: PLAN.total }}>
+                {td("TOTAL", { dir: "left", forte: true, fundo: PLAN.total })}{td(linhas.length + " carros", { fundo: PLAN.total })}
+                {td("", { fundo: PLAN.total })}{td("", { fundo: PLAN.total })}{td("", { fundo: PLAN.total })}
+                {td(rs(total.venda), { forte: true, fundo: PLAN.total })}{td(rs(total.compra), { forte: true, fundo: PLAN.total })}
+                {td(rs(total.debitos), { forte: true, fundo: PLAN.total })}{td(rs(total.quitacao), { forte: true, fundo: PLAN.total })}
+                {td(rs(total.deducoes), { forte: true, fundo: PLAN.total })}
+                {td(rs(total.bruta), { forte: true, cor: corDe(total.bruta), fundo: PLAN.total })}
+                {td(rs(total.cautelar), { forte: true, fundo: PLAN.total })}{td(rs(total.comissao), { forte: true, fundo: PLAN.total })}
+                {td(rs(total.liquida), { forte: true, cor: corDe(total.liquida), fundo: PLAN.total })}
+                {td("", { fundo: PLAN.total })}{td("", { fundo: PLAN.total })}{td("", { fundo: PLAN.total })}{td("", { fundo: PLAN.total })}
               </tr>
             </tbody>
           </table>
         </div>
 
-        {/* ---- TOTAL NEGOCIADORES ---- */}
-        <div className="rounded-xl p-4 self-start" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-          <div className="text-[12px] font-semibold uppercase tracking-[0.06em]" style={{ color: C.mute }}>Por negociador</div>
-          <div className="mt-2 space-y-1.5">
-            {negociadores.map((n) => (
-              <div key={n.nome} className="flex items-baseline justify-between gap-2 text-[13px]">
-                <span className="truncate">{n.nome} <span style={{ color: C.mute }}>· {n.carros}</span></span>
-                <span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", color: n.liquida >= 0 ? C.verde : C.laranja }}>{brl(n.liquida)}</span>
-              </div>
-            ))}
-          </div>
-          <p className="mt-3 text-[11px] leading-snug" style={{ color: C.mute }}>
-            Rentabilidade líquida por negociador, como a caixa TOTAL NEGOCIADORES da planilha.
-          </p>
+        {/* ---- TOTAL NEGOCIADORES, no mesmo desenho ---- */}
+        <div className="self-start" style={{ background: C.paper, border: borda }}>
+          <table className="w-full" style={{ borderCollapse: "collapse" }}>
+            <thead>
+              <tr>{th("Total negociadores", "left")}{th("Carros")}{th("Rent. líquida")}</tr>
+            </thead>
+            <tbody>
+              {negociadores.map((n, i) => (
+                <tr key={n.nome} style={{ background: i % 2 ? PLAN.zebra : undefined }}>
+                  {td(n.nome, { dir: "left" })}
+                  {td(n.carros)}
+                  {td(rs(n.liquida), { forte: true, cor: corDe(n.liquida) })}
+                </tr>
+              ))}
+              <tr>
+                {td("TOTAL", { dir: "left", forte: true, fundo: PLAN.total })}
+                {td(linhas.length, { forte: true, fundo: PLAN.total })}
+                {td(rs(total.liquida), { forte: true, cor: corDe(total.liquida), fundo: PLAN.total })}
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -12150,10 +12193,15 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
 
   return (
     <div className="space-y-3">
-      <Cabecalho titulo={soRentab ? "Rentabilidade" : "Estoque"} mes={filtro === "vendido" ? mes : null}
-        sub={lista === null ? "Carregando…"
-          : soRentab ? `${rotuloMes(comp)} · a planilha CONTROLE DE VEÍCULOS, por carro vendido`
-          : `${lista.filter((e) => e.situacao === "em_estoque").length} no pátio · ${lista.filter((e) => e.situacao === "vendido").length} vendidos`} />
+      {/* Na Rentabilidade o cabeçalho é uma linha só, junto dos totais
+          (24/10/2026, o Derek: *"o cabeçalho tá muito grande e ocupando
+          muito espaço"*) — a planilha é o assunto, e tem que começar no
+          alto da tela. */}
+      {!soRentab && (
+        <Cabecalho titulo="Estoque" mes={filtro === "vendido" ? mes : null}
+          sub={lista === null ? "Carregando…"
+            : `${lista.filter((e) => e.situacao === "em_estoque").length} no pátio · ${lista.filter((e) => e.situacao === "vendido").length} vendidos`} />
+      )}
 
       {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
 
@@ -12215,7 +12263,7 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
       )}
 
       {/* ---- filtro e totais ---- */}
-      <div className="flex flex-wrap items-center gap-2">
+      <div className={`flex flex-wrap items-center gap-2 ${soRentab ? "hidden" : ""}`}>
         {!soRentab && [["em_estoque", "No pátio"], ["vendido", "Rentabilidade"]].map(([v, r]) => (
           <button key={v} onClick={() => setFiltro(v)}
             className="rounded-full px-3 py-1 text-[12px] font-semibold"
@@ -12242,7 +12290,8 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
       {/* A rentabilidade é a planilha do mês: só carros vendidos, do mês
           escolhido no cabeçalho. Vendido sem data cai no mês de entrada. */}
       {filtro === "vendido" && lista !== null && (
-        <Rentabilidade comp={comp} aoAbrir={(id) => setAbrindo(id)}
+        <Rentabilidade comp={comp} aoAbrir={(id) => setAbrindo(id)} mes={soRentab ? mes : null}
+          aoImportar={eGerente && !importando ? () => setImportando(true) : null}
           vendidos={lista.filter((e) => e.situacao === "vendido" && String(e.vendido_em || e.entrou_em || "").slice(0, 7) === String(comp).slice(0, 7))} />
       )}
 
@@ -21034,10 +21083,14 @@ function Shell({ perfil, tela, setTela, children, cheia }) {
           em branco em cima"*). A caixa de 1.080 px com margem serve a
           página que se LÊ; a que se TRABALHA o dia todo, como o WhatsApp,
           quer cada pixel. Sem título, sem margem, a altura da janela. */}
-      <main className={`${cheia ? "pb-16 lg:pb-0" : "pb-24 lg:pb-10"} ${painel ? "lg:pl-[248px]" : "lg:pl-16"}`}>
-        {cheia
+      <main className={`${cheia === true ? "pb-16 lg:pb-0" : "pb-24 lg:pb-10"} ${painel ? "lg:pl-[248px]" : "lg:pl-16"}`}>
+        {/* `cheia === "larga"`: a largura toda com margem curta, para
+            tabela que se lê como planilha (a Rentabilidade, 24/10/2026). */}
+        {cheia === true
           ? <div className="h-[calc(100dvh-64px)] lg:h-[100dvh]">{children}</div>
-          : <div className="mx-auto max-w-[1080px] px-4 pt-4 lg:px-8 lg:pt-8">{children}</div>}
+          : cheia === "larga"
+            ? <div className="px-3 pt-3 lg:px-5 lg:pt-4">{children}</div>
+            : <div className="mx-auto max-w-[1080px] px-4 pt-4 lg:px-8 lg:pt-8">{children}</div>}
       </main>
 
       {/* ---- barra inferior (celular) ----
@@ -22909,7 +22962,7 @@ function App() {
   if (!permitida && tela !== "atendimentos") { setTela("atendimentos"); return null; }
 
   return (
-    <Shell perfil={perfil} tela={tela} setTela={setTela} cheia={tela === "conversas"}>
+    <Shell perfil={perfil} tela={tela} setTela={setTela} cheia={tela === "conversas" ? true : tela === "rentabilidade" ? "larga" : false}>
       {/* Fica dentro da casca, sobre qualquer destino: a pergunta
           aparece onde a pessoa estiver, e não só no "Meu dia". */}
       {pedeLembrete && <LembreteDoDia perfil={perfil} />}

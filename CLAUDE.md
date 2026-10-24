@@ -3407,7 +3407,12 @@ quitação, dedução — `CUSTO_DO_CARRO`) de custo *da venda* (o resto)
 por tipo da linha; quem criar tipo novo decide de que lado ele fica.
 
 **A vista mora dentro do Estoque**, no filtro "Rentabilidade", e
-obedece ao mês do cabeçalho. É conta na tela, não no servidor — a
+obedece ao mês do cabeçalho. **Desde 24/10/2026 ela tem cara de
+planilha** (o Derek: *"lembre mais a nossa planilha original… o
+cabeçalho tá muito grande… margens muito grandes"*): tela na largura
+toda (Shell `cheia="larga"`), cabeçalho numa linha com os quatro
+totais, grade em toda célula, as colunas na ordem da CONTROLE DE
+VEÍCULOS e a caixa TOTAL NEGOCIADORES ao lado, no mesmo desenho. É conta na tela, não no servidor — a
 lista do estoque vem inteira (teto 300), diferente do CRM paginado.
 Passou de 300 carros, isto vai para `api/veiculo.js`.
 
