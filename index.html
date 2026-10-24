@@ -11478,13 +11478,13 @@ function CRM({ perfil, aoAbrir, mes }) {
                 Cortar coluna por coluna dependia da janela de quem olha. */}
             <table className="w-full" style={{ borderCollapse: "collapse", tableLayout: "fixed" }}>
               <colgroup>
-                {[4.5, 8.5, 6.5, 15.5, 6.5, 5, 5.5, 9.5, 8.5, 6.5, 9, 7, 7].map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}
+                {[5, 9, 6, 13.5, 6.5, 4.5, 5.5, 9.5, 9, 6, 10, 7.5, 7.5].map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}
               </colgroup>
               <thead>
                 <tr style={{ background: "#F6F4F8" }}>
                   {["Data", "Negociador", "Prospec", "Carro", "Placa", "Ano", "KM",
                     "Cliente", "Telefone", "Origem", "Status", "FIPE", "Pretensão"].map((h, i) => (
-                    <th key={h} className="overflow-hidden text-ellipsis whitespace-nowrap px-2 py-2 text-left text-[9px] uppercase tracking-[0.1em]"
+                    <th key={h} className="overflow-hidden text-ellipsis whitespace-nowrap px-1.5 py-2 text-left text-[9px] uppercase tracking-[0.1em]"
                       style={{ color: C.mute, borderBottom: `1px solid ${C.line}`, textAlign: i >= 11 ? "right" : "left" }}>
                       {h}
                     </th>
@@ -11495,7 +11495,7 @@ function CRM({ perfil, aoAbrir, mes }) {
                 {lista.map((a) => {
                   const v = (a.veiculo || [])[0] || {};
                   const anoMod = [v.ano_fabricacao, v.ano_modelo].filter(Boolean).join("/");
-                  const td = "overflow-hidden text-ellipsis whitespace-nowrap px-2 py-2 text-[12px]";
+                  const td = "overflow-hidden text-ellipsis whitespace-nowrap px-1.5 py-2 text-[12px]";
                   // Ano curto ("14/15") e origem curta: a coluna é estreita.
                   const anoCurto = [v.ano_fabricacao, v.ano_modelo].filter(Boolean).map((x) => String(x).slice(-2)).join("/");
                   const ORIGEM_CURTA = { facebook: "Facebook", fluxo_loja: "Fluxo", google: "Google", prospeccao: "Prospecção", indicacao: "Indicação", recuperacao: "Recuperação" };
