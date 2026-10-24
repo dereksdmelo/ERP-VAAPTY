@@ -11473,12 +11473,18 @@ function CRM({ perfil, aoAbrir, mes }) {
                 e cliente cortam com reticências (o nome inteiro fica no
                 `title`), e a coluna de propostas saiu: a proposta de lojista
                 quase nunca está registrada aqui (decisão 12). */}
-            <table className="w-full" style={{ borderCollapse: "collapse" }}>
+            {/* Largura FIXA, em porcentagem: cada coluna tem a sua fatia e
+                o que não cabe termina em "…" (o inteiro fica no `title`).
+                Cortar coluna por coluna dependia da janela de quem olha. */}
+            <table className="w-full" style={{ borderCollapse: "collapse", tableLayout: "fixed" }}>
+              <colgroup>
+                {[4.5, 8.5, 6.5, 15.5, 6.5, 5, 5.5, 9.5, 8.5, 6.5, 9, 7, 7].map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}
+              </colgroup>
               <thead>
                 <tr style={{ background: "#F6F4F8" }}>
-                  {["Data", "Negociador", "Prospec", "Carro", "Placa", "Ano/Mod", "KM",
+                  {["Data", "Negociador", "Prospec", "Carro", "Placa", "Ano", "KM",
                     "Cliente", "Telefone", "Origem", "Status", "FIPE", "Pretensão"].map((h, i) => (
-                    <th key={h} className="whitespace-nowrap px-2 py-2 text-left text-[9px] uppercase tracking-[0.1em]"
+                    <th key={h} className="overflow-hidden text-ellipsis whitespace-nowrap px-2 py-2 text-left text-[9px] uppercase tracking-[0.1em]"
                       style={{ color: C.mute, borderBottom: `1px solid ${C.line}`, textAlign: i >= 11 ? "right" : "left" }}>
                       {h}
                     </th>
@@ -11489,7 +11495,10 @@ function CRM({ perfil, aoAbrir, mes }) {
                 {lista.map((a) => {
                   const v = (a.veiculo || [])[0] || {};
                   const anoMod = [v.ano_fabricacao, v.ano_modelo].filter(Boolean).join("/");
-                  const td = "whitespace-nowrap px-2 py-2 text-[12px]";
+                  const td = "overflow-hidden text-ellipsis whitespace-nowrap px-2 py-2 text-[12px]";
+                  // Ano curto ("14/15") e origem curta: a coluna é estreita.
+                  const anoCurto = [v.ano_fabricacao, v.ano_modelo].filter(Boolean).map((x) => String(x).slice(-2)).join("/");
+                  const ORIGEM_CURTA = { facebook: "Facebook", fluxo_loja: "Fluxo", google: "Google", prospeccao: "Prospecção", indicacao: "Indicação", recuperacao: "Recuperação" };
                   const num = { fontFamily: F.mono, textAlign: "right" };
                   return (
                     // Negócio fechado pinta a linha inteira de verde, e vendeu
@@ -11500,19 +11509,17 @@ function CRM({ perfil, aoAbrir, mes }) {
                       style={{ borderBottom: `1px solid ${(COR_LINHA[a.status] || {}).borda || C.line}`, cursor: "pointer",
                                background: (COR_LINHA[a.status] || {}).fundo }}>
                       <td className={td} style={{ fontFamily: F.mono, color: C.mute }}>{soData(a.data)}</td>
-                      <td className={td}>{a.negociador_nome || "—"}</td>
-                      <td className={td} style={{ color: C.mute }}>{a.prospec || "—"}</td>
+                      <td className={td} title={a.negociador_nome || ""}>{a.negociador_nome || "—"}</td>
+                      <td className={td} style={{ color: C.mute }} title={a.prospec || ""}>{a.prospec || "—"}</td>
                       <td className={td} style={{ fontWeight: 600 }} title={v.marca_modelo || a.carro_descricao || ""}>
-                        <div className="max-w-[150px] truncate xl:max-w-[230px]">{v.marca_modelo || a.carro_descricao || "—"}</div>
+                        {v.marca_modelo || a.carro_descricao || "—"}
                       </td>
                       <td className={td} style={{ fontFamily: F.mono }}>{v.placa || "—"}</td>
-                      <td className={td} style={{ fontFamily: F.mono, color: C.mute }}>{anoMod || "—"}</td>
+                      <td className={td} style={{ fontFamily: F.mono, color: C.mute }} title={anoMod}>{anoCurto || "—"}</td>
                       <td className={td} style={num}>{v.km_atual ? Number(v.km_atual).toLocaleString("pt-BR") : "—"}</td>
-                      <td className={td} title={a.cliente_nome || ""}>
-                        <div className="max-w-[110px] truncate xl:max-w-[150px]">{a.cliente_nome || "—"}</div>
-                      </td>
-                      <td className={td} style={{ fontFamily: F.mono, color: C.mute }}>{a.cliente_telefone || "—"}</td>
-                      <td className={td} style={{ color: C.mute }}>{rotulo(ORIGENS, a.origem)}</td>
+                      <td className={td} title={a.cliente_nome || ""}>{a.cliente_nome || "—"}</td>
+                      <td className={td} style={{ fontFamily: F.mono, color: C.mute }} title={a.cliente_telefone || ""}>{a.cliente_telefone || "—"}</td>
+                      <td className={td} style={{ color: C.mute }} title={rotulo(ORIGENS, a.origem)}>{ORIGEM_CURTA[a.origem] || rotulo(ORIGENS, a.origem)}</td>
                       <td className={td}><Etiqueta status={a.status} /></td>
                       <td className={td} style={num}>{v.fipe_valor ? brl(v.fipe_valor) : "—"}</td>
                       <td className={td} style={num}>{a.pretensao ? brl(a.pretensao) : "—"}</td>
