@@ -11914,13 +11914,14 @@ function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar }) {
           {mes.MESES.map((m) => <option key={m} value={m}>{rotuloMes(m)}</option>)}
         </select>
       )}
-      {[["carros", linhas.length, null], ["faturamento", brl(total.venda), null],
-        ["bruta", brl(total.bruta), corDe(total.bruta)], ["líquida", brl(total.liquida), corDe(total.liquida)]].map(([rot, v, cor]) => (
-        <span key={rot} className="flex items-baseline gap-1.5">
-          <span className="text-[11.5px] uppercase tracking-[0.06em]" style={{ color: C.mute }}>{rot}</span>
-          <span className="text-[17px]" style={{ fontWeight: 800, color: cor || C.ink, fontVariantNumeric: "tabular-nums" }}>{v}</span>
-        </span>
-      ))}
+      {/* "FATURAMENTO", na casa, é a rentabilidade LÍQUIDA — não o valor
+          de venda (o Derek, 24/10/2026; é a mesma régua da decisão 32,
+          "faturamento aqui é a margem dos carros"). Os outros totais
+          estão na linha TOTAL da planilha e saíram daqui. */}
+      <span className="flex items-baseline gap-1.5">
+        <span className="text-[11.5px] uppercase tracking-[0.06em]" style={{ color: C.mute }}>faturamento</span>
+        <span className="text-[19px]" style={{ fontWeight: 800, color: corDe(total.liquida), fontVariantNumeric: "tabular-nums" }}>{brl(total.liquida)}</span>
+      </span>
       <span className="ml-auto flex items-center gap-3">
         {!!linhas.length && (
           <button onClick={() => setVerNeg(true)} className="rounded-md px-3 py-1.5 text-[13px] font-semibold text-white"
