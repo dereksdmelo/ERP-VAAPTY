@@ -3316,6 +3316,14 @@ painel, estoque, leads, administrativo — numa sanfona dentro da lista
 de atendimentos, o painel numa segunda sanfona dentro da primeira.
 **Navegação era um widget.**
 
+**Desde 24/10/2026 as páginas usam a largura da janela** (o Derek:
+*"todas estão sendo pouco aproveitadas, com um título muito grande"*):
+a caixa de 1.080 px saiu, a margem ficou curta, e o `Cabecalho` virou
+uma linha só — título de 21 px, subtítulo ao lado, controles à direita.
+É o componente que manda em todas as páginas; quem criar página nova
+usa ele, e não um título próprio. As Conversas vão além (`cheia`, sem
+cabeçalho, a altura da janela).
+
 **Agora há uma casca única** (`Shell`): barra lateral no desktop
 (≥ 1024 px), barra inferior no celular com três destinos de todo dia
 mais "Mais". Cada destino é uma página com `Cabecalho` — título, uma

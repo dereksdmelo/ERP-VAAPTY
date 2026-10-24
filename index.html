@@ -2143,12 +2143,13 @@ function Toggle({ label, valor, onChange, nota }) {
   );
 }
 const Bloco = ({ titulo, sub, children }) => (
-  <section className="rounded-xl p-4 lg:p-5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+  <section className="rounded-xl p-3.5 lg:p-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
     {/* O título deixou de ser roxo: roxo agora é só da ação principal.
-        Antes ele competia com o botão que a pessoa tem que apertar. */}
-    <h3 className="text-[17px] leading-tight" style={{ color: C.ink, fontFamily: F.disp, fontWeight: 700 }}>{titulo}</h3>
-    {sub && <p className="mt-1.5 text-[13.5px] leading-relaxed" style={{ color: C.mute }}>{sub}</p>}
-    <div className="mt-3">{children}</div>
+        Antes ele competia com o botão que a pessoa tem que apertar.
+        Mais enxuto desde 24/10/2026, com o cabeçalho das páginas. */}
+    <h3 className="text-[16px] leading-tight" style={{ color: C.ink, fontFamily: F.disp, fontWeight: 700 }}>{titulo}</h3>
+    {sub && <p className="mt-1 text-[13px] leading-snug" style={{ color: C.mute }}>{sub}</p>}
+    <div className="mt-2.5">{children}</div>
   </section>
 );
 const Pendente = ({ children }) => (
@@ -21133,7 +21134,10 @@ function Shell({ perfil, tela, setTela, children, cheia }) {
           ? <div className="h-[calc(100dvh-64px)] lg:h-[100dvh]">{children}</div>
           : cheia === "larga"
             ? <div className="px-3 pt-3 lg:px-5 lg:pt-4">{children}</div>
-            : <div className="mx-auto max-w-[1080px] px-4 pt-4 lg:px-8 lg:pt-8">{children}</div>}
+            /* Todas as outras páginas: a largura da janela, com margem
+               curta (24/10/2026). A caixa de 1.080 px deixava metade de um
+               monitor de computador em branco. */
+            : <div className="px-3 pt-3 lg:px-5 lg:pt-4">{children}</div>}
       </main>
 
       {/* ---- barra inferior (celular) ----
@@ -21195,18 +21199,24 @@ function Shell({ perfil, tela, setTela, children, cheia }) {
  * máximo uma ação principal. O seletor de mês entra aqui nas páginas
  * que medem um mês — é o mesmo estado, vindo do App.
  */
+/* O CABEÇALHO COMPACTO (24/10/2026, o Derek: *"todas estão sendo pouco
+ * aproveitadas, com um título muito grande — faz uma geral em todas as
+ * páginas"*). Era um título de 30 px com o subtítulo embaixo e 24 px de
+ * margem: quase 100 px antes do primeiro dado. Agora é uma linha só —
+ * título, subtítulo ao lado, controles à direita —, e é ele que manda em
+ * todas as páginas, então a mudança vale de uma vez para todas. */
 function Cabecalho({ titulo, sub, acao, mes }) {
   return (
-    <div className="mb-4 flex flex-wrap items-end justify-between gap-x-4 gap-y-3 lg:mb-6">
-      <div className="min-w-0">
-        <h1 className="text-[26px] leading-none tracking-tight lg:text-[30px]" style={{ fontFamily: F.disp, fontWeight: 800 }}>
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+      <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
+        <h1 className="text-[21px] leading-tight tracking-tight" style={{ fontFamily: F.disp, fontWeight: 800 }}>
           {titulo}
         </h1>
-        {sub && <p className="mt-1.5 text-[14px]" style={{ color: C.mute }}>{sub}</p>}
+        {sub && <p className="text-[13px]" style={{ color: C.mute }}>{sub}</p>}
       </div>
       <div className="flex flex-wrap items-center gap-2">
         {mes && (
-          <select className="rounded-lg border px-3 py-2 text-[14px] outline-none"
+          <select className="rounded-lg border px-2.5 py-1.5 text-[13.5px] outline-none"
             style={{ ...inputSty, fontWeight: 600 }} value={mes.comp} onChange={(e) => mes.setComp(e.target.value)}>
             {mes.MESES.map((m) => <option key={m} value={m}>{rotuloMes(m)}</option>)}
             {mes.todos && <option value="">Todos os meses</option>}
