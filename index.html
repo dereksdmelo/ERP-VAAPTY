@@ -15837,7 +15837,7 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
    * favorecido ainda se editam dentro de Lançamentos, e um grupo com um
    * atalho para a mesma tela seria menu que promete o que não tem. */
   const TITULO = { pendencias: "Pendências", lancamentos: "Lançamentos", recebimentos: "Recebimentos", contas: "A pagar / receber",
-    carros: "Carros", fechamento: "Fechamento", dre: "DRE", folha: "Folha", caixas: "Contas e caixas" };
+    carros: "Carros", fechamento: "Fechamento", dre: "DRE", ano: "Ano", folha: "Folha", caixas: "Contas e caixas" };
   const SUB = {
     pendencias: "Tudo que pede ação, num lugar só.",
     lancamentos: "O extrato do banco: categorizar, ligar ao carro, fechar o mês.",
@@ -15846,6 +15846,7 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
     carros: "O que foi combinado com cada carro contra o que foi lançado.",
     fechamento: "Previsto × realizado do mês.",
     dre: "O resultado: quanto entrou, quanto custou, quanto sobrou.",
+    ano: "Os doze meses lado a lado, como o fluxo de caixa da planilha.",
     folha: "Salário, comissão, bonificação e vales.",
     caixas: "Os bancos e o dinheiro em espécie: quanto tem em cada lugar.",
   };
@@ -15854,13 +15855,14 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
   const irPara = (a, c) => { if (c && aoMudarMes) aoMudarMes(competenciaDe(c)); if (aoIrPara) aoIrPara(a); };
   return (
     <div>
-      <Cabecalho titulo={TITULO[aba] || "Financeiro"} mes={aba === "pendencias" || aba === "caixas" ? null : mes} sub={SUB[aba]} />
+      <Cabecalho titulo={TITULO[aba] || "Financeiro"} mes={aba === "pendencias" || aba === "caixas" || aba === "ano" ? null : mes} sub={SUB[aba]} />
       {aba === "pendencias" && <FinPendencias aoIr={irPara} />}
       {aba === "lancamentos" && <FinLancamentos comp={comp} />}
       {aba === "recebimentos" && <FinRecebimentos comp={comp} />}
       {aba === "contas" && <FinContas comp={comp} />}
       {aba === "fechamento" && <FinFechamento comp={comp} />}
       {aba === "dre" && <FinDRE comp={comp} />}
+      {aba === "ano" && <FinAno comp={comp} aoIr={irPara} />}
       {aba === "carros" && <FinCarros comp={comp} />}
       {aba === "folha" && <FinFolha comp={comp} />}
       {aba === "caixas" && <FinCaixas />}
@@ -17649,6 +17651,186 @@ function FinFechamento({ comp }) {
         o mesmo cálculo do DRE, somando as partes de cada rateio. Faturamento é a margem bruta dos carros vendidos no mês
         (venda − compra − custos do carro); cautelar e comissão externa aparecem abaixo, como despesa variável, para não
         serem descontadas duas vezes.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * O ano: a aba FLUXO DE CAIXA da planilha, em tela (24/10/2026).
+ *
+ * O Derek mandou o "Controle Financeiro Completo" de novo, agora com o
+ * 2025 e o 2026 preenchidos à mão, e escolheu a tela anual. O
+ * Fechamento já tinha o desenho (decisão 32); o que faltava era ver os
+ * meses JUNTOS — um mês sozinho não diz se a margem está caindo.
+ *
+ * **As linhas são as do Fechamento, na mesma ordem**, e saem do mesmo
+ * cálculo no servidor (`realizadoDoMes`). Embaixo do resultado vêm as
+ * retiradas dos sócios e o acumulado, como na planilha: lucro e
+ * distribuição são coisas diferentes, e somá-las esconderia o mês em
+ * que se retirou mais do que se ganhou.
+ *
+ * **Os KPIs por carro ficam no fim**, como lá. Custo por carro contra
+ * margem por carro é a conta que diz se vender mais resolve.
+ *
+ * **Tocar no nome do mês abre o Fechamento daquele mês** — é onde se
+ * digita o previsto e se reclassifica uma categoria.
+ */
+function FinAno({ comp, aoIr }) {
+  const [ano, setAno] = useState(Number(String(comp).slice(0, 4)));
+  const [d, setD] = useState(null);
+  const [erro, setErro] = useState("");
+  useEffect(() => {
+    let vivo = true;
+    setD(null); setErro("");
+    fin("ano", { ano }).then((r) => { if (vivo) setD(r); }).catch((e) => { if (vivo) setErro(e.message); });
+    return () => { vivo = false; };
+  }, [ano]);
+
+  const anoAtual = Number(hojeEmSP().slice(0, 4));
+  const seletor = (
+    <div className="mb-3 flex items-center gap-2 text-[13px]">
+      <button onClick={() => setAno(ano - 1)} className="rounded-full px-2 py-0.5 font-semibold" style={{ color: C.roxo }} aria-label="ano anterior">‹</button>
+      <span className="font-semibold" style={{ fontVariantNumeric: "tabular-nums" }}>{ano}</span>
+      <button onClick={() => setAno(ano + 1)} disabled={ano >= anoAtual} className="rounded-full px-2 py-0.5 font-semibold disabled:opacity-30" style={{ color: C.roxo }} aria-label="próximo ano">›</button>
+    </div>
+  );
+  if (erro) return <div>{seletor}<p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p></div>;
+  if (!d) return <div>{seletor}<p className="text-[13px]" style={{ color: C.mute }}>Montando os doze meses…</p></div>;
+
+  const meses = d.meses;
+  const com = meses.filter((m) => d.veiculos[m] !== undefined);
+  const soma = (o) => com.reduce((t, m) => t + (Number(o[m]) || 0), 0);
+  const media = (o) => (com.length ? soma(o) / com.length : 0);
+  const div = (a, b) => (b ? a / b : null);
+  // Linha derivada mês a mês (percentual, por carro): a soma de uma
+  // razão não é a razão das somas, então a coluna Soma recalcula.
+  const razao = (num, den, mult) => {
+    const o = {}; com.forEach((m) => { const v = div(num[m], den[m]); o[m] = v == null ? null : v * (mult || 1); });
+    const t = div(soma(num), soma(den));
+    return { o, total: t == null ? null : t * (mult || 1) };
+  };
+  const totalDesp = {}; com.forEach((m) => { totalDesp[m] = (d.total_variaveis[m] || 0) + (d.total_fixas[m] || 0); });
+
+  const num = (v, tipo) => {
+    if (v == null || v === "") return "";
+    if (tipo === "pct") return `${(Number(v) || 0).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
+    if (tipo === "int") return (Number(v) || 0).toLocaleString("pt-BR", { maximumFractionDigits: 0 });
+    return (Number(v) || 0).toLocaleString("pt-BR", { maximumFractionDigits: 0 });
+  };
+  const celula = { fontVariantNumeric: "tabular-nums" };
+  const Linha = ({ rot, o, tipo, forte, fundo, total, med, cor }) => {
+    const tot = total !== undefined ? total : soma(o);
+    const md = med !== undefined ? med : media(o);
+    return (
+      <tr style={{ borderBottom: `1px solid ${C.line}`, background: fundo || "transparent" }}>
+        <td className="sticky left-0 z-[1] whitespace-nowrap px-3 py-1.5 text-[12px]"
+          style={{ fontWeight: forte ? 700 : 400, background: fundo || C.paper, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis" }} title={rot}>{rot}</td>
+        {meses.map((m) => {
+          const v = o[m];
+          const neg = typeof v === "number" && v < -0.004 && cor !== false;
+          return <td key={m} className="whitespace-nowrap px-2 py-1 text-right text-[12px]"
+            style={{ ...celula, fontWeight: forte ? 700 : 400, color: neg ? C.laranja : undefined }}>{num(v, tipo)}</td>;
+        })}
+        <td className="whitespace-nowrap px-2 py-1 text-right text-[12px]" style={{ ...celula, fontWeight: 700, borderLeft: `1px solid ${C.line}` }}>{num(tot, tipo)}</td>
+        <td className="whitespace-nowrap px-3 py-1 text-right text-[12px]" style={{ ...celula, color: C.mute }}>{num(md, tipo)}</td>
+      </tr>
+    );
+  };
+  const Faixa = ({ rot }) => (
+    <tr><td className="sticky left-0 z-[1] px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-[0.08em]" style={{ color: C.mute, background: C.paper }}>{rot}</td>
+      <td colSpan={meses.length + 2} /></tr>
+  );
+  const Pct = ({ rot, num: n, den }) => { const r = razao(n, den, 100); return <Linha rot={rot} o={r.o} tipo="pct" total={r.total} med={r.total} cor={false} />; };
+  const PorCarro = ({ rot, o }) => { const r = razao(o, d.veiculos); return <Linha rot={rot} o={r.o} total={r.total} med={r.total} />; };
+
+  const csv = () => {
+    const linha = (rot, o) => [rot].concat(meses.map((m) => (o[m] == null ? "" : Number(o[m]) || 0)), [soma(o)]);
+    const ls = [linha("Qtd veículos vendidos", d.veiculos), linha("Faturamento bruto", d.faturamento)]
+      .concat(d.outras.map((l) => linha(l.nome, l.por_mes)), [linha("RECEITA OPERACIONAL BRUTA", d.receita)])
+      .concat(d.variaveis.map((l) => linha(l.nome, l.por_mes)), [linha("DESPESAS VARIÁVEIS", d.total_variaveis), linha("MARGEM DE CONTRIBUIÇÃO", d.margem)])
+      .concat(d.fixas.map((l) => linha(l.nome, l.por_mes)), [linha("TOTAL DESPESAS FIXAS", d.total_fixas), linha("LUCRO LÍQUIDO", d.resultado)])
+      .concat(d.retiradas.map((l) => linha(l.nome, l.por_mes)), [linha("Resultado após retiradas", d.apos_retiradas), linha("Acumulado", d.acumulado)]);
+    baixarCSV(`ano-${ano}.csv`, ["Descrição"].concat(meses.map((m) => MESES_PT[Number(m.slice(5, 7)) - 1]), ["Soma"]), ls);
+  };
+  const semCat = com.filter((m) => Math.abs(d.sem_categoria[m] || 0) > 0.004);
+
+  return (
+    <div>
+      <div className="flex items-center gap-3">
+        {seletor}
+        <button onClick={csv} className="mb-3 ml-auto text-[13px] font-semibold" style={{ color: C.mute }}>CSV</button>
+      </div>
+      {!com.length && <p className="text-[13px]" style={{ color: C.mute }}>Nenhum mês de {ano} para mostrar ainda.</p>}
+      {!!com.length && (
+        <div className="rolar overflow-x-auto rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+          <table style={{ borderCollapse: "collapse", minWidth: 1180 }}>
+            <thead>
+              <tr>
+                <th className="sticky left-0 z-[1] px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.06em]"
+                  style={{ color: C.mute, borderBottom: `1px solid ${C.line}`, background: C.paper, minWidth: 220 }}>Descrição</th>
+                {meses.map((m) => {
+                  const tem = d.veiculos[m] !== undefined;
+                  return (
+                    <th key={m} className="px-2 py-2 text-right text-[11px] font-semibold uppercase" style={{ color: C.mute, borderBottom: `1px solid ${C.line}`, minWidth: 74 }}>
+                      {tem && aoIr
+                        ? <button onClick={() => aoIr("fechamento", m)} className="font-semibold uppercase" style={{ color: C.roxo }} title="abrir o fechamento deste mês">{MESES_PT[Number(m.slice(5, 7)) - 1].slice(0, 3)}</button>
+                        : MESES_PT[Number(m.slice(5, 7)) - 1].slice(0, 3)}
+                    </th>
+                  );
+                })}
+                <th className="px-2 py-2 text-right text-[11px] font-semibold uppercase" style={{ color: C.mute, borderBottom: `1px solid ${C.line}`, borderLeft: `1px solid ${C.line}` }}>Soma</th>
+                <th className="px-3 py-2 text-right text-[11px] font-semibold uppercase" style={{ color: C.mute, borderBottom: `1px solid ${C.line}` }}>Média</th>
+              </tr>
+            </thead>
+            <tbody>
+              <Linha rot="Qtd. veículos vendidos" o={d.veiculos} tipo="int" />
+              <Linha rot="Faturamento bruto" o={d.faturamento} forte />
+              <PorCarro rot="Ticket médio" o={d.faturamento} />
+              {d.outras.map((l) => <Linha key={l.id} rot={l.nome} o={l.por_mes} />)}
+              <Linha rot="RECEITA OPERACIONAL BRUTA" o={d.receita} forte fundo={C.bg} />
+
+              <Faixa rot="Despesas variáveis" />
+              {d.variaveis.map((l) => <Linha key={l.id} rot={l.nome} o={l.por_mes} />)}
+              <Linha rot="DESPESAS VARIÁVEIS" o={d.total_variaveis} forte fundo={C.bg} />
+              <Pct rot="% despesas variáveis × faturamento" num={d.total_variaveis} den={d.faturamento} />
+              <Linha rot="MARGEM DE CONTRIBUIÇÃO" o={d.margem} forte fundo={C.roxoFraco} />
+              <Pct rot="% margem de contribuição" num={d.margem} den={d.receita} />
+
+              <Faixa rot="Despesas fixas" />
+              {d.fixas.map((l) => <Linha key={l.id} rot={l.nome} o={l.por_mes} />)}
+              <Linha rot="TOTAL DESPESAS FIXAS" o={d.total_fixas} forte fundo={C.bg} />
+              <Pct rot="% despesas fixas × faturamento" num={d.total_fixas} den={d.faturamento} />
+              <Linha rot="TOTAL DESPESAS (variáveis + fixas)" o={totalDesp} forte />
+              <Linha rot="LUCRO LÍQUIDO" o={d.resultado} forte fundo="#F3F7F4" />
+              <Pct rot="% margem líquida sobre faturamento" num={d.resultado} den={d.faturamento} />
+
+              <Faixa rot="Distribuição de lucros" />
+              {d.retiradas.map((l) => <Linha key={l.id} rot={l.nome} o={l.por_mes} />)}
+              {!d.retiradas.length && (
+                <tr><td className="sticky left-0 px-3 py-1.5 text-[12px]" style={{ color: C.mute, background: C.paper }}>Nenhuma retirada lançada.</td><td colSpan={meses.length + 2} /></tr>
+              )}
+              <Linha rot="Resultado após retiradas" o={d.apos_retiradas} forte />
+              <Linha rot="Acumulado no ano" o={d.acumulado} total={com.length ? d.acumulado[com[com.length - 1]] : 0} med={null} />
+
+              <Faixa rot="Por carro" />
+              <PorCarro rot="Custo total por carro" o={totalDesp} />
+              <PorCarro rot="Custo fixo por carro" o={d.total_fixas} />
+              <PorCarro rot="Lucro líquido por carro" o={d.resultado} />
+            </tbody>
+          </table>
+        </div>
+      )}
+      {!!semCat.length && (
+        <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>
+          Ficaram fora por falta de categoria: {semCat.map((m) => `${MESES_PT[Number(m.slice(5, 7)) - 1].slice(0, 3)} ${rs2(Math.abs(d.sem_categoria[m]))}`).join(" · ")}.
+          Sem categoria não há como saber se é receita, custo variável ou fixo — classifique em Lançamentos.
+        </p>
+      )}
+      <p className="mt-3 text-[11px] leading-snug" style={{ color: C.mute }}>
+        Cada coluna é o realizado do Fechamento daquele mês: lançamentos efetivados da competência, pelas partes de cada
+        rateio. Faturamento é a margem bruta dos carros vendidos (venda − compra − custos do carro). Retiradas são as
+        categorias do grupo retirada, fora do lucro. Percentuais e valores por carro, na coluna Soma, são do ano inteiro.
       </p>
     </div>
   );
@@ -20660,6 +20842,7 @@ function destinosPara(perfil) {
       { id: "fin_carros",      rot: "Carros",            curto: "Financ.", area: "financeiro", aba: "carros",      grupo: "todo dia",   icone: "financeiro" },
       { id: "fin_fechamento",  rot: "Fechamento",        curto: "Financ.", area: "financeiro", aba: "fechamento",  grupo: "fim do mês", icone: "financeiro" },
       { id: "fin_dre",         rot: "DRE",               curto: "Financ.", area: "financeiro", aba: "dre",         grupo: "fim do mês", icone: "financeiro" },
+      { id: "fin_ano",         rot: "Ano",               curto: "Financ.", area: "financeiro", aba: "ano",         grupo: "fim do mês", icone: "financeiro" },
       { id: "fin_folha",       rot: "Folha",             curto: "Financ.", area: "financeiro", aba: "folha",       grupo: "fim do mês", icone: "financeiro" },
       { id: "fin_caixas",      rot: "Contas e caixas",   curto: "Financ.", area: "financeiro", aba: "caixas",      grupo: "cadastros",  icone: "financeiro" },
     ] : []),
@@ -22574,7 +22757,7 @@ function TelaGestao({ perfil, comp }) {
 // razão: o menu e o roteador precisam concordar.
 const ABA_FIN = {
   fin_pendencias: "pendencias", fin_lancamentos: "lancamentos", fin_recebimentos: "recebimentos", fin_contas: "contas",
-  fin_carros: "carros", fin_fechamento: "fechamento", fin_dre: "dre", fin_folha: "folha", fin_caixas: "caixas",
+  fin_carros: "carros", fin_fechamento: "fechamento", fin_dre: "dre", fin_ano: "ano", fin_folha: "folha", fin_caixas: "caixas",
 };
 const DESTINO_FIN = Object.fromEntries(Object.entries(ABA_FIN).map(([d, a]) => [a, d]));
 

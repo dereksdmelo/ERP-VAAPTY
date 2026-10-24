@@ -13,6 +13,7 @@
  *   ?recurso=pendencias    GET                         tudo que pede ação, num lugar só (0066)
  *   ?recurso=saldos        GET                         o saldo de hoje de cada conta (0070)
  *   ?recurso=lancamento&acao=transferir  POST { de, para, valor, data }   duas linhas, Transferência
+ *   ?recurso=ano           GET ?ano=                  os doze meses do fechamento lado a lado
  *   ?recurso=recebimentos  GET ?competencia= · POST ?acao=automatico|casar|explicar · DELETE ?id=   (0067)
  *
  * Quem decide o acesso é a RLS (e_financeiro): esta função só repassa
@@ -1333,6 +1334,44 @@ async function orcamentoDoMes(tok, comp) {
   return { porCat, livres };
 }
 
+const categoriasDoFechamento = (tok) =>
+  supa(`${base("fin_categoria")}?select=id,nome,grupo,no_dre,ordem,tipo_custo&ativa=eq.true&order=ordem.asc,nome.asc`, { headers: cab(tok) })
+    .then((c) => c || []);
+
+/**
+ * O realizado de UM mês, do jeito do fechamento: lançamentos
+ * efetivados da competência, somados pelas partes do rateio, mais a
+ * margem bruta dos carros vendidos. O Fechamento (um mês) e o Ano (doze)
+ * passam os dois por aqui — duas contas da mesma linha discordariam na
+ * primeira categoria nova.
+ *
+ * `retiradas` é o grupo `retirada`, que fica fora do resultado e a
+ * planilha mostra embaixo dele, como distribuição de lucro.
+ */
+async function realizadoDoMes(tok, comp, cats) {
+  const [lanc, vendidos] = await Promise.all([
+    supa(`${base("fin_lancamento")}?select=debito,credito,situacao,categoria_id,estoque_id,tipo_negociacao,funcionario_id,` +
+      `fin_rateio(valor,categoria_id,estoque_id,tipo_negociacao,funcionario_id)&situacao=eq.efetivado&competencia=eq.${comp}&limit=10000`,
+      { headers: cab(tok) }),
+    vendidosNoMes(tok, comp),
+  ]);
+  const catPorId = {};
+  (cats || []).forEach((c) => { catPorId[c.id] = c; });
+  const real = {}; const retiradas = {};
+  let semCategoria = 0;
+  (lanc || []).forEach((l) => {
+    partesDe(l).forEach((p) => {
+      const c = p.categoria_id ? catPorId[p.categoria_id] : null;
+      if (!c) { semCategoria += p.valor; return; }
+      if (c.grupo === "retirada") { retiradas[c.id] = (retiradas[c.id] || 0) + p.valor; return; }
+      if (c.tipo_custo === "fora" || !c.no_dre) return;
+      real[c.id] = (real[c.id] || 0) + p.valor;
+    });
+  });
+  const rent = vendidos.reduce((t, e) => t + rentabilidadeDe(e).bruta, 0);
+  return { real, retiradas, semCategoria, vendidos, rent };
+}
+
 async function orcamento(req, res, tok) {
   const comp = competenciaDe(req.query.competencia) || competenciaDe(hojeAqui());
 
@@ -1373,29 +1412,8 @@ async function orcamento(req, res, tok) {
 
   if (req.method !== "GET") { res.setHeader("Allow", "GET, PUT, POST"); return res.status(405).json({ erro: "Use GET, PUT ou POST." }); }
 
-  const [lanc, cats, orc, vendidos] = await Promise.all([
-    supa(`${base("fin_lancamento")}?select=debito,credito,situacao,categoria_id,estoque_id,tipo_negociacao,funcionario_id,` +
-      `fin_rateio(valor,categoria_id,estoque_id,tipo_negociacao,funcionario_id)&situacao=eq.efetivado&competencia=eq.${comp}&limit=10000`,
-      { headers: cab(tok) }),
-    supa(`${base("fin_categoria")}?select=id,nome,grupo,no_dre,ordem,tipo_custo&ativa=eq.true&order=ordem.asc,nome.asc`, { headers: cab(tok) }),
-    orcamentoDoMes(tok, comp),
-    vendidosNoMes(tok, comp),
-  ]);
-
-  const catPorId = {};
-  (cats || []).forEach((c) => { catPorId[c.id] = c; });
-  const real = {};
-  let semCategoria = 0;
-  (lanc || []).forEach((l) => {
-    partesDe(l).forEach((p) => {
-      const c = p.categoria_id ? catPorId[p.categoria_id] : null;
-      if (!c) { semCategoria += p.valor; return; }
-      if (c.tipo_custo === "fora" || !c.no_dre) return;
-      real[c.id] = (real[c.id] || 0) + p.valor;
-    });
-  });
-
-  const rent = vendidos.reduce((t, e) => t + rentabilidadeDe(e).bruta, 0);
+  const [cats, orc] = await Promise.all([categoriasDoFechamento(tok), orcamentoDoMes(tok, comp)]);
+  const { real, semCategoria, vendidos, rent } = await realizadoDoMes(tok, comp, cats);
   const prev = orc.livres;
   const vPrev = prev.veiculos || 0;
   const tPrev = prev.ticket || 0;
@@ -1431,6 +1449,66 @@ async function orcamento(req, res, tok) {
     sem_categoria: semCategoria,
     categorias: (cats || []).filter((c) => c.no_dre && c.tipo_custo !== "fora")
       .map((c) => ({ id: c.id, nome: c.nome, tipo_custo: c.tipo_custo, ordem: c.ordem })),
+  });
+}
+
+/**
+ * ===== o ano =====
+ *
+ * A aba FLUXO DE CAIXA da planilha do Derek (24/10/2026): os doze
+ * meses lado a lado, na ordem do fechamento — receita, variáveis,
+ * margem de contribuição, fixas, resultado — e embaixo as retiradas
+ * dos sócios e o acumulado. O Fechamento responde "como foi este mês";
+ * o Ano responde "como este mês se compara aos outros", que é a
+ * pergunta que a planilha existe para responder.
+ *
+ * **É o mesmo realizado do Fechamento, mês a mês** (`realizadoDoMes`),
+ * e não uma conta nova: a coluna de setembro aqui e o realizado de
+ * setembro lá têm que ser o mesmo número.
+ *
+ * **Mês que ainda não chegou não é consultado.** Doze idas ao banco
+ * para devolver zero seriam metade das subrequisições do Worker gastas
+ * em nada — e o zero de novembro, na planilha, é célula vazia.
+ */
+async function ano(req, res, tok) {
+  const hoje = hojeAqui();
+  const a = /^\d{4}$/.test(String(req.query.ano || "")) ? Number(req.query.ano) : Number(hoje.slice(0, 4));
+  const meses = Array.from({ length: 12 }, (_, i) => `${a}-${String(i + 1).padStart(2, "0")}-01`);
+  const atual = competenciaDe(hoje);
+  const cats = await categoriasDoFechamento(tok);
+  const porMes = {};
+  await Promise.all(meses.filter((m) => m <= atual).map(async (m) => { porMes[m] = await realizadoDoMes(tok, m, cats); }));
+
+  // Despesa vem negativa de partesDe(); aqui ela é custo e se lê
+  // positiva, como na planilha. O sinal volta no resultado.
+  const linhasDe = (filtro, sinal, fonte) => cats.filter(filtro).map((c) => {
+    const por_mes = {};
+    meses.forEach((m) => { if (porMes[m]) por_mes[m] = sinal * ((porMes[m][fonte] || {})[c.id] || 0); });
+    return { id: c.id, nome: c.nome, por_mes };
+  }).filter((l) => Object.keys(l.por_mes).some((m) => Math.abs(l.por_mes[m]) > 0.004));
+  const variaveis = linhasDe((c) => c.no_dre && c.tipo_custo === "variavel", -1, "real");
+  const fixas = linhasDe((c) => c.no_dre && c.tipo_custo === "fixa", -1, "real");
+  const outras = linhasDe((c) => c.no_dre && c.tipo_custo === "receita", 1, "real");
+  const retiradas = linhasDe((c) => c.grupo === "retirada", -1, "retiradas");
+
+  const somaLinhas = (ls) => { const t = {}; meses.forEach((m) => { if (porMes[m]) t[m] = ls.reduce((s, l) => s + (l.por_mes[m] || 0), 0); }); return t; };
+  const mapa = (f) => { const t = {}; meses.forEach((m) => { if (porMes[m]) t[m] = f(m); }); return t; };
+  const veiculos = mapa((m) => porMes[m].vendidos.length);
+  const faturamento = mapa((m) => porMes[m].rent);
+  const totOut = somaLinhas(outras), totVar = somaLinhas(variaveis), totFix = somaLinhas(fixas), totRet = somaLinhas(retiradas);
+  const receita = mapa((m) => faturamento[m] + totOut[m]);
+  const margem = mapa((m) => receita[m] - totVar[m]);
+  const resultado = mapa((m) => margem[m] - totFix[m]);
+  const aposRetiradas = mapa((m) => resultado[m] - totRet[m]);
+  let corrido = 0;
+  const acumulado = mapa((m) => (corrido += aposRetiradas[m]));
+  const semCategoria = mapa((m) => porMes[m].semCategoria);
+
+  return res.status(200).json({
+    ano: a, meses, ate: meses.filter((m) => porMes[m]).pop() || null,
+    veiculos, faturamento, outras, total_outras: totOut, receita,
+    variaveis, total_variaveis: totVar, margem, fixas, total_fixas: totFix, resultado,
+    retiradas, total_retiradas: totRet, apos_retiradas: aposRetiradas, acumulado, sem_categoria: semCategoria,
   });
 }
 
@@ -1903,7 +1981,7 @@ async function pendencias(req, res, tok) {
 }
 
 const RECURSOS = { conta, categoria, funcionario, favorecido, lancamento, importar, dre, carros, vale, folha,
-                   fechamento, orcamento, rateio, negociacao, titulo, fluxo, log, recibo, pendencias, recebimentos, saldos,
+                   fechamento, orcamento, ano, rateio, negociacao, titulo, fluxo, log, recibo, pendencias, recebimentos, saldos,
                    estoque: estoqueLista };
 
 module.exports = async function handler(req, res) {

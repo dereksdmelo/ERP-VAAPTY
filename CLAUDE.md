@@ -3897,6 +3897,19 @@ mostrar.
 cada render: o React remonta o campo e o foco se perde a cada tecla —
 o mesmo que já derrubou o formulário do cliente (decisão 7).
 
+**E desde 24/10/2026 há a tela Ano** (Financeiro → fim do mês). O
+Derek mandou a mesma planilha com o FLUXO DE CAIXA 2025 e 2026
+preenchidos à mão e escolheu a vista anual: os doze meses lado a lado,
+na ordem do fechamento, e embaixo as retiradas dos sócios (grupo
+`retirada`, fora do lucro), o acumulado e os KPIs por carro.
+**Cada coluna é o realizado do Fechamento daquele mês** —
+`realizadoDoMes()`, em `api/financeiro.js`, é a conta única dos dois;
+quem mexer no realizado mexe ali. Mês futuro não é consultado.
+Percentual e valor por carro, na coluna Soma, são do ano inteiro (a
+soma de razões não é a razão das somas). **O previsto anual e a
+importação do histórico à mão ficaram de fora** — a tela mostra só o
+que o extrato sabe.
+
 ### 33. A conta do negócio virou composta
 
 Três coisas que o número solto escondia, e que apareceram no uso em
