@@ -2514,8 +2514,12 @@ decisão 51 já tinha desfeito na pré-venda. São oito destinos em
 roteador precisam concordar, e dois mapas divergem no primeiro
 acréscimo. `grupo` é o rótulo que o painel escreve acima dos itens (*todo
 dia*, *fim do mês*), **uma vez, quando muda** — e vale para qualquer área
-que queira agrupar. O destino único `financeiro` deixou de existir; a
-última tela não é guardada, então nada antigo cai em branco.
+que queira agrupar. O destino único `financeiro` deixou de existir.
+**Desde 24/10/2026 a tela atual é guardada** — o Derek pediu que
+atualizar a página não mudasse de tela. Fica na sessão da ABA
+(`sessionStorage`, `vaapty:tela` e `vaapty:aberto`), não no aparelho:
+aba nova começa nos atendimentos, e tela que o perfil não tem mais cai
+no `permitida` do App em vez de abrir em branco.
 
 **O grupo "cadastros" nasceu com a primeira tela própria** (decisão 61,
 Contas e caixas). Categoria e favorecido continuam dentro de Lançamentos.

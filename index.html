@@ -22775,7 +22775,17 @@ function App() {
   const [aberto, setAberto] = useState(null);           // atendimento em foco, ou a lista
   // A página atual e o mês. O mês mora aqui porque vale para mais de
   // uma página — a lista de atendimentos e o painel medem o mesmo mês.
-  const [tela, setTela] = useState("atendimentos");
+  /* ATUALIZAR A PÁGINA NÃO MUDA DE TELA (24/10/2026, o Derek: *"quando
+   * eu atualizar a tela, gostaria que se mantivesse na mesma tela"*).
+   * A tela e o atendimento aberto ficam na sessão da ABA, não no
+   * aparelho: duas abas abertas em telas diferentes continuam cada uma
+   * na sua, e aba nova começa nos atendimentos. Tela que o perfil não
+   * tem mais cai no `permitida` abaixo, como antes. */
+  const lerSessao = (k) => { try { return sessionStorage.getItem(k) || ""; } catch (e) { return ""; } };
+  const gravarSessao = (k, v) => { try { if (v) sessionStorage.setItem(k, v); else sessionStorage.removeItem(k); } catch (e) {} };
+  const [tela, setTela] = useState(() => lerSessao("vaapty:tela") || "atendimentos");
+  useEffect(() => { gravarSessao("vaapty:tela", tela); }, [tela]);
+  useEffect(() => { if (estado === "dentro") gravarSessao("vaapty:aberto", aberto && aberto.id); }, [aberto, estado]);
   /* A CONVERSA ORIGINAL, aberta de dentro do lead.
    *
    * O alvo mora no App porque quem pede está na Pré-vendas e quem
@@ -22847,6 +22857,9 @@ function App() {
       }
       await restaurarSessao();
       if (!AUTH.sessao) { setEstado("fora"); return; }
+      // O atendimento que estava aberto antes de atualizar volta junto.
+      const idAberto = lerSessao("vaapty:aberto");
+      if (idAberto) { try { setAberto(await lerAtendimento(idAberto)); } catch (e) { gravarSessao("vaapty:aberto", ""); } }
       await verQuemSou();
     })();
     return () => { AUTH.aoSair = null; };
