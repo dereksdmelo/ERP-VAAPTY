@@ -10817,9 +10817,11 @@ function ReguaDoMes({ d, equipe, metaLoja }) {
           {/* ---- as metas individuais, como no quadro ---- */}
           <div className="mt-3 border-t pt-2" style={{ borderColor: C.line }}>
             <div className="flex items-baseline gap-[6px] px-1 pb-1 text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>
-              <span style={col(58)}>Neg</span>
-              <span style={{ ...col(62), textAlign: "right" }}>Meta</span>
-              <span style={{ ...col(62), textAlign: "right" }}>Feito</span>
+              {/* Mais larga no computador (24/10/2026): com a página na
+                  largura toda, o nome não precisa virar "ANDRE …". */}
+              <span className="w-[58px] shrink-0 lg:w-[160px]">Neg</span>
+              <span className="w-[62px] shrink-0 lg:w-[96px]" style={{ textAlign: "right" }}>Meta</span>
+              <span className="w-[62px] shrink-0 lg:w-[96px]" style={{ textAlign: "right" }}>Feito</span>
               <span className="flex-1" style={{ minWidth: 30 }}>Ritmo</span>
               <span style={{ ...col(30), textAlign: "right" }}>%</span>
             </div>
@@ -10828,12 +10830,12 @@ function ReguaDoMes({ d, equipe, metaLoja }) {
               const dele = l.meta ? (l.valor / l.meta) * diasNoMes : 0;
               const bateu = l.meta && diaHoje - dele <= 0;
               return (
-                <div key={l.nome} className="flex items-center gap-[6px] px-1 py-[3px] text-[10px]">
-                  <span className="truncate" style={{ ...col(58), fontSize: 11, fontWeight: 600 }} title={l.nome}>{l.nome}</span>
-                  <span style={{ ...col(62), textAlign: "right", fontFamily: F.mono, color: l.semMeta ? C.mute : C.ink, whiteSpace: "nowrap" }}>
+                <div key={l.nome} className="flex items-center gap-[6px] px-1 py-[3px] text-[10px] lg:py-[5px] lg:text-[12px]">
+                  <span className="w-[58px] shrink-0 truncate text-[11px] lg:w-[160px] lg:text-[13px]" style={{ fontWeight: 600 }} title={l.nome}>{l.nome}</span>
+                  <span className="w-[62px] shrink-0 lg:w-[96px]" style={{ textAlign: "right", fontFamily: F.mono, color: l.semMeta ? C.mute : C.ink, whiteSpace: "nowrap" }}>
                     {l.semMeta ? "sem meta" : brl(l.meta)}
                   </span>
-                  <span style={{ ...col(62), textAlign: "right", fontFamily: F.mono, fontWeight: 700, whiteSpace: "nowrap" }}>
+                  <span className="w-[62px] shrink-0 lg:w-[96px]" style={{ textAlign: "right", fontFamily: F.mono, fontWeight: 700, whiteSpace: "nowrap" }}>
                     {brl(l.valor)}
                   </span>
                   <span className="flex-1" style={{ minWidth: 30 }}>
@@ -11109,7 +11111,9 @@ function CadastroNegociadores({ perfil, competencia, aoMudarMetaLoja }) {
     return (
       <div className="mt-3">
         <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>{titulo}</div>
-        <div className="mt-1.5 space-y-1.5">
+        {/* Duas colunas na tela larga (24/10/2026): o cartão tem três
+            campos curtos, e na largura toda ficava quase vazio. */}
+        <div className="mt-1.5 grid gap-1.5 xl:grid-cols-2">
           {gente.map((n) => (
             <div key={n.id} className="rounded-md px-3 py-2"
               style={{ background: n.ativo ? "#fff" : "#FBFAFC", border: `1px solid ${C.line}`, opacity: n.ativo ? 1 : 0.55 }}>
