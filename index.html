@@ -11864,6 +11864,10 @@ const PLAN = { grade: "#D5D9DE", cab: "#2F3B4C", cabTexto: "#FFFFFF", total: "#F
 
 function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar }) {
   const rs = (v) => (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // TOTAL NEGOCIADORES abre por botão (24/10/2026, o Derek: *"pode ser um
+  // botão que abre um pop-up, aí não fica ocupando espaço na lateral"*):
+  // a planilha é o assunto, e com a caixa ao lado ela cortava em DÉBITOS.
+  const [verNeg, setVerNeg] = useState(false);
   const linhas = vendidos.map((e) => ({ e, r: rentabilidadeDe(e), semana: semanaDe(e), dias: diasNoPatio(e) }));
 
   const total = linhas.reduce((t, { r }) => ({
@@ -11917,9 +11921,15 @@ function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar }) {
           <span className="text-[17px]" style={{ fontWeight: 800, color: cor || C.ink, fontVariantNumeric: "tabular-nums" }}>{v}</span>
         </span>
       ))}
-      {aoImportar && (
-        <button onClick={aoImportar} className="ml-auto text-[12.5px] font-semibold" style={{ color: C.roxo }}>importar planilha</button>
-      )}
+      <span className="ml-auto flex items-center gap-3">
+        {!!linhas.length && (
+          <button onClick={() => setVerNeg(true)} className="rounded-md px-3 py-1.5 text-[13px] font-semibold text-white"
+            style={{ background: PLAN.cab }}>Por negociador</button>
+        )}
+        {aoImportar && (
+          <button onClick={aoImportar} className="text-[12.5px] font-semibold" style={{ color: C.roxo }}>importar planilha</button>
+        )}
+      </span>
     </div>
   );
 
@@ -11940,7 +11950,7 @@ function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar }) {
   return (
     <div>
       {resumo}
-      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_300px]">
+      <div>
         {/* ---- CONTROLE DE VEÍCULOS / CLIENTES ---- */}
         <div className="rolar overflow-auto" style={{ background: C.paper, border: borda, maxHeight: "calc(100dvh - 120px)" }}>
           <table className="w-full" style={{ borderCollapse: "collapse" }}>
@@ -11998,8 +12008,14 @@ function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar }) {
           </table>
         </div>
 
-        {/* ---- TOTAL NEGOCIADORES, no mesmo desenho ---- */}
-        <div className="self-start" style={{ background: C.paper, border: borda }}>
+        {/* ---- TOTAL NEGOCIADORES, numa janela, no mesmo desenho ---- */}
+        {verNeg && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(24,18,33,0.45)" }} onClick={() => setVerNeg(false)}>
+        <div className="w-full max-w-lg" style={{ background: C.paper, border: borda }} onClick={(ev) => ev.stopPropagation()}>
+          <div className="flex items-center justify-between px-3 py-2">
+            <span className="text-[14px] font-bold">{rotuloMes(comp)}</span>
+            <button onClick={() => setVerNeg(false)} className="text-[13px]" style={{ color: C.mute }}>fechar</button>
+          </div>
           <table className="w-full" style={{ borderCollapse: "collapse" }}>
             <thead>
               <tr>{th("Total negociadores", "left")}{th("Carros")}{th("Rent. líquida")}</tr>
@@ -12020,6 +12036,8 @@ function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar }) {
             </tbody>
           </table>
         </div>
+        </div>
+        )}
       </div>
     </div>
   );
