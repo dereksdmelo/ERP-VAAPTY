@@ -387,7 +387,16 @@ async function fetchAut(url, opcoes) {
     return o;
   };
   let r = await fetch(url, monta());
-  if (r.status === 401) {
+  /* SESSÃO VENCIDA NEM SEMPRE VOLTA 401 (24/10/2026). Parte das funções
+   * repassa o erro do banco como 500 com "JWT expired" no corpo — e aí
+   * a renovação não disparava: o Derek viu "JWT expired" em vermelho
+   * nas Conversas, com a tela parada. Lê-se o corpo só de resposta com
+   * erro, numa cópia, para o chamador continuar podendo lê-lo. */
+  let vencida = r.status === 401;
+  if (!r.ok && !vencida) {
+    try { vencida = /jwt expired|PGRST30[13]|invalid jwt/i.test(await r.clone().text()); } catch (e) {}
+  }
+  if (vencida) {
     try { await renovarSessao(); } catch (e) { sair(); throw e; }
     r = await fetch(url, monta());
     if (r.status === 401) { sair(); throw new Error("Sessão expirada. Entre de novo."); }
@@ -9433,16 +9442,12 @@ function TelaConversas({ alvo, aoConsumirAlvo }) {
   const abertaViva = aberta && (lista || []).find((c) => c.id === aberta.id) || aberta;
 
   return (
-    <div>
-      <Cabecalho titulo="Conversas"
-        sub={lista ? `${esperando.length} esperando resposta · ${lista.length} no total`
-                   : "Tudo que chega nos números da loja, num lugar só."} />
-
-      {erro && <p className="mb-4 text-[14px]" style={{ color: C.laranja }}>{erro}</p>}
-
+    <div className="h-full">
       {/* O PAINEL DO WHATSAPP WEB: lista à esquerda, conversa à direita,
-          a altura da tela. No celular, um de cada vez. */}
-      <div className="flex overflow-hidden rounded-lg" style={{ height: "calc(100vh - 210px)", minHeight: 520, border: `1px solid ${WA.linha}`, background: "#fff" }}>
+          a tela inteira (o Shell entra em `cheia`). No celular, um de
+          cada vez. O título saiu: a tela se explica sozinha, e a linha
+          de "quantos esperando" virou o número no filtro. */}
+      <div className="flex h-full overflow-hidden" style={{ background: "#fff" }}>
         <div className={`${abertaViva ? "hidden lg:flex" : "flex"} w-full min-w-0 flex-col lg:w-[400px] lg:shrink-0`}
           style={{ borderRight: `1px solid ${WA.linha}` }}>
           <div className="space-y-2 px-3 py-2.5" style={{ background: "#fff", borderBottom: `1px solid ${WA.linha}` }}>
@@ -9453,8 +9458,9 @@ function TelaConversas({ alvo, aoConsumirAlvo }) {
                 onKeyDown={(e) => { if (e.key === "Enter") setBusca(digitado.trim()); }}
                 onBlur={() => { if (digitado.trim() !== busca) setBusca(digitado.trim()); }} />
             </div>
+            {erro && <p className="text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
             <div className="flex flex-wrap items-center gap-1.5">
-              {[["esperando", `Não respondidas${esperando.length ? ` ${esperando.length}` : ""}`], ["todas", "Todas"]].map(([id, rot]) => (
+              {[["esperando", `Não respondidas${esperando.length ? ` ${esperando.length}` : ""}`], ["todas", `Todas${lista ? ` ${lista.length}` : ""}`]].map(([id, rot]) => (
                 <button key={id} onClick={() => setAba(id)}
                   className="rounded-full px-3 py-1 text-[13px]"
                   style={aba === id ? { background: "#E7FCE3", color: "#008069", fontWeight: 600 } : { background: WA.barra, color: WA.mute }}>
@@ -20675,7 +20681,7 @@ const Logotipo = () => (
   </span>
 );
 
-function Shell({ perfil, tela, setTela, children }) {
+function Shell({ perfil, tela, setTela, children, cheia }) {
   const destinos = destinosPara(perfil);
   const principais = destinos.filter((d) => d.principal);
   const demais = destinos.filter((d) => !d.principal);
@@ -20840,8 +20846,15 @@ function Shell({ perfil, tela, setTela, children }) {
       </aside>
 
       {/* ---- conteúdo ---- */}
-      <main className={`pb-24 lg:pb-10 ${painel ? "lg:pl-[248px]" : "lg:pl-16"}`}>
-        <div className="mx-auto max-w-[1080px] px-4 pt-4 lg:px-8 lg:pt-8">{children}</div>
+      {/* TELA CHEIA (24/10/2026, o Derek, nas Conversas: *"ocupar a tela
+          inteira, não tem por que ter aquele título e todo aquele espaço
+          em branco em cima"*). A caixa de 1.080 px com margem serve a
+          página que se LÊ; a que se TRABALHA o dia todo, como o WhatsApp,
+          quer cada pixel. Sem título, sem margem, a altura da janela. */}
+      <main className={`${cheia ? "pb-16 lg:pb-0" : "pb-24 lg:pb-10"} ${painel ? "lg:pl-[248px]" : "lg:pl-16"}`}>
+        {cheia
+          ? <div className="h-[calc(100dvh-64px)] lg:h-[100dvh]">{children}</div>
+          : <div className="mx-auto max-w-[1080px] px-4 pt-4 lg:px-8 lg:pt-8">{children}</div>}
       </main>
 
       {/* ---- barra inferior (celular) ----
@@ -22700,7 +22713,7 @@ function App() {
   if (!permitida && tela !== "atendimentos") { setTela("atendimentos"); return null; }
 
   return (
-    <Shell perfil={perfil} tela={tela} setTela={setTela}>
+    <Shell perfil={perfil} tela={tela} setTela={setTela} cheia={tela === "conversas"}>
       {/* Fica dentro da casca, sobre qualquer destino: a pergunta
           aparece onde a pessoa estiver, e não só no "Meu dia". */}
       {pedeLembrete && <LembreteDoDia perfil={perfil} />}
