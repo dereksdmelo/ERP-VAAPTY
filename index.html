@@ -11467,12 +11467,18 @@ function CRM({ perfil, aoAbrir, mes }) {
 
         {!!lista.length && (
           <div className="rolar hidden overflow-x-auto rounded-lg lg:block" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-            <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 1180 }}>
+            {/* TUDO NA TELA, SEM ARRASTAR (24/10/2026, o Derek: *"diminua a
+                coluna do carro, diminua a do cliente, remova a de propostas —
+                quero que tudo apareça sem ter que arrastar pro lado"*). Carro
+                e cliente cortam com reticências (o nome inteiro fica no
+                `title`), e a coluna de propostas saiu: a proposta de lojista
+                quase nunca está registrada aqui (decisão 12). */}
+            <table className="w-full" style={{ borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: "#F6F4F8" }}>
                   {["Data", "Negociador", "Prospec", "Carro", "Placa", "Ano/Mod", "KM",
-                    "Cliente", "Telefone", "Origem", "Status", "FIPE", "Pretensão", "Propostas"].map((h, i) => (
-                    <th key={h} className="whitespace-nowrap px-2.5 py-2 text-left text-[9px] uppercase tracking-[0.1em]"
+                    "Cliente", "Telefone", "Origem", "Status", "FIPE", "Pretensão"].map((h, i) => (
+                    <th key={h} className="whitespace-nowrap px-2 py-2 text-left text-[9px] uppercase tracking-[0.1em]"
                       style={{ color: C.mute, borderBottom: `1px solid ${C.line}`, textAlign: i >= 11 ? "right" : "left" }}>
                       {h}
                     </th>
@@ -11482,10 +11488,8 @@ function CRM({ perfil, aoAbrir, mes }) {
               <tbody>
                 {lista.map((a) => {
                   const v = (a.veiculo || [])[0] || {};
-                  const props = a.proposta || [];
-                  const melhor = props.length ? Math.max(...props.map((p) => Number(p.valor) || 0)) : 0;
                   const anoMod = [v.ano_fabricacao, v.ano_modelo].filter(Boolean).join("/");
-                  const td = "whitespace-nowrap px-2.5 py-2 text-[12px]";
+                  const td = "whitespace-nowrap px-2 py-2 text-[12px]";
                   const num = { fontFamily: F.mono, textAlign: "right" };
                   return (
                     // Negócio fechado pinta a linha inteira de verde, e vendeu
@@ -11498,22 +11502,20 @@ function CRM({ perfil, aoAbrir, mes }) {
                       <td className={td} style={{ fontFamily: F.mono, color: C.mute }}>{soData(a.data)}</td>
                       <td className={td}>{a.negociador_nome || "—"}</td>
                       <td className={td} style={{ color: C.mute }}>{a.prospec || "—"}</td>
-                      <td className={td} style={{ fontWeight: 600 }}>
-                        {v.marca_modelo || a.carro_descricao || "—"}
+                      <td className={td} style={{ fontWeight: 600 }} title={v.marca_modelo || a.carro_descricao || ""}>
+                        <div className="max-w-[150px] truncate xl:max-w-[230px]">{v.marca_modelo || a.carro_descricao || "—"}</div>
                       </td>
                       <td className={td} style={{ fontFamily: F.mono }}>{v.placa || "—"}</td>
                       <td className={td} style={{ fontFamily: F.mono, color: C.mute }}>{anoMod || "—"}</td>
                       <td className={td} style={num}>{v.km_atual ? Number(v.km_atual).toLocaleString("pt-BR") : "—"}</td>
-                      <td className={td}>{a.cliente_nome || "—"}</td>
+                      <td className={td} title={a.cliente_nome || ""}>
+                        <div className="max-w-[110px] truncate xl:max-w-[150px]">{a.cliente_nome || "—"}</div>
+                      </td>
                       <td className={td} style={{ fontFamily: F.mono, color: C.mute }}>{a.cliente_telefone || "—"}</td>
                       <td className={td} style={{ color: C.mute }}>{rotulo(ORIGENS, a.origem)}</td>
                       <td className={td}><Etiqueta status={a.status} /></td>
                       <td className={td} style={num}>{v.fipe_valor ? brl(v.fipe_valor) : "—"}</td>
                       <td className={td} style={num}>{a.pretensao ? brl(a.pretensao) : "—"}</td>
-                      <td className={td} style={{ ...num, color: melhor ? C.verde : C.mute }}>
-                        {melhor ? brl(melhor) : "—"}
-                        {props.length > 1 ? <span style={{ color: C.mute }}> ({props.length})</span> : null}
-                      </td>
                     </tr>
                   );
                 })}
@@ -11523,7 +11525,7 @@ function CRM({ perfil, aoAbrir, mes }) {
         )}
         {!!lista.length && (
           <p className="hidden text-[12px] lg:block" style={{ color: C.mute }}>
-            Arraste a tabela para o lado para ver o resto das colunas. Toque na linha para abrir o atendimento.
+            Toque na linha para abrir o atendimento. Carro ou nome cortado: pare o mouse em cima para ver inteiro.
           </p>
         )}
       </div>
