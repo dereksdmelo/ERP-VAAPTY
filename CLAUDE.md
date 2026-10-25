@@ -3450,7 +3450,14 @@ o "Voltar / Ir para" do rodapé saiu, porque rolar é o caminho. **Todas
 as etapas ficam montadas**: componente de etapa que consulte algo ao
 montar passa a consultar ao abrir o atendimento — o desvalorizômetro,
 que aparece duas vezes, faz uma ida só (`consultarDesvalorizacao`
-guarda a promessa por chave).
+guarda a promessa por chave). E o que marcava ao montar deixou de
+marcar: a Demonstração dava o processo por mostrado ao carregar a
+primeira página — numa página só, isso seria todo atendimento aberto.
+Agora conta quem **chega à última página** (`Apresentacao aoFim`), e o
+"Mostrei o processo" saiu: uma coisa a menos para ticar. As páginas
+estavam dando 404 desde que a lista do `.assetsignore` virou de
+permissão — `!apresentacao` libera a pasta, não os arquivos dentro;
+é `!apresentacao/*.jpg`.
 
 **As fontes nomeadas nunca foram carregadas.** `F` citava Archivo,
 Public Sans e Roboto Mono, mas não havia `<link>` — cada aparelho caía

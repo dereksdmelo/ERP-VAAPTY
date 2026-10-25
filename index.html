@@ -5621,11 +5621,17 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
           <>
             <Bloco titulo="Mostre como funciona" sub="O cliente aceita um número menor quando entende de onde ele veio.">
               <div className="space-y-2.5">
-                <Apresentacao aoAbrir={() => { if (!f.mostrouProcesso) set("mostrouProcesso", true); }} />
-                <p className="text-[11px] leading-relaxed" style={{ color: C.mute }}>
-                  Onze páginas, aqui mesmo — arraste ou use os botões para virar na frente do cliente. Abrir já marca que o processo foi mostrado.
+                {/* CHEGAR À ÚLTIMA PÁGINA É O QUE MARCA (o Derek, em
+                    24/10/2026: "uma coisa a menos pro negociador ticar").
+                    Antes marcava ao ABRIR — e com as etapas numa página
+                    só, abrir o atendimento já daria o processo por
+                    mostrado sem ninguém virar uma folha. */}
+                <Apresentacao aoFim={() => { if (!f.mostrouProcesso) set("mostrouProcesso", true); }} />
+                <p className="text-[11px] leading-relaxed" style={{ color: f.mostrouProcesso ? C.verde : C.mute }}>
+                  {f.mostrouProcesso
+                    ? "✓ Processo mostrado — chegou à última página."
+                    : "Vire as páginas na frente do cliente (arraste ou use os botões). Chegando à última, conta como mostrado."}
                 </p>
-                <Toggle label="Mostrei o processo completo ao cliente" valor={f.mostrouProcesso} onChange={(v) => set("mostrouProcesso", v)} />
                 <a href="/apresentacao.pdf" target="_blank" rel="noopener noreferrer"
                   className="block text-[11px] underline" style={{ color: C.mute }}>
                   Baixar o PDF — para mandar por WhatsApp
@@ -10438,9 +10444,10 @@ const NECESSIDADE_TEMA = [
  */
 const APRESENTACAO_PAGINAS = 11;
 
-function Apresentacao({ aoAbrir }) {
+function Apresentacao({ aoFim }) {
   const [pag, setPag] = useState(1);
   const trilho = useRef(null);
+  useEffect(() => { if (pag === APRESENTACAO_PAGINAS && aoFim) aoFim(); }, [pag]);
 
   const ir = (n) => {
     const alvo = Math.min(APRESENTACAO_PAGINAS, Math.max(1, n));
@@ -10468,7 +10475,6 @@ function Apresentacao({ aoAbrir }) {
           <img key={i} src={`/apresentacao/${String(i + 1).padStart(2, "0")}.jpg`}
             alt={`Página ${i + 1}`}
             loading={i === 0 ? "eager" : "lazy"}
-            onLoad={i === 0 && aoAbrir ? aoAbrir : undefined}
             style={{ width: "100%", flex: "0 0 100%", scrollSnapAlign: "start", display: "block" }} />
         ))}
       </div>
