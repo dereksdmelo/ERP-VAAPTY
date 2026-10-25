@@ -22897,7 +22897,7 @@ const setorDe = (pe) => {
   return "vendas";
 };
 
-function CartaoPessoa({ pe, eGerente, eu, mexerAcesso, mexerNeg, gerarSenha, gerando, senha, fecharSenha, ligar, criarMeta }) {
+function CartaoPessoa({ pe, eGerente, eu, mexerAcesso, mexerNeg, gerarSenha, gerando, senha, fecharSenha, ligar, criarMeta, soltas }) {
   const [aberto, setAberto] = useState(false);
   const a = pe.acesso, n = pe.neg;
   const nome = (a && a.nome) || (n && n.nome) || "—";
@@ -22966,7 +22966,18 @@ function CartaoPessoa({ pe, eGerente, eu, mexerAcesso, mexerNeg, gerarSenha, ger
           {n ? (
             <button onClick={() => setAberto(!aberto)} className="ml-auto text-[11.5px] font-semibold" style={{ color: C.roxo }}>metas {aberto ? "▴" : "▾"}</button>
           ) : (a && a.papel !== "gerente" && a.papel !== "prep" && (
-            <button onClick={() => criarMeta(pe)} className="ml-auto text-[11.5px] font-semibold" style={{ color: C.roxo }}>criar meta</button>
+            <span className="ml-auto flex items-center gap-2">
+              {/* Nome diferente nos dois cadastros ("DIEGO" e "Diego
+                  Weber"): a ligação é à mão, escolhendo a meta. */}
+              {!!(soltas || []).length && (
+                <select className="max-w-[150px] rounded-md border px-1.5 py-0.5 text-[11.5px] outline-none" style={inputSty} value=""
+                  onChange={(e) => { const alvo = (soltas || []).filter((x) => x.id === e.target.value)[0]; if (alvo) mexerNeg(alvo, { perfil_id: a.id }); }}>
+                  <option value="">ligar à meta de…</option>
+                  {soltas.map((x) => <option key={x.id} value={x.id}>{x.nome}</option>)}
+                </select>
+              )}
+              <button onClick={() => criarMeta(pe)} className="text-[11.5px] font-semibold" style={{ color: C.roxo }}>criar meta</button>
+            </span>
           ))}
         </div>
       )}
@@ -23064,20 +23075,22 @@ function QuadroEquipe({ perfil, negs, recarregarNegs }) {
   const inativas = pessoas.filter(inativa);
   const doSetor = (k) => ativas.filter((pe) => setorDe(pe) === k).sort((x, y) => nomeChave((x.acesso || x.neg).nome).localeCompare(nomeChave((y.acesso || y.neg).nome)));
   const esperando = acessos.filter((a) => !a.ativo).length;
+  // As metas que não estão ligadas a login nenhum: é delas que sai o "ligar à meta de…".
+  const soltas = (negs || []).filter((x) => !x.perfil_id);
 
   const cartao = (pe) => (
     <CartaoPessoa key={pe.chave} pe={pe} eGerente={eGerente} eu={pe.acesso && perfil && pe.acesso.id === perfil.id}
       mexerAcesso={mexerAcesso} mexerNeg={mexerNeg} gerarSenha={gerarSenha} gerando={gerando}
       senha={senha && pe.acesso && senha.id === pe.acesso.id ? senha.senha : null} fecharSenha={() => setSenha(null)}
-      ligar={ligar} criarMeta={criarMeta} />
+      ligar={ligar} criarMeta={criarMeta} soltas={soltas} />
   );
   const coluna = ([k, rot, sub], grade) => {
     const gente = doSetor(k);
     return (
       <div key={k} className="min-w-0 rounded-xl p-2.5" style={{ background: "#F6F4F8", border: `1px solid ${C.line}` }}>
         <div className="mb-2 flex items-baseline justify-between gap-2 px-0.5">
-          <span className="text-[12px] font-bold uppercase tracking-[0.08em]" style={{ color: C.ink }}>{rot} <span style={{ color: C.mute, fontWeight: 600 }}>· {gente.length}</span></span>
-          <span className="truncate text-[11px]" style={{ color: C.mute }}>{sub}</span>
+          <span className="whitespace-nowrap text-[12px] font-bold uppercase tracking-[0.08em]" style={{ color: C.ink }}>{rot} <span style={{ color: C.mute, fontWeight: 600 }}>· {gente.length}</span></span>
+          <span className="hidden truncate text-[11px] 2xl:inline" style={{ color: C.mute }}>{sub}</span>
         </div>
         <div className={`grid gap-2 ${grade || ""}`}>
           {gente.length ? gente.map(cartao) : <p className="px-1 py-2 text-[12px]" style={{ color: C.mute }}>Ninguém aqui ainda.</p>}
@@ -23095,7 +23108,7 @@ function QuadroEquipe({ perfil, negs, recarregarNegs }) {
         </p>
       )}
       {/* O ORGANOGRAMA: a gestão em cima, os três setores embaixo. */}
-      <div className="mx-auto max-w-[760px]">{coluna(SETORES[0], "sm:grid-cols-2")}</div>
+      <div className="mx-auto max-w-[1100px]">{coluna(SETORES[0], "sm:grid-cols-2 xl:grid-cols-3")}</div>
       <div className="mx-auto h-3 w-px" style={{ background: C.line }} />
       <div className="grid gap-3 xl:grid-cols-[1fr_1fr_1.6fr]">
         {coluna(SETORES[1])}
