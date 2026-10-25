@@ -875,6 +875,93 @@ async function anexos(req, res, tok) {
   return res.status(405).json({ erro: "Use GET, POST ou DELETE." });
 }
 
+/* OS DOCUMENTOS DO COLABORADOR (0079): RG/CNH, comprovante, o contrato
+ * de prestação de serviços. Mesmo bucket privado e mesma ordem dos anexos
+ * do negócio (decisão 9): a consulta pelo token de quem pede vem antes de
+ * tocar no arquivo, e só o financeiro e o gerente passam por ela. */
+const ROTULOS_COLAB = ["Documento (RG/CNH)", "CPF", "Comprovante de residência", "Contrato de prestação de serviços", "Distrato / desligamento", "Outro"];
+async function anexosColaborador(req, res, tok) {
+  const assinar = async (caminhos) => {
+    if (!caminhos.length) return {};
+    const r = await arquivos(`${STORAGE()}/object/sign/${BUCKET_DOC}`, {
+      method: "POST", headers: jsonArquivo(), body: JSON.stringify({ expiresIn: VALIDADE, paths: caminhos }),
+    });
+    const mapa = {};
+    (Array.isArray(r) ? r : []).forEach((x) => {
+      const a = x && (x.signedURL || x.signedUrl);
+      if (a) mapa[x.path] = a.charAt(0) === "/" ? `${STORAGE()}${a}` : a;
+    });
+    return mapa;
+  };
+  const daFicha = async (cid) => {
+    const r = await banco(`${REST("colaborador")}?select=id&id=eq.${cid}&limit=1`, { headers: cabecalhos(tok) });
+    return Array.isArray(r) && r[0];
+  };
+
+  if (req.method === "GET") {
+    const cid = String(req.query.colaborador_id || "");
+    if (!RX_UUID.test(cid)) return res.status(400).json({ erro: "colaborador_id inválido." });
+    const linhas = await banco(`${REST("colaborador_anexo")}?select=*&colaborador_id=eq.${cid}&order=criado_em.desc`, { headers: cabecalhos(tok) });
+    const lista = Array.isArray(linhas) ? linhas : [];
+    const urls = await assinar(lista.map((x) => x.caminho));
+    return res.status(200).json({ anexos: lista.map((x) => ({ ...x, url: urls[x.caminho] || null })), rotulos: ROTULOS_COLAB });
+  }
+
+  if (req.method === "POST") {
+    let corpo = req.body;
+    if (typeof corpo === "string") { try { corpo = JSON.parse(corpo); } catch (e) { corpo = null; } }
+    if (!corpo || typeof corpo !== "object") return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    const cid = String(corpo.colaborador_id || "");
+    if (!RX_UUID.test(cid)) return res.status(400).json({ erro: "colaborador_id inválido." });
+    const tipo = String(corpo.tipo || "");
+    const ext = TIPOS_DOC[tipo];
+    if (!ext) return res.status(415).json({ erro: "Só PDF, JPEG, PNG ou WEBP." });
+    let bruto = String(corpo.dados || "").trim();
+    const virgula = bruto.indexOf(",");
+    if (bruto.slice(0, 5) === "data:" && virgula > 0) bruto = bruto.slice(virgula + 1);
+    bruto = bruto.replace(/\s/g, "");
+    if (!bruto || !/^[A-Za-z0-9+/]+={0,2}$/.test(bruto)) return res.status(400).json({ erro: "Arquivo vazio ou fora do formato." });
+    const buf = Buffer.from(bruto, "base64");
+    if (!buf.length) return res.status(400).json({ erro: "Arquivo vazio." });
+    if (buf.length > MAX_DOC) return res.status(413).json({ erro: "Arquivo maior que 10 MB." });
+    if (!(await daFicha(cid))) return res.status(404).json({ erro: "Ficha não encontrada — ou você não tem acesso a ela." });
+
+    const caminho = `equipe/${cid}/${Date.now()}-${sufixo()}.${ext}`;
+    await arquivos(`${STORAGE()}/object/${BUCKET_DOC}/${paraURL(caminho)}`, {
+      method: "POST", headers: hArquivo({ "Content-Type": tipo, "Cache-Control": "3600", "x-upsert": "false" }), body: buf,
+    });
+    let linha;
+    try {
+      const r = await banco(REST("colaborador_anexo"), {
+        method: "POST", headers: json(tok, { Prefer: "return=representation" }),
+        body: JSON.stringify({
+          colaborador_id: cid, caminho, tipo, bytes: buf.length,
+          nome: String(corpo.nome || "").slice(0, 200) || null,
+          rotulo: ROTULOS_COLAB.indexOf(String(corpo.rotulo || "")) >= 0 ? corpo.rotulo : "Outro",
+        }),
+      });
+      linha = Array.isArray(r) ? r[0] : r;
+      if (!linha) throw new Error("O banco recusou o anexo.");
+    } catch (e) { await apagarDoc(caminho); throw e; }
+    const urls = await assinar([caminho]);
+    return res.status(201).json({ ok: true, anexo: { ...linha, url: urls[caminho] || null } });
+  }
+
+  if (req.method === "DELETE") {
+    const id = String(req.query.id || "");
+    if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido." });
+    const achado = await banco(`${REST("colaborador_anexo")}?select=caminho&id=eq.${id}&limit=1`, { headers: cabecalhos(tok) });
+    const alvo = Array.isArray(achado) && achado[0] ? achado[0].caminho : null;
+    if (!alvo) return res.status(404).json({ erro: "Anexo não encontrado." });
+    await apagarDoc(alvo);
+    await banco(`${REST("colaborador_anexo")}?id=eq.${id}`, { method: "DELETE", headers: cabecalhos(tok) });
+    return res.status(200).json({ ok: true });
+  }
+
+  res.setHeader("Allow", "GET, POST, DELETE");
+  return res.status(405).json({ erro: "Use GET, POST ou DELETE." });
+}
+
 async function apagarDoc(caminho) {
   try {
     await arquivos(`${STORAGE()}/object/${BUCKET_DOC}/${paraURL(caminho)}`, {
@@ -1138,6 +1225,11 @@ module.exports = async function handler(req, res) {
   if (String(req.query.recurso || "") === "shinkai") {
     try { return await shinkai(req, res, tok); }
     catch (e) { return res.status(e.status || 500).json({ erro: limpar(e.message) || "Falha no envio ao Shinkai." }); }
+  }
+
+  if (String(req.query.recurso || "") === "colaborador-anexo") {
+    try { return await anexosColaborador(req, res, tok); }
+    catch (e) { return res.status(e.status || 500).json({ erro: limpar(e.message) || "Falha no anexo." }); }
   }
 
   if (String(req.query.recurso || "") === "anexo") {

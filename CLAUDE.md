@@ -677,6 +677,19 @@ a ficha aparece junta com "mesmo nome — ligar o login à meta", e a
 ligação só vale com o clique — a mesma régua do `shinkai_nome` (0044),
 onde a tradução entre dois mundos virou cadastro em vez de adivinhação.
 
+**Clicar na pessoa abre a FICHA DO COLABORADOR (0079)**: dados do
+documento, PIX e conta, contrato (tipo, início, desligamento e motivo)
+e os papéis anexados (RG/CNH, comprovante, contrato de prestação de
+serviços). Pedido do Derek, *"isso vai ajudar a ligar com a parte de
+pagamento de equipe no financeiro"* — por isso a ficha aponta para a
+pessoa da folha (`fin_funcionario_id`), e "pôr na folha" a cria lá.
+**É uma ficha por pessoa, não por cadastro**: `colaborador` aponta para
+o login, a meta e a folha, sem repetir nenhum. **Só financeiro e
+gerente leem** (`e_financeiro()`): CPF e conta de funcionário vazados
+viram fraude. Os arquivos vão para `documentos-veiculo/equipe/`, pelo
+`api/foto.js` (decisão 9). **Desligar não tira o acesso sozinho** — a
+data pode ser futura —; o botão ao lado faz isso quando for a hora.
+
 **PATCH que volta vazio é RLS, não erro.** A política deixa qualquer um
 da equipe *ler* todo atendimento, mas só o dono (ou o gerente)
 *escrever*. Quando alguém tenta editar o atendimento de outro, o

@@ -661,6 +661,64 @@ async function configLoja(req, res, tok) {
   return res.status(405).json({ erro: "Use GET, PUT ou PATCH." });
 }
 
+/* A FICHA DO COLABORADOR (0079): documento, pagamento, contrato,
+ * entrada e saída. Lida e gravada com o token de quem pede — a RLS só
+ * abre para financeiro e gerente, então para o resto do mundo a ficha
+ * simplesmente não existe (GET devolve nulo, PUT volta 403). */
+const CAMPOS_COLAB = ["nome_completo", "cpf", "rg", "telefone", "email", "endereco", "cidade", "uf", "cep",
+  "pix", "banco", "agencia", "conta", "funcao", "motivo_desligamento", "observacoes"];
+const DATAS_COLAB = ["nascimento", "inicio_em", "desligado_em"];
+const TIPOS_CONTRATO = ["pj", "clt", "estagio", "autonomo", "outro"];
+async function colaborador(req, res, tok) {
+  const base = `${URL_BASE}/rest/v1/colaborador`;
+  const cab = { apikey: ANON, Authorization: tok };
+  const uuid = (v) => (RX_UUID.test(String(v || "")) ? String(v) : null);
+
+  if (req.method === "GET") {
+    const f = uuid(req.query.id) ? `id=eq.${req.query.id}`
+      : uuid(req.query.perfil_id) ? `perfil_id=eq.${req.query.perfil_id}`
+      : uuid(req.query.negociador_id) ? `negociador_id=eq.${req.query.negociador_id}` : "";
+    if (!f) return res.status(400).json({ erro: "Diga de quem é a ficha." });
+    const r = await fetch(`${base}?select=*&${f}&limit=1`, { headers: cab });
+    if (!r.ok) return res.status(r.status === 401 ? 401 : 502).json({ erro: "Não consegui ler a ficha." });
+    const d = await r.json().catch(() => []);
+    return res.status(200).json({ colaborador: (Array.isArray(d) ? d[0] : null) || null });
+  }
+
+  if (req.method === "PUT") {
+    const c = await lerCorpo(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    const linha = { atualizado_em: new Date().toISOString(), atualizado_por: donoDoToken(tok) };
+    CAMPOS_COLAB.forEach((k) => { if (c[k] !== undefined) linha[k] = texto(c[k]); });
+    DATAS_COLAB.forEach((k) => { if (c[k] !== undefined) linha[k] = /^\d{4}-\d{2}-\d{2}$/.test(String(c[k] || "")) ? c[k] : null; });
+    if (c.tipo_contrato !== undefined) linha.tipo_contrato = TIPOS_CONTRATO.indexOf(String(c.tipo_contrato)) >= 0 ? c.tipo_contrato : null;
+    ["perfil_id", "negociador_id", "fin_funcionario_id"].forEach((k) => { if (c[k] !== undefined) linha[k] = uuid(c[k]); });
+    if (linha.cpf) linha.cpf = linha.cpf.replace(/\D/g, "").slice(0, 11) || null;
+    if (linha.uf) linha.uf = linha.uf.toUpperCase().slice(0, 2);
+    if (linha.desligado_em && linha.inicio_em && linha.desligado_em < linha.inicio_em) {
+      return res.status(400).json({ erro: "O desligamento está antes do início." });
+    }
+    const id = uuid(c.id);
+    const r = await fetch(id ? `${base}?id=eq.${id}` : base, {
+      method: id ? "PATCH" : "POST",
+      headers: { ...cab, "Content-Type": "application/json", Prefer: "return=representation" },
+      body: JSON.stringify(linha),
+    });
+    const t = await r.text();
+    if (!r.ok) {
+      const dup = /23505/.test(t);
+      return res.status(dup ? 409 : r.status === 401 ? 401 : 502).json({ erro: dup ? "Essa pessoa já tem ficha." : "O banco recusou a ficha." });
+    }
+    let d = null; try { d = JSON.parse(t); } catch (e) {}
+    const salvo = Array.isArray(d) ? d[0] : d;
+    if (!salvo) return res.status(403).json({ erro: "Só o financeiro e o gerente mexem na ficha do colaborador." });
+    return res.status(200).json({ colaborador: salvo });
+  }
+
+  res.setHeader("Allow", "GET, PUT");
+  return res.status(405).json({ erro: "Use GET ou PUT." });
+}
+
 module.exports = async function handler(req, res) {
   if (!URL_BASE || !ANON) {
     return res.status(500).json({ erro: "SUPABASE_URL ou SUPABASE_ANON_KEY não configurados." });
@@ -702,6 +760,11 @@ module.exports = async function handler(req, res) {
 
   if (String(req.query.recurso || "") === "desempenho") {
     try { return await desempenho(req, res, tok); }
+    catch (e) { return res.status(502).json({ erro: "Não consegui falar com o banco." }); }
+  }
+
+  if (String(req.query.recurso || "") === "colaborador") {
+    try { return await colaborador(req, res, tok); }
     catch (e) { return res.status(502).json({ erro: "Não consegui falar com o banco." }); }
   }
 

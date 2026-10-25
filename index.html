@@ -22897,7 +22897,7 @@ const setorDe = (pe) => {
   return "vendas";
 };
 
-function CartaoPessoa({ pe, eGerente, eu, mexerAcesso, mexerNeg, gerarSenha, gerando, senha, fecharSenha, ligar, criarMeta, soltas }) {
+function CartaoPessoa({ pe, eGerente, eu, mexerAcesso, mexerNeg, gerarSenha, gerando, senha, fecharSenha, ligar, criarMeta, soltas, abrir }) {
   const [aberto, setAberto] = useState(false);
   const a = pe.acesso, n = pe.neg;
   const nome = (a && a.nome) || (n && n.nome) || "—";
@@ -22925,7 +22925,8 @@ function CartaoPessoa({ pe, eGerente, eu, mexerAcesso, mexerNeg, gerarSenha, ger
   const apagada = (!a || !a.ativo) && (!n || !n.ativo);
   return (
     <div className="rounded-lg p-2.5" style={{ background: "#fff", border: `1px solid ${a && !a.ativo ? C.laranja : C.line}`, opacity: apagada ? 0.6 : 1 }}>
-      <div className="flex items-center gap-2.5">
+      <button onClick={() => abrir && abrir(pe)} title="Abrir a ficha: documentos, contrato, entrada e saída"
+        className="flex w-full items-center gap-2.5 text-left">
         <Avatar nome={nome} tam={34} />
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13.5px] font-semibold" title={nome}>{nome}{eu ? <span className="ml-1 text-[11px] font-normal" style={{ color: C.mute }}>· você</span> : null}</div>
@@ -22934,7 +22935,7 @@ function CartaoPessoa({ pe, eGerente, eu, mexerAcesso, mexerNeg, gerarSenha, ger
           </div>
         </div>
         <span className="shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-semibold" style={{ background: estado[2], color: estado[1] }}>{estado[0]}</span>
-      </div>
+      </button>
 
       {pe.sugestao && eGerente && (
         <button onClick={() => ligar(pe)} className="mt-2 w-full rounded-md px-2 py-1 text-left text-[11.5px]" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
@@ -23030,6 +23031,7 @@ function QuadroEquipe({ perfil, negs, recarregarNegs }) {
   const [gerando, setGerando] = useState("");
   const [senha, setSenha] = useState(null);
   const [verInativos, setVerInativos] = useState(false);
+  const [ficha, setFicha] = useState(null);
   const eGerente = !!(perfil && perfil.papel === "gerente");
   const carregar = () => listarAcessos().then(setAcessos).catch((e) => { setAcessos([]); setErro(e.message); });
   useEffect(() => { carregar(); }, []);
@@ -23082,7 +23084,7 @@ function QuadroEquipe({ perfil, negs, recarregarNegs }) {
     <CartaoPessoa key={pe.chave} pe={pe} eGerente={eGerente} eu={pe.acesso && perfil && pe.acesso.id === perfil.id}
       mexerAcesso={mexerAcesso} mexerNeg={mexerNeg} gerarSenha={gerarSenha} gerando={gerando}
       senha={senha && pe.acesso && senha.id === pe.acesso.id ? senha.senha : null} fecharSenha={() => setSenha(null)}
-      ligar={ligar} criarMeta={criarMeta} soltas={soltas} />
+      ligar={ligar} criarMeta={criarMeta} soltas={soltas} abrir={setFicha} />
   );
   const coluna = ([k, rot, sub], grade) => {
     const gente = doSetor(k);
@@ -23123,6 +23125,237 @@ function QuadroEquipe({ perfil, negs, recarregarNegs }) {
           {verInativos && <div className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">{inativas.map(cartao)}</div>}
         </div>
       )}
+      {ficha && (
+        <FichaColaborador pe={ficha} aoFechar={() => setFicha(null)}
+          tirarAcessoEMeta={async () => {
+            if (ficha.acesso && ficha.acesso.ativo) await mexerAcesso(ficha.acesso, { ativo: false });
+            if (ficha.neg && ficha.neg.ativo) await mexerNeg(ficha.neg, { ativo: false });
+          }} />
+      )}
+    </div>
+  );
+}
+
+/* A FICHA DO COLABORADOR (0079), aberta ao clicar na pessoa da Equipe.
+ *
+ * Quatro partes, na ordem em que a contratação acontece: quem é (o
+ * documento), como recebe (o PIX e a conta — e a ligação com a folha do
+ * financeiro, que é o que o Derek quer amarrar), o contrato (início e
+ * desligamento) e os papéis anexados.
+ *
+ * **Grava com um botão, não no blur**: são vinte campos de dado
+ * sensível, e salvar meio documento a cada tecla deixaria a ficha pela
+ * metade no meio da digitação. **Desligar não tira o acesso sozinho** —
+ * a data pode ser futura (aviso prévio); o botão ao lado faz isso quando
+ * for a hora. */
+const TIPOS_CONTRATO_COLAB = [["pj", "PJ / prestação de serviços"], ["clt", "CLT"], ["estagio", "Estágio"], ["autonomo", "Autônomo"], ["outro", "Outro"]];
+function FichaColaborador({ pe, aoFechar, tirarAcessoEMeta }) {
+  const a = pe.acesso, n = pe.neg;
+  const nome = (a && a.nome) || (n && n.nome) || "";
+  const [f, setF] = useState(null);
+  const [erro, setErro] = useState("");
+  const [aviso, setAviso] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  const [anexos, setAnexos] = useState([]);
+  const [rotulos, setRotulos] = useState([]);
+  const [rotulo, setRotulo] = useState("Documento (RG/CNH)");
+  const [enviando, setEnviando] = useState(false);
+  const [folha, setFolha] = useState(null);
+
+  const lerAnexos = (cid) => fetchAut(`/api/foto?recurso=colaborador-anexo&colaborador_id=${cid}`).then((r) => r.json())
+    .then((d) => { setAnexos(d.anexos || []); if (d.rotulos) setRotulos(d.rotulos); }).catch(() => {});
+  useEffect(() => {
+    const q = a ? `perfil_id=${a.id}` : `negociador_id=${n.id}`;
+    fetchAut(`/api/perfil?recurso=colaborador&${q}`).then(async (r) => {
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.erro || "Não consegui ler a ficha.");
+      const c = d.colaborador || { perfil_id: a ? a.id : null, negociador_id: n ? n.id : null, nome_completo: nome };
+      setF(c);
+      if (c.id) lerAnexos(c.id);
+    }).catch((e) => { setErro(e.message); setF({}); });
+    fetchAut("/api/financeiro?recurso=funcionario").then((r) => r.json()).then((d) => setFolha(d.lista || [])).catch(() => setFolha([]));
+  }, []);
+
+  const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+  const salvar = async () => {
+    setSalvando(true); setErro(""); setAviso("");
+    try {
+      const corpo = { ...f };
+      if (!corpo.perfil_id && a) corpo.perfil_id = a.id;
+      if (!corpo.negociador_id && n) corpo.negociador_id = n.id;
+      const r = await fetchAut("/api/perfil?recurso=colaborador", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.erro || "Não consegui salvar a ficha.");
+      setF(d.colaborador); setAviso("Ficha salva.");
+    } catch (e) { setErro(e.message); }
+    setSalvando(false);
+  };
+  const enviar = async (arq) => {
+    if (!arq || !f || !f.id) return;
+    setEnviando(true); setErro("");
+    try {
+      const dados = await new Promise((ok, falha) => { const l = new FileReader(); l.onload = () => ok(l.result); l.onerror = falha; l.readAsDataURL(arq); });
+      const r = await fetchAut("/api/foto?recurso=colaborador-anexo", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ colaborador_id: f.id, tipo: arq.type, nome: arq.name, rotulo, dados }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.erro || "Não consegui anexar.");
+      lerAnexos(f.id);
+    } catch (e) { setErro(e.message); }
+    setEnviando(false);
+  };
+  const apagar = async (x) => {
+    if (!window.confirm(`Apagar "${x.nome || x.rotulo}"?`)) return;
+    try { await fetchAut(`/api/foto?recurso=colaborador-anexo&id=${x.id}`, { method: "DELETE" }); lerAnexos(f.id); }
+    catch (e) { setErro(e.message); }
+  };
+  const criarNaFolha = async () => {
+    try {
+      const r = await fetchAut("/api/financeiro?recurso=funcionario", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nome: (f && f.nome_completo) || nome, negociador_id: n ? n.id : null, ativo: true }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.erro || "Não consegui criar na folha.");
+      const lista = await fetchAut("/api/financeiro?recurso=funcionario").then((x) => x.json()).then((x) => x.lista || []);
+      setFolha(lista);
+      const novo = lista.filter((x) => nomeChave(x.nome) === nomeChave((f && f.nome_completo) || nome))[0];
+      if (novo) set("fin_funcionario_id", novo.id);
+    } catch (e) { setErro(e.message); }
+  };
+
+  const campo = (k, rot, o) => (
+    <label className={`block ${(o && o.cls) || ""}`}>
+      <span className="block text-[10px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>{rot}</span>
+      <input type={(o && o.tipo) || "text"} className="mt-0.5 w-full rounded-md border px-2 py-1.5 text-[13.5px] outline-none" style={inputSty}
+        value={(f && f[k]) || ""} onChange={(e) => set(k, e.target.value)} placeholder={(o && o.ph) || ""} />
+    </label>
+  );
+  const secao = (t, filhos) => (
+    <section className="rounded-lg p-3" style={{ border: `1px solid ${C.line}` }}>
+      <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.1em]" style={{ color: C.roxo }}>{t}</div>
+      {filhos}
+    </section>
+  );
+  const desligado = f && f.desligado_em;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-3 lg:p-8" style={{ background: "rgba(24,18,33,0.45)" }} onClick={aoFechar}>
+      <div className="w-full max-w-4xl rounded-xl p-4" style={{ background: C.paper }} onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-center gap-3">
+          <Avatar nome={nome} tam={42} />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[18px] font-bold">{(f && f.nome_completo) || nome}</div>
+            <div className="text-[12.5px]" style={{ color: C.mute }}>
+              {(a && CARGO[a.papel]) || (n && n.papel === "prospeccao" ? "Pré-venda" : "Negociador")}
+              {f && f.inicio_em ? ` · desde ${diaBR(f.inicio_em)}/${String(f.inicio_em).slice(0, 4)}` : ""}
+              {desligado ? ` · desligado em ${diaBR(f.desligado_em)}/${String(f.desligado_em).slice(0, 4)}` : ""}
+            </div>
+          </div>
+          <button onClick={aoFechar} className="text-[13px]" style={{ color: C.mute }}>fechar</button>
+        </div>
+        {!f ? <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p> : (
+          <div className="grid gap-3 lg:grid-cols-2">
+            {secao("Dados pessoais", (
+              <div className="grid grid-cols-2 gap-2">
+                {campo("nome_completo", "Nome completo", { cls: "col-span-2" })}
+                {campo("cpf", "CPF", { ph: "só números" })}
+                {campo("rg", "RG")}
+                {campo("nascimento", "Nascimento", { tipo: "date" })}
+                {campo("telefone", "Telefone")}
+                {campo("email", "E-mail", { cls: "col-span-2", tipo: "email" })}
+                {campo("endereco", "Endereço", { cls: "col-span-2" })}
+                {campo("cidade", "Cidade")}
+                <div className="grid grid-cols-2 gap-2">{campo("uf", "UF")}{campo("cep", "CEP")}</div>
+              </div>
+            ))}
+            {secao("Pagamento", (
+              <div className="grid grid-cols-2 gap-2">
+                {campo("pix", "Chave PIX", { cls: "col-span-2" })}
+                {campo("banco", "Banco")}
+                <div className="grid grid-cols-2 gap-2">{campo("agencia", "Agência")}{campo("conta", "Conta")}</div>
+                {/* A LIGAÇÃO COM O FINANCEIRO: a pessoa da folha (0021) é
+                    quem recebe salário, comissão e vale nos lançamentos.
+                    Ligada aqui, a ficha e o pagamento falam da mesma gente. */}
+                <label className="col-span-2 block">
+                  <span className="block text-[10px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>Na folha do financeiro como</span>
+                  <div className="mt-0.5 flex gap-2">
+                    <select className="min-w-0 flex-1 rounded-md border px-2 py-1.5 text-[13.5px] outline-none" style={inputSty}
+                      value={f.fin_funcionario_id || ""} onChange={(e) => set("fin_funcionario_id", e.target.value || null)}>
+                      <option value="">{folha === null ? "carregando…" : "não está na folha"}</option>
+                      {(folha || []).map((x) => <option key={x.id} value={x.id}>{x.nome}{x.salario_base ? ` · ${brl(x.salario_base)}` : ""}</option>)}
+                    </select>
+                    {!f.fin_funcionario_id && folha !== null && (
+                      <button onClick={criarNaFolha} className="shrink-0 text-[12px] font-semibold" style={{ color: C.roxo }}>pôr na folha</button>
+                    )}
+                  </div>
+                </label>
+              </div>
+            ))}
+            {secao("Contrato", (
+              <div className="grid grid-cols-2 gap-2">
+                {campo("funcao", "Função", { ph: "ex.: negociador, pré-venda" })}
+                <label className="block">
+                  <span className="block text-[10px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>Tipo de contrato</span>
+                  <select className="mt-0.5 w-full rounded-md border px-2 py-1.5 text-[13.5px] outline-none" style={inputSty}
+                    value={f.tipo_contrato || ""} onChange={(e) => set("tipo_contrato", e.target.value || null)}>
+                    <option value="">—</option>
+                    {TIPOS_CONTRATO_COLAB.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
+                  </select>
+                </label>
+                {campo("inicio_em", "Início do trabalho", { tipo: "date" })}
+                {campo("desligado_em", "Desligado em", { tipo: "date" })}
+                {desligado && campo("motivo_desligamento", "Motivo do desligamento", { cls: "col-span-2" })}
+                {desligado && ((a && a.ativo) || (n && n.ativo)) && (
+                  <button onClick={tirarAcessoEMeta} className="col-span-2 rounded-md px-3 py-1.5 text-left text-[12.5px] font-semibold"
+                    style={{ background: "#FDECE4", color: C.laranja }}>
+                    Tirar o acesso ao sistema e a meta agora
+                  </button>
+                )}
+                <label className="col-span-2 block">
+                  <span className="block text-[10px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>Observações</span>
+                  <textarea className="mt-0.5 w-full rounded-md border px-2 py-1.5 text-[13.5px] outline-none" rows={2} style={inputSty}
+                    value={f.observacoes || ""} onChange={(e) => set("observacoes", e.target.value)} />
+                </label>
+              </div>
+            ))}
+            {secao("Documentos", (
+              <div>
+                {!f.id ? (
+                  <p className="text-[12.5px]" style={{ color: C.mute }}>Salve a ficha uma vez para poder anexar documentos.</p>
+                ) : (
+                  <>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select className="rounded-md border px-2 py-1.5 text-[13px] outline-none" style={inputSty} value={rotulo} onChange={(e) => setRotulo(e.target.value)}>
+                        {(rotulos.length ? rotulos : ["Documento (RG/CNH)", "Contrato de prestação de serviços", "Outro"]).map((r) => <option key={r}>{r}</option>)}
+                      </select>
+                      <label className="cursor-pointer rounded-md px-3 py-1.5 text-[13px] font-semibold text-white" style={{ background: enviando ? C.line : C.roxo }}>
+                        {enviando ? "enviando…" : "Anexar arquivo"}
+                        <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" className="hidden" disabled={enviando}
+                          onChange={(e) => { const arq = e.target.files && e.target.files[0]; e.target.value = ""; enviar(arq); }} />
+                      </label>
+                    </div>
+                    <div className="mt-2 space-y-1">
+                      {!anexos.length && <p className="text-[12.5px]" style={{ color: C.mute }}>Nenhum documento ainda.</p>}
+                      {anexos.map((x) => (
+                        <div key={x.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px]" style={{ background: C.bg }}>
+                          <span className="shrink-0 font-semibold">{x.rotulo}</span>
+                          <span className="min-w-0 flex-1 truncate" style={{ color: C.mute }}>{x.nome || ""}</span>
+                          {x.url && <a href={x.url} target="_blank" rel="noopener noreferrer" className="font-semibold" style={{ color: C.roxo }}>abrir</a>}
+                          <button onClick={() => apagar(x)} style={{ color: C.mute }}>apagar</button>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="mt-2 text-[11px]" style={{ color: C.mute }}>PDF ou foto, até 10 MB. Fica no arquivo privado da loja; só o financeiro e o gerente abrem.</p>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <BotaoPrimario onClick={salvar} disabled={salvando || !f}>{salvando ? "salvando…" : "Salvar a ficha"}</BotaoPrimario>
+          {aviso && <span className="text-[13px]" style={{ color: C.verde }}>{aviso}</span>}
+          {erro && <span className="text-[13px]" style={{ color: C.laranja }}>{erro}</span>}
+        </div>
+      </div>
     </div>
   );
 }
