@@ -7727,7 +7727,7 @@ function simularPorMelhor(alvo, quantidade) {
   return escolhida;
 }
 
-function SimuladorPropostas({ alvoPadrao, veiculo, negociador, aoImprimir, rotuloImprimir }) {
+function SimuladorPropostas({ alvoPadrao, veiculo, negociador, aoImprimir, rotuloImprimir, linha, antes }) {
   const [alvo, setAlvo] = useState(alvoPadrao || "");
   const [qtd, setQtd] = useState("57");
   const [r, setR] = useState(null);
@@ -7782,26 +7782,15 @@ function SimuladorPropostas({ alvoPadrao, veiculo, negociador, aoImprimir, rotul
     </div>
   );
 
-  return (
-    <div>
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <label className="text-[11px]" style={{ color: C.mute }}>Melhor Proposta que vai à mesa</label>
-          <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal"
-            value={alvo} onChange={(e) => setAlvo(e.target.value)} placeholder="40.600" />
-        </div>
-        <div>
-          <label className="text-[11px]" style={{ color: C.mute }}>Quant. de propostas</label>
-          <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric"
-            value={qtd} onChange={(e) => setQtd(e.target.value)} placeholder="57" />
-        </div>
-      </div>
-
-      <button onClick={rodar} className="mt-3 w-full rounded-md py-2.5 text-[13px] font-semibold"
-        style={{ background: C.roxo, color: "#fff" }}>
-        {r ? "Sortear de novo" : "Simular a rodada"}
-      </button>
-
+  /* EM LINHA (24/10/2026, o Derek, no Extrato avulso: *"deixe mais
+     simples o input, de preferência numa linha só lá em cima"*). Os
+     campos de quem chama (`antes`: veículo e negociador) e os dois daqui
+     numa fileira, com o botão no fim. Na Negociação continua empilhado. */
+  const rotulo = (t) => <label className="block text-[11px]" style={{ color: C.mute }}>{t}</label>;
+  // A folha e a conta da casa: o mesmo desenho nos dois modos — duas
+  // folhas para o mesmo carro é o que a decisão 16 existe para evitar.
+  const corpoDoSimulador = () => (
+    <>
       {/* **A conta da casa fica FORA da folha.** O negociador precisa
           ver a referência — ele digita a Melhor Proposta e ela é
           consequência (decisão 16) —, mas a folha branca abaixo é o
@@ -7888,6 +7877,54 @@ function SimuladorPropostas({ alvoPadrao, veiculo, negociador, aoImprimir, rotul
           )}
         </div>
       )}
+    </>
+  );
+  if (linha) {
+    return (
+      <div>
+        <div className="flex flex-wrap items-end gap-2">
+          {antes}
+          <div className="w-[150px]">
+            {rotulo("Melhor proposta")}
+            <input className="w-full rounded-lg border px-2.5 py-1.5 text-[14px] outline-none" style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal"
+              value={alvo} onChange={(e) => setAlvo(e.target.value)} placeholder="40.600"
+              onKeyDown={(e) => { if (e.key === "Enter") rodar(); }} />
+          </div>
+          <div className="w-[80px]">
+            {rotulo("Propostas")}
+            <input className="w-full rounded-lg border px-2.5 py-1.5 text-[14px] outline-none" style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric"
+              value={qtd} onChange={(e) => setQtd(e.target.value)} placeholder="57"
+              onKeyDown={(e) => { if (e.key === "Enter") rodar(); }} />
+          </div>
+          <button onClick={rodar} className="rounded-lg px-4 py-[7px] text-[13.5px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>
+            {r ? "Sortear de novo" : "Simular"}
+          </button>
+        </div>
+        {r && <div className="mt-3">{corpoDoSimulador()}</div>}
+      </div>
+    );
+  }
+  return (
+    <div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-[11px]" style={{ color: C.mute }}>Melhor Proposta que vai à mesa</label>
+          <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal"
+            value={alvo} onChange={(e) => setAlvo(e.target.value)} placeholder="40.600" />
+        </div>
+        <div>
+          <label className="text-[11px]" style={{ color: C.mute }}>Quant. de propostas</label>
+          <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric"
+            value={qtd} onChange={(e) => setQtd(e.target.value)} placeholder="57" />
+        </div>
+      </div>
+
+      <button onClick={rodar} className="mt-3 w-full rounded-md py-2.5 text-[13px] font-semibold"
+        style={{ background: C.roxo, color: "#fff" }}>
+        {r ? "Sortear de novo" : "Simular a rodada"}
+      </button>
+
+      {corpoDoSimulador()}
     </div>
   );
 }
@@ -20796,42 +20833,33 @@ function TelaExtratoAvulso({ perfil }) {
       <Cabecalho titulo="Extrato de ofertas"
         sub="A folha da mesa, sem precisar abrir um atendimento." />
 
-      <div className="space-y-4 p-4">
-        <div className="rounded-lg px-3 py-2.5 text-[12px] leading-snug"
-          style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
-          <b>Esta folha não entra em negócio nenhum.</b> Numa negociação de verdade, imprima
-          pela etapa <b>Negociação</b> do atendimento: é lá que a impressão vira rodada,
-          ganha protocolo e aparece no CRM. Daqui sai só o papel.
-        </div>
-
-        <Bloco titulo="O carro" sub="O que vai no cabeçalho da folha.">
-          <div className="space-y-2.5">
-            <Campo label="Veículo">
-              <input className={inputCls} style={inputSty} value={veiculo}
-                onChange={(e) => setVeiculo(e.target.value)} placeholder="marca e modelo" />
-            </Campo>
-            <Campo label="Negociador">
-              <input className={inputCls} style={inputSty} value={negociador}
-                onChange={(e) => setNegociador(e.target.value)} placeholder="quem leva à mesa" />
-            </Campo>
+      {/* TUDO NUMA LINHA LÁ EM CIMA, SEM O AVISO AMARELO (24/10/2026, o
+          Derek). O aviso de que esta folha não vira rodada saiu da tela a
+          pedido dele; o que separa as duas continua sendo o lugar — a
+          folha que vira rodada sai pela Negociação do atendimento. */}
+      <SimuladorPropostas linha
+        veiculo={veiculo} negociador={negociador}
+        rotuloImprimir="Imprimir o extrato"
+        antes={<>
+          <div className="w-[220px]">
+            <label className="block text-[11px]" style={{ color: C.mute }}>Veículo</label>
+            <input className="w-full rounded-lg border px-2.5 py-1.5 text-[14px] outline-none" style={inputSty} value={veiculo}
+              onChange={(e) => setVeiculo(e.target.value)} placeholder="marca e modelo" />
           </div>
-        </Bloco>
-
-        <Bloco titulo="Extrato de ofertas"
-          sub="Digite a melhor proposta que quer levar à mesa. O valor de referência é consequência.">
-          <SimuladorPropostas
-            veiculo={veiculo} negociador={negociador}
-            rotuloImprimir="Imprimir o extrato"
-            aoImprimir={(r) => {
-              // A janela abre no clique, antes de qualquer espera:
-              // pop-up disparado depois de um await é bloqueado
-              // (decisão 15), e a impressão quebraria em silêncio.
-              const j = abrirDocumento(extratoOfertas({}, r, 1, "Extrato de ofertas"));
-              setErro(j.ok ? "" : j.erro);
-            }} />
-          {erro && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
-        </Bloco>
-      </div>
+          <div className="w-[170px]">
+            <label className="block text-[11px]" style={{ color: C.mute }}>Negociador</label>
+            <input className="w-full rounded-lg border px-2.5 py-1.5 text-[14px] outline-none" style={inputSty} value={negociador}
+              onChange={(e) => setNegociador(e.target.value)} placeholder="quem leva à mesa" />
+          </div>
+        </>}
+        aoImprimir={(r) => {
+          // A janela abre no clique, antes de qualquer espera:
+          // pop-up disparado depois de um await é bloqueado
+          // (decisão 15), e a impressão quebraria em silêncio.
+          const j = abrirDocumento(extratoOfertas({}, r, 1, "Extrato de ofertas"));
+          setErro(j.ok ? "" : j.erro);
+        }} />
+      {erro && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
     </div>
   );
 }

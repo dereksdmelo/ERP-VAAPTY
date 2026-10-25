@@ -1030,8 +1030,10 @@ o mesmo carro, que é exatamente o que esta decisão existe para evitar.
 **Quem mexer na conta mexe nos dois lugares de uma vez — porque é um
 lugar só.**
 
-**A folha avulsa não vira rodada de negócio nenhum, e a tela grita
-isso.** Dentro da Negociação cada impressão cria a rodada e grava o
+**A folha avulsa não vira rodada de negócio nenhum.** Até 24/10/2026
+a tela gritava isso num aviso amarelo; o Derek pediu a tela mais
+simples — tudo numa linha lá em cima (`SimuladorPropostas linha`) — e
+sem o aviso. Dentro da Negociação cada impressão cria a rodada e grava o
 documento com protocolo (decisão 15); aqui não há a que amarrar — a
 tabela `documento` exige `veiculo_id` (decisão 40). **Se o negociador
 usar a tela avulsa no lugar da etapa N, o CRM perde a rodada**, e o
