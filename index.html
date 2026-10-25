@@ -10482,14 +10482,17 @@ const APRESENTACAO_PAGINAS = 11;
 
 function Apresentacao({ aoFim }) {
   const [pag, setPag] = useState(1);
+  const [cheia, setCheia] = useState(false);
   const trilho = useRef(null);
+  const palco = useRef(null);
   useEffect(() => { if (pag === APRESENTACAO_PAGINAS && aoFim) aoFim(); }, [pag]);
+  const src = (n) => `/apresentacao/${String(n).padStart(2, "0")}.jpg`;
 
   const ir = (n) => {
     const alvo = Math.min(APRESENTACAO_PAGINAS, Math.max(1, n));
     setPag(alvo);
     if (trilho.current) {
-      trilho.current.scrollTo({ left: trilho.current.clientWidth * (alvo - 1), behavior: "smooth" });
+      trilho.current.scrollTo({ left: trilho.current.clientWidth * (alvo - 1), behavior: cheia ? "auto" : "smooth" });
     }
   };
 
@@ -10502,13 +10505,40 @@ function Apresentacao({ aoFim }) {
     if (atual !== pag) setPag(atual);
   };
 
+  /* TELA CHEIA (24/10/2026, pedido do Derek). Uma folha por vez, preta,
+   * e o computador inteiro para o cliente ler. O pedido de tela cheia
+   * do navegador é tentado, mas a camada fixa vale sozinha: o Safari do
+   * iPhone não deixa elemento que não seja vídeo ocupar a tela. Setas
+   * do teclado viram a página, ESC sai; tocar nas metades também. */
+  const sair = () => {
+    setCheia(false);
+    try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {}
+  };
+  useEffect(() => {
+    if (!cheia) return;
+    try { if (palco.current && palco.current.requestFullscreen) palco.current.requestFullscreen().catch(() => {}); } catch (e) {}
+    const tecla = (e) => {
+      if (e.key === "ArrowRight" || e.key === " ") { e.preventDefault(); setPag((p) => Math.min(APRESENTACAO_PAGINAS, p + 1)); }
+      else if (e.key === "ArrowLeft") { e.preventDefault(); setPag((p) => Math.max(1, p - 1)); }
+      else if (e.key === "Escape") { e.preventDefault(); sair(); }
+    };
+    const saiuDoNavegador = () => { if (!document.fullscreenElement) setCheia(false); };
+    window.addEventListener("keydown", tecla);
+    document.addEventListener("fullscreenchange", saiuDoNavegador);
+    return () => { window.removeEventListener("keydown", tecla); document.removeEventListener("fullscreenchange", saiuDoNavegador); };
+  }, [cheia]);
+  // Ao sair, o trilho volta à folha em que a pessoa parou.
+  useEffect(() => {
+    if (!cheia && trilho.current) trilho.current.scrollTo({ left: trilho.current.clientWidth * (pag - 1) });
+  }, [cheia]);
+
   return (
     <div>
       <div ref={trilho} onScroll={aoRolar}
         className="flex overflow-x-auto rounded-md"
         style={{ scrollSnapType: "x mandatory", border: `1px solid ${C.line}`, background: "#000" }}>
         {Array.from({ length: APRESENTACAO_PAGINAS }, (_, i) => (
-          <img key={i} src={`/apresentacao/${String(i + 1).padStart(2, "0")}.jpg`}
+          <img key={i} src={src(i + 1)}
             alt={`Página ${i + 1}`}
             loading={i === 0 ? "eager" : "lazy"}
             style={{ width: "100%", flex: "0 0 100%", scrollSnapAlign: "start", display: "block" }} />
@@ -10521,8 +10551,13 @@ function Apresentacao({ aoFim }) {
           style={{ borderColor: C.line, color: pag <= 1 ? C.mute : C.roxo }}>
           ‹ Anterior
         </button>
-        <span className="text-[12px]" style={{ color: C.mute, fontFamily: F.mono }}>
-          {pag} de {APRESENTACAO_PAGINAS}
+        <span className="flex items-center gap-3">
+          <span className="text-[12px]" style={{ color: C.mute, fontFamily: F.mono }}>
+            {pag} de {APRESENTACAO_PAGINAS}
+          </span>
+          <button onClick={() => setCheia(true)} className="rounded-md px-3 py-2 text-[13px] font-semibold text-white" style={{ background: C.roxo }}>
+            ⛶ Tela cheia
+          </button>
         </span>
         <button onClick={() => ir(pag + 1)} disabled={pag >= APRESENTACAO_PAGINAS}
           className="rounded-md border px-4 py-2 text-[13px] font-semibold"
@@ -10530,6 +10565,23 @@ function Apresentacao({ aoFim }) {
           Próxima ›
         </button>
       </div>
+
+      {cheia && (
+        <div ref={palco} className="fixed inset-0 flex items-center justify-center" style={{ background: "#000", zIndex: 70 }}>
+          <img src={src(pag)} alt={`Página ${pag}`} className="max-h-full max-w-full select-none" style={{ objectFit: "contain" }} draggable={false} />
+          {/* As duas metades da tela viram a folha, como num livro. */}
+          <button aria-label="Página anterior" onClick={() => setPag((p) => Math.max(1, p - 1))} className="absolute inset-y-0 left-0 w-1/2" style={{ cursor: pag > 1 ? "w-resize" : "default" }} />
+          <button aria-label="Próxima página" onClick={() => setPag((p) => Math.min(APRESENTACAO_PAGINAS, p + 1))} className="absolute inset-y-0 right-0 w-1/2" style={{ cursor: pag < APRESENTACAO_PAGINAS ? "e-resize" : "default" }} />
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full px-3 py-1 text-[12px]"
+            style={{ background: "rgba(255,255,255,0.14)", color: "#fff", fontFamily: F.mono }}>
+            {pag} / {APRESENTACAO_PAGINAS}
+          </div>
+          <button onClick={sair} className="absolute right-3 top-3 rounded-full px-3 py-1.5 text-[13px] font-semibold"
+            style={{ background: "rgba(255,255,255,0.16)", color: "#fff" }}>
+            ✕ Sair
+          </button>
+        </div>
+      )}
     </div>
   );
 }
