@@ -328,7 +328,19 @@ não tem por que ficar guardada em celular de ninguém.
 `api/foto.js` tira a placa que nomeia a pasta. Foto tirada antes disso
 fica `aguardando` e sobe sozinha assim que a ficha é salva.
 
-**Consequência no gate:** o botão "Salvar no banco" **não** exige foto
+**Desde 24/10/2026 não há botão: a ficha grava sozinha** quando fica
+completa, e de novo a cada mudança (o Derek: *"não precisa ter essa
+parte do banco"*). A régua é a mesma do botão (`podeSalvar`), só
+depois de `pronto` (decisão 44), e o corpo que falhou não é tentado de
+novo até a ficha mudar. Na mesma leva saiu o "Lancei o carro na
+plataforma": **enviar ao Shinkai é lançar** (`shinkaiEm` fecha o PUB e
+põe o atendimento em "aguardando"), e sem chave do Shinkai, copiar o
+descritivo lança. Pela mesma régua — *"uma coisa a menos para ticar"* —
+a prova social conta qualquer gesto nas avaliações, a cautelar conta a
+autorização impressa e a avaliação do Google conta o link copiado ou
+aberto (o QR continua no tique, porque a leitura dele não chega aqui).
+
+**Consequência no gate:** a gravação **não** exige foto
 (`podeSalvar`, [index.html:531](index.html:531)) — se exigisse, nada
 subiria nunca, porque a foto precisa do id que só o salvamento cria. O
 gate do descritivo continua exigindo foto, só que agora conta as que

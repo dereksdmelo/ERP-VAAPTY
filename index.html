@@ -147,7 +147,7 @@ function statusDerivado(f) {
   // derivado: ninguém registra proposta durante a espera, então o
   // sistema não tem como saber que a rede não respondeu — quem marca
   // isso é o negociador, na faixa de status.
-  if (f.publicado) return "aguardando";
+  if (f.publicado || f.shinkaiEm) return "aguardando";
   // Era o "carro subiu pro pátio" que acendia isto; com ele fora, quem
   // diz que o cliente está na loja é a hora de chegada — que é o mesmo
   // momento, com um toque a menos.
@@ -2112,7 +2112,7 @@ function etapaConcluida(id, f, fotos) {
     case "A": return !!f.chegada && f.tempoCombinado;
     case "P": return !!f.motivo && !!f.pretensao && f.decisorPresente && faltamCanais(f).length === 0;
     case "O": return f.mostrouProcesso && f.mostrouTestemunhal;
-    case "PUB": return faltando(f, fotos).length === 0 && f.publicado;
+    case "PUB": return faltando(f, fotos).length === 0 && (f.publicado || !!f.shinkaiEm);
     case "ESP": return !!f.esperaIniciadaEm;
     case "N": return f.rodadas.length > 0;
     case "T": return f.aceiteFinal && !!f.valorFechado;
@@ -4762,6 +4762,20 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   const podeSalvar = faltasFicha.length === 0;
   const descritivo = gerarDescritivo(f, enviadas.length);
 
+  // A FICHA GRAVA SOZINHA quando fica completa, e de novo a cada
+  // mudança (2,5 s depois da última tecla). Só depois de `pronto` —
+  // antes disso a tela tem a ficha vazia (decisão 44) — e só com a
+  // ficha inteira, que é a régua do botão que existia: gravar meia
+  // ficha mandaria vazio por cima do banco (decisão 43). Um corpo que
+  // falhou não é tentado de novo até a ficha mudar: falha em laço
+  // martelaria o servidor com a mesma recusa.
+  const tentadoRef = useRef("");
+  useEffect(() => {
+    if (!pronto || !podeSalvar || salvando || salvoAtual || tentadoRef.current === corpoBanco) return;
+    const t = setTimeout(() => { tentadoRef.current = corpoBanco; salvarNoBanco(); }, 2500);
+    return () => clearTimeout(t);
+  }, [pronto, podeSalvar, salvando, salvoAtual, corpoBanco]);
+
   const restante = f.esperaIniciadaEm ? Math.max(0, ESPERA_SEG - Math.floor((agora - f.esperaIniciadaEm) / 1000)) : null;
   const mmss = (s) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
@@ -5642,11 +5656,17 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
             <Bloco titulo="Prova social" sub="Depoimento de quem vendeu pelo mesmo motivo que esse cliente.">
               <div className="space-y-2.5">
                 <Campo label="Necessidade principal do cliente">
-                  <input className={inputCls} style={inputSty} value={f.necessidadeCliente} onChange={(e) => set("necessidadeCliente", e.target.value)}
+                  <input className={inputCls} style={inputSty} value={f.necessidadeCliente}
+                    onChange={(e) => setVarios({ necessidadeCliente: e.target.value, mostrouTestemunhal: true })}
                     placeholder="Ex.: precisa quitar dívida rápido" />
                 </Campo>
-                <Testemunhais necessidade={f.necessidadeCliente} negociador={f.negociador} />
-                <Toggle label="Mostrei um caso parecido com o dele" valor={f.mostrouTestemunhal} onChange={(v) => set("mostrouTestemunhal", v)} />
+                {/* Sem tique: procurar pela necessidade ou mexer nas
+                    avaliações já é tê-las mostrado (24/10/2026). */}
+                <Testemunhais necessidade={f.necessidadeCliente} negociador={f.negociador}
+                  aoMostrar={() => { if (!f.mostrouTestemunhal) set("mostrouTestemunhal", true); }} />
+                <p className="text-[11px]" style={{ color: f.mostrouTestemunhal ? C.verde : C.mute }}>
+                  {f.mostrouTestemunhal ? "✓ Avaliações mostradas." : "Escolha um tema ou procure pela necessidade — conta como mostrado."}
+                </p>
               </div>
             </Bloco>
           </>
@@ -5868,6 +5888,9 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                         const d = await enviarAoShinkai2(veiculoId);
                         setRespShinkai(d);
                         setVarios({
+                          // Mandar ao Shinkai É lançar: a etapa e os 15 minutos andam sozinhos.
+                          ...(f.publicado ? {} : { publicado: true }),
+                          ...(f.esperaIniciadaEm ? {} : { esperaIniciadaEm: Date.now() }),
                           shinkaiEm: new Date().toISOString(), shinkaiStatus: d.status || "", shinkaiUrl: d.url || "",
                           shinkaiFotos: typeof d.fotos === "number" ? d.fotos : null,
                           shinkaiAvisos: Array.isArray(d.avisos) ? d.avisos : [],
@@ -5895,7 +5918,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                   )}
                   {!veiculoId && (
                     <p className="mt-1.5 text-[11px]" style={{ color: C.mute }}>
-                      Salve a ficha no banco antes — é ela que leva as fotos junto.
+                      {podeSalvar ? "Gravando a ficha — é ela que leva as fotos junto." : `A ficha grava sozinha quando estiver completa. Falta ${faltasFicha.map((x) => x[1]).join(" · ")}.`}
                     </p>
                   )}
                   {/* Os três códigos da FIPE são o que move os seletores
@@ -5958,7 +5981,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               <section className="rounded-lg" style={{ background: C.paper, border: `1px solid ${C.line}`, opacity: liberado ? 1 : 0.45 }}>
                 <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: C.line }}>
                   <span className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.roxo, fontFamily: F.disp, fontWeight: 700 }}>Descritivo</span>
-                  <button disabled={!liberado} onClick={() => copiar(descritivo, "d")} className="rounded-md px-3 py-1.5 text-[12px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>
+                  <button disabled={!liberado} onClick={() => { copiar(descritivo, "d"); if (!f.publicado) setVarios({ publicado: true, ...(f.esperaIniciadaEm ? {} : { esperaIniciadaEm: Date.now() }) }); }} className="rounded-md px-3 py-1.5 text-[12px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>
                     {copiado === "d" ? "Copiado" : "Copiar"}
                   </button>
                 </div>
@@ -5978,36 +6001,20 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               </section>
             )}
 
-            <section className="rounded-lg p-4" style={{ background: C.paper, border: `1px solid ${C.line}`, opacity: podeSalvar ? 1 : 0.45 }}>
-              <div className="text-[11px] uppercase tracking-[0.16em]" style={{ color: C.roxo, fontFamily: F.disp, fontWeight: 700 }}>Banco</div>
-              <p className="mt-1 text-[11px] leading-relaxed" style={{ color: C.mute }}>
-                Grava a ficha no Supabase. Salvar de novo na mesma placa atualiza a ficha em avaliação em vez de criar outra.
-                As fotos só sobem depois que a ficha existe no banco.
-              </p>
-              <button disabled={!podeSalvar || salvando} onClick={salvarNoBanco}
-                className="mt-3 w-full rounded-md py-2.5 text-[13px] font-semibold"
-                style={{ background: podeSalvar && !salvando ? C.roxo : C.line, color: "#fff" }}>
-                {salvando ? "Salvando…" : veiculoId ? "Salvar de novo" : "Salvar no banco"}
-              </button>
-              {!podeSalvar && (
-                <p className="mt-2 text-[11px]" style={{ color: C.mute }}>
-                  Falta {faltasFicha.map((x) => x[1]).join(" · ")}.
-                </p>
-              )}
-              {salvo && salvoAtual && (
-                <p className="mt-2 text-[12px]" style={{ color: C.verde }}>
-                  {salvo.criado ? "Ficha criada" : "Ficha atualizada"} às {salvo.hora.toTimeString().slice(0, 5)}.
-                </p>
-              )}
-              {salvo && !salvoAtual && (
-                <p className="mt-2 text-[12px]" style={{ color: C.mute }}>
-                  Salva às {salvo.hora.toTimeString().slice(0, 5)} e alterada depois. Salve de novo.
-                </p>
-              )}
-              {erroSalvar && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erroSalvar}</p>}
-            </section>
-
-            <Toggle label="Lancei o carro na plataforma" nota="Marque depois de publicar no grupo e no Shinkai." valor={f.publicado} onChange={(v) => { set("publicado", v); if (v && !f.esperaIniciadaEm) setVarios({ publicado: v, esperaIniciadaEm: Date.now() }); }} />
+            {/* SEM O BLOCO "BANCO" E SEM O "LANCEI O CARRO" (24/10/2026). O
+                Derek: "não precisa ter essa parte do banco… ter enviado ao
+                Shinkai já deve significar que enviou o carro pra rede".
+                A ficha grava sozinha quando fica completa (efeito
+                `gravarSozinho`), e o envio ao Shinkai — ou o descritivo
+                copiado, quando não há chave — é o que lança. */}
+            <p className="px-1 text-[11px]" style={{ color: erroSalvar ? C.laranja : C.mute }}>
+              {erroSalvar ? `Não consegui gravar a ficha: ${erroSalvar}`
+                : salvando ? "Gravando a ficha…"
+                : salvo && salvoAtual ? `✓ Ficha gravada às ${salvo.hora.toTimeString().slice(0, 5)}.`
+                : !podeSalvar ? `A ficha grava sozinha quando estiver completa — falta ${faltasFicha.map((x) => x[1]).join(" · ")}.`
+                : "A ficha grava sozinha."}
+              {(f.publicado || f.shinkaiEm) && <span style={{ color: C.verde }}> · ✓ carro lançado na rede.</span>}
+            </p>
           </>
         )}
 
@@ -6277,10 +6284,10 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               sub="O pré-contrato é assinado antes de o carro ir para a cautelar — é ele que segura o negócio enquanto o laudo não sai.">
               <div className="space-y-2.5">
                 <Toggle label="Aceite final assinado" valor={f.aceiteFinal} onChange={(v) => set("aceiteFinal", v)} />
-                <Toggle label="Carro enviado para a cautelar" valor={f.cautelarEnviado} onChange={(v) => set("cautelarEnviado", v)} />
+                <Toggle label="Carro enviado para a cautelar" nota="Marca sozinho ao imprimir a autorização." valor={f.cautelarEnviado} onChange={(v) => set("cautelarEnviado", v)} />
                 <div className="grid grid-cols-2 gap-2">
                   <button disabled={!podeImprimir}
-                    onClick={() => gerarDocumento("autorizacao_cautelar", "Autorização de cautelar", autorizacaoCautelar(dadosDoc), null)}
+                    onClick={() => { gerarDocumento("autorizacao_cautelar", "Autorização de cautelar", autorizacaoCautelar(dadosDoc), null); if (!f.cautelarEnviado) set("cautelarEnviado", true); }}
                     className="rounded-md border py-2 text-[12px] font-semibold"
                     style={{ borderColor: podeImprimir ? C.roxo : C.line, color: podeImprimir ? C.roxo : C.mute }}>
                     Autorização de cautelar
@@ -6742,12 +6749,13 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 <input readOnly className={inputCls} style={{ ...inputSty, fontFamily: F.mono, fontSize: 11 }}
                   value={AVALIACAO_LINK} onFocus={(e) => e.target.select()} />
                 <div className="flex gap-2">
-                  <button onClick={() => copiar(AVALIACAO_LINK, "av")}
+                  <button onClick={() => { copiar(AVALIACAO_LINK, "av"); if (!f.avaliacaoGoogle) set("avaliacaoGoogle", true); }}
                     className="flex-1 rounded-md py-2.5 text-[13px] font-semibold"
                     style={{ background: C.roxo, color: "#fff" }}>
                     {copiado === "av" ? "Link copiado" : "Copiar link"}
                   </button>
                   <a href={AVALIACAO_LINK} target="_blank" rel="noopener noreferrer"
+                    onClick={() => { if (!f.avaliacaoGoogle) set("avaliacaoGoogle", true); }}
                     className="flex-1 rounded-md border py-2.5 text-center text-[13px] font-semibold"
                     style={{ borderColor: C.line, color: C.roxo }}>
                     Abrir
@@ -6756,7 +6764,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               </div>
 
               <div className="mt-3">
-                <Toggle label="Pedi a avaliação no Google" nota="Entra no score do negociador." valor={f.avaliacaoGoogle} onChange={(v) => set("avaliacaoGoogle", v)} />
+                <Toggle label="Pedi a avaliação no Google" nota="Copiar ou abrir o link já marca. Pelo QR, marque aqui — entra no score do negociador." valor={f.avaliacaoGoogle} onChange={(v) => set("avaliacaoGoogle", v)} />
               </div>
             </Bloco>
 
@@ -10504,6 +10512,9 @@ function Testemunhais({ necessidade, negociador, aoMostrar }) {
   const [tema, setTema] = useState("");
   const [soMeus, setSoMeus] = useState(false);
   const [quantos, setQuantos] = useState(5);
+  // Qualquer gesto aqui — filtrar, pedir mais, só as minhas — é o
+  // negociador mostrando avaliação ao cliente (o Derek, 24/10/2026).
+  const mexeu = () => { if (aoMostrar) aoMostrar(); };
 
   useEffect(() => {
     fetch("/testemunhais.json")
@@ -10568,13 +10579,13 @@ function Testemunhais({ necessidade, negociador, aoMostrar }) {
       )}
 
       <div className="flex gap-1.5 overflow-x-auto pb-1">
-        <button onClick={() => setTema("")}
+        <button onClick={() => { setTema(""); mexeu(); }}
           className="shrink-0 rounded-full px-3 py-1 text-[11px]"
           style={{ background: tema === "" ? C.roxo : "#fff", color: tema === "" ? "#fff" : C.mute, border: `1px solid ${C.line}` }}>
           Todos
         </button>
         {TEMAS_TESTEMUNHAL.map((t) => (
-          <button key={t} onClick={() => setTema(t === tema ? "" : t)}
+          <button key={t} onClick={() => { setTema(t === tema ? "" : t); mexeu(); }}
             className="shrink-0 rounded-full px-3 py-1 text-[11px]"
             style={{
               background: tema === t ? C.roxo : "#fff",
@@ -10591,7 +10602,7 @@ function Testemunhais({ necessidade, negociador, aoMostrar }) {
         <div className="mt-2">
           <Toggle label={`Só as que citam ${String(negociador).split(/\s+/)[0]}`}
             nota="Avaliação com o seu nome vale mais que uma genérica."
-            valor={soMeus} onChange={setSoMeus} />
+            valor={soMeus} onChange={(v) => { setSoMeus(v); mexeu(); }} />
         </div>
       )}
 
@@ -10629,7 +10640,7 @@ function Testemunhais({ necessidade, negociador, aoMostrar }) {
       </div>
 
       {lista.length > quantos && (
-        <button onClick={() => setQuantos(quantos + 10)}
+        <button onClick={() => { setQuantos(quantos + 10); mexeu(); }}
           className="mt-3 w-full rounded-md border py-2.5 text-[14px] font-semibold"
           style={{ borderColor: C.line, color: C.roxo }}>
           Ver mais {Math.min(10, lista.length - quantos)}
