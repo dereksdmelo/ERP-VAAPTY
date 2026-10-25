@@ -21,4 +21,8 @@
 !dut.html
 !testemunhais.json
 !apresentacao
+# A pasta sozinha não basta: o `*` lá em cima pega também os arquivos
+# DENTRO dela, e as onze páginas da Demonstração davam 404 — a tela
+# mostrava uma faixa preta com "Página 1" (24/10/2026).
+!apresentacao/*.jpg
 !apresentacao.pdf
