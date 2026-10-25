@@ -2129,44 +2129,46 @@ function etapaConcluida(id, f, fotos) {
 // a tela mostra "Adm" e "Pré-venda".
 const PAPEL_ROT = { negociador: "Negociador", pre_venda: "Pré-venda", prep: "Adm", gerente: "Gerente" };
 const papelRot = (p) => PAPEL_ROT[p] || p || "";
-const inputCls = "w-full rounded-lg border px-3 py-2.5 text-[16px] outline-none";
+// Compacto no computador desde 24/10/2026 (o Derek: *"reduzir,
+// simplificar, mais em uma linha só"*). No celular continua 16 px.
+const inputCls = "w-full rounded-lg border px-3 py-2 text-[16px] outline-none lg:rounded-md lg:px-2.5 lg:py-1.5 lg:text-[13.5px]";
 const inputSty = { borderColor: C.line, background: "#fff", color: C.ink };
 
 const Rotulo = ({ children, req }) => (
-  <span className="block text-[12px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>
+  <span className="block text-[10.5px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>
     {children}{req && <span style={{ color: C.laranja }}> *</span>}
   </span>
 );
 const Campo = ({ label, req, nota, children }) => (
   <label className="block">
     <Rotulo req={req}>{label}</Rotulo>
-    <div className="mt-1">{children}</div>
+    <div className="mt-0.5">{children}</div>
     {nota && <span className="mt-1 block text-[11px] leading-snug" style={{ color: C.mute }}>{nota}</span>}
   </label>
 );
 function Toggle({ label, valor, onChange, nota }) {
   return (
-    <button onClick={() => onChange(!valor)} className="flex w-full items-start gap-3 rounded-md border px-3 py-3 text-left"
+    <button onClick={() => onChange(!valor)} className="flex w-full items-start gap-2.5 rounded-md border px-2.5 py-2 text-left"
       style={{ borderColor: valor ? C.verde : C.line, background: valor ? "#F0F8F4" : "#fff" }}>
-      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded"
-        style={{ background: valor ? C.verde : "#fff", border: `1.5px solid ${valor ? C.verde : C.line}`, color: "#fff", fontSize: 12 }}>
+      <span className="mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded"
+        style={{ background: valor ? C.verde : "#fff", border: `1.5px solid ${valor ? C.verde : C.line}`, color: "#fff", fontSize: 11 }}>
         {valor ? "✓" : ""}
       </span>
       <span>
-        <span className="block text-[15px] font-medium leading-snug">{label}</span>
-        {nota && <span className="mt-1 block text-[13px] leading-snug" style={{ color: C.mute }}>{nota}</span>}
+        <span className="block text-[14px] font-medium leading-snug lg:text-[13.5px]">{label}</span>
+        {nota && <span className="mt-0.5 block text-[12px] leading-snug" style={{ color: C.mute }}>{nota}</span>}
       </span>
     </button>
   );
 }
 const Bloco = ({ titulo, sub, children }) => (
-  <section className="rounded-xl p-3.5 lg:p-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+  <section className="rounded-xl p-3" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
     {/* O título deixou de ser roxo: roxo agora é só da ação principal.
         Antes ele competia com o botão que a pessoa tem que apertar.
         Mais enxuto desde 24/10/2026, com o cabeçalho das páginas. */}
-    <h3 className="text-[16px] leading-tight" style={{ color: C.ink, fontFamily: F.disp, fontWeight: 700 }}>{titulo}</h3>
-    {sub && <p className="mt-1 text-[13px] leading-snug" style={{ color: C.mute }}>{sub}</p>}
-    <div className="mt-2.5">{children}</div>
+    <h3 className="text-[15px] leading-tight" style={{ color: C.ink, fontFamily: F.disp, fontWeight: 700 }}>{titulo}</h3>
+    {sub && <p className="mt-0.5 text-[12px] leading-snug" style={{ color: C.mute }}>{sub}</p>}
+    <div className="mt-2">{children}</div>
   </section>
 );
 const Pendente = ({ children }) => (
@@ -4662,8 +4664,9 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   };
 
   const blocoCliente = (
-    <Bloco titulo="Dados do cliente" sub="Aqui só o que se pergunta de saída: nome, CPF e telefone. RG e endereço ficam para o fechamento, junto do contrato — e saem do CRLV e da CNH que você anexa abaixo.">
-      <div className="space-y-2.5">
+    <Bloco titulo="Dados do cliente" sub="Só o que se pergunta de saída. RG e endereço ficam para o fechamento — saem do CRLV e da CNH anexados abaixo.">
+      <div className="space-y-2">
+        <div className="grid items-end gap-2 lg:grid-cols-[1.6fr_1fr_1fr_auto]">
         <Campo label="Nome completo" req>
           <input className={inputCls} style={inputSty} value={cliente.cliente_nome}
             onChange={(e) => setCliente({ ...cliente, cliente_nome: e.target.value })} />
@@ -4676,12 +4679,12 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
           <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="tel"
             value={cliente.cliente_telefone} onChange={(e) => setCliente({ ...cliente, cliente_telefone: e.target.value })} />
         </Campo>
-
         <button onClick={salvarCliente} disabled={salvandoCliente}
-          className="w-full rounded-md py-2.5 text-[13px] font-semibold"
+          className="rounded-md px-4 py-2 text-[13px] font-semibold lg:py-1.5"
           style={{ background: salvandoCliente ? C.line : C.roxo, color: "#fff" }}>
-          {salvandoCliente ? "Salvando…" : "Salvar dados do cliente"}
+          {salvandoCliente ? "Salvando…" : "Salvar cliente"}
         </button>
+        </div>
         {erroCliente && <p className="text-[12px]" style={{ color: C.laranja }}>{erroCliente}</p>}
         {!podeImprimir && (
           <p className="text-[11px]" style={{ color: AMARELO.texto }}>
@@ -5190,10 +5193,10 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     const e = ETAPAS.filter((x) => x.id === id)[0];
     const ok = etapaConcluida(id, f, enviadas);
     return (
-      <div id={`etapa-${id}`} data-etapa={id} className="flex items-center gap-2 pt-4" style={{ scrollMarginTop: 96 }}>
+      <div id={`etapa-${id}`} data-etapa={id} className="flex items-center gap-2 pt-3" style={{ scrollMarginTop: 80 }}>
         <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[13px]"
           style={{ background: ok ? C.verde : C.roxo, color: "#fff", fontFamily: F.disp, fontWeight: 800 }}>{ok ? "✓" : e.letra}</span>
-        <h2 className="text-[17px] font-bold leading-tight">{e.nome}</h2>
+        <h2 className="text-[16px] font-bold leading-tight">{e.nome}</h2>
         <span className="h-px flex-1" style={{ background: C.line }} />
       </div>
     );
@@ -5327,22 +5330,22 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         </div>
       )}
 
-      <div className="mx-auto max-w-[1100px] space-y-4 p-4">
+      <div className="mx-auto max-w-[1180px] space-y-3 px-4 pb-4 pt-1">
 
         {/* ---------- A ---------- */}
         {cabecaEtapa("A")}
         {(
-          <Bloco titulo="Chegada" sub="“Cliente não aguardou na loja” é o motivo de perda mais repetido no CRM. Combinar o tempo do processo agora é o que evita isso.">
-            <div className="space-y-2.5">
+          <Bloco titulo="Chegada" sub="“Cliente não aguardou na loja” é a perda mais repetida no CRM — combine o tempo agora.">
+            <div className="grid items-end gap-2 sm:grid-cols-[1fr_170px] lg:grid-cols-[1fr_170px_1.3fr]">
               <Campo label="Negociador"><input className={inputCls} style={inputSty} value={f.negociador} onChange={(e) => set("negociador", e.target.value)} placeholder="Seu nome" /></Campo>
-              <Campo label="Hora de chegada">
-                <div className="flex gap-2">
+              <Campo label="Chegou às">
+                <div className="flex gap-1.5">
                   <input type="time" className={inputCls} style={inputSty} value={f.chegada} onChange={(e) => set("chegada", e.target.value)} />
                   <button onClick={() => set("chegada", new Date().toTimeString().slice(0, 5))}
-                    className="shrink-0 rounded-md border px-3 text-[13px] font-semibold" style={{ borderColor: C.line, color: C.roxo }}>Agora</button>
+                    className="shrink-0 rounded-md border px-2 text-[12px] font-semibold" style={{ borderColor: C.line, color: C.roxo }}>Agora</button>
                 </div>
               </Campo>
-              <Toggle label="Combinei o tempo do processo com o cliente" nota="“A avaliação leva cerca de 40 minutos, tudo bem?”" valor={f.tempoCombinado} onChange={(v) => set("tempoCombinado", v)} />
+              <Toggle label="Combinei o tempo do processo" nota="“A avaliação leva uns 40 minutos, tudo bem?”" valor={f.tempoCombinado} onChange={(v) => set("tempoCombinado", v)} />
             </div>
           </Bloco>
         )}
@@ -5352,7 +5355,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
             seria pedir na pior hora possível. */}
         {(
           <Bloco titulo="Escutar a conversa"
-            sub="Peça agora, no começo. Uma vez ligada, a escuta acompanha todas as etapas.">
+            sub="Peça agora, no começo. Ligada, ela segue o atendimento inteiro; os ganchos aparecem na Negociação.">
             <EscutaControle escuta={escuta} f={f} setVarios={setVarios} />
           </Bloco>
         )}
@@ -5567,18 +5570,20 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
             {blocoCliente}
 
             <Bloco titulo="O cliente" sub="Descobrir que falta o decisor depois de 40 minutos de avaliação é perda certa.">
-              <div className="space-y-2.5">
+              <div className="space-y-2">
+                <div className="grid gap-2 lg:grid-cols-[220px_1fr]">
                 <Campo label="Motivo da venda">
                   <select className={inputCls} style={inputSty} value={f.motivo} onChange={(e) => set("motivo", e.target.value)}>
                     {MOTIVOS.map((m) => <option key={m}>{m}</option>)}
                   </select>
                 </Campo>
                 <Campo label="Detalhe do motivo — opcional">
-                  <textarea rows={2} className={inputCls} style={inputSty} value={f.motivoDetalhe}
+                  <input className={inputCls} style={inputSty} value={f.motivoDetalhe}
                     onChange={(e) => set("motivoDetalhe", e.target.value)}
-                    placeholder="A história por trás. Vai separando divórcio de mudança de emprego, e é o que dá argumento na hora do extrato." />
+                    placeholder="A história por trás — é o que dá argumento na hora do extrato." />
                 </Campo>
-                <div className="grid grid-cols-3 gap-2.5">
+                </div>
+                <div className="grid grid-cols-3 gap-2">
                   <Campo label="Pretensão"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.pretensao} onChange={(e) => set("pretensao", e.target.value)} /></Campo>
                   <Campo label="Quitação"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.quitacao} onChange={(e) => set("quitacao", e.target.value)} /></Campo>
                   <Campo label="Débitos"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.debitos} onChange={(e) => set("debitos", e.target.value)} /></Campo>
@@ -5586,11 +5591,13 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 <p className="text-[10px] leading-relaxed" style={{ color: C.mute }}>
                   Quitação é o saldo do financiamento. Débitos é IPVA, multa e licenciamento em aberto — os dois saem do valor que o cliente recebe.
                 </p>
+                <div className="grid gap-2 lg:grid-cols-3">
                 <Toggle label="O decisor está na loja" nota="Se não estiver, resolva antes de rodar o carro." valor={f.decisorPresente} onChange={(v) => set("decisorPresente", v)} />
                 <Toggle label="Cliente entrega o carro hoje"
-                  nota="Ciente de que, fechando negócio, o carro já fica na loja."
+                  nota="Fechando negócio, o carro já fica na loja."
                   valor={f.entregaHoje} onChange={(v) => set("entregaHoje", v)} />
                 <Toggle label="Já recebeu proposta de outro lugar" valor={f.temPropostaFora} onChange={(v) => set("temPropostaFora", v)} />
+                </div>
                 {f.temPropostaFora && (
                   <div className="grid grid-cols-2 gap-2.5">
                     <Campo label="Quanto"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.propostaForaValor} onChange={(e) => set("propostaForaValor", e.target.value)} /></Campo>
@@ -7169,52 +7176,50 @@ function EscutaControle({ escuta, f, setVarios }) {
   const { Rec, ouvindo, erro, ligar, desligar } = escuta;
   return (
     <div>
-      <div className="rounded-md p-3" style={{ background: "#FBF7FD", border: `1px solid ${C.line}` }}>
-        <Toggle
-          label="O cliente foi avisado e autorizou a escuta"
-          nota={CONSENTIMENTO_ESCUTA}
-          valor={f.escutaOk}
-          onChange={(v) => {
-            if (!v) desligar();
-            setVarios({
-              escutaOk: v,
-              escutaEm: v ? new Date().toISOString() : null,
-              // A redação que ele ouviu, não a que estiver no código
-              // quando alguém for olhar isto meses depois.
-              escutaVersao: v ? CONSENTIMENTO_VERSAO : "",
-            });
-          }} />
-        {f.escutaOk && f.escutaEm && (
-          <p className="mt-2 text-[11px]" style={{ color: C.mute, fontFamily: F.mono }}>
-            autorizado em {new Date(f.escutaEm).toLocaleString("pt-BR")}
-            {f.escutaVersao ? ` · aceite de ${f.escutaVersao}` : ""}
-          </p>
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-stretch">
+        <div className="min-w-0 flex-1">
+          {/* A redação é texto de base legal (decisão 45): só a letra
+              ficou menor, nenhuma palavra mudou. */}
+          <Toggle
+            label="O cliente foi avisado e autorizou a escuta"
+            nota={CONSENTIMENTO_ESCUTA}
+            valor={f.escutaOk}
+            onChange={(v) => {
+              if (!v) desligar();
+              setVarios({
+                escutaOk: v,
+                escutaEm: v ? new Date().toISOString() : null,
+                // A redação que ele ouviu, não a que estiver no código
+                // quando alguém for olhar isto meses depois.
+                escutaVersao: v ? CONSENTIMENTO_VERSAO : "",
+              });
+            }} />
+        </div>
+        {Rec && (
+          <button onClick={ouvindo ? desligar : ligar} disabled={!f.escutaOk}
+            className="shrink-0 rounded-md px-4 py-2.5 text-[13px] font-semibold lg:w-[190px]"
+            title={f.escutaOk ? "" : "Primeiro o aceite do cliente"}
+            style={{
+              background: ouvindo ? C.laranja : (f.escutaOk ? C.roxo : "#E7E3EC"),
+              color: f.escutaOk ? "#fff" : C.mute,
+              cursor: f.escutaOk ? "pointer" : "not-allowed",
+            }}>
+            {ouvindo ? "● Ouvindo — parar" : "Começar a escutar"}
+          </button>
         )}
       </div>
-
+      {f.escutaOk && f.escutaEm && (
+        <p className="mt-1.5 text-[11px]" style={{ color: C.mute, fontFamily: F.mono }}>
+          autorizado em {new Date(f.escutaEm).toLocaleString("pt-BR")}
+          {f.escutaVersao ? ` · aceite de ${f.escutaVersao}` : ""}
+        </p>
+      )}
       {!Rec && (
-        <p className="mt-3 text-[12px]" style={{ color: C.laranja }}>
+        <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>
           Este navegador não tem reconhecimento de voz. No celular, use o Chrome (Android) ou o Safari (iPhone).
         </p>
       )}
-
-      {Rec && (
-        <button onClick={ouvindo ? desligar : ligar} disabled={!f.escutaOk}
-          className="mt-3 w-full rounded-md py-3 text-[14px] font-semibold"
-          style={{
-            background: ouvindo ? C.laranja : (f.escutaOk ? C.roxo : "#E7E3EC"),
-            color: f.escutaOk ? "#fff" : C.mute,
-            cursor: f.escutaOk ? "pointer" : "not-allowed",
-          }}>
-          {ouvindo ? "● Ouvindo — tocar para parar" : "Começar a escutar"}
-        </button>
-      )}
-
       {erro && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
-
-      <p className="mt-3 text-[11px]" style={{ color: C.mute }}>
-        Uma vez ligada, a escuta segue por todo o atendimento — você troca de etapa e ela continua. Os ganchos aparecem na Pesquisa, na Espera e na Negociação.
-      </p>
     </div>
   );
 }
