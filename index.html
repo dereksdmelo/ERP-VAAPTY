@@ -7096,8 +7096,11 @@ function useEscuta(f, set) {
     return r;
   };
 
-  const ligar = () => {
-    if (!Rec || !f.escutaOk || ligadoRef.current) return;
+  // `aceitoAgora`: o aceite e o ligar são o MESMO toque desde
+  // 24/10/2026, e o `f` desta closure ainda não viu o aceite que
+  // acabou de ser gravado no mesmo clique.
+  const ligar = (aceitoAgora) => {
+    if (!Rec || (!f.escutaOk && aceitoAgora !== true) || ligadoRef.current) return;
     setErro("");
     ligadoRef.current = true;
     recRef.current = criar();
@@ -7174,37 +7177,30 @@ const CONSENTIMENTO_VERSAO = "2026-09-16";
 /** O aceite e o microfone. Fica na Abordagem: é onde se pede. */
 function EscutaControle({ escuta, f, setVarios }) {
   const { Rec, ouvindo, erro, ligar, desligar } = escuta;
+  /* UM TOQUE SÓ: "Iniciar escuta (cliente autorizou)" (o Derek, em
+   * 24/10/2026). A ordem da decisão 17 continua: o aceite é GRAVADO
+   * (hora e redação, 0051) antes de o microfone abrir, no mesmo clique
+   * — e o rótulo do botão é a declaração de quem aperta. O texto de
+   * base legal (decisão 45) fica à vista, para ser lido antes. */
+  const aceitarELigar = () => {
+    if (!f.escutaOk) {
+      setVarios({ escutaOk: true, escutaEm: new Date().toISOString(), escutaVersao: CONSENTIMENTO_VERSAO });
+    }
+    ligar(true);
+  };
+  const retirar = () => { desligar(); setVarios({ escutaOk: false, escutaEm: null, escutaVersao: "" }); };
   return (
     <div>
-      <div className="flex flex-col gap-2 lg:flex-row lg:items-stretch">
-        <div className="min-w-0 flex-1">
-          {/* A redação é texto de base legal (decisão 45): só a letra
-              ficou menor, nenhuma palavra mudou. */}
-          <Toggle
-            label="O cliente foi avisado e autorizou a escuta"
-            nota={CONSENTIMENTO_ESCUTA}
-            valor={f.escutaOk}
-            onChange={(v) => {
-              if (!v) desligar();
-              setVarios({
-                escutaOk: v,
-                escutaEm: v ? new Date().toISOString() : null,
-                // A redação que ele ouviu, não a que estiver no código
-                // quando alguém for olhar isto meses depois.
-                escutaVersao: v ? CONSENTIMENTO_VERSAO : "",
-              });
-            }} />
-        </div>
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+        <p className="min-w-0 flex-1 rounded-md px-2.5 py-2 text-[12px] leading-snug"
+          style={{ background: "#FBF7FD", border: `1px solid ${C.line}`, color: C.mute }}>
+          {CONSENTIMENTO_ESCUTA}
+        </p>
         {Rec && (
-          <button onClick={ouvindo ? desligar : ligar} disabled={!f.escutaOk}
-            className="shrink-0 rounded-md px-4 py-2.5 text-[13px] font-semibold lg:w-[190px]"
-            title={f.escutaOk ? "" : "Primeiro o aceite do cliente"}
-            style={{
-              background: ouvindo ? C.laranja : (f.escutaOk ? C.roxo : "#E7E3EC"),
-              color: f.escutaOk ? "#fff" : C.mute,
-              cursor: f.escutaOk ? "pointer" : "not-allowed",
-            }}>
-            {ouvindo ? "● Ouvindo — parar" : "Começar a escutar"}
+          <button onClick={ouvindo ? desligar : aceitarELigar}
+            className="shrink-0 rounded-md px-4 py-2.5 text-[13px] font-semibold lg:w-[230px]"
+            style={{ background: ouvindo ? C.laranja : C.roxo, color: "#fff" }}>
+            {ouvindo ? "● Ouvindo — parar" : f.escutaOk ? "Retomar a escuta" : "Iniciar escuta (cliente autorizou)"}
           </button>
         )}
       </div>
@@ -7212,6 +7208,7 @@ function EscutaControle({ escuta, f, setVarios }) {
         <p className="mt-1.5 text-[11px]" style={{ color: C.mute, fontFamily: F.mono }}>
           autorizado em {new Date(f.escutaEm).toLocaleString("pt-BR")}
           {f.escutaVersao ? ` · aceite de ${f.escutaVersao}` : ""}
+          {" · "}<button onClick={retirar} className="underline" style={{ fontFamily: F.body }}>o cliente retirou a autorização</button>
         </p>
       )}
       {!Rec && (

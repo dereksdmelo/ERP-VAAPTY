@@ -1118,6 +1118,13 @@ era um componente dentro da etapa, trocar de etapa desmontava o
 componente e **matava o reconhecimento no meio da conversa, sem aviso**.
 Quem voltar a declarar isso dentro de uma etapa reintroduz o corte.
 
+**Desde 24/10/2026 o aceite e o microfone são um botão só**,
+"Iniciar escuta (cliente autorizou)" — pedido do Derek. A ordem não
+inverteu: o mesmo clique GRAVA o aceite (hora e redação) e só depois
+abre o microfone, e o rótulo é a declaração de quem aperta. O texto
+do aceite fica ao lado, para ser lido antes; "o cliente retirou a
+autorização" desfaz.
+
 O aceite e o botão do microfone ficam na **Abordagem** — é onde se
 pede, e pedir no meio da negociação seria pedir na pior hora. Uma tarja
 laranja no alto, fora das etapas, mostra que está escutando e há quanto
