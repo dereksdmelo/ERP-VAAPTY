@@ -669,8 +669,8 @@ acertar é conveniência, não controle.
 **O vínculo entre cadastro e login existe: `negociador.perfil_id`**
 (estava na 0010 e nunca foi preenchido). Desde 24/10/2026 a tela de
 Equipe o usa: cada pessoa é UMA ficha — acesso e meta juntos —, num
-organograma por setor (Gestão em cima; Administrativo, Suporte a
-vendas e Vendas embaixo; `QuadroEquipe`, `CartaoPessoa`). Pedido do
+organograma por setor (Gestão em cima; Administrativo, Pré-vendas
+e Negociação embaixo; `QuadroEquipe`, `CartaoPessoa`). Pedido do
 Derek: *"a equipe com as metas e os acessos deve ser a mesma coisa…
 cada colaborador no seu quadrado"*. **Nome igual não liga sozinho**:
 a ficha aparece junta com "mesmo nome — ligar o login à meta", e a
@@ -689,6 +689,26 @@ gerente leem** (`e_financeiro()`): CPF e conta de funcionário vazados
 viram fraude. Os arquivos vão para `documentos-veiculo/equipe/`, pelo
 `api/foto.js` (decisão 9). **Desligar não tira o acesso sozinho** — a
 data pode ser futura —; o botão ao lado faz isso quando for a hora.
+
+**O gerente cria o login, já liberado** ("+ Adicionar pessoa", e "+
+criar login" no cartão de quem só tem meta). Pedido do Derek em
+24/10/2026: *"gerar o login pra eles, sem necessidade de eles gerarem…
+ou pelo menos deixar o e-mail pré-autorizado, e depois eles entram e
+criam a senha"*. São as duas: `?recurso=pessoa` cadastra pelo
+`/auth/v1/signup` com a chave **anônima** — o mesmo da tela de entrada,
+e a confirmação por e-mail está desligada (decisão 38) — e libera o
+perfil com o **token do gerente**. **A chave de serviço não entra**: é
+o teste da 0032, e aqui existe caminho sem ela. A senha que sai é
+provisória: aparece uma vez, com o recado pronto para o WhatsApp, e no
+primeiro acesso a pessoa escolhe a dela. O setor decide o papel
+(`PAPEL_DO_SETOR`); negociação e pré-vendas ganham a meta junto, ligada
+pelo `perfil_id`.
+
+**Conta desativada é ex-prestador, não pendência.** A tarja "N contas
+sem acesso" cobrava ação todo dia por gente que já tinha saído. Agora
+quem está sem acesso vai para "Ex-prestadores de serviço", recolhido no
+fim — e só a conta criada há menos de 14 dias aparece em cima, como
+"pedindo acesso".
 
 **PATCH que volta vazio é RLS, não erro.** A política deixa qualquer um
 da equipe *ler* todo atendimento, mas só o dono (ou o gerente)

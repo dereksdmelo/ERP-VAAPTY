@@ -364,12 +364,89 @@ async function senha(req, res, tok) {
   return res.status(200).json({ ok: true, senha: nova });
 }
 
+/**
+ * O gerente cria o login de uma pessoa nova, já liberado.
+ *
+ * O Derek, em 24/10/2026: *"preciso poder gerar o login pra eles, sem
+ * necessidade de eles gerarem"*. Até aqui a pessoa se cadastrava na
+ * tela de entrada e esperava alguém marcar "entra".
+ *
+ * **Sem a chave de serviço.** A 0032 deixou o teste anotado: existe
+ * caminho pelo token do usuário? Existe — o cadastro público do
+ * Supabase (`/auth/v1/signup`, com a chave anônima) é o mesmo que a
+ * tela de entrada usa, e a confirmação por e-mail está desligada
+ * (decisão 38). O gatilho da 0004 cria o perfil desativado, como
+ * sempre; quem o libera, com papel e marcas, é o PATCH COM O TOKEN DO
+ * GERENTE, e é a RLS que decide. Um não-gerente que chamasse isto
+ * criaria uma conta desativada — a mesma coisa que a tela de entrada
+ * já deixa qualquer um fazer.
+ *
+ * **A senha é provisória** (0032): volta uma vez, vai por WhatsApp, e
+ * no primeiro acesso a pessoa é obrigada a escolher a dela. É o "eles
+ * entram e criam a senha" — sem depender de e-mail que não chega.
+ */
+async function novaPessoa(req, res, tok) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ erro: "Use POST." });
+  }
+  const c = (await lerCorpo(req)) || {};
+  const nome = texto(c.nome);
+  const email = String(c.email || "").trim().toLowerCase();
+  const papel = String(c.papel || "");
+  if (!nome) return res.status(400).json({ erro: "Falta o nome." });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ erro: "E-mail inválido." });
+  if (PAPEIS_PERFIL.indexOf(papel) < 0) return res.status(400).json({ erro: "Papel inválido." });
+
+  // Gerente primeiro, pelo token dele: sem isso a conta nasceria e
+  // ficaria desativada, um lixo a mais na lista.
+  const meuId = donoDoToken(tok);
+  if (!meuId) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
+  const r0 = await fetch(`${URL_BASE}/rest/v1/perfil?select=papel&id=eq.${meuId}`,
+    { headers: { apikey: ANON, Authorization: tok } });
+  const meu = r0.ok ? (await r0.json().catch(() => []))[0] : null;
+  if (!meu || meu.papel !== "gerente") return res.status(403).json({ erro: "Só o gerente cria login para outra pessoa." });
+
+  const senhaNova = senhaAleatoria();
+  const r = await fetch(`${URL_BASE}/auth/v1/signup`, {
+    method: "POST",
+    headers: { apikey: ANON, "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password: senhaNova, data: { nome } }),
+  });
+  const t = await r.text();
+  let d = null; try { d = t ? JSON.parse(t) : null; } catch (e) {}
+  const usuario = d && (d.user || (d.id ? d : null));
+  // Com confirmação ligada, e-mail repetido volta 200 com `identities`
+  // vazio em vez de erro — é o Supabase não entregando quem tem conta.
+  const repetido = (!r.ok && /registered|already|exists/i.test(String((d && (d.msg || d.message || d.error_description)) || "")))
+    || (usuario && Array.isArray(usuario.identities) && usuario.identities.length === 0);
+  if (repetido) {
+    return res.status(409).json({ erro: "Já existe uma conta com esse e-mail. Procure a pessoa em \"Ex-prestadores\" e marque \"entra\", ou use \"gerar senha\"." });
+  }
+  if (!r.ok || !usuario || !RX_UUID.test(String(usuario.id || ""))) {
+    return res.status(502).json({ erro: (d && (d.msg || d.message || d.error_description)) || "O Supabase recusou o cadastro." });
+  }
+
+  const mud = { nome, papel, ativo: true, senha_provisoria: true,
+                administrativo: !!c.administrativo || papel === "prep", financeiro: !!c.financeiro };
+  const r2 = await fetch(`${URL_BASE}/rest/v1/perfil?id=eq.${usuario.id}`, {
+    method: "PATCH",
+    headers: { apikey: ANON, Authorization: tok, "Content-Type": "application/json", Prefer: "return=representation" },
+    body: JSON.stringify(mud),
+  });
+  const salvo = r2.ok ? (await r2.json().catch(() => []))[0] : null;
+  if (!salvo) {
+    return res.status(502).json({ erro: "A conta foi criada mas não consegui liberar. Marque \"entra\" na pessoa.", id: usuario.id, senha: senhaNova });
+  }
+  return res.status(200).json({ ok: true, id: usuario.id, senha: senhaNova, acesso: salvo });
+}
+
 async function acessos(req, res, tok) {
   const base = `${URL_BASE}/rest/v1/perfil`;
   const cab = { apikey: ANON, Authorization: tok };
 
   if (req.method === "GET") {
-    const r = await fetch(`${base}?select=id,nome,papel,ativo,administrativo,financeiro,senha_provisoria,criado_em&order=ativo.asc,nome.asc`, { headers: cab });
+    const r = await fetch(`${base}?select=id,nome,email,papel,ativo,administrativo,financeiro,senha_provisoria,criado_em&order=ativo.asc,nome.asc`, { headers: cab });
     if (!r.ok) return res.status(r.status === 401 ? 401 : 502).json({ erro: "Não consegui ler os acessos." });
     const d = await r.json().catch(() => []);
     return res.status(200).json({ acessos: Array.isArray(d) ? d : [] });
@@ -741,6 +818,11 @@ module.exports = async function handler(req, res) {
   if (String(req.query.recurso || "") === "senha") {
     try { return await senha(req, res, tok); }
     catch (e) { return res.status(500).json({ erro: "Falha ao gerar a senha." }); }
+  }
+
+  if (String(req.query.recurso || "") === "pessoa") {
+    try { return await novaPessoa(req, res, tok); }
+    catch (e) { return res.status(502).json({ erro: "Não consegui criar o login." }); }
   }
 
   if (String(req.query.recurso || "") === "acessos") {

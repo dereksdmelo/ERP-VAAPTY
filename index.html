@@ -321,6 +321,16 @@ async function fetchAut2(url, opcoes) {
   });
 }
 
+/** O gerente cria o login de alguém, já liberado, com senha provisória. */
+async function criarPessoa(dados) {
+  const r = await fetchAut("/api/perfil?recurso=pessoa", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok && !d.senha) throw new Error(d.erro || "Não consegui criar o login.");
+  return d;
+}
+
 /** O gerente gera uma senha aleatória para alguém. Volta uma vez só. */
 async function gerarSenhaPara(id) {
   const r = await fetchAut("/api/perfil?recurso=senha", {
@@ -22882,9 +22892,9 @@ function PontoTreino({ n, p, nome, ocupado, aoRedigir, aoAvaliar }) {
  * junta com "mesmo nome — ligar", e a ligação só vale com o clique. */
 const SETORES = [
   ["gestao", "Gestão", "quem decide e mede"],
-  ["adm", "Administrativo", "papel, cartório e financeiro"],
-  ["suporte", "Suporte a vendas", "pré-venda: traz o cliente"],
-  ["vendas", "Vendas", "negociação: compra o carro"],
+  ["adm", "Administrativo", "suporte: papel, cartório e financeiro"],
+  ["suporte", "Pré-vendas", "traz o cliente à loja"],
+  ["vendas", "Negociação", "compra o carro"],
 ];
 const CARGO = { gerente: "Gerente", prep: "Administrativo", pre_venda: "Pré-venda", negociador: "Negociador" };
 const nomeChave = (t) => String(t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/\s+/g, " ").trim();
@@ -22897,7 +22907,7 @@ const setorDe = (pe) => {
   return "vendas";
 };
 
-function CartaoPessoa({ pe, eGerente, eu, mexerAcesso, mexerNeg, gerarSenha, gerando, senha, fecharSenha, ligar, criarMeta, soltas, abrir }) {
+function CartaoPessoa({ pe, eGerente, eu, mexerAcesso, mexerNeg, gerarSenha, gerando, senha, fecharSenha, ligar, criarMeta, soltas, abrir, novoLogin }) {
   const [aberto, setAberto] = useState(false);
   const a = pe.acesso, n = pe.neg;
   const nome = (a && a.nome) || (n && n.nome) || "—";
@@ -22933,6 +22943,7 @@ function CartaoPessoa({ pe, eGerente, eu, mexerAcesso, mexerNeg, gerarSenha, ger
           <div className="truncate text-[11.5px]" style={{ color: C.mute }}>
             {(a && CARGO[a.papel]) || (pre ? "Pré-venda" : "Negociador")}{meta ? ` · ${meta}` : ""}
           </div>
+          {a && a.email && <div className="truncate text-[11px]" style={{ color: C.mute }} title={a.email}>{a.email}</div>}
         </div>
         <span className="shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-semibold" style={{ background: estado[2], color: estado[1] }}>{estado[0]}</span>
       </button>
@@ -22962,7 +22973,9 @@ function CartaoPessoa({ pe, eGerente, eu, mexerAcesso, mexerNeg, gerarSenha, ger
               {a.senha_provisoria && <span className="rounded px-1.5 text-[10.5px] font-semibold" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>senha provisória</span>}
             </>
           ) : (
-            <span className="text-[11.5px]" style={{ color: C.mute }}>Sem login — a pessoa cria a conta na tela de entrada.</span>
+            /^IA\b/i.test(nome) ? <span className="text-[11.5px]" style={{ color: C.mute }}>Robô — não entra no sistema.</span> : (
+              <button onClick={() => novoLogin && novoLogin(pe)} className="text-[11.5px] font-semibold" style={{ color: C.roxo }}>+ criar login</button>
+            )
           )}
           {n ? (
             <button onClick={() => setAberto(!aberto)} className="ml-auto text-[11.5px] font-semibold" style={{ color: C.roxo }}>metas {aberto ? "▴" : "▾"}</button>
@@ -23025,6 +23038,115 @@ function CartaoPessoa({ pe, eGerente, eu, mexerAcesso, mexerNeg, gerarSenha, ger
   );
 }
 
+/* PESSOA NOVA NA EQUIPE: o setor decide o papel, e o login nasce
+ * pronto (`?recurso=pessoa`). O Derek, em 24/10/2026: *"preciso poder
+ * gerar o login pra eles, sem necessidade de eles gerarem… ou pelo
+ * menos já deixar o e-mail pré-autorizado, e depois eles entram e criam
+ * a senha"*. São as duas coisas de uma vez: o e-mail já entra liberado,
+ * a senha que sai daqui é provisória, e no primeiro acesso a pessoa é
+ * obrigada a escolher a dela (0032).
+ *
+ * Negociação e pré-vendas ganham também a ficha de META, ligada ao
+ * login pelo `perfil_id` — sem ela a pessoa entra no sistema e não
+ * aparece na régua do mês. Para elas o e-mail é opcional: quem ainda
+ * não vai usar o sistema existe só na meta, como os importados. */
+const PAPEL_DO_SETOR = { gestao: "gerente", adm: "prep", suporte: "pre_venda", vendas: "negociador" };
+
+function NovaPessoa({ inicial, aoFechar, aoCriar }) {
+  const [nome, setNome] = useState(inicial.nome || "");
+  const [setor, setSetor] = useState(inicial.setor || "vendas");
+  const [email, setEmail] = useState("");
+  const [fin, setFin] = useState(inicial.setor === "gestao");
+  const [indo, setIndo] = useState(false);
+  const [erro, setErro] = useState("");
+  const [feito, setFeito] = useState(null);
+  const vende = setor === "vendas" || setor === "suporte";
+  const soLogin = !!inicial.neg;
+  const pedeEmail = !vende || soLogin;
+
+  const criar = async () => {
+    setErro("");
+    if (!nome.trim()) return setErro("Falta o nome.");
+    if (pedeEmail && !email.trim()) return setErro("Falta o e-mail — é com ele que a pessoa entra.");
+    setIndo(true);
+    try {
+      let login = null;
+      if (email.trim()) {
+        login = await criarPessoa({ nome: nome.trim(), email: email.trim(), papel: PAPEL_DO_SETOR[setor],
+                                    financeiro: setor === "gestao" ? fin : setor === "adm" ? fin : false });
+      }
+      if (vende) {
+        if (inicial.neg) { if (login && login.id) await atualizarNegociador(inicial.neg.id, { perfil_id: login.id }); }
+        else await criarNegociador({ nome: nome.trim().toUpperCase(), papel: setor === "suporte" ? "prospeccao" : "negociador", ...(login && login.id ? { perfil_id: login.id } : {}) });
+      }
+      aoCriar();
+      if (login && login.senha) setFeito({ email: email.trim().toLowerCase(), senha: login.senha, aviso: login.erro || "" });
+      else aoFechar();
+    } catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+
+  const recado = feito ? `Seu acesso ao sistema da Vaapty:\n${location.origin}\nE-mail: ${feito.email}\nSenha provisória: ${feito.senha}\nNo primeiro acesso o sistema pede para você criar a sua senha.` : "";
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(20,10,30,0.45)" }}
+      onClick={(e) => { if (e.target === e.currentTarget) aoFechar(); }}>
+      <div className="w-full max-w-[460px] rounded-xl p-4" style={{ background: "#fff" }}>
+        {feito ? (
+          <>
+            <div className="text-[15px] font-bold">Login criado — já entra</div>
+            {feito.aviso && <p className="mt-1 text-[12px]" style={{ color: C.laranja }}>{feito.aviso}</p>}
+            <p className="mt-1 text-[12.5px]" style={{ color: C.mute }}>A senha aparece <b>uma vez só</b>. Mande para a pessoa; no primeiro acesso ela troca pela dela.</p>
+            <pre className="mt-2 whitespace-pre-wrap rounded-md px-3 py-2 text-[12.5px]" style={{ background: "#F0F8F4", border: `1px solid ${C.verde}`, fontFamily: F.mono }}>{recado}</pre>
+            <div className="mt-3 flex gap-2">
+              <button onClick={() => { try { navigator.clipboard.writeText(recado); } catch (e) {} }} className="rounded-md px-3 py-1.5 text-[12.5px] font-semibold text-white" style={{ background: C.roxo }}>Copiar para o WhatsApp</button>
+              <button onClick={aoFechar} className="rounded-md px-3 py-1.5 text-[12.5px]" style={{ color: C.mute }}>Fechar</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="text-[15px] font-bold">{soLogin ? `Criar login para ${inicial.nome}` : "Adicionar pessoa à equipe"}</div>
+            {!soLogin && (
+              <div className="mt-3 grid grid-cols-2 gap-1.5">
+                {SETORES.map(([k, rot, sub]) => (
+                  <button key={k} onClick={() => { setSetor(k); setFin(k === "gestao"); }} className="rounded-lg px-2.5 py-1.5 text-left"
+                    style={{ border: `1.5px solid ${setor === k ? C.roxo : C.line}`, background: setor === k ? "#F5EEFA" : "#fff" }}>
+                    <div className="text-[12.5px] font-semibold">{rot}</div>
+                    <div className="text-[10.5px]" style={{ color: C.mute }}>{sub}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+            <label className="mt-3 block">
+              <span className="block text-[10px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Nome</span>
+              <input autoFocus={!soLogin} className="mt-0.5 w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none" style={inputSty}
+                value={nome} onChange={(e) => setNome(e.target.value)} disabled={soLogin} />
+            </label>
+            <label className="mt-2 block">
+              <span className="block text-[10px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>E-mail de acesso{pedeEmail ? "" : " — opcional"}</span>
+              <input autoFocus={soLogin} type="email" className="mt-0.5 w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none" style={inputSty}
+                value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nome@gmail.com"
+                onKeyDown={(e) => { if (e.key === "Enter") criar(); }} />
+              {!pedeEmail && <span className="mt-0.5 block text-[11px]" style={{ color: C.mute }}>Sem e-mail, a pessoa entra só na meta da loja; o login dá para criar depois.</span>}
+            </label>
+            {(setor === "gestao" || setor === "adm") && !soLogin && (
+              <label className="mt-2 flex items-center gap-1.5 text-[12.5px]">
+                <input type="checkbox" checked={fin} onChange={(e) => setFin(e.target.checked)} /> vê o financeiro
+              </label>
+            )}
+            {erro && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+            <div className="mt-3 flex gap-2">
+              <button onClick={criar} disabled={indo} className="rounded-md px-3 py-1.5 text-[12.5px] font-semibold text-white" style={{ background: indo ? C.mute : C.roxo }}>
+                {indo ? "criando…" : email.trim() ? "Criar e gerar o login" : "Adicionar"}
+              </button>
+              <button onClick={aoFechar} className="rounded-md px-3 py-1.5 text-[12.5px]" style={{ color: C.mute }}>Cancelar</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function QuadroEquipe({ perfil, negs, recarregarNegs }) {
   const [acessos, setAcessos] = useState(null);
   const [erro, setErro] = useState("");
@@ -23032,6 +23154,7 @@ function QuadroEquipe({ perfil, negs, recarregarNegs }) {
   const [senha, setSenha] = useState(null);
   const [verInativos, setVerInativos] = useState(false);
   const [ficha, setFicha] = useState(null);
+  const [nova, setNova] = useState(null);
   const eGerente = !!(perfil && perfil.papel === "gerente");
   const carregar = () => listarAcessos().then(setAcessos).catch((e) => { setAcessos([]); setErro(e.message); });
   useEffect(() => { carregar(); }, []);
@@ -23072,11 +23195,15 @@ function QuadroEquipe({ perfil, negs, recarregarNegs }) {
     return { chave: a.id, acesso: a, neg: n, sugestao };
   });
   (negs || []).forEach((n) => { if (!usados[n.id]) pessoas.push({ chave: n.id, acesso: null, neg: n, sugestao: null }); });
-  const inativa = (pe) => (!pe.acesso || !pe.acesso.ativo) && (!pe.neg || !pe.neg.ativo) && !(pe.acesso && !pe.acesso.ativo && !pe.neg);
-  const ativas = pessoas.filter((pe) => !inativa(pe));
-  const inativas = pessoas.filter(inativa);
+  // Conta desativada é quem SAIU — salvo a recém-criada, que é alguém
+  // que se cadastrou na tela de entrada e espera ser liberado. As duas
+  // eram uma tarja amarela só, e a pessoa que saiu cobrava ação todo dia.
+  const recente = (a) => a && !a.ativo && a.criado_em && Date.now() - Date.parse(a.criado_em) < 14 * 864e5;
+  const pedindo = pessoas.filter((pe) => recente(pe.acesso));
+  const ex = (pe) => !recente(pe.acesso) && ((pe.acesso && !pe.acesso.ativo) || (!pe.acesso && pe.neg && !pe.neg.ativo));
+  const ativas = pessoas.filter((pe) => !ex(pe) && !recente(pe.acesso));
+  const inativas = pessoas.filter(ex);
   const doSetor = (k) => ativas.filter((pe) => setorDe(pe) === k).sort((x, y) => nomeChave((x.acesso || x.neg).nome).localeCompare(nomeChave((y.acesso || y.neg).nome)));
-  const esperando = acessos.filter((a) => !a.ativo).length;
   // As metas que não estão ligadas a login nenhum: é delas que sai o "ligar à meta de…".
   const soltas = (negs || []).filter((x) => !x.perfil_id);
 
@@ -23084,7 +23211,8 @@ function QuadroEquipe({ perfil, negs, recarregarNegs }) {
     <CartaoPessoa key={pe.chave} pe={pe} eGerente={eGerente} eu={pe.acesso && perfil && pe.acesso.id === perfil.id}
       mexerAcesso={mexerAcesso} mexerNeg={mexerNeg} gerarSenha={gerarSenha} gerando={gerando}
       senha={senha && pe.acesso && senha.id === pe.acesso.id ? senha.senha : null} fecharSenha={() => setSenha(null)}
-      ligar={ligar} criarMeta={criarMeta} soltas={soltas} abrir={setFicha} />
+      ligar={ligar} criarMeta={criarMeta} soltas={soltas} abrir={setFicha}
+      novoLogin={(p) => setNova({ nome: p.neg.nome, setor: setorDe(p), neg: p.neg })} />
   );
   const coluna = ([k, rot, sub], grade) => {
     const gente = doSetor(k);
@@ -23104,10 +23232,20 @@ function QuadroEquipe({ perfil, negs, recarregarNegs }) {
   return (
     <div>
       {erro && <p className="mb-2 text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
-      {esperando > 0 && (
-        <p className="mb-2 rounded-lg px-3 py-1.5 text-[12px]" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
-          {esperando} conta{esperando > 1 ? "s" : ""} sem acesso (borda laranja). Marque <b>entra</b> para liberar.
-        </p>
+      {eGerente && (
+        <div className="mb-2 flex justify-end">
+          <button onClick={() => setNova({ nome: "", setor: "vendas" })} className="rounded-md px-3 py-1.5 text-[12.5px] font-semibold text-white" style={{ background: C.roxo }}>
+            + Adicionar pessoa
+          </button>
+        </div>
+      )}
+      {!!pedindo.length && (
+        <div className="mb-3 rounded-xl p-2.5" style={{ background: AMARELO.fundo, border: `1px solid ${C.line}` }}>
+          <div className="mb-2 px-0.5 text-[12px] font-bold" style={{ color: AMARELO.texto }}>
+            Pedindo acesso · {pedindo.length} <span className="font-normal">— cadastrou-se na tela de entrada. Escolha o papel e marque <b>entra</b>.</span>
+          </div>
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">{pedindo.map(cartao)}</div>
+        </div>
       )}
       {/* O ORGANOGRAMA: a gestão em cima, os três setores embaixo. */}
       <div className="mx-auto max-w-[1100px]">{coluna(SETORES[0], "sm:grid-cols-2 xl:grid-cols-3")}</div>
@@ -23120,10 +23258,14 @@ function QuadroEquipe({ perfil, negs, recarregarNegs }) {
       {!!inativas.length && (
         <div className="mt-3">
           <button onClick={() => setVerInativos(!verInativos)} className="text-[12px] font-semibold" style={{ color: C.mute }}>
-            {verInativos ? "▾" : "▸"} {inativas.length} fora da equipe (sem acesso e fora da meta)
+            {verInativos ? "▾" : "▸"} Ex-prestadores de serviço · {inativas.length} <span className="font-normal">— sem acesso; marque <b>entra</b> para trazer de volta</span>
           </button>
           {verInativos && <div className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">{inativas.map(cartao)}</div>}
         </div>
+      )}
+      {nova && (
+        <NovaPessoa inicial={nova} aoFechar={() => setNova(null)}
+          aoCriar={() => { carregar(); recarregarNegs(); }} />
       )}
       {ficha && (
         <FichaColaborador pe={ficha} aoFechar={() => setFicha(null)}
