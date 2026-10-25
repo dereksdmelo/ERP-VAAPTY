@@ -468,7 +468,14 @@ async function fipeOficial(params) {
   return d;
 }
 
-async function consultarDesvalorizacao(chave) {
+const _desval = {};
+function consultarDesvalorizacao(chave) {
+  // O mesmo carro aparece na Pesquisa e na Negociação, agora na mesma
+  // página: uma ida só, que a consulta gasta cota (decisão 11).
+  if (!_desval[chave]) _desval[chave] = buscarDesvalorizacao(chave).catch((e) => { delete _desval[chave]; throw e; });
+  return _desval[chave];
+}
+async function buscarDesvalorizacao(chave) {
   const r = await fetch(`/api/placa?acao=desvalorizacao&chave=${encodeURIComponent(chave)}`);
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.erro || "Histórico indisponível.");
@@ -4273,9 +4280,8 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   const [guardados, setGuardados] = useState(0);
 
   useEffect(() => {
-    if (etapa !== "T") return;
     zapsignConfigurado().then(setZapOk).catch(() => setZapOk(null));
-  }, [etapa]);
+  }, []);
   const [erroCliente, setErroCliente] = useState("");
   const [erroCanais, setErroCanais] = useState("");
   const [novaRodada, setNovaRodada] = useState({ impresso: "", contra: "" });
@@ -4780,6 +4786,20 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
    * troca de passo, pela mesma razão da escuta (decisão 17).
    */
   useEffect(() => { etapaRef.current = etapa; }, [etapa]);
+  // A etapa à vista: a última seção cujo título já passou do cabeçalho.
+  useEffect(() => {
+    let pedido = 0;
+    const olhar = () => {
+      pedido = 0;
+      const secs = Array.from(document.querySelectorAll("[data-etapa]"));
+      let atual = secs.length ? secs[0].getAttribute("data-etapa") : "A";
+      secs.forEach((el) => { if (el.getBoundingClientRect().top <= 130) atual = el.getAttribute("data-etapa"); });
+      setEtapa((e) => (e === atual ? e : atual));
+    };
+    const aoRolar = () => { if (!pedido) pedido = requestAnimationFrame(olhar); };
+    window.addEventListener("scroll", aoRolar, { passive: true });
+    return () => { window.removeEventListener("scroll", aoRolar); if (pedido) cancelAnimationFrame(pedido); };
+  }, []);
 
   // O outro lado do painel do gestor: o recado que chega enquanto o
   // negociador está com o cliente. Só o CONTADOR fica visível até ele
@@ -5155,29 +5175,50 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     return Math.round(((Number(f.pretensao) - Number(f.rodadas[0].impresso)) / Number(f.pretensao)) * 100);
   }, [f.pretensao, f.rodadas]);
 
-  const idx = ETAPAS.findIndex((e) => e.id === etapa);
-  const et = ETAPAS[idx];
+  /* AS ETAPAS NUMA PÁGINA SÓ (24/10/2026). O Derek: *"ao invés de
+   * abas, como se fosse uma landing page, começando pela Abordagem e
+   * descendo até as próximas"*. Todas ficam montadas; a letra do
+   * cabeçalho leva à seção, e a etapa "atual" passa a ser a que está à
+   * vista — é ela que o espelho manda ao painel do gestor (decisão 44,
+   * que continua só subindo). */
+  const irPara = (id) => {
+    setEtapa(id);
+    const el = document.getElementById(`etapa-${id}`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  const cabecaEtapa = (id) => {
+    const e = ETAPAS.filter((x) => x.id === id)[0];
+    const ok = etapaConcluida(id, f, enviadas);
+    return (
+      <div id={`etapa-${id}`} data-etapa={id} className="flex items-center gap-2 pt-4" style={{ scrollMarginTop: 96 }}>
+        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[13px]"
+          style={{ background: ok ? C.verde : C.roxo, color: "#fff", fontFamily: F.disp, fontWeight: 800 }}>{ok ? "✓" : e.letra}</span>
+        <h2 className="text-[17px] font-bold leading-tight">{e.nome}</h2>
+        <span className="h-px flex-1" style={{ background: C.line }} />
+      </div>
+    );
+  };
 
   return (
-    <div className="min-h-screen w-full pb-24" style={{ background: C.bg, fontFamily: F.body, color: C.ink }}>
+    <div className="min-h-screen w-full pb-16" style={{ background: C.bg, fontFamily: F.body, color: C.ink }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Public+Sans:wght@400;500;600&family=Roboto+Mono:wght@500;700&display=swap');
         input:focus,textarea:focus,select:focus{border-color:${C.roxo}!important;box-shadow:0 0 0 3px ${C.roxoFraco}}
         .rolar::-webkit-scrollbar{height:0}
         @media (prefers-reduced-motion: reduce){*{transition:none!important}}
       `}</style>
 
-      {/* cabeçalho */}
-      <header className="px-4 pt-4 pb-3" style={{ background: C.roxo, color: "#fff" }}>
-        <div className="flex items-baseline justify-between">
-          <span className="text-[10px] uppercase tracking-[0.22em]" style={{ opacity: 0.7 }}>
-            {perfil ? `${perfil.nome} · ${papelRot(perfil.papel)}` : "Vaapty Joinville"}
-          </span>
-          {cota && (
-            <span className="text-[10px]" style={{ fontFamily: F.mono, opacity: cota.restantes <= 3 ? 1 : 0.7, color: cota.restantes <= 3 ? "#FFC9B4" : "#fff" }}>
-              {cota.usadas}/{cota.limiteDiario} consultas
-            </span>
-          )}
-        </div>
+      {/* O CABEÇALHO É UMA LINHA SÓ (24/10/2026). O Derek: *"tela de
+          atendimento muito poluída, com itens muito grandes"*. Eram
+          cinco faixas antes da primeira pergunta — nome do usuário,
+          carro, quinze pílulas de status, a linha do CRM e o trilho de
+          44 px. Agora o status é uma lista ao lado do carro e o trilho
+          são oito letras no mesmo cabeçalho, que fica preso no alto:
+          com as etapas numa página só, é ele que leva de uma à outra. */}
+      <div className="sticky top-0 z-30">
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2" style={{ background: C.roxo, color: "#fff" }}>
+        {aoVoltar && (
+          <button onClick={aoVoltar} title="Voltar aos atendimentos" className="shrink-0 rounded-md px-1.5 text-[18px] leading-none" style={{ color: "#fff" }}>‹</button>
+        )}
         {(() => {
           const vBanco = (atendimento && (atendimento.veiculo || [])[0]) || null;
           const titulo = f.modelo || (vBanco && vBanco.marca_modelo) ||
@@ -5186,52 +5227,77 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
           const ano = f.ano || (vBanco ? [vBanco.ano_fabricacao, vBanco.ano_modelo].filter(Boolean).join("/") : "");
           const fipe = f.fipe || (vBanco && vBanco.fipe_valor) || "";
           return (
-            <>
-              <h1 className="mt-1 text-[17px] leading-tight" style={{ fontFamily: F.disp, fontWeight: 800 }}>
-                {titulo}
-              </h1>
+            <div className="min-w-0">
+              <div className="flex min-w-0 items-baseline gap-2">
+                {atendimento && atendimento.cliente_nome && (
+                  <span className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.06em]" style={{ opacity: 0.8 }}>{atendimento.cliente_nome}</span>
+                )}
+                <h1 className="truncate text-[15px] leading-tight" style={{ fontFamily: F.disp, fontWeight: 800 }} title={titulo}>{titulo}</h1>
+              </div>
               {!!placa && (
-                <div className="mt-1 text-[11px]" style={{ fontFamily: F.mono, opacity: 0.85 }}>
+                <div className="text-[10.5px]" style={{ fontFamily: F.mono, opacity: 0.8 }}>
                   {placa}{ano ? ` · ${ano}` : ""}{fipe ? ` · FIPE ${brl(fipe)}` : ""}
                 </div>
               )}
-            </>
+            </div>
           );
         })()}
-        <div className="mt-2 flex items-center gap-3">
-          {aoVoltar && (
-            <button onClick={aoVoltar} className="text-[11px] font-semibold" style={{ color: "#fff" }}>‹ Atendimentos</button>
-          )}
-          {atendimento && atendimento.cliente_nome && (
-            <span className="text-[10px]" style={{ opacity: 0.75 }}>{atendimento.cliente_nome}</span>
-          )}
-          <button onClick={sair} className="ml-auto text-[10px] underline" style={{ color: "#fff", opacity: 0.7 }}>Sair</button>
-        </div>
-      </header>
+        {atendimento && (
+          <select value={statusAtual || ""} onChange={(e) => mudarStatus(e.target.value, true)} title="Status do atendimento"
+            className="shrink-0 rounded-full px-2.5 py-1 text-[12px] font-semibold outline-none"
+            style={{ background: corStatus(statusAtual) || "#fff", color: "#fff", border: "1.5px solid rgba(255,255,255,0.7)" }}>
+            {statusAtual && !STATUS_AT.some((x) => x[0] === statusAtual) && <option value={statusAtual}>{rotuloStatus(statusAtual)}</option>}
+            {!statusAtual && <option value="">status…</option>}
+            {STATUS_AT.map(([val, rot]) => <option key={val} value={val} style={{ color: C.ink, background: "#fff" }}>{rot}</option>)}
+          </select>
+        )}
 
-      {atendimento && (
-        <>
-          <StatusAtendimento valor={statusAtual} erro={erroStatus}
-            aoMudar={(novo) => mudarStatus(novo, true)} />
+        <nav className="flex items-center gap-1 lg:ml-auto" aria-label="Etapas do APONTE">
+          {ETAPAS.map((e) => {
+            const ok = etapaConcluida(e.id, f, enviadas);
+            const ativa = e.id === etapa;
+            return (
+              <button key={e.id} onClick={() => irPara(e.id)} title={e.nome}
+                className="grid h-7 w-7 place-items-center rounded-full text-[12px]"
+                style={{ background: ativa ? "#fff" : ok ? C.verde : "rgba(255,255,255,0.16)",
+                         color: ativa ? C.roxo : "#fff", fontFamily: F.disp, fontWeight: 800,
+                         outline: ativa && ok ? `2px solid ${C.verde}` : "none" }}>
+                {ok && !ativa ? "✓" : e.letra}
+              </button>
+            );
+          })}
+        </nav>
 
-          {/* A linha do CRM, para colar no Sheets.
-
-              Fica aqui, ao lado do status, e não no fim do trilho: o
-              negociador precisa dela quando lembra da planilha, e o
-              atendimento que não fecha nunca chega à última etapa —
-              seria justamente o que ninguém registraria. */}
-          <div className="mx-4 mt-2 flex items-center gap-2">
-            <button
-              onClick={() => copiar(linhaDoCRM(f, atendimento, statusAtual), "crm")}
-              className="rounded-md px-3 py-1.5 text-[12px] font-semibold"
-              style={{ border: `1px solid ${C.line}`, color: C.roxo, background: "#fff" }}>
-              {copiado === "crm" ? "✓ linha copiada — cole no Sheets" : "Copiar linha do CRM"}
+        <div className="ml-auto flex items-center gap-3 lg:ml-0">
+          {atendimento && (
+            <button onClick={() => copiar(linhaDoCRM(f, atendimento, statusAtual), "crm")}
+              title={`As ${COLUNAS_CRM.length} colunas da planilha, na ordem, para colar no Sheets`}
+              className="text-[11px] font-semibold" style={{ color: "#fff", opacity: copiado === "crm" ? 1 : 0.85 }}>
+              {copiado === "crm" ? "✓ copiada" : "Copiar linha do CRM"}
             </button>
-            <span className="text-[11px]" style={{ color: C.mute }}>
-              as {COLUNAS_CRM.length} colunas da planilha, na ordem
+          )}
+          {cota && (
+            <span className="text-[10px]" title="Consultas de placa de hoje" style={{ fontFamily: F.mono, opacity: cota.restantes <= 3 ? 1 : 0.7, color: cota.restantes <= 3 ? "#FFC9B4" : "#fff" }}>
+              {cota.usadas}/{cota.limiteDiario}
             </span>
-          </div>
-
+          )}
+          <button onClick={sair} className="text-[10.5px] underline" style={{ color: "#fff", opacity: 0.7 }}>Sair</button>
+        </div>
+        {erroStatus && <p className="w-full text-[11px]" style={{ color: "#FFC9B4" }}>{erroStatus}</p>}
+      </header>
+      <BarraEscuta escuta={escuta} />
+      {/* Ouvida ao vivo pelo gestor (0052). Fica ao lado da tarja do
+          microfone porque é a mesma classe de informação: o que está
+          saindo desta sala agora. */}
+      {ouvindoGestor && (
+        <div className="px-4 py-1.5 text-[11px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>
+          <span className="vp-pulso">●</span> O gerente está ouvindo esta conversa agora
+        </div>
+      )}
+      <BarraSinc sinc={sinc} />
+      </div>
+      {atendimento && (
+        <div className="mx-auto max-w-[1100px] px-4">
           {(statusAtual === "vai_voltar" || pedeVolta) && (
             <div className="mx-4 mt-2 flex flex-wrap items-center gap-2 rounded-lg px-3 py-2"
               style={{ background: voltaEm ? "#F0F8F4" : AMARELO.fundo,
@@ -5258,54 +5324,14 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               )}
             </div>
           )}
-        </>
-      )}
-
-      {/* trilho */}
-      <div className="rolar flex gap-1.5 overflow-x-auto px-3 py-3" style={{ background: C.paper, borderBottom: `1px solid ${C.line}` }}>
-        {ETAPAS.map((e) => {
-          const ok = etapaConcluida(e.id, f, enviadas);
-          const ativa = e.id === etapa;
-          return (
-            /* Onda 1: 36 px de círculo com rótulo de 9 px ficava abaixo
-               do alvo de toque confortável, e o nome da etapa não se
-               lia em pé. Passa a 44 px com rótulo de 11 px. */
-            <button key={e.id} onClick={() => setEtapa(e.id)} className="flex shrink-0 flex-col items-center gap-1.5" style={{ width: 66 }}>
-              <span className="flex h-11 w-11 items-center justify-center rounded-full text-[17px]"
-                style={{
-                  background: ativa ? C.roxo : ok ? C.verde : C.roxoFraco,
-                  color: ativa || ok ? "#fff" : C.roxo,
-                  fontFamily: F.disp, fontWeight: 800,
-                }}>
-                {ok && !ativa ? "✓" : e.letra}
-              </span>
-              <span className="text-center text-[11px] leading-tight" style={{ color: ativa ? C.roxo : C.mute, fontWeight: ativa ? 700 : 500 }}>
-                {e.curto}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
-      <BarraEscuta escuta={escuta} />
-      {/* Ouvida ao vivo pelo gestor (0052). Fica ao lado da tarja do
-          microfone porque é a mesma classe de informação: o que está
-          saindo desta sala agora. */}
-      {ouvindoGestor && (
-        <div className="px-4 py-1.5 text-[11px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>
-          <span className="vp-pulso">●</span> O gerente está ouvindo esta conversa agora
         </div>
       )}
-      <BarraSinc sinc={sinc} />
 
-      <div className="px-4 pt-4">
-        <h2 className="text-[16px] font-semibold leading-tight">{et.nome}</h2>
-      </div>
-
-      <div className="space-y-4 p-4">
+      <div className="mx-auto max-w-[1100px] space-y-4 p-4">
 
         {/* ---------- A ---------- */}
-        {etapa === "A" && (
+        {cabecaEtapa("A")}
+        {(
           <Bloco titulo="Chegada" sub="“Cliente não aguardou na loja” é o motivo de perda mais repetido no CRM. Combinar o tempo do processo agora é o que evita isso.">
             <div className="space-y-2.5">
               <Campo label="Negociador"><input className={inputCls} style={inputSty} value={f.negociador} onChange={(e) => set("negociador", e.target.value)} placeholder="Seu nome" /></Campo>
@@ -5324,7 +5350,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         {/* A autorização é pedida aqui, no primeiro contato, e vale
             para o atendimento inteiro. Pedir no meio da negociação
             seria pedir na pior hora possível. */}
-        {etapa === "A" && (
+        {(
           <Bloco titulo="Escutar a conversa"
             sub="Peça agora, no começo. Uma vez ligada, a escuta acompanha todas as etapas.">
             <EscutaControle escuta={escuta} f={f} setVarios={setVarios} />
@@ -5332,7 +5358,8 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         )}
 
         {/* ---------- P ---------- */}
-        {etapa === "P" && (
+        {cabecaEtapa("P")}
+        {(
           <>
             <Bloco titulo="O carro" sub="Digite a placa: vem marca, modelo, ano, cor, chassi e as versões FIPE.">
               <div className="flex gap-2">
@@ -5578,15 +5605,12 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               <Anexos atendimentoId={atendimento ? atendimento.id : null}
                 rotulos={["CRLV", "CNH", "Identidade"]} />
             </Bloco>
-
-            <Bloco titulo="Escutar a conversa" sub="É aqui que ele conta por que está vendendo. O cliente precisa autorizar antes — é a condição do parecer.">
-              <EscutaPainel escuta={escuta} f={f} set={set} atendimentoId={aid} />
-            </Bloco>
           </>
         )}
 
         {/* ---------- O ---------- */}
-        {etapa === "O" && (
+        {cabecaEtapa("O")}
+        {(
           <>
             <Bloco titulo="Mostre como funciona" sub="O cliente aceita um número menor quando entende de onde ele veio.">
               <div className="space-y-2.5">
@@ -5616,7 +5640,8 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         )}
 
         {/* ---------- PUB ---------- */}
-        {etapa === "PUB" && (
+        {cabecaEtapa("PUB")}
+        {(
           <>
             <div className="rounded-lg p-3" style={{ background: liberado ? "#E7F4EE" : "#FDEDE6", border: `1px solid ${liberado ? C.verde : C.laranja}` }}>
               <div className="text-[12px] font-semibold" style={{ color: liberado ? C.verde : C.laranja }}>
@@ -5974,7 +5999,8 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         )}
 
         {/* ---------- ESPERA ---------- */}
-        {etapa === "ESP" && (
+        {cabecaEtapa("ESP")}
+        {(
           <>
             <Bloco titulo="Enquanto as propostas chegam" sub="O carro está lançado e a rede está respondendo. Aqui não se registra nada — a primeira proposta que entra no sistema é o 1º extrato, na Negociação. Este é o tempo de conversa que decide o fechamento.">
               {restante == null ? (
@@ -5998,15 +6024,12 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               <textarea rows={5} className={inputCls} style={inputSty} value={f.notasEspera} onChange={(e) => set("notasEspera", e.target.value)}
                 placeholder="Precisa do dinheiro até sexta. Mulher não sabe da dívida. Já tentou vender há 2 meses…" />
             </Bloco>
-
-            <Bloco titulo="Escutar a conversa" sub="Transcreve o que for dito e destaca os ganchos. O cliente precisa autorizar antes — é a condição do parecer.">
-              <EscutaPainel escuta={escuta} f={f} set={set} atendimentoId={aid} />
-            </Bloco>
           </>
         )}
 
         {/* ---------- N ---------- */}
-        {etapa === "N" && (() => {
+        {cabecaEtapa("N")}
+        {(() => {
           /* O caminho é uma fila só, e a tela mostra um passo de cada
              vez: extrato 1 → contra 1 → 5 min → extrato 2 → contra 2 →
              5 min → extrato 3 → pré-contrato. Antes disso tudo
@@ -6144,7 +6167,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                   style={{ background: podeImprimir ? C.roxo : "#E7E3EC", color: podeImprimir ? "#fff" : C.mute }}>
                   {podeImprimir ? "Imprimir o pré-contrato" : "Pré-contrato — complete o cliente na Pesquisa"}
                 </button>
-                <button onClick={() => setEtapa("T")}
+                <button onClick={() => irPara("T")}
                   className="mt-2 w-full rounded-md border py-2.5 text-[13px] font-semibold"
                   style={{ borderColor: C.roxo, color: C.roxo }}>
                   Ir para o Tome a iniciativa
@@ -6208,7 +6231,8 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         })()}
 
         {/* ---------- T ---------- */}
-        {etapa === "T" && (
+        {cabecaEtapa("T")}
+        {(
           <>
             {/* A etapa tem quatro passos e uma ordem que não é
                 negociável — o contrato é o último porque antes do laudo
@@ -6689,7 +6713,8 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         )}
 
         {/* ---------- E ---------- */}
-        {etapa === "E" && (
+        {cabecaEtapa("E")}
+        {(
           <>
             <Bloco titulo="Avaliação no Google" sub="Mostre o QR para o cliente ler na hora, ainda na loja. Avaliação pedida depois, por mensagem, quase nunca sai.">
               <div className="flex flex-col items-center">
@@ -6823,7 +6848,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         <>
           <button onClick={() => { setChatAberto(true); setRecados(0); }}
             className="fixed right-4 grid h-12 w-12 place-items-center rounded-full text-[18px]"
-            style={{ bottom: 76, background: recados ? C.laranja : C.paper, color: recados ? "#fff" : C.roxo,
+            style={{ bottom: 20, background: recados ? C.laranja : C.paper, color: recados ? "#fff" : C.roxo,
                      border: `1px solid ${recados ? C.laranja : C.line}`, boxShadow: "0 2px 10px rgba(24,18,33,0.14)", zIndex: 40 }}
             title="Recados do gestor">
             {recados ? recados : "\u2709"}
@@ -6844,51 +6869,10 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         </>
       )}
 
-      {/* navegação */}
-      <div className="fixed bottom-0 left-0 right-0 flex gap-2 px-4 py-3" style={{ background: C.paper, borderTop: `1px solid ${C.line}` }}>
-        <button onClick={() => idx > 0 && setEtapa(ETAPAS[idx - 1].id)} disabled={idx === 0}
-          className="rounded-md border px-4 py-2.5 text-[13px] font-semibold" style={{ borderColor: C.line, color: idx === 0 ? C.line : C.mute }}>
-          Voltar
-        </button>
-        <button onClick={() => idx < ETAPAS.length - 1 && setEtapa(ETAPAS[idx + 1].id)} disabled={idx === ETAPAS.length - 1}
-          className="flex-1 rounded-md py-2.5 text-[13px] font-semibold"
-          style={{ background: idx === ETAPAS.length - 1 ? C.line : C.roxo, color: "#fff" }}>
-          {idx === ETAPAS.length - 1 ? "Fim do atendimento" : `Ir para ${ETAPAS[idx + 1].curto}`}
-        </button>
-      </div>
     </div>
   );
 }
 
-
-/**
- * O status é o que faz a lista do CRM valer. Sem isto tudo fica
- * "aberto" para sempre e o funil não conta nada.
- */
-function StatusAtendimento({ valor, aoMudar, erro }) {
-  const legado = valor && !STATUS_AT.some((x) => x[0] === valor);
-  return (
-    <div className="px-4 pt-3">
-      <div className="rolar flex gap-1.5 overflow-x-auto">
-        {legado && (
-          <span className="shrink-0 rounded-full px-3 py-1.5 text-[11px]"
-            style={{ background: "#8A8394", color: "#fff", border: "1px solid #8A8394" }}>
-            {rotuloStatus(valor)}
-          </span>
-        )}
-        {STATUS_AT.map(([val, rot]) => (
-          <button key={val} onClick={() => aoMudar(val)}
-            className="shrink-0 rounded-full px-3 py-1.5 text-[11px]"
-            style={{ background: valor === val ? corStatus(val) : "#fff", color: valor === val ? "#fff" : C.mute,
-                     border: `1px solid ${valor === val ? corStatus(val) : C.line}` }}>
-            {rot}
-          </button>
-        ))}
-      </div>
-      {erro && <p className="mt-1 text-[11px]" style={{ color: C.laranja }}>{erro}</p>}
-    </div>
-  );
-}
 
 /* ===================== check list digital ===================== */
 

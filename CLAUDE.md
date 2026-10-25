@@ -1122,7 +1122,9 @@ O aceite e o botão do microfone ficam na **Abordagem** — é onde se
 pede, e pedir no meio da negociação seria pedir na pior hora. Uma tarja
 laranja no alto, fora das etapas, mostra que está escutando e há quanto
 tempo: é o que impede a escuta de rodar esquecida. Os sinais e a
-transcrição aparecem na Pesquisa, na Espera e na Negociação.
+transcrição aparecem na Negociação — eram três painéis iguais (Pesquisa,
+Espera, Negociação) enquanto as etapas eram abas; com elas numa página
+só (decisão 24), ficou um.
 
 ### 18. Leads de indicação: eles morriam no aparelho
 
@@ -3429,6 +3431,19 @@ mora no efeito, que é onde `await` cabe.
 **O atendimento aberto (`VaaptyAponte`) fica fora da casca**, de
 propósito: é um fluxo guiado de oito etapas com trilho próprio, e a
 barra inferior competiria com o trilho pelo polegar.
+
+**E desde 24/10/2026 as oito etapas são UMA PÁGINA, uma embaixo da
+outra** (o Derek: *"ao invés de abas, como se fosse uma landing page"*),
+com um cabeçalho de uma linha preso no alto: voltar, cliente, carro, o
+status numa lista e as oito letras do APONTE, que levam à seção. Antes
+eram cinco faixas — quinze pílulas de status, a linha do CRM, um
+trilho de 44 px — e a primeira pergunta ficava abaixo da dobra. A
+etapa "atual" é a que está à vista (é o que vai ao painel do gestor);
+o "Voltar / Ir para" do rodapé saiu, porque rolar é o caminho. **Todas
+as etapas ficam montadas**: componente de etapa que consulte algo ao
+montar passa a consultar ao abrir o atendimento — o desvalorizômetro,
+que aparece duas vezes, faz uma ida só (`consultarDesvalorizacao`
+guarda a promessa por chave).
 
 **As fontes nomeadas nunca foram carregadas.** `F` citava Archivo,
 Public Sans e Roboto Mono, mas não havia `<link>` — cada aparelho caía
