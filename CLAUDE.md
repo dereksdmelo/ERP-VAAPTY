@@ -546,7 +546,13 @@ canal a menos — e agora seria pior ainda, porque travaria a etapa. O
 iCarros, aliás, **ignora `?q=`** e cai na home genérica. **Quem mexer
 aqui confere o resultado antes de publicar.**
 
-**A etapa P só fecha depois de abrir todos os canais.** É regra de
+**Desde 24/10/2026 basta abrir UM canal** (o Derek: *"abrir qualquer
+item da pesquisa de mercado deve deixar ficar verde"*) — `mercadoVisto`.
+O contador continua, e o título de cada etapa diz o que falta
+(`faltaNaEtapa`, que precisa concordar com `etapaConcluida`). O que
+vem abaixo é a regra de antes, e vale pelo raciocínio dos canais.
+
+**A etapa P só fechava depois de abrir todos os canais.** É regra de
 processo pedida pela casa: o negociador tem que ter visto o preço
 anunciado antes de sentar. `faltamCanais()` conta só os canais que
 **têm endereço** para o carro em questão — exigir clique em link

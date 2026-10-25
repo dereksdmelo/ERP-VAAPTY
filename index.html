@@ -1488,6 +1488,12 @@ function canaisPossiveis(f) {
   const [ma, mo] = marcaModeloDa(f);
   return CANAIS.filter((c) => !!enderecoCanal(c, "x", ma, mo)).map((c) => c.chave);
 }
+/* ABRIR UM CANAL BASTA (24/10/2026, o Derek: "abrir qualquer item da
+ * pesquisa de mercado deve deixar ficar verde"). A regra era abrir
+ * TODOS; o contador x/7 continua, mas é informação, não trava. */
+function mercadoVisto(f) {
+  return (f.canaisVistos || []).length > 0 || canaisPossiveis(f).length === 0;
+}
 function faltamCanais(f) {
   const vistos = f.canaisVistos || [];
   return canaisPossiveis(f).filter((c) => vistos.indexOf(c) < 0);
@@ -2103,6 +2109,26 @@ const ETAPAS = [
   { id: "E", letra: "E", nome: "Estenda o relacionamento", curto: "Relacionamento" },
 ];
 
+/* O QUE FALTA para a etapa ficar verde, com as palavras da tela. Sem
+ * isto a letra ficava cinza e ninguém sabia por quê — o Derek abriu os
+ * sete canais e a Pesquisa continuou sem ✓, porque faltava a pretensão.
+ * Tem que dizer o mesmo que `etapaConcluida`: quem mexer numa mexe na
+ * outra. */
+function faltaNaEtapa(id, f, fotos) {
+  const l = [];
+  switch (id) {
+    case "A": if (!f.chegada) l.push("hora de chegada"); if (!f.tempoCombinado) l.push("combinar o tempo"); break;
+    case "P": if (!f.motivo) l.push("motivo"); if (!f.pretensao) l.push("pretensão"); if (!f.decisorPresente) l.push("decisor na loja"); if (!mercadoVisto(f)) l.push("abrir um canal de mercado"); break;
+    case "O": if (!f.mostrouProcesso) l.push("ir até a última página"); if (!f.mostrouTestemunhal) l.push("mostrar avaliações"); break;
+    case "PUB": if (faltando(f, fotos).length) l.push("completar a ficha"); if (!(f.publicado || f.shinkaiEm)) l.push("enviar ao Shinkai"); break;
+    case "ESP": if (!f.esperaIniciadaEm) l.push("iniciar os 15 minutos"); break;
+    case "N": if (!f.rodadas.length) l.push("imprimir o 1º extrato"); break;
+    case "T": if (!f.aceiteFinal) l.push("aceite final"); if (!f.valorFechado) l.push("valor fechado"); break;
+    case "E": if (!(f.avaliacaoGoogle || f.indicacoes.length)) l.push("avaliação no Google ou uma indicação"); break;
+  }
+  return l;
+}
+
 function etapaConcluida(id, f, fotos) {
   switch (id) {
     // "Carro subiu pro pátio" saiu a pedido do Derek em 14/09/2026: o
@@ -2110,7 +2136,7 @@ function etapaConcluida(id, f, fotos) {
     // de o cliente ter chegado. Cobrar o toque atrasava a etapa sem
     // registrar nada que já não estivesse na hora de chegada.
     case "A": return !!f.chegada && f.tempoCombinado;
-    case "P": return !!f.motivo && !!f.pretensao && f.decisorPresente && faltamCanais(f).length === 0;
+    case "P": return !!f.motivo && !!f.pretensao && f.decisorPresente && mercadoVisto(f);
     case "O": return f.mostrouProcesso && f.mostrouTestemunhal;
     case "PUB": return faltando(f, fotos).length === 0 && (f.publicado || !!f.shinkaiEm);
     case "ESP": return !!f.esperaIniciadaEm;
@@ -5211,6 +5237,8 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[13px]"
           style={{ background: ok ? C.verde : C.roxo, color: "#fff", fontFamily: F.disp, fontWeight: 800 }}>{ok ? "✓" : e.letra}</span>
         <h2 className="text-[16px] font-bold leading-tight">{e.nome}</h2>
+        {!ok && (() => { const fl = faltaNaEtapa(id, f, enviadas); return fl.length
+          ? <span className="text-[11.5px]" style={{ color: C.mute }}>falta: {fl.join(" · ")}</span> : null; })()}
         <span className="h-px flex-1" style={{ background: C.line }} />
       </div>
     );
@@ -5495,7 +5523,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 };
 
                 return (
-                  <div className="mt-3 rounded-md p-3" style={{ background: "#FBFAFC", border: `1px solid ${faltam.length ? C.laranja : C.verde}` }}>
+                  <div className="mt-3 rounded-md p-3" style={{ background: mercadoVisto(f) ? "#F0F8F4" : "#FBFAFC", border: `1px solid ${mercadoVisto(f) ? C.verde : C.laranja}` }}>
                     <div className="flex items-baseline justify-between gap-2">
                       <span className="text-[10px] uppercase tracking-[0.13em]" style={{ color: C.mute }}>
                         Pesquisa de mercado
