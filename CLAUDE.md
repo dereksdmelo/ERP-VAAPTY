@@ -666,10 +666,16 @@ grave que recusar o atendimento.** `idDePerfil()` confere no servidor
 nos três caminhos (POST, PATCH e o "chegou" do lead), porque a tela
 acertar é conveniência, não controle.
 
-Quem quiser o vínculo de volta para todo mundo: falta uma coluna
-`perfil_id` em `negociador`, ligando cadastro e login — a mesma forma
-do `shinkai_nome` (0044), onde a tradução entre dois mundos virou
-cadastro em vez de adivinhação.
+**O vínculo entre cadastro e login existe: `negociador.perfil_id`**
+(estava na 0010 e nunca foi preenchido). Desde 24/10/2026 a tela de
+Equipe o usa: cada pessoa é UMA ficha — acesso e meta juntos —, num
+organograma por setor (Gestão em cima; Administrativo, Suporte a
+vendas e Vendas embaixo; `QuadroEquipe`, `CartaoPessoa`). Pedido do
+Derek: *"a equipe com as metas e os acessos deve ser a mesma coisa…
+cada colaborador no seu quadrado"*. **Nome igual não liga sozinho**:
+a ficha aparece junta com "mesmo nome — ligar o login à meta", e a
+ligação só vale com o clique — a mesma régua do `shinkai_nome` (0044),
+onde a tradução entre dois mundos virou cadastro em vez de adivinhação.
 
 **PATCH que volta vazio é RLS, não erro.** A política deixa qualquer um
 da equipe *ler* todo atendimento, mas só o dono (ou o gerente)

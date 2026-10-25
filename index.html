@@ -11073,7 +11073,7 @@ function CartaoNegociador({ n, equipe, loja, metaLoja, desempenho, podeEditar, a
   );
 }
 
-function CadastroNegociadores({ perfil, competencia, aoMudarMetaLoja }) {
+function CadastroNegociadores({ perfil, competencia, aoMudarMetaLoja, so, aoMudarLista }) {
   const [lista, setLista] = useState([]);
   const [novo, setNovo] = useState({ nome: "", papel: "negociador" });
   const [erro, setErro] = useState("");
@@ -11083,7 +11083,7 @@ function CadastroNegociadores({ perfil, competencia, aoMudarMetaLoja }) {
   const [lojaSalvo, setLojaSalvo] = useState("");
   const eGerente = perfil && perfil.papel === "gerente";
 
-  const carregar = () => listarNegociadores().then(setLista).catch((e) => setErro(e.message));
+  const carregar = () => listarNegociadores().then((l) => { setLista(l); if (aoMudarLista) aoMudarLista(l); }).catch((e) => setErro(e.message));
   useEffect(() => { carregar(); }, []);
 
   // A meta da loja é por mês: seguir o seletor do painel é o que
@@ -11307,8 +11307,9 @@ function CadastroNegociadores({ perfil, competencia, aoMudarMetaLoja }) {
         </p>
       </div>
 
-      {grupo("negociador", "Negociadores")}
-      {grupo("prospeccao", "Pré-vendas · prospecção")}
+      {/* Na tela de Equipe (`so="loja"`) as pessoas moram no organograma. */}
+      {so !== "loja" && grupo("negociador", "Negociadores")}
+      {so !== "loja" && grupo("prospeccao", "Pré-vendas · prospecção")}
 
       {eGerente && (
         <div className="mt-3 space-y-2">
@@ -20947,7 +20948,7 @@ function destinosPara(perfil) {
     gerente ? { id: "gestor", rot: "Painel do gestor", curto: "Gestor", area: "gestao" } : null,
     { id: "painel", rot: "Painel do mês", curto: "Painel", area: "gestao" },
     gestao ? { id: "rentabilidade", rot: "Rentabilidade", curto: "Rentab.", area: "gestao" } : null,
-    gerente ? { id: "gestao", rot: "Equipe e metas", curto: "Equipe", area: "gestao" } : null,
+    gerente ? { id: "gestao", rot: "Equipe", curto: "Equipe", area: "gestao" } : null,
     // Área restrita: só quem tem o sinalizador no perfil (0021). A tela
     // esconde o destino; quem protege de verdade é a RLS.
 
@@ -22865,21 +22866,273 @@ function PontoTreino({ n, p, nome, ocupado, aoRedigir, aoAvaliar }) {
   );
 }
 
+/* A EQUIPE NUM QUADRO SÓ (24/10/2026, o Derek: *"a equipe com as metas e
+ * os acessos deve ser a mesma coisa… separando gestão, adm e suporte a
+ * vendas… cada colaborador no seu quadrado, bem organizado, talvez até um
+ * organograma"*).
+ *
+ * Eram duas listas da mesma gente: o cadastro de metas (`negociador`,
+ * 0010) e quem entra no sistema (`perfil`, 0004) — com nomes escritos
+ * de um jeito em cada uma, e nada ligando as duas na tela. Agora cada
+ * pessoa é UMA ficha, no setor dela.
+ *
+ * **O elo é `negociador.perfil_id`**, que existe desde a 0010 e nunca foi
+ * preenchido (decisão 10). Nome igual não liga sozinho — a decisão 10 e
+ * a 44 já mostraram o estrago de casar gente por nome —: a ficha aparece
+ * junta com "mesmo nome — ligar", e a ligação só vale com o clique. */
+const SETORES = [
+  ["gestao", "Gestão", "quem decide e mede"],
+  ["adm", "Administrativo", "papel, cartório e financeiro"],
+  ["suporte", "Suporte a vendas", "pré-venda: traz o cliente"],
+  ["vendas", "Vendas", "negociação: compra o carro"],
+];
+const CARGO = { gerente: "Gerente", prep: "Administrativo", pre_venda: "Pré-venda", negociador: "Negociador" };
+const nomeChave = (t) => String(t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/\s+/g, " ").trim();
+const setorDe = (pe) => {
+  const a = pe.acesso, n = pe.neg;
+  if (a && a.papel === "gerente") return "gestao";
+  if (a && a.papel === "prep") return "adm";
+  if ((a && a.papel === "pre_venda") || (n && n.papel === "prospeccao")) return "suporte";
+  if (a && !n && a.papel !== "negociador" && (a.administrativo || a.financeiro)) return "adm";
+  return "vendas";
+};
+
+function CartaoPessoa({ pe, eGerente, eu, mexerAcesso, mexerNeg, gerarSenha, gerando, senha, fecharSenha, ligar, criarMeta }) {
+  const [aberto, setAberto] = useState(false);
+  const a = pe.acesso, n = pe.neg;
+  const nome = (a && a.nome) || (n && n.nome) || "—";
+  const estado = !a ? ["sem login", C.mute, C.bg] : a.ativo ? ["entra", C.verde, "#E6F4EC"] : ["sem acesso", C.laranja, "#FDECE4"];
+  const pre = n && n.papel === "prospeccao";
+  const meta = !n ? "" : pre ? `${n.meta_comparecimentos || 0} na loja · ${n.meta_agendamentos || 0} agend.` : `${brl(n.meta_valor)} · ${n.meta_volume} carros`;
+  const marca = (campo, rot) => (
+    <label className="flex items-center gap-1 text-[11.5px]" style={{ color: C.mute }}>
+      <input type="checkbox" checked={!!a[campo]} disabled={!eGerente}
+        onChange={(e) => mexerAcesso(a, campo === "ativo" ? { ativo: e.target.checked } : { [campo]: e.target.checked })} /> {rot}
+    </label>
+  );
+  const campoMeta = (chave, rot, larg) => (
+    <label style={{ width: larg, flex: `0 0 ${larg}px` }}>
+      <span className="block text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>{rot}</span>
+      <input className="mt-[2px] w-full rounded-md border px-2 py-1 text-right text-[12px] outline-none" style={{ ...inputSty, fontFamily: F.mono }}
+        inputMode="decimal" defaultValue={n[chave] == null || Number(n[chave]) === 0 ? "" : n[chave]}
+        onBlur={(e) => {
+          const antes = Number(n[chave]) || 0;
+          const agora = Number(String(e.target.value).replace(/\./g, "").replace(",", ".")) || 0;
+          if (agora !== antes) mexerNeg(n, { [chave]: e.target.value });
+        }} />
+    </label>
+  );
+  const apagada = (!a || !a.ativo) && (!n || !n.ativo);
+  return (
+    <div className="rounded-lg p-2.5" style={{ background: "#fff", border: `1px solid ${a && !a.ativo ? C.laranja : C.line}`, opacity: apagada ? 0.6 : 1 }}>
+      <div className="flex items-center gap-2.5">
+        <Avatar nome={nome} tam={34} />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[13.5px] font-semibold" title={nome}>{nome}{eu ? <span className="ml-1 text-[11px] font-normal" style={{ color: C.mute }}>· você</span> : null}</div>
+          <div className="truncate text-[11.5px]" style={{ color: C.mute }}>
+            {(a && CARGO[a.papel]) || (pre ? "Pré-venda" : "Negociador")}{meta ? ` · ${meta}` : ""}
+          </div>
+        </div>
+        <span className="shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-semibold" style={{ background: estado[2], color: estado[1] }}>{estado[0]}</span>
+      </div>
+
+      {pe.sugestao && eGerente && (
+        <button onClick={() => ligar(pe)} className="mt-2 w-full rounded-md px-2 py-1 text-left text-[11.5px]" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
+          Mesmo nome que o cadastro de metas — <b>ligar o login à meta</b>
+        </button>
+      )}
+
+      {eGerente && (
+        <div className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+          {a ? (
+            <>
+              <select className="rounded-md border px-1.5 py-0.5 text-[11.5px] outline-none" style={inputSty}
+                value={a.papel} onChange={(e) => mexerAcesso(a, e.target.value === "prep" ? { papel: "prep", administrativo: true } : { papel: e.target.value })}>
+                {[["negociador", "Negociador"], ["pre_venda", "Pré-venda"], ["prep", "Adm"], ["gerente", "Gerente"]].map(([v, r]) => <option key={v} value={v}>{r}</option>)}
+              </select>
+              {marca("ativo", "entra")}
+              {marca("administrativo", "adm")}
+              {marca("financeiro", "financeiro")}
+              {!eu && (
+                <button onClick={() => gerarSenha(a)} disabled={gerando === a.id} className="text-[11.5px] font-semibold" style={{ color: gerando === a.id ? C.mute : C.roxo }}>
+                  {gerando === a.id ? "gerando…" : "gerar senha"}
+                </button>
+              )}
+              {a.senha_provisoria && <span className="rounded px-1.5 text-[10.5px] font-semibold" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>senha provisória</span>}
+            </>
+          ) : (
+            <span className="text-[11.5px]" style={{ color: C.mute }}>Sem login — a pessoa cria a conta na tela de entrada.</span>
+          )}
+          {n ? (
+            <button onClick={() => setAberto(!aberto)} className="ml-auto text-[11.5px] font-semibold" style={{ color: C.roxo }}>metas {aberto ? "▴" : "▾"}</button>
+          ) : (a && a.papel !== "gerente" && a.papel !== "prep" && (
+            <button onClick={() => criarMeta(pe)} className="ml-auto text-[11.5px] font-semibold" style={{ color: C.roxo }}>criar meta</button>
+          ))}
+        </div>
+      )}
+
+      {senha && (
+        <div className="mt-2 rounded-md px-2.5 py-2" style={{ background: "#F0F8F4", border: `1px solid ${C.verde}` }}>
+          <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.verde }}>Senha nova — aparece uma vez só</div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-3">
+            <span className="text-[18px]" style={{ fontFamily: F.mono, fontWeight: 700, letterSpacing: "0.06em" }}>{senha}</span>
+            <button onClick={() => { try { navigator.clipboard.writeText(senha); } catch (e) {} }} className="text-[12px] font-semibold" style={{ color: C.roxo }}>copiar</button>
+            <button onClick={fecharSenha} className="text-[12px]" style={{ color: C.mute }}>fechar</button>
+          </div>
+        </div>
+      )}
+
+      {aberto && n && eGerente && (
+        <div className="mt-2 border-t pt-2" style={{ borderColor: C.line }}>
+          {/* A meta é o que a pessoa controla; o resultado vem do servidor (0018, 0037). */}
+          <div className="flex flex-wrap items-end gap-1.5">
+            {pre ? (
+              <>{campoMeta("meta_prospeccoes", "Prospec.", 66)}<span className="pb-1.5 text-[11px]" style={{ color: C.mute }}>×</span>
+                {campoMeta("meta_conv_agendamento", "→ agend. %", 72)}<span className="pb-1.5 text-[11px]" style={{ color: C.mute }}>×</span>
+                {campoMeta("meta_conv_comparecimento", "→ veio %", 66)}</>
+            ) : (
+              <>{campoMeta("meta_atendimentos", "Atend.", 58)}<span className="pb-1.5 text-[11px]" style={{ color: C.mute }}>×</span>
+                {campoMeta("meta_conversao", "Conv. %", 58)}<span className="pb-1.5 text-[11px]" style={{ color: C.mute }}>×</span>
+                {campoMeta("meta_ticket", "Ticket R$", 84)}</>
+            )}
+          </div>
+          {!pre && (
+            <label className="mt-1.5 block">
+              <span className="block text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Nome no Shinkai</span>
+              <input className="mt-[2px] w-full rounded-md border px-2 py-1 text-[12px] outline-none" style={inputSty} defaultValue={n.shinkai_nome || ""}
+                placeholder={`vazio usa "${n.nome}"`}
+                onBlur={(e) => { const v = e.target.value.trim(); if (v !== (n.shinkai_nome || "")) mexerNeg(n, { shinkai_nome: v }); }} />
+            </label>
+          )}
+          <button onClick={() => mexerNeg(n, { ativo: !n.ativo })} className="mt-1.5 text-[11px]" style={{ color: n.ativo ? C.laranja : C.verde }}>
+            {n.ativo ? "tirar da meta da loja" : "voltar para a meta"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function QuadroEquipe({ perfil, negs, recarregarNegs }) {
+  const [acessos, setAcessos] = useState(null);
+  const [erro, setErro] = useState("");
+  const [gerando, setGerando] = useState("");
+  const [senha, setSenha] = useState(null);
+  const [verInativos, setVerInativos] = useState(false);
+  const eGerente = !!(perfil && perfil.papel === "gerente");
+  const carregar = () => listarAcessos().then(setAcessos).catch((e) => { setAcessos([]); setErro(e.message); });
+  useEffect(() => { carregar(); }, []);
+
+  const mexerAcesso = async (a, mud) => {
+    setErro(""); setAcessos((ls) => (ls || []).map((x) => (x.id === a.id ? { ...x, ...mud } : x)));
+    try { await atualizarAcesso(a.id, mud); carregar(); } catch (e) { setErro(e.message); carregar(); }
+  };
+  const mexerNeg = async (n, mud) => {
+    setErro("");
+    try { await atualizarNegociador(n.id, mud); recarregarNegs(); } catch (e) { setErro(e.message); }
+  };
+  const gerarSenha = async (a) => {
+    if (!window.confirm(`Gerar uma senha nova para ${a.nome}? A senha atual para de valer na hora.`)) return;
+    setGerando(a.id); setErro(""); setSenha(null);
+    try { setSenha({ id: a.id, senha: await gerarSenhaPara(a.id) }); carregar(); } catch (e) { setErro(e.message); }
+    setGerando("");
+  };
+  const ligar = (pe) => mexerNeg(pe.sugestao, { perfil_id: pe.acesso.id });
+  const criarMeta = async (pe) => {
+    setErro("");
+    try { await criarNegociador({ nome: pe.acesso.nome, papel: pe.acesso.papel === "pre_venda" ? "prospeccao" : "negociador", perfil_id: pe.acesso.id }); recarregarNegs(); }
+    catch (e) { setErro(e.message); }
+  };
+
+  if (acessos === null) return <p className="text-[13px]" style={{ color: C.mute }}>Carregando a equipe…</p>;
+
+  // Uma ficha por pessoa: o login e, ligado a ele, o cadastro de metas.
+  const usados = {};
+  const pessoas = acessos.map((a) => {
+    let n = (negs || []).filter((x) => x.perfil_id === a.id)[0] || null;
+    let sugestao = null;
+    if (!n) {
+      sugestao = (negs || []).filter((x) => !x.perfil_id && nomeChave(x.nome) === nomeChave(a.nome))[0] || null;
+      n = sugestao;
+    }
+    if (n) usados[n.id] = true;
+    return { chave: a.id, acesso: a, neg: n, sugestao };
+  });
+  (negs || []).forEach((n) => { if (!usados[n.id]) pessoas.push({ chave: n.id, acesso: null, neg: n, sugestao: null }); });
+  const inativa = (pe) => (!pe.acesso || !pe.acesso.ativo) && (!pe.neg || !pe.neg.ativo) && !(pe.acesso && !pe.acesso.ativo && !pe.neg);
+  const ativas = pessoas.filter((pe) => !inativa(pe));
+  const inativas = pessoas.filter(inativa);
+  const doSetor = (k) => ativas.filter((pe) => setorDe(pe) === k).sort((x, y) => nomeChave((x.acesso || x.neg).nome).localeCompare(nomeChave((y.acesso || y.neg).nome)));
+  const esperando = acessos.filter((a) => !a.ativo).length;
+
+  const cartao = (pe) => (
+    <CartaoPessoa key={pe.chave} pe={pe} eGerente={eGerente} eu={pe.acesso && perfil && pe.acesso.id === perfil.id}
+      mexerAcesso={mexerAcesso} mexerNeg={mexerNeg} gerarSenha={gerarSenha} gerando={gerando}
+      senha={senha && pe.acesso && senha.id === pe.acesso.id ? senha.senha : null} fecharSenha={() => setSenha(null)}
+      ligar={ligar} criarMeta={criarMeta} />
+  );
+  const coluna = ([k, rot, sub], grade) => {
+    const gente = doSetor(k);
+    return (
+      <div key={k} className="min-w-0 rounded-xl p-2.5" style={{ background: "#F6F4F8", border: `1px solid ${C.line}` }}>
+        <div className="mb-2 flex items-baseline justify-between gap-2 px-0.5">
+          <span className="text-[12px] font-bold uppercase tracking-[0.08em]" style={{ color: C.ink }}>{rot} <span style={{ color: C.mute, fontWeight: 600 }}>· {gente.length}</span></span>
+          <span className="truncate text-[11px]" style={{ color: C.mute }}>{sub}</span>
+        </div>
+        <div className={`grid gap-2 ${grade || ""}`}>
+          {gente.length ? gente.map(cartao) : <p className="px-1 py-2 text-[12px]" style={{ color: C.mute }}>Ninguém aqui ainda.</p>}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      {erro && <p className="mb-2 text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
+      {esperando > 0 && (
+        <p className="mb-2 rounded-lg px-3 py-1.5 text-[12px]" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
+          {esperando} conta{esperando > 1 ? "s" : ""} sem acesso (borda laranja). Marque <b>entra</b> para liberar.
+        </p>
+      )}
+      {/* O ORGANOGRAMA: a gestão em cima, os três setores embaixo. */}
+      <div className="mx-auto max-w-[760px]">{coluna(SETORES[0], "sm:grid-cols-2")}</div>
+      <div className="mx-auto h-3 w-px" style={{ background: C.line }} />
+      <div className="grid gap-3 xl:grid-cols-[1fr_1fr_1.6fr]">
+        {coluna(SETORES[1])}
+        {coluna(SETORES[2])}
+        {coluna(SETORES[3], "2xl:grid-cols-2")}
+      </div>
+      {!!inativas.length && (
+        <div className="mt-3">
+          <button onClick={() => setVerInativos(!verInativos)} className="text-[12px] font-semibold" style={{ color: C.mute }}>
+            {verInativos ? "▾" : "▸"} {inativas.length} fora da equipe (sem acesso e fora da meta)
+          </button>
+          {verInativos && <div className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">{inativas.map(cartao)}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Equipe, metas e importação — o que era a sanfona da gestão. */
 function TelaGestao({ perfil, comp }) {
   const [importando, setImportando] = useState(false);
+  // O cadastro de metas é lido aqui e dividido entre o organograma e o
+  // bloco da meta da loja; quem cadastra alguém novo lá faz o quadro reler.
+  const [negs, setNegs] = useState([]);
+  const [versaoNegs, setVersaoNegs] = useState(0);
+  const recarregarNegs = () => listarNegociadores().then(setNegs).catch(() => {});
+  useEffect(() => { recarregarNegs(); }, []);
   return (
     <div>
-      <Cabecalho titulo="Equipe e metas"
-        sub="Quem vende, a meta de cada um e a meta da loja no mês." />
-      <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-        <Bloco titulo="Negociadores">
-          <CadastroNegociadores perfil={perfil} competencia={comp || competenciaDe(hojeEmSP())} />
+      <Cabecalho titulo="Equipe"
+        sub="Cada pessoa no seu setor: o acesso ao sistema e a meta, numa ficha só." />
+      <QuadroEquipe perfil={perfil} negs={negs} recarregarNegs={recarregarNegs} />
+      <div className="mt-4 grid gap-4 lg:grid-cols-3">
+        <Bloco titulo="Meta da loja e gente nova" sub="A meta do mês e o cadastro de quem ainda não tem login.">
+          <CadastroNegociadores perfil={perfil} competencia={comp || competenciaDe(hojeEmSP())} so="loja" aoMudarLista={setNegs} key={versaoNegs} />
         </Bloco>
-        <div className="space-y-4">
-          <Bloco titulo="Quem entra no sistema" sub="Conta nova nasce desativada. Libere aqui.">
-            <Acessos perfil={perfil} />
-          </Bloco>
+        <div className="contents">
           <Bloco titulo="Horários da loja e IA" sub="O que o agendador oferece e como a IA de atendimento se apresenta.">
             <ConfigLoja />
           </Bloco>

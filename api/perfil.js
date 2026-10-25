@@ -178,7 +178,9 @@ async function negociadores(req, res, tok) {
   };
 
   if (req.method === "GET") {
-    const r = await fetch(`${base}?select=id,nome,papel,ativo,shinkai_nome,meta_valor,meta_volume,` +
+    // `perfil_id` liga o cadastro ao login da pessoa (0010), e é o que
+    // deixa a tela de Equipe mostrar meta e acesso numa ficha só.
+    const r = await fetch(`${base}?select=id,nome,papel,ativo,shinkai_nome,perfil_id,meta_valor,meta_volume,` +
       `meta_agendamentos,meta_comparecimentos,` +
       `${CAMPOS_META.concat(CAMPOS_META_PRE).join(",")}&order=papel.asc,nome.asc`, { headers: cab });
     const d = await responder(r);
@@ -197,6 +199,7 @@ async function negociadores(req, res, tok) {
     // normal: só precisa de tradução quem o nome daqui não encontra do
     // lado de lá.
     if (c.shinkai_nome !== undefined) linha.shinkai_nome = texto(c.shinkai_nome);
+    if (c.perfil_id !== undefined) linha.perfil_id = RX_UUID.test(String(c.perfil_id || "")) ? c.perfil_id : null;
     // meta_valor e meta_volume não são aceitos do cliente: são
     // derivados dos três campos abaixo, e só aqui.
     if (CAMPOS_META.some((k) => c[k] !== undefined)) {
@@ -227,6 +230,8 @@ async function negociadores(req, res, tok) {
     if (c.papel !== undefined && PAPEIS.indexOf(String(c.papel)) >= 0) mud.papel = c.papel;
     if (c.ativo !== undefined) mud.ativo = !!c.ativo;
     if (c.shinkai_nome !== undefined) mud.shinkai_nome = texto(c.shinkai_nome);
+    // Ligar (ou desligar) o cadastro ao login da pessoa.
+    if (c.perfil_id !== undefined) mud.perfil_id = RX_UUID.test(String(c.perfil_id || "")) ? c.perfil_id : null;
 
     // Só recalcula quando um dos três chega. Sem esta guarda, um
     // "desativar" — que manda apenas `ativo` — zeraria a meta de quem
