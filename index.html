@@ -652,7 +652,10 @@ async function listarNegociadores() {
   const r = await fetchAut("/api/perfil?recurso=negociadores");
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.erro || "Não consegui carregar os negociadores.");
-  return d.negociadores || [];
+  const l = d.negociadores || [];
+  // Quem pode atender viaja junto da lista (0080) — ver `quemAtende`.
+  l.atendem = d.atendem || null;
+  return l;
 }
 async function criarNegociador(dados) {
   const r = await fetchAut("/api/perfil?recurso=negociadores", {
@@ -8342,7 +8345,7 @@ function NovoAtendimento({ perfil, aoCriar, aoCancelar }) {
             <select className={inputCls} style={inputSty} value={d.negociador_nome}
               onChange={(e) => set("negociador_nome", e.target.value)}>
               <option value="">escolha</option>
-              {equipe.filter((n) => n.papel === "negociador" && n.ativo).map((n) => (
+              {quemAtende(equipe).map((n) => (
                 <option key={n.id} value={n.nome}>{n.nome}</option>
               ))}
             </select>
@@ -13209,11 +13212,31 @@ function QuandoVoltar({ titulo, valor, aoEscolher, aoFechar }) {
  * trouxe (decisão 49). Vira atendimento direto, com origem "fluxo de
  * loja" e PROSPEC "FLUXO" (a convenção da planilha, 0004), e aparece
  * na agenda na hora em que chegou, com outra cor. */
+/* Quem pode atender um cliente: meta ativa OU login ativo de
+ * negociador (0080). O cadastro sozinho deixava de fora quem saiu da
+ * meta e continua na loja. Sem a lista do servidor, cai na regra
+ * antiga. */
+function quemAtende(equipe) {
+  if (equipe && Array.isArray(equipe.atendem)) return equipe.atendem;
+  return (equipe || []).filter((n) => n.ativo && n.papel === "negociador").map((n) => ({ id: n.perfil_id || n.id, nome: n.nome }));
+}
+
+/* A mesma régua, mas em linhas do CADASTRO — para o que guarda o id
+ * de `negociador`, como o agendamento do lead (0022). */
+function metasQueAtendem(equipe) {
+  const at = (equipe && Array.isArray(equipe.atendem)) ? equipe.atendem : null;
+  return (equipe || []).filter((n) => n.papel === "negociador" &&
+    (n.ativo || (at && n.perfil_id && at.some((x) => x.id === n.perfil_id))));
+}
+
 function JanelaChegou({ lead, equipe, aoFechar, aoPronto, fluxo }) {
   lead = lead || {};
   const agora = () => new Date().toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
-  const negs = (equipe || []).filter((n) => n.ativo && n.papel === "negociador");
-  const [neg, setNeg] = useState(negs.some((n) => n.id === lead.negociador_id) ? lead.negociador_id : "");
+  const negs = quemAtende(equipe);
+  // O lead guarda o id do CADASTRO (0022); a lista usa o do login.
+  const doLead = (equipe || []).filter((x) => x.id === lead.negociador_id)[0];
+  const pre = negs.filter((n) => n.id === lead.negociador_id || (doLead && (n.id === doLead.perfil_id || n.nome === doLead.nome)))[0];
+  const [neg, setNeg] = useState(pre ? pre.id : "");
   const [nome, setNome] = useState(lead.nome || "");
   const [telefone, setTelefone] = useState(lead.telefone || "");
   const [carro, setCarro] = useState(lead.carro || "");
@@ -13423,7 +13446,7 @@ function Agendador({ lead, equipe, aoFechar, aoAgendar }) {
         <div className="mt-3 text-[11px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Negociador</div>
         <select className={`${inputCls} mt-1`} style={inputSty} value={neg} onChange={(e) => setNeg(e.target.value)}>
           <option value="">A definir</option>
-          {(equipe || []).filter((n) => n.ativo && n.papel === "negociador").map((n) => <option key={n.id} value={n.id}>{n.nome}</option>)}
+          {metasQueAtendem(equipe).map((n) => <option key={n.id} value={n.id}>{n.nome}</option>)}
         </select>
 
         <BotaoPrimario className="mt-4 w-full" disabled={!pronto}

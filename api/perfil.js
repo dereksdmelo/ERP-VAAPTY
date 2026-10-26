@@ -185,7 +185,28 @@ async function negociadores(req, res, tok) {
       `${CAMPOS_META.concat(CAMPOS_META_PRE).join(",")}&order=papel.asc,nome.asc`, { headers: cab });
     const d = await responder(r);
     if (d === undefined || res.writableEnded) return;
-    return res.status(200).json({ negociadores: d || [] });
+    // QUEM ATENDE (0080): a meta ativa OU o login ativo de negociador.
+    // `ativo` no cadastro é "conta na meta da loja", e quem saiu da meta
+    // continua atendendo — sumir da lista do "Chegou" era o defeito. O
+    // id que vai é o do LOGIN quando há, que é o que o atendimento
+    // guarda (decisão 10); sem login, o do cadastro, e o nome basta.
+    const lista = d || [];
+    let logins = [];
+    try {
+      const rl = await fetch(`${URL_BASE}/rest/v1/rpc/negociadores_com_login`, {
+        method: "POST", headers: { ...cabJson }, body: "{}",
+      });
+      if (rl.ok) logins = (await rl.json().catch(() => [])) || [];
+    } catch (e) {}
+    const ativos = {};
+    logins.forEach((p) => { ativos[p.id] = p.nome; });
+    const atendem = [];
+    const visto = {};
+    lista.filter((n) => n.papel === "negociador" && (n.ativo || (n.perfil_id && ativos[n.perfil_id])))
+      .forEach((n) => { const id = n.perfil_id || n.id; if (!visto[id]) { visto[id] = 1; atendem.push({ id, nome: n.nome }); } });
+    logins.forEach((p) => { if (!visto[p.id]) { visto[p.id] = 1; atendem.push({ id: p.id, nome: p.nome }); } });
+    atendem.sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR"));
+    return res.status(200).json({ negociadores: lista, atendem });
   }
 
   if (req.method === "POST") {

@@ -2976,6 +2976,16 @@ DATA: 22/10
 TIAGO ATENDEU
 ```
 
+**Quem atende é quem tem meta ativa OU login ativo de negociador**
+(26/10/2026, o Derek: *"não tá aparecendo todos os negociadores"*). A
+lista saía do cadastro de metas filtrado por `ativo`, que quer dizer
+"conta na meta da loja" — quem saiu da meta e continua atendendo
+sumia (o André Santos). `negociadores_com_login()` (0080, estreita, só
+id e nome) responde à pré-venda, que não lê `perfil`; o
+`?recurso=negociadores` devolve `atendem` pronto, e `quemAtende()` /
+`metasQueAtendem()` são as duas leituras dele — a segunda para o que
+guarda id do cadastro, como o agendamento (0022).
+
 **A janela é uma só (`JanelaChegou`), nos três lugares do "Chegou"**:
 Agendamentos, quadro e Ações. Três versões da mesma pergunta divergem
 no primeiro acréscimo. O nome corrigido ali vale para o lead também.
