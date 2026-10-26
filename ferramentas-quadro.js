@@ -22,7 +22,7 @@ const codigo = [
   pega("const hojeEmSP = () =>", "\n\nconst MESES_PT"),
   pega("const COLUNAS_LEAD = [", "/* A ESCOLHA DE QUAL NÚMERO LIGA."),
   pega("const REGIAO_LOJA = [", "function ConversaPopup("),
-  pega("const diaDaMensagem = ", "function ListaDeBaloes("),
+  pega("const diaDaMensagem = ", "/* A CARA DO WHATSAPP"),
 ].join("\n");
 const { etapaDoLead, foraDaRegiao, escondidoPorFora, diaDaMensagem, rotuloDoDia, hojeEmSP } = new Function(
   `${codigo}\nreturn { etapaDoLead, foraDaRegiao, escondidoPorFora, diaDaMensagem, rotuloDoDia, hojeEmSP };`)();
@@ -38,6 +38,11 @@ const col = (l) => etapaDoLead(l).id;
 confere("novo sem data",                 col({ status: "novo" }), "novo");
 confere("em contato sem data",           col({ status: "em_contato" }), "agendar");
 confere("em contato COM retorno",        col({ status: "em_contato", proximo_contato: "2026-10-09" }), "futuro");
+// ---- prospecção: o novo que a loja foi buscar tem coluna própria ----
+confere("novo de prospecção",            col({ status: "novo", origem: "prospeccao" }), "prospeccao");
+confere("prospecção já em contato",      col({ status: "em_contato", origem: "prospeccao" }), "agendar");
+confere("prospecção com retorno",        col({ status: "novo", origem: "prospeccao", proximo_contato: "2026-10-09" }), "futuro");
+confere("novo de outra origem",          col({ status: "novo", origem: "tv" }), "novo");
 confere("novo COM retorno",              col({ status: "novo", proximo_contato: "2026-10-09" }), "futuro");
 confere("agendado ignora retorno velho", col({ status: "agendado", proximo_contato: "2026-10-09" }), "agendado");
 confere("confirmado",                    col({ status: "confirmado" }), "agendado");

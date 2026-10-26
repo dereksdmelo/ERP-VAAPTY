@@ -14070,6 +14070,14 @@ function ordenarFila(lista) {
  */
 const COLUNAS_LEAD = [
   { id: "novo",        rot: "Novo",       status: ["novo"],                   cor: "#6D1B9E" },
+  /* PROSPECÇÃO (26/10/2026, o Derek: "uma coluna à direita do Novo para
+   * os clientes de prospecção"). Também não é status novo: é o lead
+   * `novo` que veio de prospecção (`origem`) — gente que a loja
+   * procurou, não que escreveu. Misturado ao Novo, quem chega sozinho
+   * e quem foi chamado pareciam a mesma fila, e não são: um espera
+   * resposta, o outro espera insistência. Do Agendar em diante, o
+   * caminho é o mesmo de todo lead. */
+  { id: "prospeccao",  rot: "Prospecção", status: [],                     cor: "#1B5FA8" },
   { id: "agendar",     rot: "Agendar",    status: ["em_contato"],             cor: "#8E4FC0" },
   /* CONTATO FUTURO (o Diego, 07/10/2026: *"tá faltando também um
    * [contato futuro]… mais uma coluna, e quando clicar abrir igual ao
@@ -14088,7 +14096,9 @@ const colunaDe = (l) => etapaDoLead(l).id;
 // Um lugar só: o quadro e a lista chamam a mesma etapa pelo mesmo
 // nome, senão viram dois vocabulários para o mesmo funil.
 const ehContatoFuturo = (l) => ["novo", "em_contato"].indexOf(l.status) >= 0 && !!l.proximo_contato;
+const ehProspeccao = (l) => l.status === "novo" && l.origem === "prospeccao" && !l.proximo_contato;
 const etapaDoLead = (l) => (ehContatoFuturo(l) ? COLUNAS_LEAD.find((c) => c.id === "futuro") : null)
+  || (ehProspeccao(l) ? COLUNAS_LEAD.find((c) => c.id === "prospeccao") : null)
   || COLUNAS_LEAD.find((c) => c.status.indexOf(l.status) >= 0) || COLUNAS_LEAD[0];
 
 /* A ESCOLHA DE QUAL NÚMERO LIGA.
@@ -14251,7 +14261,7 @@ const foraDaRegiao = (l) => {
  * está: esconder um agendamento só porque a pessoa mora longe faria a
  * loja perder a visita que ela mesma marcou — e a marca de "fora" é
  * sobre o esforço de prospecção, não sobre uma visita que já existe. */
-const COLUNAS_DE_TRABALHO = ["novo", "agendar", "futuro"];
+const COLUNAS_DE_TRABALHO = ["novo", "prospeccao", "agendar", "futuro"];
 const escondidoPorFora = (l, idColuna) => COLUNAS_DE_TRABALHO.indexOf(idColuna) >= 0 && foraDaRegiao(l);
 
 function ConversaPopup({ telefone, nome, aoFechar, aoLigar, aoRenomear, rotuloFechar }) {
@@ -14579,6 +14589,14 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
      * parado na frente da mesa (decisão 27). É idempotente, então
      * clicar duas vezes não cria dois. */
     if (col === "compareceu") { chegou(l); return; }
+    // Para a coluna de prospecção vai como lead novo DE prospecção. O
+    // caminho inverso não existe: a origem é fato, não etapa, e trocá-la
+    // para tirar da coluna mentiria no funil por origem.
+    if (col === "prospeccao") {
+      mexer(l, { status: "novo", origem: "prospeccao", proximo_contato: null, agendado_para: null, confirmado_em: null });
+      return;
+    }
+    if (col === "novo" && l.origem === "prospeccao") return;
     const ALVO = { novo: "novo", agendar: "em_contato", reagendar: "nao_compareceu" };
     const st = ALVO[col];
     if (!st) return;
@@ -14964,7 +14982,7 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
 
             <div className="mt-3 text-[10px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>Mover para</div>
             <div className="mt-1.5 grid grid-cols-2 gap-2">
-              {COLUNAS_LEAD.filter((c) => c.id !== colunaDe(menu)).map((c) => (
+              {COLUNAS_LEAD.filter((c) => c.id !== colunaDe(menu) && !(c.id === "novo" && menu.origem === "prospeccao")).map((c) => (
                 <button key={c.id} onClick={() => mover(menu, c.id)}
                   className="rounded-lg border px-3 py-2.5 text-[13.5px] font-semibold"
                   style={{ borderColor: C.line, color: c.cor }}>{c.rot}</button>

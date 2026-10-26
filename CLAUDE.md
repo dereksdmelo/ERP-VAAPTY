@@ -2434,6 +2434,16 @@ promessa que ninguém vai cobrar. Fica entre AGENDAR e AGENDADO, que é
 onde ela pertence no fluxo; as seis colunas ditadas pelo Derek
 (decisão 51) continuam todas lá, na ordem dele.
 
+**Prospecção é a oitava coluna, logo depois de Novo (26/10/2026), e
+também não é status novo**: é o lead `novo` com `origem = prospeccao`
+(`ehProspeccao`, em `etapaDoLead`) — gente que a loja foi buscar, não
+que escreveu. Do Agendar em diante segue o caminho de todo lead.
+Mover para ela grava a origem; o inverso (de Prospecção para Novo) não
+existe, porque a origem é fato e trocá-la mentiria no funil por canal.
+O `ferramentas-quadro.js` voltou a rodar junto — ele estava quebrado
+desde a cara de WhatsApp das Conversas, que pôs JSX no trecho que ele
+lê.
+
 **"De hoje" em Contato futuro é o que VENCEU, não só o que é de hoje**
 (o Diego: *"e essa ter filtro 'hoje' pra ela"*). Retorno de ontem que
 ninguém fez é justamente o que o filtro existe para achar; escondê-lo
