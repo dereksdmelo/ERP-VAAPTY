@@ -10515,20 +10515,39 @@ function Apresentacao({ aoFim }) {
    * do teclado viram a página, ESC sai; tocar nas metades também. */
   const sair = () => {
     setCheia(false);
-    try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {}
+    try {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else if (document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen();
+    } catch (e) {}
+  };
+  /* O PEDIDO DE TELA CHEIA SAI DENTRO DO CLIQUE. O navegador só o aceita
+   * como resposta direta a um gesto; feito num efeito, depois do render,
+   * ele era recusado calado e a apresentação ficava só na camada preta,
+   * com a barra do navegador e as abas em volta (o Derek, 27/10/2026:
+   * "tela cheia não tá funcionando"). Pede-se a página inteira — a camada
+   * fixa cobre o resto. */
+  const entrar = () => {
+    setCheia(true);
+    try {
+      const el = document.documentElement;
+      const pedir = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (pedir) { const p = pedir.call(el); if (p && p.catch) p.catch(() => {}); }
+    } catch (e) {}
   };
   useEffect(() => {
     if (!cheia) return;
-    try { if (palco.current && palco.current.requestFullscreen) palco.current.requestFullscreen().catch(() => {}); } catch (e) {}
     const tecla = (e) => {
       if (e.key === "ArrowRight" || e.key === " ") { e.preventDefault(); setPag((p) => Math.min(APRESENTACAO_PAGINAS, p + 1)); }
       else if (e.key === "ArrowLeft") { e.preventDefault(); setPag((p) => Math.max(1, p - 1)); }
       else if (e.key === "Escape") { e.preventDefault(); sair(); }
     };
-    const saiuDoNavegador = () => { if (!document.fullscreenElement) setCheia(false); };
+    // Saiu da tela cheia pelo navegador (ESC, gesto): a camada sai junto.
+    const saiuDoNavegador = () => { if (!document.fullscreenElement && !document.webkitFullscreenElement) setCheia(false); };
     window.addEventListener("keydown", tecla);
     document.addEventListener("fullscreenchange", saiuDoNavegador);
-    return () => { window.removeEventListener("keydown", tecla); document.removeEventListener("fullscreenchange", saiuDoNavegador); };
+    document.addEventListener("webkitfullscreenchange", saiuDoNavegador);
+    return () => { window.removeEventListener("keydown", tecla); document.removeEventListener("fullscreenchange", saiuDoNavegador);
+                   document.removeEventListener("webkitfullscreenchange", saiuDoNavegador); };
   }, [cheia]);
   // Ao sair, o trilho volta à folha em que a pessoa parou.
   useEffect(() => {
@@ -10558,7 +10577,7 @@ function Apresentacao({ aoFim }) {
           <span className="text-[12px]" style={{ color: C.mute, fontFamily: F.mono }}>
             {pag} de {APRESENTACAO_PAGINAS}
           </span>
-          <button onClick={() => setCheia(true)} className="rounded-md px-3 py-2 text-[13px] font-semibold text-white" style={{ background: C.roxo }}>
+          <button onClick={entrar} className="rounded-md px-3 py-2 text-[13px] font-semibold text-white" style={{ background: C.roxo }}>
             ⛶ Tela cheia
           </button>
         </span>
