@@ -768,7 +768,8 @@ muda todo mundo que o usa. Desativa-se, não se apaga.
 somam; a quinzena (dia 1 a 15) paga uma vez. **O mês tem QUATRO
 semanas e nenhuma atravessa a virada** (o Derek: *"a segunda semana tem
 que finalizar com o quinzenal, e a última normalmente estendemos"*):
-1–7, 8–15, 16–22 e 23 até o fim (`semanaDoDia`, em
+1–8, 9–15, 16–22 e 23 até o fim — a primeira com um dia a mais, de
+fôlego para o fechamento do mês anterior (`semanaDoDia`, em
 `regras/remuneracao.js`; o `semanaDe` da Rentabilidade usa o mesmo
 corte, e a SEM. 5 da planilha antiga cai na 4). No ritmo, a semana
 corrente se estica pelo tamanho dela, e as que não chegaram repetem a

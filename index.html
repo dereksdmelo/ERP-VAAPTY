@@ -11988,13 +11988,14 @@ function rentabilidadeDe(e) {
 }
 
 // 1ª..5ª semana do mês, como a planilha conta: dias 1–7, 8–14…
-// QUATRO SEMANAS NO MÊS (27/10/2026, o Derek): 1–7, 8–15 (fecha com a
-// quinzena), 16–22 e 23 até o fim. A SEM. 5 da planilha antiga cai na 4.
+// QUATRO SEMANAS NO MÊS (27/10/2026, o Derek): 1–8 (um dia a mais para o
+// fechamento do mês anterior), 9–15 (fecha com a quinzena), 16–22 e 23
+// até o fim. A SEM. 5 da planilha antiga cai na 4.
 // A mesma regra do bônus semanal, em `regras/remuneracao.js`.
 const semanaDe = (e) => {
   if (e.semana_venda) return Math.min(4, Number(e.semana_venda));
   const d = Number(String(e.vendido_em || "").slice(8, 10));
-  return !d ? null : d <= 7 ? 1 : d <= 15 ? 2 : d <= 22 ? 3 : 4;
+  return !d ? null : d <= 8 ? 1 : d <= 15 ? 2 : d <= 22 ? 3 : 4;
 };
 
 /* A RENTABILIDADE COM CARA DE PLANILHA (24/10/2026, o Derek: *"vamos
@@ -23638,7 +23639,7 @@ function CombinadoRemuneracao({ plano, aoMudar, colaboradorId, versao, soPecas }
           </label>
           {faixasDe(x, i, "a partir de", "paga R$", false, true)}
           <span className="basis-full text-[11px]" style={{ color: C.mute }}>
-            {x.periodo === "quinzena1" ? "Paga uma vez, com o resultado do dia 1 ao 15." : "Quatro semanas por mês — dias 1–7, 8–15, 16–22 e 23 até o fim. Cada semana que bate uma faixa paga o valor dela; as semanas somam."}
+            {x.periodo === "quinzena1" ? "Paga uma vez, com o resultado do dia 1 ao 15." : "Quatro semanas por mês — dias 1–8, 9–15, 16–22 e 23 até o fim. Cada semana que bate uma faixa paga o valor dela; as semanas somam."}
           </span>
         </>);
       case "bonus_lucro":

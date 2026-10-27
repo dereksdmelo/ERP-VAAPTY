@@ -47,12 +47,14 @@ const num = (v) => {
 /* AS SEMANAS DO MÊS SÃO QUATRO (27/10/2026, o Derek): "a segunda
  * semana tem que finalizar com o quinzenal, e a última semana normalmente
  * estendemos — a gente só considera 4 semanas no mês", e semana não
- * atravessa a virada do mês. Então: 1–7, 8–15, 16–22 e 23 até o fim.
+ * atravessa a virada do mês. Então: 1–8, 9–15, 16–22 e 23 até o fim —
+ * a primeira com um dia a mais, de fôlego para o fechamento do mês
+ * anterior (o Derek, no mesmo dia).
  * A planilha trazia SEM. de 1 a 5; a 5 cai na 4. */
-const PRIMEIRO_DIA_DA_SEMANA = [1, 8, 16, 23];
+const PRIMEIRO_DIA_DA_SEMANA = [1, 9, 16, 23];
 function semanaDoDia(d) {
   if (!d) return null;
-  return d <= 7 ? 1 : d <= 15 ? 2 : d <= 22 ? 3 : 4;
+  return d <= 8 ? 1 : d <= 15 ? 2 : d <= 22 ? 3 : 4;
 }
 const semanaDaPlanilha = (n) => (n >= 1 ? Math.min(4, Math.trunc(n)) : null);
 
@@ -239,7 +241,7 @@ function noRitmo(met, fator, dia, diasNoMes) {
     const media = { carros: 0, rent: 0, fluxo: 0, fechados: 0 };
     feitas.forEach((m) => { Object.keys(media).forEach((k) => { media[k] += (m && m[k]) || 0; }); });
     Object.keys(media).forEach((k) => { media[k] = feitas.length ? media[k] / feitas.length : 0; });
-    // A semana corrente se estica pelo tamanho DELA (a 2ª tem 8 dias, a
+    // A semana corrente se estica pelo tamanho DELA (a 1ª tem 8 dias, a
     // 4ª vai até o fim do mês).
     const ini = PRIMEIRO_DIA_DA_SEMANA[atual - 1];
     const fim = atual < 4 ? PRIMEIRO_DIA_DA_SEMANA[atual] - 1 : diasNoMes || 31;

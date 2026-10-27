@@ -2030,7 +2030,7 @@ async function remuneracao(req, res, tok) {
   const por = {};
   const de = (nome) => { const k = chave(nome) || "—"; return por[k] || (por[k] = novo()); };
   const L = novo();
-  // As quatro semanas do mês: 1–7, 8–15, 16–22, 23–fim (a regra mora em
+  // As quatro semanas do mês: 1–8, 9–15, 16–22, 23–fim (a regra mora em
   // `regras/remuneracao.js`, ao lado do bônus que a usa).
   const semDoDia = R.semanaDoDia;
   (vendidos || []).forEach((e) => {
