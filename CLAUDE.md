@@ -728,6 +728,24 @@ quem está sem acesso vai para "Ex-prestadores de serviço", recolhido no
 fim — e só a conta criada há menos de 14 dias aparece em cima, como
 "pedindo acesso".
 
+**A ficha tem o COMBINADO DE REMUNERAÇÃO (0081), e o DRE mostra a
+folha projetada.** O Derek, em 27/10/2026: anotar o formato do
+combinado de cada um e ver *"o salário dele projetado de acordo com o
+resultado dele até ali"*. O combinado é uma **lista de peças** — fixo,
+variável fixo, variável por faixa, das vendas próprias, das vendas da
+loja, bônus de conversão, de rentabilidade, de ticket e por faixa de
+lucro da loja —, porque cada pessoa tem um diferente. A regra mora em
+`regras/remuneracao.js`, fora de `api/` (teto de 12 funções), e é a
+MESMA para a prévia da ficha e para a folha do DRE
+(`?recurso=remuneracao` no `api/financeiro.js`). **"Próprio" é o nome da
+meta ligada à ficha mais os apelidos escritos no combinado** — nome
+parecido não casa sozinho (decisão 44). Rentabilidade é a líquida
+(o "faturamento" da casa), conversão é fechados ÷ atendimentos (a do
+funil), ticket é rentabilidade ÷ carros, e o lucro é o do DRE do mês
+(`dreDoMes`, a mesma conta da tela). **A folha projetada não entra no
+lucro**: o salário pago já está nas despesas quando passa no banco.
+"No ritmo" estica as somas até o fim do mês — aritmética, não previsão.
+
 **PATCH que volta vazio é RLS, não erro.** A política deixa qualquer um
 da equipe *ler* todo atendimento, mas só o dono (ou o gerente)
 *escrever*. Quando alguém tenta editar o atendimento de outro, o

@@ -844,6 +844,12 @@ async function dre(req, res, tok) {
   const comp = competenciaDe(req.query.competencia) || competenciaDe(hojeAqui());
   const n = Math.min(24, Math.max(0, Number(req.query.meses) || 0));
   if (n > 1) return dreMeses(req, res, tok, comp, n);
+  return res.status(200).json(await dreDoMes(tok, comp));
+}
+
+// O DRE de um mês, como objeto: a tela o lê pelo `dre`, e o combinado de
+// remuneração usa o mesmo lucro — duas contas do lucro seriam dois DREs.
+async function dreDoMes(tok, comp) {
   const [lanc, cats] = await Promise.all([
     supa(`${base("fin_lancamento")}?select=debito,credito,situacao,categoria_id,estoque_id,tipo_negociacao,funcionario_id,` +
       `fin_rateio(valor,categoria_id,estoque_id,tipo_negociacao,funcionario_id)&situacao=in.(aberto,efetivado)&competencia=eq.${comp}&limit=10000`,
@@ -880,11 +886,11 @@ async function dre(req, res, tok) {
   const rent = vendidos.reduce((t, e) => { const r = rentabilidadeDe(e); return { bruta: t.bruta + r.bruta, liquida: t.liquida + r.liquida, venda: t.venda + r.venda }; },
     { bruta: 0, liquida: 0, venda: 0 });
 
-  return res.status(200).json({
+  return {
     competencia: comp, linhas, total_despesas: totalDespesas, sem_categoria: semCategoria, em_aberto: emAberto,
     carros_vendidos: vendidos.length, rentabilidade: rent.liquida, rentabilidade_bruta: rent.bruta, faturamento: rent.venda,
     lucro: rent.liquida + totalDespesas + semCategoria,
-  });
+  };
 }
 
 /* ------------------ conferência dos carros ------------------ */
@@ -1980,7 +1986,83 @@ async function pendencias(req, res, tok) {
   return res.status(200).json({ ...(r || {}), vendas_sem_receber: vsr });
 }
 
-const RECURSOS = { conta, categoria, funcionario, favorecido, lancamento, importar, dre, carros, vale, folha,
+/* ------------------ o combinado de cada um, contra o mês (0081) ------------------
+ *
+ * O Derek, em 27/10/2026: *"na projeção do DRE mostrar automaticamente
+ * qual seria o salário dele projetado de acordo com o resultado dele até
+ * ali"*. A regra mora em `regras/remuneracao.js`; aqui só se juntam as
+ * métricas do mês e se aplica o combinado de cada ficha.
+ *
+ * **Quem é "próprio"** é o nome da META ligada à ficha (`negociador`),
+ * mais os apelidos escritos no combinado ("THIAGO SOUZA" da planilha).
+ * Nome parecido não casa sozinho — a mesma régua da decisão 44.
+ *
+ * **Duas colunas: até agora e no ritmo.** O mês aberto mostra o que já
+ * foi conquistado e, ao lado, as somas esticadas até o fim do mês no
+ * mesmo passo — aritmética, não previsão (decisão 22). Mês fechado
+ * tem as duas iguais. */
+async function remuneracao(req, res, tok) {
+  const R = require("../regras/remuneracao.js");
+  const comp = competenciaDe(req.query.competencia) || competenciaDe(hojeAqui());
+  const fim = fimDoMes(comp);
+  const chave = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/\s+/g, " ").trim();
+
+  const [colabs, negs, vendidos, ats, dreMes] = await Promise.all([
+    supa(`${base("colaborador")}?select=id,nome_completo,perfil_id,negociador_id,desligado_em,inicio_em,remuneracao`, { headers: cab(tok) }),
+    supa(`${base("negociador")}?select=id,nome`, { headers: cab(tok) }),
+    supa(`${base("estoque")}?select=valor_compra,valor_venda,negociador_nome,estoque_custo(tipo,previsto,realizado)` +
+      `&situacao=eq.vendido&or=(and(vendido_em.gte.${comp},vendido_em.lte.${fim}),and(vendido_em.is.null,entrou_em.gte.${comp},entrou_em.lte.${fim}))&limit=2000`,
+      { headers: cab(tok) }),
+    supa(`${base("atendimento")}?select=negociador_nome,status&data=gte.${comp}&data=lte.${fim}&limit=5000`, { headers: cab(tok) }),
+    dreDoMes(tok, comp),
+  ]);
+  const nomeNeg = {}; (negs || []).forEach((n) => { nomeNeg[n.id] = n.nome; });
+
+  // Por nome: carros e rentabilidade (estoque), atendimentos e fechados.
+  const por = {};
+  const de = (nome) => { const k = chave(nome) || "—"; return por[k] || (por[k] = { carros: 0, rent: 0, fluxo: 0, fechados: 0 }); };
+  const loja = { carros: 0, rent: 0, fluxo: 0, fechados: 0 };
+  (vendidos || []).forEach((e) => {
+    const r = rentabilidadeDe(e).liquida;
+    const m = de(e.negociador_nome); m.carros += 1; m.rent += r;
+    loja.carros += 1; loja.rent += r;
+  });
+  (ats || []).forEach((a) => {
+    const m = de(a.negociador_nome); m.fluxo += 1; loja.fluxo += 1;
+    if (a.status === "fechado") { m.fechados += 1; loja.fechados += 1; }
+  });
+
+  // O ritmo: dias do mês sobre dias passados, só no mês aberto.
+  const hoje = hojeAqui();
+  const diasMes = Number(fim.slice(8, 10));
+  const aberto = hoje >= comp && hoje <= fim;
+  const fator = aberto ? diasMes / Math.max(1, Number(hoje.slice(8, 10))) : 1;
+
+  const pessoas = (colabs || []).filter((c) => c.remuneracao && (c.remuneracao.pecas || []).length)
+    .filter((c) => !c.desligado_em || c.desligado_em >= comp)
+    .map((c) => {
+      const plano = c.remuneracao;
+      const nomes = [nomeNeg[c.negociador_id]].concat(plano.apelidos || []).filter(Boolean).map(chave);
+      const proprio = { carros: 0, rent: 0, fluxo: 0, fechados: 0 };
+      [...new Set(nomes)].forEach((k) => { const m = por[k]; if (m) Object.keys(proprio).forEach((x) => { proprio[x] += m[x]; }); });
+      const met = { proprio, loja, lucro: dreMes.lucro };
+      const agora = R.calcular(plano, met);
+      const ritmo = R.calcular(plano, R.noRitmo(met, fator));
+      return { colaborador_id: c.id, perfil_id: c.perfil_id, negociador_id: c.negociador_id,
+               nome: c.nome_completo || nomeNeg[c.negociador_id] || "—", nomes_nas_vendas: nomes,
+               proprio, agora, ritmo };
+    })
+    .sort((a, b) => b.agora.total - a.agora.total);
+
+  return res.status(200).json({
+    competencia: comp, aberto, fator: Math.round(fator * 100) / 100,
+    loja, lucro: dreMes.lucro, pessoas,
+    total_agora: pessoas.reduce((t, p) => t + p.agora.total, 0),
+    total_ritmo: pessoas.reduce((t, p) => t + p.ritmo.total, 0),
+  });
+}
+
+const RECURSOS = { conta, categoria, funcionario, favorecido, lancamento, importar, dre, carros, vale, folha, remuneracao,
                    fechamento, orcamento, ano, rateio, negociacao, titulo, fluxo, log, recibo, pendencias, recebimentos, saldos,
                    estoque: estoqueLista };
 

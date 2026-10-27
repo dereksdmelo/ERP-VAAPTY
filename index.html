@@ -17636,6 +17636,77 @@ function BaixarTitulo({ l, contas, aoFechar, aoBaixar }) {
 
 /* ---------------- DRE ---------------- */
 
+/* A FOLHA PROJETADA (0081): o combinado de cada um contra o resultado
+ * do mês. "Até agora" é o que já foi conquistado; "no ritmo" estica as
+ * somas até o fim do mês no mesmo passo — aritmética, não previsão
+ * (decisão 22). NÃO entra no lucro acima: o salário pago já está nas
+ * despesas quando passa no banco, e somar o calculado seria contar duas
+ * vezes. Quem não tem combinado na ficha não aparece. */
+function FolhaProjetada({ comp }) {
+  const [d, setD] = useState(null); const [erro, setErro] = useState(""); const [aberto, setAberto] = useState("");
+  useEffect(() => { setD(null); setErro(""); fin("remuneracao", { competencia: comp }).then(setD).catch((e) => setErro(e.message)); }, [comp]);
+  if (erro) return <p className="mt-3 text-[12.5px]" style={{ color: C.laranja }}>Folha projetada: {erro}</p>;
+  if (!d) return <p className="mt-3 text-[12.5px]" style={{ color: C.mute }}>Calculando a folha projetada…</p>;
+  const soma = (l, filtro) => l.linhas.filter(filtro).reduce((t, x) => t + x.valor, 0);
+  const th = "px-2 py-1.5 text-right text-[11px] font-semibold uppercase";
+  const td = (v, forte) => <td className="whitespace-nowrap px-2 py-1.5 text-right text-[12.5px]" style={{ fontVariantNumeric: "tabular-nums", fontWeight: forte ? 700 : 400 }}>{rs2(v)}</td>;
+  return (
+    <div className="mt-4 rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+      <div className="flex flex-wrap items-baseline gap-x-3 px-3 py-2" style={{ borderBottom: `1px solid ${C.line}` }}>
+        <span className="text-[12px] font-semibold uppercase tracking-[0.06em]" style={{ color: C.mute }}>Folha projetada · {rotuloMes(comp)}</span>
+        <span className="text-[11.5px]" style={{ color: C.mute }}>
+          o combinado de cada um contra o resultado {d.aberto ? `até hoje · no ritmo = ×${String(d.fator).replace(".", ",")} até o fim do mês` : "do mês fechado"}.
+          Não entra no lucro acima — o que já foi pago está nas despesas.
+        </span>
+      </div>
+      {!d.pessoas.length ? (
+        <p className="px-3 py-5 text-center text-[13px]" style={{ color: C.mute }}>
+          Ninguém tem combinado cadastrado. Em Equipe, clique na pessoa e monte o combinado de remuneração.
+        </p>
+      ) : (
+        <div className="rolar overflow-x-auto">
+          <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 640 }}>
+            <thead><tr style={{ color: C.mute, borderBottom: `1px solid ${C.line}` }}>
+              <th className="px-2 py-1.5 text-left text-[11px] font-semibold uppercase">Pessoa</th>
+              <th className={th}>Fixo</th><th className={th}>Variável</th><th className={th}>Bônus</th>
+              <th className={th}>Até agora</th>{d.aberto && <th className={th}>No ritmo</th>}
+            </tr></thead>
+            <tbody>
+              {d.pessoas.map((p) => (
+                <React.Fragment key={p.colaborador_id}>
+                  <tr onClick={() => setAberto(aberto === p.colaborador_id ? "" : p.colaborador_id)} className="cursor-pointer hover:brightness-[0.98]"
+                    style={{ borderBottom: `1px solid ${C.line}`, background: "#fff" }}>
+                    <td className="px-2 py-1.5 text-[12.5px] font-semibold">{aberto === p.colaborador_id ? "▾" : "▸"} {p.nome}
+                      <span className="ml-2 text-[11px] font-normal" style={{ color: C.mute }}>{p.proprio.carros} carros · {rs2(p.proprio.rent)}</span></td>
+                    {td(soma(p.agora, (x) => x.fixo))}
+                    {td(soma(p.agora, (x) => !x.fixo && !x.bonus))}
+                    {td(soma(p.agora, (x) => x.bonus))}
+                    {td(p.agora.total, true)}
+                    {d.aberto && td(p.ritmo.total)}
+                  </tr>
+                  {aberto === p.colaborador_id && p.agora.linhas.map((l, i) => (
+                    <tr key={i} style={{ background: C.bg, borderBottom: `1px solid ${C.line}` }}>
+                      <td className="px-2 py-1 pl-6 text-[12px]" colSpan={4}>
+                        <b>{l.rotulo}</b> <span style={{ color: C.mute }}>— {l.conta}</span>
+                      </td>
+                      {td(l.valor)}
+                      {d.aberto && td((p.ritmo.linhas[i] || {}).valor || 0)}
+                    </tr>
+                  ))}
+                </React.Fragment>
+              ))}
+              <tr style={{ background: "#F3F7F4" }}>
+                <td className="px-2 py-1.5 text-[13px] font-bold" colSpan={4}>Total da folha</td>
+                {td(d.total_agora, true)}{d.aberto && td(d.total_ritmo, true)}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FinDRE({ comp }) {
   const [d, setD] = useState(null); const [erro, setErro] = useState("");
   const [meses, setMeses] = useState(1);
@@ -17712,6 +17783,7 @@ function FinDRE({ comp }) {
         <p className="mt-3 text-[11px] leading-snug" style={{ color: C.mute }}>Como na planilha: despesa é crédito − débito por categoria, e a rentabilidade líquida dos carros vendidos no mês entra como receita. Negociação, retirada e transferência ficam fora.</p>
       </div>
     </div>
+    <FolhaProjetada comp={comp} />
     </div>
   );
 }
@@ -23415,6 +23487,157 @@ function QuadroEquipe({ perfil, negs, recarregarNegs }) {
  * a data pode ser futura (aviso prévio); o botão ao lado faz isso quando
  * for a hora. */
 const TIPOS_CONTRATO_COLAB = [["pj", "PJ / prestação de serviços"], ["clt", "CLT"], ["estagio", "Estágio"], ["autonomo", "Autônomo"], ["outro", "Outro"]];
+/* O COMBINADO DE REMUNERAÇÃO (0081), na ficha do colaborador. Uma
+ * lista de peças — cada combinado é diferente —, montada aqui e calculada
+ * no servidor por `regras/remuneracao.js`, a mesma regra que o DRE usa
+ * para a folha projetada. Componente de topo, não declarado dentro da
+ * ficha: componente criado dentro de outro remonta a cada tecla e o
+ * campo perde o foco (decisão 7). */
+const TIPOS_PECA = [
+  ["fixo", "Fixo"], ["variavel_fixo", "Variável fixo"], ["variavel_faixa", "Variável por faixa"],
+  ["vendas_proprias", "Variável das vendas próprias"], ["vendas_loja", "Variável das vendas da loja"],
+  ["bonus_conversao", "Bônus de conversão"], ["bonus_rentab", "Bônus de rentabilidade"],
+  ["bonus_ticket", "Bônus de ticket médio"], ["bonus_lucro", "Bônus por faixa de lucro da loja"],
+];
+const NOVA_PECA = {
+  fixo: { valor: "" }, variavel_fixo: { valor: "" },
+  variavel_faixa: { escopo: "proprio", metrica: "carros", modo: "por_carro", faixas: [{ de: 0, valor: "" }] },
+  vendas_proprias: { modo: "por_carro", valor: "" }, vendas_loja: { modo: "percentual", valor: "" },
+  bonus_conversao: { escopo: "proprio", meta: "", valor: "" }, bonus_rentab: { escopo: "proprio", meta: "", valor: "" },
+  bonus_ticket: { escopo: "proprio", meta: "", valor: "" }, bonus_lucro: { passo: "", valor: "" },
+};
+function CampoPeca({ rot, valor, aoMudar, ph, larg }) {
+  return (
+    <label className="block" style={{ width: larg || 110 }}>
+      <span className="block text-[9.5px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>{rot}</span>
+      <input className="mt-0.5 w-full rounded-md border px-2 py-1 text-[13px] outline-none" style={{ ...inputSty, fontFamily: F.mono }}
+        inputMode="decimal" value={valor == null ? "" : valor} placeholder={ph || ""} onChange={(e) => aoMudar(e.target.value)} />
+    </label>
+  );
+}
+function EscolhaPeca({ rot, valor, opcoes, aoMudar }) {
+  return (
+    <label className="block">
+      <span className="block text-[9.5px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>{rot}</span>
+      <select className="mt-0.5 rounded-md border px-2 py-1 text-[13px] outline-none" style={inputSty} value={valor || ""} onChange={(e) => aoMudar(e.target.value)}>
+        {opcoes.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
+      </select>
+    </label>
+  );
+}
+const ESCOPOS = [["proprio", "próprio"], ["loja", "da loja"]];
+
+function CombinadoRemuneracao({ plano, aoMudar, colaboradorId, versao }) {
+  const p = plano || {};
+  const pecas = p.pecas || [];
+  const [novo, setNovo] = useState("");
+  const [calc, setCalc] = useState(null);
+  const mudarPeca = (i, mud) => aoMudar({ ...p, pecas: pecas.map((x, j) => (j === i ? { ...x, ...mud } : x)) });
+  const tirar = (i) => aoMudar({ ...p, pecas: pecas.filter((_, j) => j !== i) });
+  const porPeca = (tipo) => { if (tipo) aoMudar({ ...p, pecas: [...pecas, { tipo, ...JSON.parse(JSON.stringify(NOVA_PECA[tipo])) }] }); setNovo(""); };
+  // O que o combinado SALVO daria neste mês. Relê a cada gravação.
+  useEffect(() => {
+    if (!colaboradorId) return;
+    fetchAut("/api/financeiro?recurso=remuneracao").then((r) => r.json())
+      .then((d) => setCalc({ ...d, eu: (d.pessoas || []).filter((x) => x.colaborador_id === colaboradorId)[0] || null }))
+      .catch(() => setCalc(null));
+  }, [colaboradorId, versao]);
+
+  const campos = (x, i) => {
+    const m = (k) => (v) => mudarPeca(i, { [k]: v });
+    switch (x.tipo) {
+      case "fixo": case "variavel_fixo":
+        return <CampoPeca rot="R$ por mês" valor={x.valor} aoMudar={m("valor")} />;
+      case "vendas_proprias": case "vendas_loja":
+        return (<>
+          <EscolhaPeca rot="Como" valor={x.modo} aoMudar={m("modo")} opcoes={[["por_carro", "R$ por carro vendido"], ["percentual", "% da rentabilidade"]]} />
+          <CampoPeca rot={x.modo === "percentual" ? "%" : "R$ por carro"} valor={x.valor} aoMudar={m("valor")} larg={90} />
+        </>);
+      case "bonus_conversao": case "bonus_rentab": case "bonus_ticket":
+        return (<>
+          <EscolhaPeca rot="De quem" valor={x.escopo} aoMudar={m("escopo")} opcoes={ESCOPOS} />
+          <CampoPeca rot={x.tipo === "bonus_conversao" ? "Meta (%)" : "Meta (R$)"} valor={x.meta} aoMudar={m("meta")} />
+          <CampoPeca rot="Paga R$" valor={x.valor} aoMudar={m("valor")} larg={100} />
+        </>);
+      case "bonus_lucro":
+        return (<>
+          <CampoPeca rot="A cada R$ de lucro" valor={x.passo} aoMudar={m("passo")} ph="10.000" larg={130} />
+          <CampoPeca rot="Paga R$" valor={x.valor} aoMudar={m("valor")} larg={100} />
+        </>);
+      case "variavel_faixa":
+        return (<>
+          <EscolhaPeca rot="De quem" valor={x.escopo} aoMudar={m("escopo")} opcoes={ESCOPOS} />
+          <EscolhaPeca rot="Medido em" valor={x.metrica} aoMudar={m("metrica")}
+            opcoes={[["carros", "carros vendidos"], ["rent", "rentabilidade (R$)"], ["conversao", "conversão (%)"], ["ticket", "ticket médio (R$)"]]} />
+          <EscolhaPeca rot="A faixa paga" valor={x.modo} aoMudar={m("modo")}
+            opcoes={[["por_carro", "R$ por carro"], ["percentual", "% da rentabilidade"], ["valor", "um valor fixo"]]} />
+          <div className="basis-full" />
+          {(x.faixas || []).map((fx, k) => (
+            <div key={k} className="flex items-end gap-1.5 rounded-md px-1.5 py-1" style={{ background: C.bg }}>
+              <CampoPeca rot="a partir de" valor={fx.de} larg={90}
+                aoMudar={(v) => mudarPeca(i, { faixas: x.faixas.map((y, z) => (z === k ? { ...y, de: v } : y)) })} />
+              <CampoPeca rot={x.modo === "percentual" ? "%" : "R$"} valor={fx.valor} larg={80}
+                aoMudar={(v) => mudarPeca(i, { faixas: x.faixas.map((y, z) => (z === k ? { ...y, valor: v } : y)) })} />
+              <button onClick={() => mudarPeca(i, { faixas: x.faixas.filter((_, z) => z !== k) })} className="pb-1 text-[12px]" style={{ color: C.mute }}>✕</button>
+            </div>
+          ))}
+          <button onClick={() => mudarPeca(i, { faixas: [...(x.faixas || []), { de: "", valor: "" }] })}
+            className="self-end pb-1 text-[12px] font-semibold" style={{ color: C.roxo }}>+ faixa</button>
+        </>);
+    }
+    return null;
+  };
+  const linhaCalc = (i) => calc && calc.eu && calc.eu.agora.linhas[i];
+
+  return (
+    <div>
+      <div className="space-y-2">
+        {!pecas.length && <p className="text-[12.5px]" style={{ color: C.mute }}>Nenhuma peça ainda. Monte o combinado somando peças: o fixo, os variáveis e os bônus.</p>}
+        {pecas.map((x, i) => (
+          <div key={i} className="rounded-md p-2" style={{ border: `1px solid ${C.line}` }}>
+            <div className="flex items-center gap-2">
+              <span className="text-[12.5px] font-bold">{(TIPOS_PECA.filter((t) => t[0] === x.tipo)[0] || [0, x.tipo])[1]}</span>
+              <input className="min-w-0 flex-1 rounded border px-1.5 py-0.5 text-[12px] outline-none" style={inputSty}
+                placeholder="nome no holerite (opcional)" value={x.rotulo || ""} onChange={(e) => mudarPeca(i, { rotulo: e.target.value })} />
+              <button onClick={() => tirar(i)} className="text-[12px]" style={{ color: C.mute }}>tirar</button>
+            </div>
+            <div className="mt-1.5 flex flex-wrap items-end gap-2">{campos(x, i)}</div>
+            {linhaCalc(i) && (
+              <div className="mt-1 text-[11.5px]" style={{ color: C.mute }}>
+                este mês: <b style={{ color: C.ink }}>{brl(linhaCalc(i).valor)}</b> — {linhaCalc(i).conta}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <select className="rounded-md border px-2 py-1.5 text-[13px] outline-none" style={inputSty} value={novo} onChange={(e) => porPeca(e.target.value)}>
+          <option value="">+ adicionar peça…</option>
+          {TIPOS_PECA.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
+        </select>
+        <label className="flex min-w-[220px] flex-1 items-center gap-2 text-[12px]" style={{ color: C.mute }}>
+          também aparece nas vendas como
+          <input className="min-w-0 flex-1 rounded-md border px-2 py-1 text-[12.5px] outline-none" style={inputSty} placeholder="ex.: THIAGO SOUZA"
+            value={Array.isArray(p.apelidos) ? p.apelidos.join(", ") : (p.apelidos || "")}
+            onChange={(e) => aoMudar({ ...p, apelidos: e.target.value })} />
+        </label>
+      </div>
+      {calc && calc.eu && (
+        <div className="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded-md px-3 py-2" style={{ background: "#F0F8F4" }}>
+          <span className="text-[12.5px]">Neste mês, até agora: <b className="text-[15px]" style={{ fontFamily: F.mono }}>{brl(calc.eu.agora.total)}</b></span>
+          {calc.aberto && <span className="text-[12.5px]">no ritmo do mês: <b style={{ fontFamily: F.mono }}>{brl(calc.eu.ritmo.total)}</b></span>}
+          <span className="text-[11px]" style={{ color: C.mute }}>
+            próprio: {calc.eu.proprio.carros} carros · {brl(calc.eu.proprio.rent)} · {calc.eu.proprio.fluxo} atendimentos. Mostra o combinado salvo — salve para recalcular.
+          </span>
+        </div>
+      )}
+      {calc && !calc.eu && colaboradorId && !!pecas.length && (
+        <p className="mt-2 text-[11.5px]" style={{ color: C.mute }}>Salve a ficha para ver quanto o combinado dá neste mês.</p>
+      )}
+    </div>
+  );
+}
+
 function FichaColaborador({ pe, aoFechar, tirarAcessoEMeta }) {
   const a = pe.acesso, n = pe.neg;
   const nome = (a && a.nome) || (n && n.nome) || "";
@@ -23427,6 +23650,7 @@ function FichaColaborador({ pe, aoFechar, tirarAcessoEMeta }) {
   const [rotulo, setRotulo] = useState("Documento (RG/CNH)");
   const [enviando, setEnviando] = useState(false);
   const [folha, setFolha] = useState(null);
+  const [versaoSalva, setVersaoSalva] = useState(0);
 
   const lerAnexos = (cid) => fetchAut(`/api/foto?recurso=colaborador-anexo&colaborador_id=${cid}`).then((r) => r.json())
     .then((d) => { setAnexos(d.anexos || []); if (d.rotulos) setRotulos(d.rotulos); }).catch(() => {});
@@ -23452,7 +23676,7 @@ function FichaColaborador({ pe, aoFechar, tirarAcessoEMeta }) {
       const r = await fetchAut("/api/perfil?recurso=colaborador", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.erro || "Não consegui salvar a ficha.");
-      setF(d.colaborador); setAviso("Ficha salva.");
+      setF(d.colaborador); setAviso("Ficha salva."); setVersaoSalva((x) => x + 1);
     } catch (e) { setErro(e.message); }
     setSalvando(false);
   };
@@ -23614,6 +23838,11 @@ function FichaColaborador({ pe, aoFechar, tirarAcessoEMeta }) {
                 )}
               </div>
             ))}
+            <div className="lg:col-span-2">
+              {secao("Combinado de remuneração", (
+                <CombinadoRemuneracao plano={f.remuneracao} aoMudar={(v) => set("remuneracao", v)} colaboradorId={f.id} versao={versaoSalva} />
+              ))}
+            </div>
           </div>
         )}
         <div className="mt-3 flex flex-wrap items-center gap-3">

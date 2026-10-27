@@ -789,6 +789,8 @@ async function colaborador(req, res, tok) {
     const linha = { atualizado_em: new Date().toISOString(), atualizado_por: donoDoToken(tok) };
     CAMPOS_COLAB.forEach((k) => { if (c[k] !== undefined) linha[k] = texto(c[k]); });
     DATAS_COLAB.forEach((k) => { if (c[k] !== undefined) linha[k] = /^\d{4}-\d{2}-\d{2}$/.test(String(c[k] || "")) ? c[k] : null; });
+    // O combinado (0081): só peças conhecidas, só os campos de cada uma.
+    if (c.remuneracao !== undefined) linha.remuneracao = require("../regras/remuneracao.js").limpar(c.remuneracao);
     if (c.tipo_contrato !== undefined) linha.tipo_contrato = TIPOS_CONTRATO.indexOf(String(c.tipo_contrato)) >= 0 ? c.tipo_contrato : null;
     ["perfil_id", "negociador_id", "fin_funcionario_id"].forEach((k) => { if (c[k] !== undefined) linha[k] = uuid(c[k]); });
     if (linha.cpf) linha.cpf = linha.cpf.replace(/\D/g, "").slice(0, 11) || null;
