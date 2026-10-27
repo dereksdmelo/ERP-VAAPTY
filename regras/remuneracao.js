@@ -50,7 +50,7 @@ function limpar(plano) {
     if (x.escopo === "loja" || x.escopo === "proprio") y.escopo = x.escopo;
     if (METRICAS.indexOf(x.metrica) >= 0) y.metrica = x.metrica;
     if (["valor", "por_carro", "percentual"].indexOf(x.modo) >= 0) y.modo = x.modo;
-    ["valor", "meta", "passo"].forEach((k) => { if (x[k] !== undefined && x[k] !== "") y[k] = num(x[k]); });
+    ["valor", "meta", "passo", "inicio"].forEach((k) => { if (x[k] !== undefined && x[k] !== "") y[k] = num(x[k]); });
     if (Array.isArray(x.faixas)) {
       y.faixas = x.faixas.slice(0, 12).map((f) => ({ de: num(f && f.de), valor: num(f && f.valor) }))
         .sort((a, b) => a.de - b.de);
@@ -103,9 +103,16 @@ function calcularPeca(x, met) {
       return { valor: bateu ? v : 0, conta: `${NOME_METRICA[k]} ${de} ${fmtMetrica(k, atual)} ${bateu ? "≥" : "<"} meta ${fmtMetrica(k, num(x.meta))}` };
     }
     case "bonus_lucro": {
+      /* "Começa em" (27/10/2026, o Derek: 50 mil paga +5, 75 mil +5,
+       * 100 mil +5 — "e assim de 25 em 25"). O primeiro degrau é pago ao
+       * bater o começo, e os seguintes a cada passo. Sem começo, o
+       * primeiro degrau é o próprio passo — a regra de antes. */
       const passo = num(x.passo);
-      const faixas = passo > 0 && met.lucro > 0 ? Math.floor(met.lucro / passo) : 0;
-      return { valor: faixas * v, conta: `lucro da loja ${brl(met.lucro)} ÷ ${brl(passo)} = ${faixas} × ${brl(v)}` };
+      const inicio = num(x.inicio) || passo;
+      const faixas = passo > 0 && met.lucro >= inicio && met.lucro > 0 ? Math.floor((met.lucro - inicio) / passo) + 1 : 0;
+      return { valor: faixas * v, conta: faixas
+        ? `lucro da loja ${brl(met.lucro)}: ${faixas} degrau${faixas > 1 ? "s" : ""} (${brl(inicio)}${faixas > 1 ? ` + ${faixas - 1} × ${brl(passo)}` : ""}) × ${brl(v)}`
+        : `lucro da loja ${brl(met.lucro)} — abaixo de ${brl(inicio)}` };
     }
   }
   return { valor: 0, conta: "" };

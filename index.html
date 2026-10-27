@@ -23504,7 +23504,7 @@ const NOVA_PECA = {
   variavel_faixa: { escopo: "proprio", metrica: "carros", modo: "por_carro", faixas: [{ de: 0, valor: "" }] },
   vendas_proprias: { modo: "por_carro", valor: "" }, vendas_loja: { modo: "percentual", valor: "" },
   bonus_conversao: { escopo: "proprio", meta: "", valor: "" }, bonus_rentab: { escopo: "proprio", meta: "", valor: "" },
-  bonus_ticket: { escopo: "proprio", meta: "", valor: "" }, bonus_lucro: { passo: "", valor: "" },
+  bonus_ticket: { escopo: "proprio", meta: "", valor: "" }, bonus_lucro: { inicio: "", passo: "", valor: "" },
 };
 function CampoPeca({ rot, valor, aoMudar, ph, larg }) {
   return (
@@ -23561,7 +23561,8 @@ function CombinadoRemuneracao({ plano, aoMudar, colaboradorId, versao }) {
         </>);
       case "bonus_lucro":
         return (<>
-          <CampoPeca rot="A cada R$ de lucro" valor={x.passo} aoMudar={m("passo")} ph="10.000" larg={130} />
+          <CampoPeca rot="Começa em R$ de lucro" valor={x.inicio} aoMudar={m("inicio")} ph="50.000" larg={140} />
+          <CampoPeca rot="Depois, a cada R$" valor={x.passo} aoMudar={m("passo")} ph="25.000" larg={130} />
           <CampoPeca rot="Paga R$" valor={x.valor} aoMudar={m("valor")} larg={100} />
         </>);
       case "variavel_faixa":
