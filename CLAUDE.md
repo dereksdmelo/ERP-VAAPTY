@@ -746,6 +746,22 @@ funil), ticket é rentabilidade ÷ carros, e o lucro é o do DRE do mês
 lucro**: o salário pago já está nas despesas quando passa no banco.
 "No ritmo" estica as somas até o fim do mês — aritmética, não previsão.
 
+**Os combinados reais pediram mais da faixa** (27/10/2026): medir em
+**clientes em loja** e em **lucro da loja**; pagar R$ por cliente, % do
+lucro, ou % só do que **passar** do começo da faixa ("depois de 100 mil
+eu pago 1%" — a tela oferece os dois, porque a frase serve aos dois);
+faixas que **se somam** (180 mil +500 e 230 mil +500 = 1.000), e
+**"deixa de valer a partir de"**, para o combinado que troca de regra
+(em 300 mil cai o que se ganhou nas de baixo e entra outra peça). O
+bônus por lucro ganhou **"começa em"**: 50 mil paga o primeiro degrau,
+depois a cada 25 mil.
+
+**Perfis de remuneração (0082)**, em Gestão abaixo de Equipe: o mesmo
+editor de peças, salvo com nome, para usar em mais de uma pessoa. A
+ficha aponta para o perfil (`remuneracao.perfil_id`) e ainda pode ter
+peças só dela; as do perfil entram primeiro na conta. Mudar o perfil
+muda todo mundo que o usa. Desativa-se, não se apaga.
+
 **PATCH que volta vazio é RLS, não erro.** A política deixa qualquer um
 da equipe *ler* todo atendimento, mas só o dono (ou o gerente)
 *escrever*. Quando alguém tenta editar o atendimento de outro, o

@@ -21155,6 +21155,9 @@ function destinosPara(perfil) {
     { id: "painel", rot: "Painel do mês", curto: "Painel", area: "gestao" },
     gestao ? { id: "rentabilidade", rot: "Rentabilidade", curto: "Rentab.", area: "gestao" } : null,
     gerente ? { id: "gestao", rot: "Equipe", curto: "Equipe", area: "gestao" } : null,
+    // O combinado pronto para mais de uma pessoa (0082). A RLS é do
+    // financeiro e do gerente, como a ficha.
+    (gerente || (perfil && perfil.financeiro)) ? { id: "remuneracao", rot: "Perfis de remuneração", curto: "Remuner.", area: "gestao" } : null,
     // Área restrita: só quem tem o sinalizador no perfil (0021). A tela
     // esconde o destino; quem protege de verdade é a RLS.
 
@@ -23527,11 +23530,26 @@ function EscolhaPeca({ rot, valor, opcoes, aoMudar }) {
 }
 const ESCOPOS = [["proprio", "próprio"], ["loja", "da loja"]];
 
-function CombinadoRemuneracao({ plano, aoMudar, colaboradorId, versao }) {
+/* Uma peça em uma linha, para mostrar o perfil ligado sem abrir o editor. */
+function resumoPeca(x) {
+  const t = (TIPOS_PECA.filter((y) => y[0] === x.tipo)[0] || [0, x.tipo])[1];
+  const r = (v) => brl(Number(v) || 0);
+  if (x.tipo === "fixo" || x.tipo === "variavel_fixo") return `${t}: ${r(x.valor)}`;
+  if (x.tipo === "bonus_lucro") return `${t}: ${r(x.valor)} a partir de ${r(x.inicio || x.passo)}, depois a cada ${r(x.passo)}`;
+  if (x.tipo === "variavel_faixa") return `${t} (${(x.faixas || []).length} faixa${(x.faixas || []).length === 1 ? "" : "s"})`;
+  if (x.meta !== undefined) return `${t}: ${r(x.valor)} ao bater ${x.meta}`;
+  return `${t}: ${x.modo === "percentual" ? `${x.valor}%` : r(x.valor)}`;
+}
+
+function CombinadoRemuneracao({ plano, aoMudar, colaboradorId, versao, soPecas }) {
   const p = plano || {};
   const pecas = p.pecas || [];
   const [novo, setNovo] = useState("");
   const [calc, setCalc] = useState(null);
+  const [perfis, setPerfis] = useState(null);
+  useEffect(() => { if (!soPecas) fin("perfil-remuneracao").then((d) => setPerfis(d.lista || [])).catch(() => setPerfis([])); }, []);
+  const perfil = (perfis || []).filter((x) => x.id === p.perfil_id)[0] || null;
+  const pecasPerfil = (perfil && perfil.remuneracao && perfil.remuneracao.pecas) || [];
   const mudarPeca = (i, mud) => aoMudar({ ...p, pecas: pecas.map((x, j) => (j === i ? { ...x, ...mud } : x)) });
   const tirar = (i) => aoMudar({ ...p, pecas: pecas.filter((_, j) => j !== i) });
   const porPeca = (tipo) => { if (tipo) aoMudar({ ...p, pecas: [...pecas, { tipo, ...JSON.parse(JSON.stringify(NOVA_PECA[tipo])) }] }); setNovo(""); };
@@ -23565,19 +23583,29 @@ function CombinadoRemuneracao({ plano, aoMudar, colaboradorId, versao }) {
           <CampoPeca rot="Depois, a cada R$" valor={x.passo} aoMudar={m("passo")} ph="25.000" larg={130} />
           <CampoPeca rot="Paga R$" valor={x.valor} aoMudar={m("valor")} larg={100} />
         </>);
-      case "variavel_faixa":
+      case "variavel_faixa": {
+        const lucro = x.metrica === "lucro";
         return (<>
-          <EscolhaPeca rot="De quem" valor={x.escopo} aoMudar={m("escopo")} opcoes={ESCOPOS} />
+          {!lucro && <EscolhaPeca rot="De quem" valor={x.escopo} aoMudar={m("escopo")} opcoes={ESCOPOS} />}
           <EscolhaPeca rot="Medido em" valor={x.metrica} aoMudar={m("metrica")}
-            opcoes={[["carros", "carros vendidos"], ["rent", "rentabilidade (R$)"], ["conversao", "conversão (%)"], ["ticket", "ticket médio (R$)"]]} />
+            opcoes={[["carros", "carros vendidos"], ["clientes", "clientes em loja"], ["rent", "rentabilidade (R$)"],
+                     ["conversao", "conversão (%)"], ["ticket", "ticket médio (R$)"], ["lucro", "lucro da loja (R$)"]]} />
           <EscolhaPeca rot="A faixa paga" valor={x.modo} aoMudar={m("modo")}
-            opcoes={[["por_carro", "R$ por carro"], ["percentual", "% da rentabilidade"], ["valor", "um valor fixo"]]} />
+            opcoes={[["valor", "um valor fixo"], ["por_carro", "R$ por carro"], ["por_cliente", "R$ por cliente em loja"],
+                     ["percentual", lucro ? "% do lucro" : "% da rentabilidade"],
+                     ["percentual_excedente", lucro ? "% do lucro acima da faixa" : "% da rentabilidade acima da faixa"]]} />
+          <CampoPeca rot="Deixa de valer a partir de" valor={x.ate} aoMudar={m("ate")} ph="opcional" larg={160} />
+          {(x.modo || "valor") === "valor" && (
+            <label className="flex items-center gap-1.5 self-end pb-1 text-[12px]">
+              <input type="checkbox" checked={!!x.soma} onChange={(e) => mudarPeca(i, { soma: e.target.checked })} /> as faixas se somam
+            </label>
+          )}
           <div className="basis-full" />
           {(x.faixas || []).map((fx, k) => (
             <div key={k} className="flex items-end gap-1.5 rounded-md px-1.5 py-1" style={{ background: C.bg }}>
               <CampoPeca rot="a partir de" valor={fx.de} larg={90}
                 aoMudar={(v) => mudarPeca(i, { faixas: x.faixas.map((y, z) => (z === k ? { ...y, de: v } : y)) })} />
-              <CampoPeca rot={x.modo === "percentual" ? "%" : "R$"} valor={fx.valor} larg={80}
+              <CampoPeca rot={String(x.modo || "").indexOf("percentual") === 0 ? "%" : "R$"} valor={fx.valor} larg={80}
                 aoMudar={(v) => mudarPeca(i, { faixas: x.faixas.map((y, z) => (z === k ? { ...y, valor: v } : y)) })} />
               <button onClick={() => mudarPeca(i, { faixas: x.faixas.filter((_, z) => z !== k) })} className="pb-1 text-[12px]" style={{ color: C.mute }}>✕</button>
             </div>
@@ -23585,15 +23613,39 @@ function CombinadoRemuneracao({ plano, aoMudar, colaboradorId, versao }) {
           <button onClick={() => mudarPeca(i, { faixas: [...(x.faixas || []), { de: "", valor: "" }] })}
             className="self-end pb-1 text-[12px] font-semibold" style={{ color: C.roxo }}>+ faixa</button>
         </>);
+      }
     }
     return null;
   };
-  const linhaCalc = (i) => calc && calc.eu && calc.eu.agora.linhas[i];
+  // As linhas do cálculo vêm com as do perfil primeiro (0082).
+  const linhaCalc = (i) => calc && calc.eu && calc.eu.agora.linhas.filter((l) => !l.do_perfil)[i];
 
   return (
     <div>
+      {!soPecas && (
+        <div className="mb-2 rounded-md p-2" style={{ background: C.bg }}>
+          <label className="flex flex-wrap items-center gap-2 text-[12.5px]">
+            <b>Perfil de remuneração</b>
+            <select className="rounded-md border px-2 py-1 text-[13px] outline-none" style={inputSty} value={p.perfil_id || ""}
+              onChange={(e) => aoMudar({ ...p, perfil_id: e.target.value || null })}>
+              <option value="">{perfis === null ? "carregando…" : "nenhum — só as peças abaixo"}</option>
+              {(perfis || []).filter((x) => x.ativo || x.id === p.perfil_id).map((x) => <option key={x.id} value={x.id}>{x.nome}</option>)}
+            </select>
+            <span className="text-[11px]" style={{ color: C.mute }}>os perfis ficam em Gestão → Perfis de remuneração</span>
+          </label>
+          {!!pecasPerfil.length && (
+            <ul className="mt-1.5 space-y-0.5 pl-1 text-[12px]" style={{ color: C.mute }}>
+              {pecasPerfil.map((x, k) => {
+                const l = calc && calc.eu && calc.eu.agora.linhas.filter((y) => y.do_perfil)[k];
+                return <li key={k}>· {resumoPeca(x)}{l ? <> — este mês <b style={{ color: C.ink }}>{brl(l.valor)}</b></> : null}</li>;
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+      {!soPecas && !!pecasPerfil.length && <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em]" style={{ color: C.mute }}>Peças só desta pessoa</div>}
       <div className="space-y-2">
-        {!pecas.length && <p className="text-[12.5px]" style={{ color: C.mute }}>Nenhuma peça ainda. Monte o combinado somando peças: o fixo, os variáveis e os bônus.</p>}
+        {!pecas.length && <p className="text-[12.5px]" style={{ color: C.mute }}>{soPecas || pecasPerfil.length ? "Nenhuma peça a mais." : "Nenhuma peça ainda. Escolha um perfil ou monte o combinado somando peças: o fixo, os variáveis e os bônus."}</p>}
         {pecas.map((x, i) => (
           <div key={i} className="rounded-md p-2" style={{ border: `1px solid ${C.line}` }}>
             <div className="flex items-center gap-2">
@@ -23616,12 +23668,12 @@ function CombinadoRemuneracao({ plano, aoMudar, colaboradorId, versao }) {
           <option value="">+ adicionar peça…</option>
           {TIPOS_PECA.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
         </select>
-        <label className="flex min-w-[220px] flex-1 items-center gap-2 text-[12px]" style={{ color: C.mute }}>
+        {!soPecas && <label className="flex min-w-[220px] flex-1 items-center gap-2 text-[12px]" style={{ color: C.mute }}>
           também aparece nas vendas como
           <input className="min-w-0 flex-1 rounded-md border px-2 py-1 text-[12.5px] outline-none" style={inputSty} placeholder="ex.: THIAGO SOUZA"
             value={Array.isArray(p.apelidos) ? p.apelidos.join(", ") : (p.apelidos || "")}
             onChange={(e) => aoMudar({ ...p, apelidos: e.target.value })} />
-        </label>
+        </label>}
       </div>
       {calc && calc.eu && (
         <div className="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded-md px-3 py-2" style={{ background: "#F0F8F4" }}>
@@ -23632,7 +23684,7 @@ function CombinadoRemuneracao({ plano, aoMudar, colaboradorId, versao }) {
           </span>
         </div>
       )}
-      {calc && !calc.eu && colaboradorId && !!pecas.length && (
+      {calc && !calc.eu && colaboradorId && (!!pecas.length || !!p.perfil_id) && (
         <p className="mt-2 text-[11.5px]" style={{ color: C.mute }}>Salve a ficha para ver quanto o combinado dá neste mês.</p>
       )}
     </div>
@@ -23856,6 +23908,79 @@ function FichaColaborador({ pe, aoFechar, tirarAcessoEMeta }) {
   );
 }
 
+/* PERFIS DE REMUNERAÇÃO (0082), em Gestão, logo abaixo de Equipe. O
+ * Derek, em 27/10/2026: *"cadastrar um perfil que pode ser usado pra
+ * mais de um tipo de negociador"*. É o mesmo editor de peças da ficha;
+ * mudar um perfil muda o combinado de todo mundo que o usa. Desativar
+ * em vez de apagar: ficha que aponta para ele não pode ficar sem
+ * combinado de um dia para o outro sem ninguém ver. */
+function TelaPerfisRemuneracao() {
+  const [lista, setLista] = useState(null);
+  const [aberto, setAberto] = useState(null);
+  const [erro, setErro] = useState(""); const [aviso, setAviso] = useState(""); const [indo, setIndo] = useState(false);
+  const ler = () => fin("perfil-remuneracao").then((d) => setLista(d.lista || [])).catch((e) => { setErro(e.message); setLista([]); });
+  useEffect(() => { ler(); }, []);
+  const salvar = async () => {
+    if (!String(aberto.nome || "").trim()) { setErro("Dê um nome ao perfil."); return; }
+    setIndo(true); setErro(""); setAviso("");
+    try {
+      const corpo = { nome: aberto.nome, descricao: aberto.descricao || "", remuneracao: aberto.remuneracao || {}, ativo: aberto.ativo !== false };
+      const d = aberto.id ? await fin("perfil-remuneracao", { id: aberto.id }, finJson("PATCH", corpo))
+                          : await fin("perfil-remuneracao", {}, finJson("POST", corpo));
+      setAberto(d.item); setAviso("Perfil salvo."); ler();
+    } catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+  return (
+    <div>
+      <Cabecalho titulo="Perfis de remuneração" sub="Combinados prontos para usar em mais de uma pessoa. Na ficha da pessoa, escolha o perfil."
+        acao={<BotaoPrimario onClick={() => { setAberto({ nome: "", remuneracao: { pecas: [] }, ativo: true }); setAviso(""); setErro(""); }}>+ Novo perfil</BotaoPrimario>} />
+      {erro && <p className="mb-2 text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
+      <div className="grid gap-3 lg:grid-cols-[280px_1fr]">
+        <div className="space-y-1.5">
+          {lista === null && <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>}
+          {lista && !lista.length && <p className="text-[13px]" style={{ color: C.mute }}>Nenhum perfil ainda.</p>}
+          {(lista || []).map((x) => (
+            <button key={x.id} onClick={() => { setAberto(x); setAviso(""); setErro(""); }}
+              className="block w-full rounded-lg px-3 py-2 text-left"
+              style={{ background: aberto && aberto.id === x.id ? C.roxoFraco : C.paper, border: `1px solid ${C.line}`, opacity: x.ativo ? 1 : 0.55 }}>
+              <div className="text-[13.5px] font-semibold">{x.nome}{!x.ativo ? " · desativado" : ""}</div>
+              <div className="text-[11.5px]" style={{ color: C.mute }}>{((x.remuneracao && x.remuneracao.pecas) || []).length} peças{x.descricao ? ` · ${x.descricao}` : ""}</div>
+            </button>
+          ))}
+        </div>
+        {aberto ? (
+          <div className="rounded-xl p-3" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+            <div className="grid gap-2 sm:grid-cols-[1fr_1.5fr]">
+              <label><Rotulo>Nome do perfil</Rotulo>
+                <input className={inputCls} style={inputSty} value={aberto.nome || ""} placeholder="ex.: Negociador júnior"
+                  onChange={(e) => setAberto({ ...aberto, nome: e.target.value })} /></label>
+              <label><Rotulo>Para quem é</Rotulo>
+                <input className={inputCls} style={inputSty} value={aberto.descricao || ""} placeholder="opcional"
+                  onChange={(e) => setAberto({ ...aberto, descricao: e.target.value })} /></label>
+            </div>
+            <div className="mt-3">
+              <CombinadoRemuneracao soPecas plano={aberto.remuneracao} aoMudar={(v) => setAberto({ ...aberto, remuneracao: v })} />
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <BotaoPrimario onClick={salvar} disabled={indo}>{indo ? "salvando…" : "Salvar o perfil"}</BotaoPrimario>
+              {aberto.id && (
+                <button onClick={() => setAberto({ ...aberto, ativo: aberto.ativo === false })} className="text-[12.5px] font-semibold" style={{ color: C.mute }}>
+                  {aberto.ativo === false ? "reativar (salve depois)" : "desativar (salve depois)"}
+                </button>
+              )}
+              {aviso && <span className="text-[13px]" style={{ color: C.verde }}>{aviso}</span>}
+              <span className="text-[11.5px]" style={{ color: C.mute }}>Mudar o perfil muda o combinado de todo mundo que o usa.</span>
+            </div>
+          </div>
+        ) : (
+          <p className="px-1 py-6 text-[13px]" style={{ color: C.mute }}>Escolha um perfil à esquerda ou crie um novo.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** Equipe, metas e importação — o que era a sanfona da gestão. */
 function TelaGestao({ perfil, comp }) {
   const [importando, setImportando] = useState(false);
@@ -24065,6 +24190,7 @@ function App() {
       {tela === "gestor" && <PainelGestor perfil={perfil} comp={compOuAtual} />}
       {tela === "adm" && <TelaADM perfil={perfil} comp={compOuAtual} mes={mes} />}
       {tela === "gestao" && <TelaGestao perfil={perfil} comp={compOuAtual} />}
+      {tela === "remuneracao" && <TelaPerfisRemuneracao />}
       {tela === "conversas" && (
         <TelaConversas alvo={conversaAlvo} aoConsumirAlvo={() => setConversaAlvo(null)} />
       )}

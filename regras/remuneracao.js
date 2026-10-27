@@ -30,7 +30,9 @@ const TIPOS = {
   bonus_ticket:      "Bônus de ticket médio",
   bonus_lucro:       "Bônus por faixa de lucro da loja",
 };
-const METRICAS = ["carros", "rent", "conversao", "ticket"];
+const METRICAS = ["carros", "clientes", "rent", "conversao", "ticket", "lucro"];
+const MODOS = ["valor", "por_carro", "por_cliente", "percentual", "percentual_excedente"];
+const RX_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const num = (v) => {
   if (typeof v === "number") return isFinite(v) ? v : 0;
   const s = String(v == null ? "" : v).trim().replace(/[R$\s%]/g, "");
@@ -49,8 +51,9 @@ function limpar(plano) {
     const y = { tipo: x.tipo, rotulo: String(x.rotulo || "").slice(0, 80) };
     if (x.escopo === "loja" || x.escopo === "proprio") y.escopo = x.escopo;
     if (METRICAS.indexOf(x.metrica) >= 0) y.metrica = x.metrica;
-    if (["valor", "por_carro", "percentual"].indexOf(x.modo) >= 0) y.modo = x.modo;
-    ["valor", "meta", "passo", "inicio"].forEach((k) => { if (x[k] !== undefined && x[k] !== "") y[k] = num(x[k]); });
+    if (MODOS.indexOf(x.modo) >= 0) y.modo = x.modo;
+    if (x.soma) y.soma = true;
+    ["valor", "meta", "passo", "inicio", "ate"].forEach((k) => { if (x[k] !== undefined && x[k] !== "") y[k] = num(x[k]); });
     if (Array.isArray(x.faixas)) {
       y.faixas = x.faixas.slice(0, 12).map((f) => ({ de: num(f && f.de), valor: num(f && f.valor) }))
         .sort((a, b) => a.de - b.de);
@@ -59,15 +62,19 @@ function limpar(plano) {
   }).filter(Boolean);
   const apelidos = (Array.isArray(p.apelidos) ? p.apelidos : String(p.apelidos || "").split(","))
     .map((s) => String(s).trim().toUpperCase()).filter(Boolean).slice(0, 6);
-  return { pecas, apelidos, obs: String(p.obs || "").slice(0, 500) };
+  // O perfil de remuneração (0082): as peças dele valem junto das daqui.
+  const perfil_id = RX_UUID.test(String(p.perfil_id || "")) ? String(p.perfil_id) : null;
+  return { perfil_id, pecas, apelidos, obs: String(p.obs || "").slice(0, 500) };
 }
 
 const conv = (m) => (m.fluxo ? (m.fechados / m.fluxo) * 100 : 0);
 const ticket = (m) => (m.carros ? m.rent / m.carros : 0);
-const daMetrica = (m, k) => (k === "carros" ? m.carros : k === "rent" ? m.rent : k === "conversao" ? conv(m) : ticket(m));
+const daMetrica = (m, k, lucro) => (k === "carros" ? m.carros : k === "clientes" ? m.fluxo : k === "rent" ? m.rent
+  : k === "conversao" ? conv(m) : k === "lucro" ? lucro : ticket(m));
 const brl = (v) => "R$ " + Math.round(v).toLocaleString("pt-BR");
-const NOME_METRICA = { carros: "carros", rent: "rentabilidade", conversao: "conversão", ticket: "ticket médio" };
-const fmtMetrica = (k, v) => (k === "carros" ? `${Math.round(v * 10) / 10} carros` : k === "conversao" ? `${Math.round(v)}%` : brl(v));
+const NOME_METRICA = { carros: "carros", clientes: "clientes em loja", rent: "rentabilidade", conversao: "conversão", ticket: "ticket médio", lucro: "lucro da loja" };
+const fmtMetrica = (k, v) => (k === "carros" ? `${Math.round(v * 10) / 10} carros` : k === "clientes" ? `${Math.round(v)} clientes`
+  : k === "conversao" ? `${Math.round(v)}%` : brl(v));
 
 /** Uma peça contra as métricas: o valor e a conta, escrita para quem lê. */
 function calcularPeca(x, met) {
@@ -85,14 +92,42 @@ function calcularPeca(x, met) {
         : { valor: mm.carros * v, conta: `${mm.carros} carros × ${brl(v)}` };
     }
     case "variavel_faixa": {
+      /* A FAIXA (27/10/2026, os combinados reais do Derek):
+       *  - medida em carros, clientes em loja, rentabilidade, conversão,
+       *    ticket ou LUCRO DA LOJA;
+       *  - paga um valor fixo, R$ por carro, R$ por cliente, % da base
+       *    (a rentabilidade, ou o lucro quando é ele que mede) ou % do que
+       *    PASSAR do começo da faixa ("depois de 100 mil eu pago 1%");
+       *  - "as faixas se somam": 180 mil +500 e 230 mil +500 dão 1.000;
+       *    sem isso vale só a mais alta, como numa tabela;
+       *  - "deixa de valer a partir de": em 300 mil o combinado muda, e o
+       *    que se ganhou nas faixas de baixo cai — a peça nova entra em
+       *    outra linha. */
       const k = x.metrica || "carros";
-      const atual = daMetrica(m, k);
-      const faixa = (x.faixas || []).filter((f) => atual >= f.de).pop();
-      if (!faixa) return { valor: 0, conta: `${fmtMetrica(k, atual)} ${de} — abaixo da primeira faixa` };
-      const conta = `${fmtMetrica(k, atual)} ${de} → faixa a partir de ${fmtMetrica(k, faixa.de)}`;
-      if (x.modo === "por_carro") return { valor: m.carros * faixa.valor, conta: `${conta}: ${m.carros} × ${brl(faixa.valor)}` };
-      if (x.modo === "percentual") return { valor: (m.rent * faixa.valor) / 100, conta: `${conta}: ${faixa.valor}% de ${brl(m.rent)}` };
-      return { valor: faixa.valor, conta: `${conta}: ${brl(faixa.valor)}` };
+      const atual = daMetrica(m, k, met.lucro);
+      const qual = k === "lucro" ? "" : ` ${de}`;
+      if (num(x.ate) > 0 && atual >= num(x.ate)) return { valor: 0, conta: `${fmtMetrica(k, atual)}${qual} — passou de ${fmtMetrica(k, num(x.ate))}, deixa de valer` };
+      const batidas = (x.faixas || []).filter((f) => atual >= f.de);
+      const faixa = batidas[batidas.length - 1];
+      if (!faixa) return { valor: 0, conta: `${fmtMetrica(k, atual)}${qual} — abaixo da primeira faixa` };
+      const conta = `${fmtMetrica(k, atual)}${qual} → faixa a partir de ${fmtMetrica(k, faixa.de)}`;
+      const baseR = k === "lucro" ? met.lucro : m.rent;
+      const nomeBase = k === "lucro" ? "do lucro" : "da rentabilidade";
+      switch (x.modo) {
+        case "por_carro": return { valor: m.carros * faixa.valor, conta: `${conta}: ${m.carros} carros × ${brl(faixa.valor)}` };
+        case "por_cliente": return { valor: m.fluxo * faixa.valor, conta: `${conta}: ${m.fluxo} clientes × ${brl(faixa.valor)}` };
+        case "percentual": return { valor: (baseR * faixa.valor) / 100, conta: `${conta}: ${faixa.valor}% ${nomeBase} (${brl(baseR)})` };
+        case "percentual_excedente": {
+          const sobra = Math.max(0, baseR - faixa.de);
+          return { valor: (sobra * faixa.valor) / 100, conta: `${conta}: ${faixa.valor}% de ${brl(sobra)} acima de ${brl(faixa.de)}` };
+        }
+        default:
+          if (x.soma) {
+            const total = batidas.reduce((t, f) => t + f.valor, 0);
+            return { valor: total, conta: `${conta}: ${batidas.length} faixa${batidas.length > 1 ? "s" : ""} somadas = ${brl(total)}` };
+          }
+          return { valor: faixa.valor, conta: `${conta}: ${brl(faixa.valor)}` };
+      }
     }
     case "bonus_conversao":
     case "bonus_rentab":
@@ -118,12 +153,13 @@ function calcularPeca(x, met) {
   return { valor: 0, conta: "" };
 }
 
-/** O combinado inteiro: peça a peça, e o total. */
-function calcular(plano, met) {
-  const pecas = (plano && plano.pecas) || [];
+/** O combinado inteiro: peça a peça, e o total. `perfil` é o perfil de
+ *  remuneração ligado (0082): as peças dele vêm antes das da pessoa. */
+function calcular(plano, met, perfil) {
+  const pecas = ((perfil && perfil.pecas) || []).map((x) => ({ ...x, doPerfil: true })).concat((plano && plano.pecas) || []);
   const linhas = pecas.map((x) => {
     const r = calcularPeca(x, met);
-    return { tipo: x.tipo, rotulo: x.rotulo || TIPOS[x.tipo], valor: Math.round(r.valor * 100) / 100, conta: r.conta,
+    return { tipo: x.tipo, rotulo: x.rotulo || TIPOS[x.tipo], valor: Math.round(r.valor * 100) / 100, conta: r.conta, do_perfil: !!x.doPerfil,
              fixo: x.tipo === "fixo", bonus: x.tipo.indexOf("bonus") === 0 };
   });
   return { linhas, total: linhas.reduce((t, l) => t + l.valor, 0) };

@@ -2007,7 +2007,7 @@ async function remuneracao(req, res, tok) {
   const fim = fimDoMes(comp);
   const chave = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/\s+/g, " ").trim();
 
-  const [colabs, negs, vendidos, ats, dreMes] = await Promise.all([
+  const [colabs, negs, vendidos, ats, dreMes, perfis] = await Promise.all([
     supa(`${base("colaborador")}?select=id,nome_completo,perfil_id,negociador_id,desligado_em,inicio_em,remuneracao`, { headers: cab(tok) }),
     supa(`${base("negociador")}?select=id,nome`, { headers: cab(tok) }),
     supa(`${base("estoque")}?select=valor_compra,valor_venda,negociador_nome,estoque_custo(tipo,previsto,realizado)` +
@@ -2015,7 +2015,9 @@ async function remuneracao(req, res, tok) {
       { headers: cab(tok) }),
     supa(`${base("atendimento")}?select=negociador_nome,status&data=gte.${comp}&data=lte.${fim}&limit=5000`, { headers: cab(tok) }),
     dreDoMes(tok, comp),
+    supa(`${base("perfil_remuneracao")}?select=id,nome,remuneracao`, { headers: cab(tok) }).catch(() => []),
   ]);
+  const perfilPor = {}; (perfis || []).forEach((x) => { perfilPor[x.id] = x; });
   const nomeNeg = {}; (negs || []).forEach((n) => { nomeNeg[n.id] = n.nome; });
 
   // Por nome: carros e rentabilidade (estoque), atendimentos e fechados.
@@ -2038,7 +2040,7 @@ async function remuneracao(req, res, tok) {
   const aberto = hoje >= comp && hoje <= fim;
   const fator = aberto ? diasMes / Math.max(1, Number(hoje.slice(8, 10))) : 1;
 
-  const pessoas = (colabs || []).filter((c) => c.remuneracao && (c.remuneracao.pecas || []).length)
+  const pessoas = (colabs || []).filter((c) => c.remuneracao && ((c.remuneracao.pecas || []).length || perfilPor[c.remuneracao.perfil_id]))
     .filter((c) => !c.desligado_em || c.desligado_em >= comp)
     .map((c) => {
       const plano = c.remuneracao;
@@ -2046,10 +2048,13 @@ async function remuneracao(req, res, tok) {
       const proprio = { carros: 0, rent: 0, fluxo: 0, fechados: 0 };
       [...new Set(nomes)].forEach((k) => { const m = por[k]; if (m) Object.keys(proprio).forEach((x) => { proprio[x] += m[x]; }); });
       const met = { proprio, loja, lucro: dreMes.lucro };
-      const agora = R.calcular(plano, met);
-      const ritmo = R.calcular(plano, R.noRitmo(met, fator));
+      const perfil = perfilPor[plano.perfil_id] || null;
+      const pp = perfil ? perfil.remuneracao : null;
+      const agora = R.calcular(plano, met, pp);
+      const ritmo = R.calcular(plano, R.noRitmo(met, fator), pp);
       return { colaborador_id: c.id, perfil_id: c.perfil_id, negociador_id: c.negociador_id,
                nome: c.nome_completo || nomeNeg[c.negociador_id] || "—", nomes_nas_vendas: nomes,
+               perfil: perfil ? perfil.nome : null,
                proprio, agora, ritmo };
     })
     .sort((a, b) => b.agora.total - a.agora.total);
@@ -2062,7 +2067,13 @@ async function remuneracao(req, res, tok) {
   });
 }
 
+// Perfis de remuneração (0082): o cadastro genérico, com o combinado
+// passando pela mesma limpeza da ficha.
+const perfilRemuneracao = cadastro("perfil_remuneracao", [["nome", texto], ["descricao", texto],
+  ["remuneracao", (v) => require("../regras/remuneracao.js").limpar(v)], ["ativo", bool]], "nome.asc");
+
 const RECURSOS = { conta, categoria, funcionario, favorecido, lancamento, importar, dre, carros, vale, folha, remuneracao,
+                   "perfil-remuneracao": perfilRemuneracao,
                    fechamento, orcamento, ano, rateio, negociacao, titulo, fluxo, log, recibo, pendencias, recebimentos, saldos,
                    estoque: estoqueLista };
 
