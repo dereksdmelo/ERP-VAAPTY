@@ -62,6 +62,9 @@ function limpar(plano) {
       y.faixas = x.faixas.slice(0, 12).map((f) => {
         const z = { de: num(f && f.de), valor: num(f && f.valor) };
         if (f && f.ticket !== undefined && f.ticket !== "") z.ticket = num(f.ticket);
+        // A faixa que paga % da rentabilidade do período, e não R$ (o
+        // semanal do negociador: de 5 a 10 mil, 1% de comissão).
+        if (f && f.pct) z.pct = true;
         return z;
       }).sort((a, b) => a.de - b.de);
     }
@@ -175,9 +178,12 @@ function calcularPeca(x, met) {
         if (!mm) return;
         const atual = daMetrica(mm, k, 0);
         const batidas = (x.faixas || []).filter((f) => atual >= f.de);
-        const pago = x.soma ? batidas.reduce((t, f) => t + f.valor, 0) : (batidas.length ? batidas[batidas.length - 1].valor : 0);
+        const paga = (f) => (f.pct ? (mm.rent * f.valor) / 100 : f.valor);
+        const pago = x.soma ? batidas.reduce((t, f) => t + paga(f), 0) : (batidas.length ? paga(batidas[batidas.length - 1]) : 0);
+        const ultima = batidas[batidas.length - 1];
         total += pago;
-        if (pago || atual) partes.push(`${x.periodo === "quinzena1" ? "1ª quinzena" : `sem ${w + 1}`}: ${fmtMetrica(k, atual)}${pago ? ` → ${brl(pago)}` : ""}`);
+        if (pago || atual) partes.push(`${x.periodo === "quinzena1" ? "1ª quinzena" : `sem ${w + 1}`}: ${fmtMetrica(k, atual)}` +
+          `${pago ? ` → ${!x.soma && ultima && ultima.pct ? `${ultima.valor}% de ${brl(mm.rent)} = ` : ""}${brl(pago)}` : ""}`);
       });
       return { valor: total, conta: partes.length ? partes.join(" · ") : `nenhum ${x.periodo === "quinzena1" ? "resultado na quinzena" : "resultado nas semanas"}` };
     }

@@ -23568,7 +23568,7 @@ function CombinadoRemuneracao({ plano, aoMudar, colaboradorId, versao, soPecas }
 
   /* As faixas de uma peça. `comTicket` é a faixa do bônus de ticket:
    * a rentabilidade da faixa, o ticket mínimo dela e o que paga. */
-  const faixasDe = (x, i, rotDe, rotValor, comTicket) => (<>
+  const faixasDe = (x, i, rotDe, rotValor, comTicket, comPct) => (<>
     <div className="basis-full" />
     {(x.faixas || []).map((fx, k) => {
       const muda = (campo) => (v) => mudarPeca(i, { faixas: x.faixas.map((y, z) => (z === k ? { ...y, [campo]: v } : y)) });
@@ -23576,7 +23576,13 @@ function CombinadoRemuneracao({ plano, aoMudar, colaboradorId, versao, soPecas }
         <div key={k} className="flex items-end gap-1.5 rounded-md px-1.5 py-1" style={{ background: C.bg }}>
           <CampoPeca rot={rotDe} valor={fx.de} larg={100} aoMudar={muda("de")} />
           {comTicket && <CampoPeca rot="ticket mínimo" valor={fx.ticket} larg={90} aoMudar={muda("ticket")} />}
-          <CampoPeca rot={rotValor} valor={fx.valor} larg={80} aoMudar={muda("valor")} />
+          <CampoPeca rot={comPct ? (fx.pct ? "paga %" : "paga R$") : rotValor} valor={fx.valor} larg={80} aoMudar={muda("valor")} />
+          {comPct && (
+            <select className="mb-px rounded-md border px-1 py-1 text-[12px] outline-none" style={inputSty} value={fx.pct ? "pct" : "rs"}
+              title="R$ fixo, ou % da rentabilidade do período" onChange={(e) => muda("pct")(e.target.value === "pct")}>
+              <option value="rs">R$</option><option value="pct">% rentab.</option>
+            </select>
+          )}
           <button onClick={() => mudarPeca(i, { faixas: x.faixas.filter((_, z) => z !== k) })} className="pb-1 text-[12px]" style={{ color: C.mute }}>✕</button>
         </div>
       );
@@ -23627,7 +23633,7 @@ function CombinadoRemuneracao({ plano, aoMudar, colaboradorId, versao, soPecas }
           <label className="flex items-center gap-1.5 self-end pb-1 text-[12px]">
             <input type="checkbox" checked={!!x.soma} onChange={(e) => mudarPeca(i, { soma: e.target.checked })} /> as faixas se somam
           </label>
-          {faixasDe(x, i, "a partir de", "paga R$")}
+          {faixasDe(x, i, "a partir de", "paga R$", false, true)}
           <span className="basis-full text-[11px]" style={{ color: C.mute }}>
             {x.periodo === "quinzena1" ? "Paga uma vez, com o resultado do dia 1 ao 15." : "Cada semana (dias 1–7, 8–14, 15–21, 22–28, 29 em diante) que bate uma faixa paga o valor dela; as semanas somam."}
           </span>

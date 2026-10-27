@@ -773,6 +773,9 @@ mais alta que a rentabilidade alcançou, e ela só paga se o ticket
 bateu o mínimo DELA — não desce para a faixa de baixo, e ticket alto
 numa faixa baixa não leva o valor da alta (a regra que o Derek ditou).
 Perfil se **duplica** ("Duplicar" abre a cópia sem id; salvar cria).
+A faixa do bônus por período pode pagar **% da rentabilidade do
+período** em vez de R$ (`pct`): o semanal do negociador é 1% de 5 a 10
+mil e valor fixo dali em diante.
 
 **PATCH que volta vazio é RLS, não erro.** A política deixa qualquer um
 da equipe *ler* todo atendimento, mas só o dono (ou o gerente)
