@@ -44,6 +44,18 @@ const num = (v) => {
   return isFinite(n) ? n : 0;
 };
 
+/* AS SEMANAS DO MÊS SÃO QUATRO (27/10/2026, o Derek): "a segunda
+ * semana tem que finalizar com o quinzenal, e a última semana normalmente
+ * estendemos — a gente só considera 4 semanas no mês", e semana não
+ * atravessa a virada do mês. Então: 1–7, 8–15, 16–22 e 23 até o fim.
+ * A planilha trazia SEM. de 1 a 5; a 5 cai na 4. */
+const PRIMEIRO_DIA_DA_SEMANA = [1, 8, 16, 23];
+function semanaDoDia(d) {
+  if (!d) return null;
+  return d <= 7 ? 1 : d <= 15 ? 2 : d <= 22 ? 3 : 4;
+}
+const semanaDaPlanilha = (n) => (n >= 1 ? Math.min(4, Math.trunc(n)) : null);
+
 /** O que a ficha pode gravar: só os tipos conhecidos e só os campos de cada um. */
 function limpar(plano) {
   const p = plano && typeof plano === "object" ? plano : {};
@@ -218,16 +230,20 @@ function calcular(plano, met, perfil) {
 /** As métricas no ritmo do mês: somas esticadas até o fim; razões iguais.
  *  Nas semanas, as que ainda não chegaram repetem a média das que já
  *  passaram; a 1ª quinzena se estica só enquanto não terminou. */
-function noRitmo(met, fator, dia) {
+function noRitmo(met, fator, dia, diasNoMes) {
   const esticar = (m, f) => (m ? { carros: Math.round(m.carros * f * 10) / 10, rent: m.rent * f, fluxo: m.fluxo * f, fechados: m.fechados * f } : m);
   const semanas = (arr) => {
     if (!arr || !dia) return arr;
-    const atual = Math.min(5, Math.floor((dia - 1) / 7) + 1);
+    const atual = semanaDoDia(dia);
     const feitas = arr.slice(0, atual);
     const media = { carros: 0, rent: 0, fluxo: 0, fechados: 0 };
     feitas.forEach((m) => { Object.keys(media).forEach((k) => { media[k] += (m && m[k]) || 0; }); });
     Object.keys(media).forEach((k) => { media[k] = feitas.length ? media[k] / feitas.length : 0; });
-    return arr.map((m, i) => (i < atual - 1 ? m : i === atual - 1 ? esticar(m, 7 / Math.max(1, ((dia - 1) % 7) + 1)) : media));
+    // A semana corrente se estica pelo tamanho DELA (a 2ª tem 8 dias, a
+    // 4ª vai até o fim do mês).
+    const ini = PRIMEIRO_DIA_DA_SEMANA[atual - 1];
+    const fim = atual < 4 ? PRIMEIRO_DIA_DA_SEMANA[atual] - 1 : diasNoMes || 31;
+    return arr.map((m, i) => (i < atual - 1 ? m : i === atual - 1 ? esticar(m, (fim - ini + 1) / Math.max(1, dia - ini + 1)) : media));
   };
   const fq = dia && dia < 15 ? 15 / dia : 1;
   return {
@@ -237,4 +253,4 @@ function noRitmo(met, fator, dia) {
   };
 }
 
-module.exports = { TIPOS, limpar, calcular, noRitmo };
+module.exports = { TIPOS, limpar, calcular, noRitmo, semanaDoDia, semanaDaPlanilha };

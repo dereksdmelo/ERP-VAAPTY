@@ -2026,15 +2026,17 @@ async function remuneracao(req, res, tok) {
   // senão dias 1–7, 8–14… (o `semanaDe` da tela). A quinzena é do dia 1
   // ao 15; carro importado só com a semana conta nela até a semana 2.
   const zero = () => ({ carros: 0, rent: 0, fluxo: 0, fechados: 0 });
-  const novo = () => ({ mes: zero(), sem: [zero(), zero(), zero(), zero(), zero()], q1: zero() });
+  const novo = () => ({ mes: zero(), sem: [zero(), zero(), zero(), zero()], q1: zero() });
   const por = {};
   const de = (nome) => { const k = chave(nome) || "—"; return por[k] || (por[k] = novo()); };
   const L = novo();
-  const semDoDia = (d) => (d ? Math.min(5, Math.floor((d - 1) / 7) + 1) : null);
+  // As quatro semanas do mês: 1–7, 8–15, 16–22, 23–fim (a regra mora em
+  // `regras/remuneracao.js`, ao lado do bônus que a usa).
+  const semDoDia = R.semanaDoDia;
   (vendidos || []).forEach((e) => {
     const r = rentabilidadeDe(e).liquida;
     const dia = Number(String(e.vendido_em || "").slice(8, 10)) || null;
-    const sem = Number(e.semana_venda) || semDoDia(dia);
+    const sem = R.semanaDaPlanilha(Number(e.semana_venda)) || semDoDia(dia);
     const naQ1 = dia ? dia <= 15 : (sem ? sem <= 2 : false);
     [de(e.negociador_nome), L].forEach((P) => {
       P.mes.carros += 1; P.mes.rent += r;
@@ -2076,7 +2078,7 @@ async function remuneracao(req, res, tok) {
       const perfil = perfilPor[plano.perfil_id] || null;
       const pp = perfil ? perfil.remuneracao : null;
       const agora = R.calcular(plano, met, pp);
-      const ritmo = R.calcular(plano, R.noRitmo(met, fator, aberto ? Number(hoje.slice(8, 10)) : 0), pp);
+      const ritmo = R.calcular(plano, R.noRitmo(met, fator, aberto ? Number(hoje.slice(8, 10)) : 0, diasMes), pp);
       return { colaborador_id: c.id, perfil_id: c.perfil_id, negociador_id: c.negociador_id,
                nome: c.nome_completo || nomeNeg[c.negociador_id] || "—", nomes_nas_vendas: nomes,
                perfil: perfil ? perfil.nome : null,
