@@ -29,6 +29,7 @@ const TIPOS = {
   bonus_rentab:      "Bônus de rentabilidade",
   bonus_ticket:      "Bônus de ticket médio",
   bonus_lucro:       "Bônus por faixa de lucro da loja",
+  bonus_periodo:     "Bônus por período (semana ou 1ª quinzena)",
 };
 const METRICAS = ["carros", "clientes", "rent", "conversao", "ticket", "lucro"];
 const MODOS = ["valor", "por_carro", "por_cliente", "percentual", "percentual_excedente"];
@@ -53,10 +54,16 @@ function limpar(plano) {
     if (METRICAS.indexOf(x.metrica) >= 0) y.metrica = x.metrica;
     if (MODOS.indexOf(x.modo) >= 0) y.modo = x.modo;
     if (x.soma) y.soma = true;
+    if (x.periodo === "semana" || x.periodo === "quinzena1") y.periodo = x.periodo;
     ["valor", "meta", "passo", "inicio", "ate"].forEach((k) => { if (x[k] !== undefined && x[k] !== "") y[k] = num(x[k]); });
     if (Array.isArray(x.faixas)) {
-      y.faixas = x.faixas.slice(0, 12).map((f) => ({ de: num(f && f.de), valor: num(f && f.valor) }))
-        .sort((a, b) => a.de - b.de);
+      // `ticket` só existe nas faixas do bônus de ticket (a rentabilidade
+      // da faixa e o ticket mínimo dela).
+      y.faixas = x.faixas.slice(0, 12).map((f) => {
+        const z = { de: num(f && f.de), valor: num(f && f.valor) };
+        if (f && f.ticket !== undefined && f.ticket !== "") z.ticket = num(f.ticket);
+        return z;
+      }).sort((a, b) => a.de - b.de);
     }
     return y;
   }).filter(Boolean);
@@ -129,13 +136,50 @@ function calcularPeca(x, met) {
           return { valor: faixa.valor, conta: `${conta}: ${brl(faixa.valor)}` };
       }
     }
-    case "bonus_conversao":
-    case "bonus_rentab":
     case "bonus_ticket": {
+      /* POR FAIXA DE RENTABILIDADE (27/10/2026, o Derek): cada faixa de
+       * rentabilidade tem o seu ticket mínimo e o seu valor. Vale a
+       * faixa MAIS ALTA que a rentabilidade alcançou, e ela só paga se o
+       * ticket bateu o mínimo DELA — ticket alto numa faixa baixa não
+       * leva o valor da alta, e faixa alta com ticket baixo não paga
+       * nada (não desce para a de baixo). */
+      if ((x.faixas || []).length) {
+        const rent = m.rent, tk = ticket(m);
+        const faixa = x.faixas.filter((f) => rent >= f.de).pop();
+        if (!faixa) return { valor: 0, conta: `rentabilidade ${de} ${brl(rent)} — abaixo da primeira faixa` };
+        const bateu = tk >= num(faixa.ticket);
+        return { valor: bateu ? faixa.valor : 0,
+          conta: `rentabilidade ${de} ${brl(rent)} → faixa de ${brl(faixa.de)}; ticket ${brl(tk)} ${bateu ? "≥" : "<"} ${brl(faixa.ticket)}${bateu ? "" : " — não paga"}` };
+      }
+    }
+    // falls through
+    case "bonus_conversao":
+    case "bonus_rentab": {
       const k = x.tipo === "bonus_conversao" ? "conversao" : x.tipo === "bonus_rentab" ? "rent" : "ticket";
       const atual = daMetrica(m, k);
       const bateu = atual >= num(x.meta) && num(x.meta) > 0;
       return { valor: bateu ? v : 0, conta: `${NOME_METRICA[k]} ${de} ${fmtMetrica(k, atual)} ${bateu ? "≥" : "<"} meta ${fmtMetrica(k, num(x.meta))}` };
+    }
+    case "bonus_periodo": {
+      /* SEMANAL E 1ª QUINZENA (27/10/2026): a mesma faixa, medida dentro
+       * do período. A semana é a da planilha de rentabilidade — dias
+       * 1–7, 8–14… (`semanaDe` na tela) —, e cada semana que bate uma
+       * faixa paga o valor dela; as semanas somam. A quinzena é do dia 1
+       * ao 15, e paga uma vez. */
+      const k = x.metrica || "carros";
+      const lista = x.periodo === "quinzena1" ? [x.escopo === "loja" ? met.q1.loja : met.q1.proprio]
+        : (x.escopo === "loja" ? met.sem.loja : met.sem.proprio);
+      const partes = [];
+      let total = 0;
+      lista.forEach((mm, w) => {
+        if (!mm) return;
+        const atual = daMetrica(mm, k, 0);
+        const batidas = (x.faixas || []).filter((f) => atual >= f.de);
+        const pago = x.soma ? batidas.reduce((t, f) => t + f.valor, 0) : (batidas.length ? batidas[batidas.length - 1].valor : 0);
+        total += pago;
+        if (pago || atual) partes.push(`${x.periodo === "quinzena1" ? "1ª quinzena" : `sem ${w + 1}`}: ${fmtMetrica(k, atual)}${pago ? ` → ${brl(pago)}` : ""}`);
+      });
+      return { valor: total, conta: partes.length ? partes.join(" · ") : `nenhum ${x.periodo === "quinzena1" ? "resultado na quinzena" : "resultado nas semanas"}` };
     }
     case "bonus_lucro": {
       /* "Começa em" (27/10/2026, o Derek: 50 mil paga +5, 75 mil +5,
@@ -165,11 +209,26 @@ function calcular(plano, met, perfil) {
   return { linhas, total: linhas.reduce((t, l) => t + l.valor, 0) };
 }
 
-/** As métricas no ritmo do mês: somas esticadas até o fim; razões iguais. */
-function noRitmo(met, fator) {
-  const esticar = (m) => ({ carros: Math.round(m.carros * fator * 10) / 10, rent: m.rent * fator,
-                            fluxo: m.fluxo * fator, fechados: m.fechados * fator });
-  return { proprio: esticar(met.proprio), loja: esticar(met.loja), lucro: met.lucro * fator };
+/** As métricas no ritmo do mês: somas esticadas até o fim; razões iguais.
+ *  Nas semanas, as que ainda não chegaram repetem a média das que já
+ *  passaram; a 1ª quinzena se estica só enquanto não terminou. */
+function noRitmo(met, fator, dia) {
+  const esticar = (m, f) => (m ? { carros: Math.round(m.carros * f * 10) / 10, rent: m.rent * f, fluxo: m.fluxo * f, fechados: m.fechados * f } : m);
+  const semanas = (arr) => {
+    if (!arr || !dia) return arr;
+    const atual = Math.min(5, Math.floor((dia - 1) / 7) + 1);
+    const feitas = arr.slice(0, atual);
+    const media = { carros: 0, rent: 0, fluxo: 0, fechados: 0 };
+    feitas.forEach((m) => { Object.keys(media).forEach((k) => { media[k] += (m && m[k]) || 0; }); });
+    Object.keys(media).forEach((k) => { media[k] = feitas.length ? media[k] / feitas.length : 0; });
+    return arr.map((m, i) => (i < atual - 1 ? m : i === atual - 1 ? esticar(m, 7 / Math.max(1, ((dia - 1) % 7) + 1)) : media));
+  };
+  const fq = dia && dia < 15 ? 15 / dia : 1;
+  return {
+    proprio: esticar(met.proprio, fator), loja: esticar(met.loja, fator), lucro: met.lucro * fator,
+    sem: met.sem ? { proprio: semanas(met.sem.proprio), loja: semanas(met.sem.loja) } : met.sem,
+    q1: met.q1 ? { proprio: esticar(met.q1.proprio, fq), loja: esticar(met.q1.loja, fq) } : met.q1,
+  };
 }
 
 module.exports = { TIPOS, limpar, calcular, noRitmo };

@@ -762,6 +762,18 @@ ficha aponta para o perfil (`remuneracao.perfil_id`) e ainda pode ter
 peças só dela; as do perfil entram primeiro na conta. Mudar o perfil
 muda todo mundo que o usa. Desativa-se, não se apaga.
 
+**Bônus por período e ticket por faixa (27/10/2026).** O semanal e o da
+1ª quinzena são a mesma faixa medida dentro do período
+(`bonus_periodo`): cada semana que bate uma faixa paga, e as semanas
+somam; a quinzena (dia 1 a 15) paga uma vez. A semana é a da planilha
+(`semana_venda`, ou dias 1–7, 8–14…, o `semanaDe` da tela). No ritmo,
+as semanas que não chegaram repetem a média das que passaram. **O
+bônus de ticket pode variar por faixa de rentabilidade**: vale a faixa
+mais alta que a rentabilidade alcançou, e ela só paga se o ticket
+bateu o mínimo DELA — não desce para a faixa de baixo, e ticket alto
+numa faixa baixa não leva o valor da alta (a regra que o Derek ditou).
+Perfil se **duplica** ("Duplicar" abre a cópia sem id; salvar cria).
+
 **PATCH que volta vazio é RLS, não erro.** A política deixa qualquer um
 da equipe *ler* todo atendimento, mas só o dono (ou o gerente)
 *escrever*. Quando alguém tenta editar o atendimento de outro, o

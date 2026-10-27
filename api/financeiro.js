@@ -2010,29 +2010,49 @@ async function remuneracao(req, res, tok) {
   const [colabs, negs, vendidos, ats, dreMes, perfis] = await Promise.all([
     supa(`${base("colaborador")}?select=id,nome_completo,perfil_id,negociador_id,desligado_em,inicio_em,remuneracao`, { headers: cab(tok) }),
     supa(`${base("negociador")}?select=id,nome`, { headers: cab(tok) }),
-    supa(`${base("estoque")}?select=valor_compra,valor_venda,negociador_nome,estoque_custo(tipo,previsto,realizado)` +
+    supa(`${base("estoque")}?select=valor_compra,valor_venda,negociador_nome,vendido_em,semana_venda,estoque_custo(tipo,previsto,realizado)` +
       `&situacao=eq.vendido&or=(and(vendido_em.gte.${comp},vendido_em.lte.${fim}),and(vendido_em.is.null,entrou_em.gte.${comp},entrou_em.lte.${fim}))&limit=2000`,
       { headers: cab(tok) }),
-    supa(`${base("atendimento")}?select=negociador_nome,status&data=gte.${comp}&data=lte.${fim}&limit=5000`, { headers: cab(tok) }),
+    supa(`${base("atendimento")}?select=negociador_nome,status,data&data=gte.${comp}&data=lte.${fim}&limit=5000`, { headers: cab(tok) }),
     dreDoMes(tok, comp),
     supa(`${base("perfil_remuneracao")}?select=id,nome,remuneracao`, { headers: cab(tok) }).catch(() => []),
   ]);
   const perfilPor = {}; (perfis || []).forEach((x) => { perfilPor[x.id] = x; });
   const nomeNeg = {}; (negs || []).forEach((n) => { nomeNeg[n.id] = n.nome; });
 
-  // Por nome: carros e rentabilidade (estoque), atendimentos e fechados.
+  // Por nome: carros e rentabilidade (estoque), atendimentos e fechados —
+  // no mês, em cada semana e na 1ª quinzena (o bônus por período). A
+  // semana é a da planilha: `semana_venda` quando a importação a trouxe,
+  // senão dias 1–7, 8–14… (o `semanaDe` da tela). A quinzena é do dia 1
+  // ao 15; carro importado só com a semana conta nela até a semana 2.
+  const zero = () => ({ carros: 0, rent: 0, fluxo: 0, fechados: 0 });
+  const novo = () => ({ mes: zero(), sem: [zero(), zero(), zero(), zero(), zero()], q1: zero() });
   const por = {};
-  const de = (nome) => { const k = chave(nome) || "—"; return por[k] || (por[k] = { carros: 0, rent: 0, fluxo: 0, fechados: 0 }); };
-  const loja = { carros: 0, rent: 0, fluxo: 0, fechados: 0 };
+  const de = (nome) => { const k = chave(nome) || "—"; return por[k] || (por[k] = novo()); };
+  const L = novo();
+  const semDoDia = (d) => (d ? Math.min(5, Math.floor((d - 1) / 7) + 1) : null);
   (vendidos || []).forEach((e) => {
     const r = rentabilidadeDe(e).liquida;
-    const m = de(e.negociador_nome); m.carros += 1; m.rent += r;
-    loja.carros += 1; loja.rent += r;
+    const dia = Number(String(e.vendido_em || "").slice(8, 10)) || null;
+    const sem = Number(e.semana_venda) || semDoDia(dia);
+    const naQ1 = dia ? dia <= 15 : (sem ? sem <= 2 : false);
+    [de(e.negociador_nome), L].forEach((P) => {
+      P.mes.carros += 1; P.mes.rent += r;
+      if (sem) { P.sem[sem - 1].carros += 1; P.sem[sem - 1].rent += r; }
+      if (naQ1) { P.q1.carros += 1; P.q1.rent += r; }
+    });
   });
   (ats || []).forEach((a) => {
-    const m = de(a.negociador_nome); m.fluxo += 1; loja.fluxo += 1;
-    if (a.status === "fechado") { m.fechados += 1; loja.fechados += 1; }
+    const dia = Number(String(a.data || "").slice(8, 10)) || null;
+    const sem = semDoDia(dia);
+    const f = a.status === "fechado" ? 1 : 0;
+    [de(a.negociador_nome), L].forEach((P) => {
+      P.mes.fluxo += 1; P.mes.fechados += f;
+      if (sem) { P.sem[sem - 1].fluxo += 1; P.sem[sem - 1].fechados += f; }
+      if (dia && dia <= 15) { P.q1.fluxo += 1; P.q1.fechados += f; }
+    });
   });
+  const loja = L.mes;
 
   // O ritmo: dias do mês sobre dias passados, só no mês aberto.
   const hoje = hojeAqui();
@@ -2045,13 +2065,18 @@ async function remuneracao(req, res, tok) {
     .map((c) => {
       const plano = c.remuneracao;
       const nomes = [nomeNeg[c.negociador_id]].concat(plano.apelidos || []).filter(Boolean).map(chave);
-      const proprio = { carros: 0, rent: 0, fluxo: 0, fechados: 0 };
-      [...new Set(nomes)].forEach((k) => { const m = por[k]; if (m) Object.keys(proprio).forEach((x) => { proprio[x] += m[x]; }); });
-      const met = { proprio, loja, lucro: dreMes.lucro };
+      const P = novo();
+      const somar = (a, b) => Object.keys(a).forEach((x) => { a[x] += b[x]; });
+      [...new Set(nomes)].forEach((k) => {
+        const m = por[k]; if (!m) return;
+        somar(P.mes, m.mes); somar(P.q1, m.q1); m.sem.forEach((w, i) => somar(P.sem[i], w));
+      });
+      const proprio = P.mes;
+      const met = { proprio, loja, lucro: dreMes.lucro, sem: { proprio: P.sem, loja: L.sem }, q1: { proprio: P.q1, loja: L.q1 } };
       const perfil = perfilPor[plano.perfil_id] || null;
       const pp = perfil ? perfil.remuneracao : null;
       const agora = R.calcular(plano, met, pp);
-      const ritmo = R.calcular(plano, R.noRitmo(met, fator), pp);
+      const ritmo = R.calcular(plano, R.noRitmo(met, fator, aberto ? Number(hoje.slice(8, 10)) : 0), pp);
       return { colaborador_id: c.id, perfil_id: c.perfil_id, negociador_id: c.negociador_id,
                nome: c.nome_completo || nomeNeg[c.negociador_id] || "—", nomes_nas_vendas: nomes,
                perfil: perfil ? perfil.nome : null,
