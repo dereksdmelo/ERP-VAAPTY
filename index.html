@@ -11487,6 +11487,37 @@ const COR_LINHA = {
   vendeu_fora: { fundo: "#FBE1E1", borda: "#F0BFBF" },
 };
 
+/**
+ * CLIENTE EM LOJA, e o botão que encerra (28/10/2026, o Derek:
+ * *"finalizar atendimento… deve estar no atendimentos"*). `em_loja` vem
+ * do servidor, pela mesma regra da fila da vez (`emLoja`, decisão 67):
+ * a lista e a fila não podem discordar sobre quem está na mesa.
+ * Finalizar grava `atendimento_fim_em` e libera o negociador na fila;
+ * o status do negócio não muda — é ele que diz como o negócio ficou.
+ */
+function EmLoja({ a, aoFinalizar }) {
+  const [indo, setIndo] = useState(false);
+  const finalizar = async (ev) => {
+    // A linha inteira abre o atendimento; o botão não pode abrir junto.
+    ev.stopPropagation();
+    setIndo(true);
+    try { await mexerNaVez("terminei", { atendimento_id: a.id }); aoFinalizar(a.id); }
+    catch (e) { alert(e.message); }
+    setIndo(false);
+  };
+  return (
+    <span className="inline-flex items-center gap-1.5" title={`status: ${rotuloStatus(a.status)}`}>
+      <span className="whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
+        style={{ background: C.verde, color: "#fff" }}>cliente em loja</span>
+      <button onClick={finalizar} disabled={indo}
+        className="whitespace-nowrap rounded border px-1.5 py-0.5 text-[11px] font-semibold"
+        style={{ borderColor: C.line, background: C.paper, color: C.roxo }}>
+        {indo ? "…" : "finalizar"}
+      </button>
+    </span>
+  );
+}
+
 function CRM({ perfil, aoAbrir, mes }) {
   const { comp, setComp, MESES } = mes;
   const [lista, setLista] = useState([]);
@@ -11518,6 +11549,8 @@ function CRM({ perfil, aoAbrir, mes }) {
   useEffect(() => { carregar(filtrosAtuais({ q: busca })); }, [status, comp, neg]);
 
   const buscar = (ev) => { if (ev) ev.preventDefault(); carregar(filtrosAtuais({ q: busca })); };
+  // Finalizou: a linha volta a mostrar o status, sem reler a lista.
+  const finalizado = (id) => setLista((l) => l.map((x) => (x.id === id ? { ...x, em_loja: false } : x)));
 
   const contas = useMemo(() => {
     const c = { total: lista.length };
@@ -11545,7 +11578,7 @@ function CRM({ perfil, aoAbrir, mes }) {
   return (
     <div>
       <Cabecalho titulo="Atendimentos"
-        sub={`${contas.total} na lista · ${contas.fechado || 0} fechados · ${contas.aguardando_propostas || 0} esperando proposta`
+        sub={`${contas.total} na lista · ${lista.filter((a) => a.em_loja).length} em loja agora · ${contas.fechado || 0} fechados · ${contas.aguardando_propostas || 0} esperando proposta`
           + (neg ? ` · ${neg === "__sem__" ? "sem negociador" : neg}` : "")}
         mes={mes}
         acao={!novo && <BotaoPrimario onClick={() => setNovo(true)}>Novo atendimento</BotaoPrimario>} />
@@ -11626,7 +11659,7 @@ function CRM({ perfil, aoAbrir, mes }) {
                     <span className="text-[16px] font-semibold leading-tight">
                       {a.cliente_nome || "Sem nome"}
                     </span>
-                    <Etiqueta status={a.status} />
+                    {a.em_loja ? <EmLoja a={a} aoFinalizar={finalizado} /> : <Etiqueta status={a.status} />}
                   </div>
                   <div className="mt-1 text-[14px]" style={{ color: C.mute }}>
                     {v.marca_modelo || a.carro_descricao || "carro não informado"}
@@ -11700,7 +11733,7 @@ function CRM({ perfil, aoAbrir, mes }) {
                       <td className={td} title={a.cliente_nome || ""}>{a.cliente_nome || "—"}</td>
                       <td className={td} style={{ fontFamily: F.mono, color: C.mute }} title={a.cliente_telefone || ""}>{a.cliente_telefone || "—"}</td>
                       <td className={td} style={{ color: C.mute }} title={rotulo(ORIGENS, a.origem)}>{ORIGEM_CURTA[a.origem] || rotulo(ORIGENS, a.origem)}</td>
-                      <td className={td}><Etiqueta status={a.status} /></td>
+                      <td className={td}>{a.em_loja ? <EmLoja a={a} aoFinalizar={finalizado} /> : <Etiqueta status={a.status} />}</td>
                       <td className={td} style={num}>{v.fipe_valor ? brl(v.fipe_valor) : "—"}</td>
                       <td className={td} style={num}>{a.pretensao ? brl(a.pretensao) : "—"}</td>
                     </tr>
@@ -21238,14 +21271,20 @@ function AvisoPresenca({ perfil, aoIrParaFila }) {
   const [fechado, setFechado] = useState(false);
   const [indo, setIndo] = useState(false);
   const [erro, setErro] = useState("");
+  // Relê de dois em dois minutos: é assim que o aviso aparece quando os
+  // trinta minutos de silêncio vencem, e some quando ele responde. A
+  // primeira leitura espera o `SinalAbriu` chegar ao servidor — antes
+  // disso, todo mundo pareceria fora da fila.
   useEffect(() => {
     let vivo = true;
-    lerVez().then((d) => {
+    const ler = () => lerVez().then((d) => {
       if (!vivo) return;
       const eu = (d.ordem || []).concat(d.ausentes || []).find((p) => p.perfil_id === d.eu);
       setEstado(eu || null);
     }).catch(() => {});
-    return () => { vivo = false; };
+    const t0 = setTimeout(ler, 3000);
+    const t = setInterval(() => { if (!document.hidden) ler(); }, 120000);
+    return () => { vivo = false; clearTimeout(t0); clearInterval(t); };
   }, []);
   // Só quem está na lista de quem atende (login de negociador) é cobrado.
   if (!estado || estado.presente || fechado) return null;
@@ -21259,8 +21298,11 @@ function AvisoPresenca({ perfil, aoIrParaFila }) {
     <div className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border px-4 py-3"
       style={{ background: C.roxoFraco, borderColor: "#DCC8EA" }}>
       <div className="min-w-0 flex-1 text-[14px]">
-        <b>{estado.saiu_em ? "Você marcou que saiu." : "Você ainda não marcou que está na loja."}</b>{" "}
-        <span style={{ color: C.mute }}>Sem isso, você não entra na fila da vez.</span>
+        <b>{estado.saida_manual ? "Você marcou que saiu."
+          : estado.fora === "sem resposta" ? "Você saiu da fila da vez: 30 minutos sem responder o que está fazendo."
+          : estado.fora ? `Você está fora da fila (${estado.fora}).`
+          : "Você ainda não está na loja para o sistema."}</b>{" "}
+        <span style={{ color: C.mute }}>Responder o lembrete ou apertar o botão te põe de volta.</span>
         {erro && <div className="text-[12.5px]" style={{ color: C.laranja }}>{erro}</div>}
       </div>
       <BotaoPrimario onClick={marcar} disabled={indo}>{indo ? "Marcando…" : "Estou na loja"}</BotaoPrimario>
@@ -21268,6 +21310,30 @@ function AvisoPresenca({ perfil, aoIrParaFila }) {
       <button onClick={() => setFechado(true)} className="text-[13px]" style={{ color: C.mute }}>agora não</button>
     </div>
   );
+}
+
+/**
+ * ABRIR O SISTEMA É ESTAR NA LOJA (0088). O Derek: *"ao abrir a tela …
+ * o sistema reconhece que o negociador está na loja"*. Uma vez por
+ * abertura da página — e de novo quando a aba volta a ficar à vista
+ * depois de muito tempo escondida, que é a pessoa pegando o computador
+ * de volta. Não é batimento: estar com a aba aberta não é estar
+ * disponível; quem prova isso é a resposta ao lembrete.
+ */
+function SinalAbriu() {
+  useEffect(() => {
+    let escondidaDesde = 0;
+    const mandar = () => { mexerNaVez("abriu").catch(() => {}); };
+    mandar();
+    const aoMudar = () => {
+      if (document.hidden) { escondidaDesde = Date.now(); return; }
+      if (escondidaDesde && Date.now() - escondidaDesde > 30 * 60000) mandar();
+      escondidaDesde = 0;
+    };
+    document.addEventListener("visibilitychange", aoMudar);
+    return () => document.removeEventListener("visibilitychange", aoMudar);
+  }, []);
+  return null;
 }
 
 function TelaFilaDaVez({ perfil }) {
@@ -21364,7 +21430,7 @@ function TelaFilaDaVez({ perfil }) {
                   {(p.perfil_id === d.eu || gerente) && (
                     <button onClick={() => fazer(a.id, "terminei", { atendimento_id: a.id })} disabled={!!indo}
                       className="rounded border px-1.5 text-[11.5px] font-semibold" style={{ borderColor: C.line, color: C.roxo }}>
-                      {indo === a.id ? "…" : "terminei"}
+                      {indo === a.id ? "…" : "finalizar"}
                     </button>
                   )}
                 </span>
@@ -21391,7 +21457,11 @@ function TelaFilaDaVez({ perfil }) {
             {d.ausentes.map((p) => (
               <span key={p.perfil_id} className="inline-flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[13px]" style={{ borderColor: C.line, background: C.paper }}>
                 {p.nome}
-                {p.saiu_em && <span style={{ color: C.mute }}>saiu {horaSP(p.saiu_em)}</span>}
+                {p.saida_manual && p.saiu_em && <span style={{ color: C.mute }}>saiu {horaSP(p.saiu_em)}</span>}
+                {/* Fora por silêncio (0088): diz desde quando, para a
+                    pessoa saber que é o lembrete que a põe de volta. */}
+                {p.fora === "sem resposta" && <span style={{ color: C.laranja }}>sem resposta desde {horaSP(p.ultimo_sinal)}</span>}
+                {p.fora && p.fora !== "sem resposta" && <span style={{ color: C.mute }}>{p.fora}</span>}
                 {/* O gerente marca por quem esqueceu e já está atendendo. */}
                 {(gerente || p.perfil_id === d.eu) && (
                   <button onClick={() => fazer(p.perfil_id, "presente", { perfil_id: p.perfil_id })} disabled={!!indo}
@@ -21405,7 +21475,8 @@ function TelaFilaDaVez({ perfil }) {
 
       <p className="mt-4 text-[12.5px] leading-relaxed" style={{ color: C.mute }}>
         Índice AT = conversão × score × vendas × 10, a conta da planilha. Empate decide pelo mês anterior, e depois por quem chegou primeiro.
-        "Atendendo" é atendimento de hoje que ainda está na mesa; ele sai com "terminei", quando muda para um status de fim, ou sozinho depois de três horas.
+        Abrir o sistema põe a pessoa na fila; 30 minutos sem responder o lembrete e sem atendimento a tiram, e a próxima resposta a traz de volta. Responder "almoço" tira até a resposta seguinte.
+        "Atendendo" é o cliente em loja da lista de Atendimentos; sai com "finalizar" (aqui ou lá), quando o status muda para um de fim, ou sozinho depois de três horas.
       </p>
     </div>
   );
@@ -24591,6 +24662,7 @@ function App() {
       {/* Fica dentro da casca, sobre qualquer destino: a pergunta
           aparece onde a pessoa estiver, e não só no "Meu dia". */}
       {pedeLembrete && <RedeDeErro onde="lembrete"><LembreteDoDia perfil={perfil} /></RedeDeErro>}
+      {perfil && perfil.papel === "negociador" && <SinalAbriu />}
       {/* Quem não marcou presença não entra na fila da vez (0085). */}
       {perfil && perfil.papel === "negociador" && tela !== "vez" && (
         <RedeDeErro onde="presença"><AvisoPresenca perfil={perfil} aoIrParaFila={() => setTela("vez")} /></RedeDeErro>

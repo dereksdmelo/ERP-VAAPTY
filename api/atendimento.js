@@ -930,6 +930,7 @@ function paraLead(c) {
 /* ------------------ a fila da vez (0085, decisão 67) ------------------
  *
  * GET  ?recurso=vez                       a ordem de hoje e de quem é a vez
+ * POST ?recurso=vez&acao=abriu           o sistema foi aberto: entra na fila sozinho (0088)
  * POST ?recurso=vez&acao=presente|saiu    { perfil_id? } — o próprio, ou o gerente por alguém
  * POST ?recurso=vez&acao=terminei         { atendimento_id }
  *
@@ -950,6 +951,23 @@ const NA_MESA = ["cliente_na_loja", "aberto", "aguardando", "aguardando_proposta
                  "em_negociacao", "baixar_expectativa"];
 // Status esquecido não pode pular alguém o dia inteiro.
 const TETO_OCUPADO_MS = 3 * 3600000;
+// Abrir o sistema ou responder o lembrete vale trinta minutos de fila
+// (0088). O lembrete pergunta de meia em meia hora, então quem responde
+// fica; quem some, sai — o Derek: "desativa a vez dele dentro de 30
+// minutos".
+const JANELA_ATIVO_MS = 30 * 60000;
+// Responder "almoço" ou "pausa" não é estar disponível para cliente.
+const TIPOS_FORA = ["almoco", "pausa"];
+
+/* CLIENTE EM LOJA: atendimento de hoje, num status de mesa, que ninguém
+ * finalizou, aberto há menos de três horas. É a MESMA regra que diz
+ * quem está atendendo na fila da vez — a lista de Atendimentos e a
+ * fila não podem discordar sobre quem está na mesa. */
+function emLoja(a, agora) {
+  return !!(a && String(a.data) === hojeAqui() && NA_MESA.indexOf(a.status) >= 0 && !a.atendimento_fim_em &&
+    (agora || Date.now()) - Date.parse(a.chegada_em || a.criado_em) < TETO_OCUPADO_MS);
+}
+const comEmLoja = (a) => (a ? { ...a, em_loja: emLoja(a) } : a);
 
 const caixaAlta = (s) => String(s || "").trim().toUpperCase();
 
@@ -959,6 +977,25 @@ async function vez(req, res, tok) {
   const eu = donoDoToken(tok);
   const c = req.method === "POST" ? (await lerCorpo(req)) || {} : {};
   const acao = String(req.query.acao || "");
+
+  if (req.method === "POST" && acao === "abriu") {
+    // Só quem atende entra na fila: abrir o sistema como pré-venda ou
+    // financeiro não cria presença nenhuma.
+    if (!eu) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
+    const logins = await banco(`${URL_BASE}/rest/v1/rpc/negociadores_com_login`, { method: "POST", headers: json(tok), body: "{}" });
+    if (!(logins || []).some((p) => p.id === eu)) return res.status(200).json({ ok: true, fila: false });
+    const atual = await banco(`${REST("presenca")}?select=saida_manual&perfil_id=eq.${eu}&dia=eq.${hoje}`, { headers: cabecalhos(tok) });
+    // "Saí" à mão vale até a pessoa dizer que voltou: abrir o sistema em
+    // casa à noite não pode pôr ninguém na fila.
+    if (Array.isArray(atual) && atual[0] && atual[0].saida_manual) return res.status(200).json({ ok: true, fila: false, saiu: true });
+    const agoraIso = new Date().toISOString();
+    await banco(`${REST("presenca")}?on_conflict=perfil_id,dia`, {
+      method: "POST",
+      headers: json(tok, { Prefer: "resolution=merge-duplicates,return=minimal" }),
+      body: JSON.stringify({ perfil_id: eu, dia: hoje, abriu_em: agoraIso, saiu_em: null, atualizado_em: agoraIso }),
+    });
+    return res.status(200).json({ ok: true, fila: true });
+  }
 
   if (req.method === "POST" && (acao === "presente" || acao === "saiu")) {
     const quem = RX_UUID.test(String(c.perfil_id || "")) ? c.perfil_id : eu;
@@ -970,13 +1007,15 @@ async function vez(req, res, tok) {
       d = await banco(`${REST("presenca")}?on_conflict=perfil_id,dia`, {
         method: "POST",
         headers: json(tok, { Prefer: "resolution=merge-duplicates,return=representation" }),
-        body: JSON.stringify({ perfil_id: quem, dia: hoje, saiu_em: null, atualizado_em: new Date().toISOString() }),
+        // "Estou na loja" à mão conta como abrir: trinta minutos de fila.
+        body: JSON.stringify({ perfil_id: quem, dia: hoje, saiu_em: null, saida_manual: false,
+          abriu_em: new Date().toISOString(), atualizado_em: new Date().toISOString() }),
       });
     } else {
       d = await banco(`${REST("presenca")}?perfil_id=eq.${quem}&dia=eq.${hoje}`, {
         method: "PATCH",
         headers: json(tok, { Prefer: "return=representation" }),
-        body: JSON.stringify({ saiu_em: new Date().toISOString(), atualizado_em: new Date().toISOString() }),
+        body: JSON.stringify({ saiu_em: new Date().toISOString(), saida_manual: true, atualizado_em: new Date().toISOString() }),
       });
     }
     // Volta vazio = a RLS recusou: só o gerente marca pelos outros.
@@ -1012,8 +1051,8 @@ async function vez(req, res, tok) {
   })();
   const cab = { headers: cabecalhos(tok) };
 
-  const [presencas, logins, metas, desemp, doMes, deHoje] = await Promise.all([
-    banco(`${REST("presenca")}?select=perfil_id,chegou_em,saiu_em&dia=eq.${hoje}`, cab),
+  const [presencas, logins, metas, desemp, doMes, deHoje, sinais] = await Promise.all([
+    banco(`${REST("presenca")}?select=perfil_id,chegou_em,saiu_em,abriu_em,saida_manual&dia=eq.${hoje}`, cab),
     banco(`${URL_BASE}/rest/v1/rpc/negociadores_com_login`, { method: "POST", headers: json(tok), body: "{}" }),
     banco(`${REST("negociador")}?select=id,nome,perfil_id&papel=eq.negociador`, cab),
     banco(`${REST("desempenho")}?select=*&competencia=in.(${comp},${ant})`, cab),
@@ -1021,6 +1060,10 @@ async function vez(req, res, tok) {
           `&data=gte.${ant}&data=lte.${hoje}&limit=5000`, cab),
     banco(`${REST("atendimento")}?select=id,negociador_id,negociador_nome,cliente_nome,carro_descricao,status,` +
           `chegada_em,criado_em,atendimento_fim_em&data=eq.${hoje}&limit=500`, cab),
+    // A última resposta ao lembrete de cada um, pela função estreita da
+    // 0088: a agenda em si é de quem a escreveu.
+    banco(`${URL_BASE}/rest/v1/rpc/agenda_ultimo_sinal`, { method: "POST", headers: json(tok), body: JSON.stringify({ p_dia: hoje }) })
+      .catch(() => []),
   ]);
 
   const agora = Date.now();
@@ -1038,13 +1081,32 @@ async function vez(req, res, tok) {
     const scoreDe = (cp) => R.score(meta ? (desemp || []).find((d) => d.negociador_id === meta.id && d.competencia === cp) : null);
     const mes = conta(comp), mesAnt = conta(ant);
     const score = scoreDe(comp);
-    const naMesa = (deHoje || []).filter((a) => dele(a) && NA_MESA.indexOf(a.status) >= 0 && !a.atendimento_fim_em &&
-      agora - Date.parse(a.chegada_em || a.criado_em) < TETO_OCUPADO_MS)
+    const naMesa = (deHoje || []).filter((a) => dele(a) && emLoja({ ...a, data: hoje }, agora))
       .map((a) => ({ id: a.id, cliente: a.cliente_nome || "", carro: a.carro_descricao || "", desde: a.chegada_em || a.criado_em }));
     const pres = (presencas || []).find((x) => x.perfil_id === p.id) || null;
+    /* NA FILA (0088): marcou presença, não apertou "Saí", e está
+     * atendendo OU deu sinal nos últimos trinta minutos — abriu o
+     * sistema, ou respondeu o lembrete. Calculado aqui, a cada leitura:
+     * não há rotina que desative ninguém, e por isso a resposta seguinte
+     * ao lembrete o põe de volta sem botão nenhum. */
+    const sinal = (sinais || []).find((x) => x.perfil_id === p.id) || null;
+    const ultimo = Math.max(pres && pres.abriu_em ? Date.parse(pres.abriu_em) : 0,
+                            pres && pres.chegou_em ? Date.parse(pres.chegou_em) : 0,
+                            sinal && sinal.ultimo ? Date.parse(sinal.ultimo) : 0);
+    // Almoço vale se for a resposta MAIS RECENTE — abrir o sistema
+    // depois de voltar do almoço já o traz de volta.
+    const emPausa = !!(sinal && TIPOS_FORA.indexOf(sinal.tipo) >= 0 && Date.parse(sinal.ultimo) >= ultimo);
+    const marcou = !!(pres && !pres.saiu_em);
+    let fora = null;
+    if (marcou && !naMesa.length) {
+      if (emPausa) fora = sinal.tipo === "almoco" ? "almoço" : "pausa";
+      else if (agora - ultimo > JANELA_ATIVO_MS) fora = "sem resposta";
+    }
     return {
       perfil_id: p.id, nome: (meta && meta.nome) || p.nome,
-      presente: !!(pres && !pres.saiu_em), chegou_em: pres ? pres.chegou_em : null, saiu_em: pres ? pres.saiu_em : null,
+      presente: marcou && !fora, fora, ultimo_sinal: ultimo ? new Date(ultimo).toISOString() : null,
+      saida_manual: !!(pres && pres.saida_manual),
+      chegou_em: pres ? pres.chegou_em : null, saiu_em: pres ? pres.saiu_em : null,
       fluxo: mes.fluxo, vendas: mes.vendas, score,
       indice_at: R.indiceAt({ ...mes, score }),
       indice_anterior: R.indiceAt({ ...mesAnt, score: scoreDe(ant) }),
@@ -2850,7 +2912,7 @@ module.exports = async function handler(req, res) {
                               { headers: cabecalhos(tok) });
         const linha = Array.isArray(r) ? r[0] : null;
         if (!linha) return res.status(404).json({ erro: "Atendimento não encontrado." });
-        return res.status(200).json({ atendimento: linha });
+        return res.status(200).json({ atendimento: comEmLoja(linha) });
       }
 
       const f = [];
@@ -2888,7 +2950,7 @@ module.exports = async function handler(req, res) {
                   (f.length ? `&${f.join("&")}` : "");
 
       const lista = await banco(url, { headers: cabecalhos(tok) });
-      return res.status(200).json({ atendimentos: lista || [] });
+      return res.status(200).json({ atendimentos: (lista || []).map(comEmLoja) });
     }
 
     if (req.method === "POST") {

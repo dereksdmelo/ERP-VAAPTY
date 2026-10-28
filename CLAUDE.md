@@ -3328,13 +3328,31 @@ menos clientes na mesa — *"esse tem que atender dois"*.
 
 **"Atendendo" é atendimento de HOJE dele num status de mesa** (`NA_MESA`
 — inclui aguardando propostas, porque o cliente continua sentado na
-Espera) sem `atendimento_fim_em`. Sai com "terminei", com status de fim,
+Espera) sem `atendimento_fim_em`. Sai com "finalizar", com status de fim,
 ou **sozinho depois de três horas**: status esquecido pularia a pessoa o
 dia inteiro, e o erro só apareceria como "ninguém me passa cliente".
 
 **Quem calcula é o servidor** (`?recurso=vez`, no `api/atendimento.js`),
 e a tela "Fila da vez" só mostra. Duas ordens — uma na tela, outra no
 totem — é como o cliente acaba chamado para a pessoa errada.
+
+**A presença vem do uso, não do botão (0088)** — o Derek, no mesmo
+dia: abrir o sistema põe o negociador na fila, e trinta minutos sem
+responder o lembrete do "Meu dia" (decisão 41) e sem cliente em loja o
+tiram. Quem decide é a conta no servidor a cada leitura, não uma rotina:
+por isso a resposta seguinte o traz de volta sem botão. Abrir conta uma
+vez por página (`SinalAbriu`), não como batimento — aba aberta não é
+estar disponível. **"Saí" à mão vale até ele dizer que voltou**: abrir o
+sistema em casa à noite não pode pôr ninguém na fila. Responder
+"almoço" ou "pausa" também tira. A agenda é só do dono (0046), então a
+última resposta de cada um vem por `agenda_ultimo_sinal()`, que devolve
+a hora e o tipo — nunca o texto.
+
+**"Cliente em loja" é uma regra só** (`emLoja`, no `api/atendimento.js`):
+a lista de Atendimentos mostra a marca e o "finalizar", e a fila usa a
+mesma conta para saber quem está atendendo. Finalizar grava
+`atendimento_fim_em` e **não muda o status** — o status diz como o
+negócio ficou, e finalizar diz só que o cliente saiu da mesa.
 
 **O que vem depois, combinado com o Derek:** a chamada (janela "Vou
 atender / Passar" em qualquer tela do ERP, três minutos e passa ao
