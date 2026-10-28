@@ -1333,7 +1333,9 @@ async function leads(req, res, tok) {
        * não remarcou, separado de quem faltou e já remarcou. */
       if (l.status === "nao_compareceu" && atual && atual.agendado_para) {
         const hist = Array.isArray(atual.remarcacoes) ? atual.remarcacoes : [];
-        l.remarcacoes = hist.concat([{ de: atual.agendado_para, nao_veio: true, em: new Date().toISOString() }]);
+        // Quem marcou fica junto (28/10/2026): a Sheila veio e foi marcada
+        // "não veio", e não havia como saber quem marcou.
+        l.remarcacoes = hist.concat([{ de: atual.agendado_para, nao_veio: true, em: new Date().toISOString(), por: donoDoToken(tok) || undefined }]);
         l.agendado_para = null;
       } else if (atual && atual.agendado_para && l.agendado_para && atual.agendado_para !== l.agendado_para) {
         const hist = Array.isArray(atual.remarcacoes) ? atual.remarcacoes : [];
