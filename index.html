@@ -4813,6 +4813,37 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     return () => clearTimeout(t);
   }, [pronto, podeSalvar, salvando, salvoAtual, corpoBanco]);
 
+  /* A FOTO NÃO ESPERA A FICHA INTEIRA (28/10/2026). O André Bruno:
+   * "às vezes seleciona as fotos e não vai, e às vezes vai". Ia quando a
+   * ficha já estava completa; quando ele fotografava antes de classificar
+   * os pneus ou marcar os opcionais, a foto ficava em "Aguarda" — e o
+   * aviso mandava apertar um "salvar" que saiu em 24/10. A foto precisa
+   * só do id do veículo, e o id precisa só da placa: com foto esperando e
+   * placa válida, a linha nasce com o que já está PREENCHIDO. Campo vazio
+   * não vai, então nada em branco é escrito por cima do banco (decisão
+   * 43); a ficha completa continua gravando por cima depois. */
+  const garantindoRef = useRef(false);
+  const placaFicha = String(f.placa || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const fotoEsperando = fotos.some((p) => p.estado === "aguardando" && p.local);
+  useEffect(() => {
+    if (!pronto || veiculoId || garantindoRef.current || !fotoEsperando) return;
+    if (!/^[A-Z]{3}\d[A-Z0-9]\d{2}$/.test(placaFicha)) return;
+    garantindoRef.current = true;
+    (async () => {
+      try {
+        const vazio = (v) => v == null || v === "" || v === false || (Array.isArray(v) && v.every((x) => x == null || x === ""));
+        const corpo = Object.fromEntries(Object.entries(fichaParaBanco(fRef.current)).filter(([, v]) => !vazio(v)));
+        const d = await salvarFicha({ ...corpo, atendimento_id: atendimento ? atendimento.id : null });
+        if (d.id) {
+          setVeiculoId(d.id);
+          window.storage.set(CH_VEIC, JSON.stringify({ id: d.id, placa: d.placa })).catch(() => {});
+          for (const p of fotosRef.current.filter((x) => x.estado !== "ok" && x.local)) await enviarFoto(p.chave, d.id);
+        }
+      } catch (e) { setErroFoto(`As fotos não subiram: ${e.message}`); }
+      garantindoRef.current = false;
+    })();
+  }, [pronto, veiculoId, fotoEsperando, placaFicha]);
+
   const restante = f.esperaIniciadaEm ? Math.max(0, ESPERA_SEG - Math.floor((agora - f.esperaIniciadaEm) / 1000)) : null;
   const mmss = (s) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
@@ -5763,7 +5794,9 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                   </div>
                   {!veiculoId && fotos.some((p) => p.estado === "aguardando") && (
                     <p className="mt-2 text-[11px]" style={{ color: C.mute }}>
-                      Fotos esperando a ficha ir para o banco. Salve a ficha abaixo e elas sobem sozinhas.
+                      {/^[A-Z]{3}\d[A-Z0-9]\d{2}$/.test(placaFicha)
+                        ? "Subindo as fotos…"
+                        : "As fotos sobem assim que a placa estiver preenchida (na Pesquisa). Até lá ficam só neste aparelho."}
                     </p>
                   )}
                   {fotos.some((p) => p.estado === "erro") && (

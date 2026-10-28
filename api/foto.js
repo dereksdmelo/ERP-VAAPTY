@@ -1286,17 +1286,31 @@ module.exports = async function handler(req, res) {
         body: imagem,
       });
 
+      /* A POSIÇÃO OCUPADA NÃO DERRUBA A FOTO (28/10/2026). A ordem vem da
+       * tela (a posição na lista dela), e o índice único da 0002 recusa a
+       * repetida — o que acontece com o celular e o computador no mesmo
+       * carro, ou com a lista do aparelho desatualizada: a foto virava
+       * "Falhou" com um erro de chave duplicada. Na recusa, ela vai para
+       * depois da última; a capa não muda, porque só a posição 0 é capa
+       * e quem pediu a 0 já a tem por outra foto. */
+      const gravar = (o) => banco(REST("foto"), {
+        method: "POST",
+        headers: json(tok, { Prefer: "return=representation" }),
+        body: JSON.stringify({
+          veiculo_id: vid, caminho, ordem: o,
+          largura: medida(corpo.largura), altura: medida(corpo.altura),
+          bytes: imagem.length,
+        }),
+      });
       let linha;
       try {
-        const r = await banco(REST("foto"), {
-          method: "POST",
-          headers: json(tok, { Prefer: "return=representation" }),
-          body: JSON.stringify({
-            veiculo_id: vid, caminho, ordem,
-            largura: medida(corpo.largura), altura: medida(corpo.altura),
-            bytes: imagem.length,
-          }),
-        });
+        let r;
+        try { r = await gravar(ordem); }
+        catch (e) {
+          if (!/duplicate|23505|foto_ordem_unica/i.test(String(e.message || ""))) throw e;
+          const ult = await banco(`${REST("foto")}?select=ordem&veiculo_id=eq.${vid}&order=ordem.desc&limit=1`, { headers: cabecalhos(tok) });
+          r = await gravar(Math.max(0, ((Array.isArray(ult) && ult[0] && ult[0].ordem) || 0) + 1));
+        }
         linha = Array.isArray(r) ? r[0] : r;
       } catch (e) {
         // Linha não gravou: o arquivo não pode ficar órfão no bucket.
@@ -1309,7 +1323,7 @@ module.exports = async function handler(req, res) {
         ok: true,
         id: linha ? linha.id : null,
         caminho,
-        ordem,
+        ordem: linha && linha.ordem != null ? linha.ordem : ordem,
         url: links[caminho] || null,
       });
     }

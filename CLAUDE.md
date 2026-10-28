@@ -340,6 +340,19 @@ a prova social conta qualquer gesto nas avaliações, a cautelar conta a
 autorização impressa e a avaliação do Google conta o link copiado ou
 aberto (o QR continua no tique, porque a leitura dele não chega aqui).
 
+**A foto não espera a ficha inteira (28/10/2026).** O André Bruno:
+*"às vezes seleciona as fotos e não vai, e às vezes vai"*. Ia quando a
+ficha já estava completa; fotografado antes de classificar os pneus ou
+marcar os opcionais, ficava em "Aguarda" — e o aviso mandava apertar um
+"salvar" que tinha saído quatro dias antes. Agora, com foto esperando e
+placa válida, a linha do `veiculo` nasce só com o que já está
+preenchido (campo vazio não vai, então nada em branco cai por cima do
+banco) e as fotos sobem; a ficha completa grava por cima depois, na
+mesma linha. **E a posição ocupada não derruba a foto**: com o celular
+e o computador no mesmo carro, as duas telas pediam a mesma `ordem` e o
+índice único da 0002 recusava a segunda ("Falhou", chave duplicada) —
+o `api/foto.js` passou a pôr a recusada depois da última.
+
 **Consequência no gate:** a gravação **não** exige foto
 (`podeSalvar`, [index.html:531](index.html:531)) — se exigisse, nada
 subiria nunca, porque a foto precisa do id que só o salvamento cria. O
