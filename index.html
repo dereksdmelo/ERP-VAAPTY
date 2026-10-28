@@ -20913,6 +20913,11 @@ function TelaMeuDia({ perfil }) {
 
       {/* Registrar é o gesto de todo dia, então a barra fica no topo e
           Enter grava — quem está com o cliente não procura botão. */}
+      {/* Registrar grava no dia de QUEM ESTÁ LOGADO (o dono da agenda é o
+          `auth.uid()`, 0047). Olhando o dia de outra pessoa ou da equipe, a
+          barra some — senão o gerente escreveria no próprio dia achando
+          que escrevia no do colega. */}
+      {quem === "eu" && (<>
       <Bloco titulo="Registrar agora" sub="Enter grava e limpa para o próximo. Sem hora, vale o relógio.">
         <div className="flex flex-wrap items-end gap-2">
           <label style={{ width: 76 }}>
@@ -20971,6 +20976,7 @@ function TelaMeuDia({ perfil }) {
         </div>
         {erro && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
       </Bloco>
+      </>)}
 
       {/* A grade de meia em meia hora.
 
