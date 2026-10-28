@@ -99,14 +99,29 @@ async function atenderFila(env) {
       try { retomada = await rpc("ia_retomada_da_conversa", { p_segredo: SEG, p_conversa: item.conversa_id }); } catch (e) {}
       const sistema = FLAVIA.instrucao(cfg, agora, livres, (ctx && ctx.exemplos) || [], retomada);
 
-      const r = await fetch("https://api.anthropic.com/v1/messages", {
+      // A IA FORA DO AR NÃO QUEIMA A MENSAGEM (0086, 28/10/2026). Crédito
+      // esgotado, chave recusada, limite e pane devolvem a reserva: a
+      // mensagem volta na volta seguinte, e a retomada para de abrir
+      // conversa enquanto isso. 400 que não é crédito é pedido nosso
+      // errado — tentar de novo a cada minuto não conserta.
+      const liberar = (erro) => rpc("ia_liberar", { p_segredo: SEG, p_id: id, p_erro: erro });
+      const passa = (status, corpo) => status === 401 || status === 403 || status === 429 || status >= 500
+        || (status === 400 && /credit balance/i.test(corpo));
+      let r;
+      try {
+        r = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST", signal: AbortSignal.timeout(45000),
         headers: { "x-api-key": CHAVE, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
         body: JSON.stringify({ model: MODELO, max_tokens: 700, system: sistema,
           messages: [{ role: "user", content: FLAVIA.conversaEmTexto(msgs) }] }),
-      });
+        });
+      } catch (e) { await liberar(`IA sem resposta: ${String((e && e.message) || e).slice(0, 200)}`); continue; }
       const corpo = await r.text();
-      if (!r.ok) { await fim("falhou", { erro: `IA ${r.status}: ${corpo.slice(0, 200)}` }); continue; }
+      if (!r.ok) {
+        const erro = `IA ${r.status}: ${corpo.slice(0, 200)}`;
+        if (passa(r.status, corpo)) await liberar(erro); else await fim("falhou", { erro });
+        continue;
+      }
       let saida = "", uso = null;
       try { const d = JSON.parse(corpo); saida = ((d.content || []).find((x) => x.type === "text") || {}).text || ""; uso = d.usage || null; } catch (e) {}
       const p = FLAVIA.lerSaida(saida, livres);
