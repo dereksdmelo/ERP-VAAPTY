@@ -11534,25 +11534,68 @@ const COR_LINHA = {
  * o status do negócio não muda — é ele que diz como o negócio ficou.
  */
 function EmLoja({ a, aoFinalizar }) {
-  const [indo, setIndo] = useState(false);
-  const finalizar = async (ev) => {
-    // A linha inteira abre o atendimento; o botão não pode abrir junto.
-    ev.stopPropagation();
-    setIndo(true);
-    try { await mexerNaVez("terminei", { atendimento_id: a.id }); aoFinalizar(a.id); }
-    catch (e) { alert(e.message); }
-    setIndo(false);
-  };
   return (
     <span className="inline-flex items-center gap-1.5" title={`status: ${rotuloStatus(a.status)}`}>
       <span className="whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
         style={{ background: C.verde, color: "#fff" }}>cliente em loja</span>
-      <button onClick={finalizar} disabled={indo}
+      <BotaoFinalizar a={a} aoFinalizar={aoFinalizar} />
+    </span>
+  );
+}
+
+/**
+ * FINALIZAR PERGUNTA COMO FICOU (28/10/2026, o Derek: *"tem que
+ * selecionar qual o status correto, cliente na loja não pode ser se já
+ * finalizou"*). A janela lista os status menos "Cliente na loja"; o
+ * escolhido e o fim vão juntos (`?recurso=vez&acao=terminei`), e o
+ * servidor recusa sem status. É o mesmo botão na lista de Atendimentos
+ * e na Fila da vez.
+ */
+function BotaoFinalizar({ a, aoFinalizar, rotulo }) {
+  const [aberto, setAberto] = useState(false);
+  const [indo, setIndo] = useState("");
+  const [erro, setErro] = useState("");
+  const escolher = async (st) => {
+    setIndo(st); setErro("");
+    try {
+      const d = await mexerNaVez("terminei", { atendimento_id: a.id, status: st });
+      setAberto(false);
+      aoFinalizar(a.id, st, d.atendimento);
+    } catch (e) { setErro(e.message); }
+    setIndo("");
+  };
+  return (
+    <>
+      <button onClick={(ev) => { ev.stopPropagation(); setAberto(true); }}
         className="whitespace-nowrap rounded border px-1.5 py-0.5 text-[11px] font-semibold"
         style={{ borderColor: C.line, background: C.paper, color: C.roxo }}>
-        {indo ? "…" : "finalizar"}
+        {rotulo || "finalizar"}
       </button>
-    </span>
+      {aberto && (
+        // O clique fica aqui dentro: a linha da lista abre o atendimento.
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(27,21,35,0.45)" }}
+          onClick={(ev) => { ev.stopPropagation(); if (!indo) setAberto(false); }}>
+          <div className="w-full max-w-[420px] rounded-xl p-5 text-left" style={{ background: C.paper, whiteSpace: "normal" }}
+            onClick={(ev) => ev.stopPropagation()}>
+            <div className="text-[17px] font-bold">Finalizar o atendimento</div>
+            <div className="mt-0.5 text-[13px]" style={{ color: C.mute }}>
+              {[a.cliente_nome || a.cliente, a.carro_descricao || a.carro].filter(Boolean).join(" · ") || "cliente"} — como ficou?
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-1.5">
+              {STATUS_AT.filter(([v]) => v !== "cliente_na_loja").map(([v, r, cor]) => (
+                <button key={v} onClick={() => escolher(v)} disabled={!!indo}
+                  className="rounded-lg border px-2.5 py-2 text-left text-[13.5px] font-semibold"
+                  style={{ borderColor: v === a.status ? cor : C.line, color: cor, background: v === a.status ? C.roxoFraco : C.paper }}>
+                  {indo === v ? "Gravando…" : r}
+                </button>
+              ))}
+            </div>
+            {erro && <p className="mt-2 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+            <button onClick={() => setAberto(false)} disabled={!!indo} className="mt-3 text-[13px]" style={{ color: C.mute }}>cancelar</button>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -11588,7 +11631,7 @@ function CRM({ perfil, aoAbrir, mes }) {
 
   const buscar = (ev) => { if (ev) ev.preventDefault(); carregar(filtrosAtuais({ q: busca })); };
   // Finalizou: a linha volta a mostrar o status, sem reler a lista.
-  const finalizado = (id) => setLista((l) => l.map((x) => (x.id === id ? { ...x, em_loja: false } : x)));
+  const finalizado = (id, st) => setLista((l) => l.map((x) => (x.id === id ? { ...x, em_loja: false, status: st } : x)));
 
   const contas = useMemo(() => {
     const c = { total: lista.length };
@@ -21465,12 +21508,7 @@ function TelaFilaDaVez({ perfil }) {
               {p.atendendo.length === 0 ? <span style={{ color: C.verde }}>livre</span> : p.atendendo.map((a) => (
                 <span key={a.id} className="inline-flex items-center gap-1.5">
                   <span style={{ color: C.laranja }}>atendendo {a.cliente || "cliente"}{a.carro ? ` · ${a.carro}` : ""} desde {horaSP(a.desde)}</span>
-                  {(p.perfil_id === d.eu || gerente) && (
-                    <button onClick={() => fazer(a.id, "terminei", { atendimento_id: a.id })} disabled={!!indo}
-                      className="rounded border px-1.5 text-[11.5px] font-semibold" style={{ borderColor: C.line, color: C.roxo }}>
-                      {indo === a.id ? "…" : "finalizar"}
-                    </button>
-                  )}
+                  {(p.perfil_id === d.eu || gerente) && <BotaoFinalizar a={a} aoFinalizar={() => carregar()} />}
                 </span>
               ))}
               {/* Empate no índice (todo mundo zerado no começo do mês) é

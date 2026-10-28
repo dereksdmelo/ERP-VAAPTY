@@ -1029,13 +1029,19 @@ async function vez(req, res, tok) {
   if (req.method === "POST" && acao === "terminei") {
     const id = String(c.atendimento_id || "");
     if (!RX_UUID.test(id)) return res.status(400).json({ erro: "atendimento_id inválido." });
+    /* FINALIZAR PEDE O STATUS (o Derek, 28/10/2026: *"cliente na loja
+     * não pode ser se já finalizou"*). Sem ele, a linha voltaria a dizer
+     * "Cliente na loja" com o cliente já fora da loja — e o funil conta
+     * pelo status. */
+    const st = daLista(c.status, STATUS);
+    if (!st || st === "cliente_na_loja") return res.status(400).json({ erro: "Escolha como o atendimento ficou." });
     const d = await banco(`${REST("atendimento")}?id=eq.${id}`, {
       method: "PATCH",
       headers: json(tok, { Prefer: "return=representation" }),
-      body: JSON.stringify({ atendimento_fim_em: new Date().toISOString() }),
+      body: JSON.stringify({ atendimento_fim_em: new Date().toISOString(), status: st }),
     });
     if (!Array.isArray(d) || !d.length) return res.status(403).json({ erro: "Só quem atende (ou o gerente) encerra este atendimento." });
-    return res.status(200).json({ ok: true });
+    return res.status(200).json({ ok: true, atendimento: comEmLoja(d[0]) });
   }
 
   if (req.method !== "GET") {
@@ -3049,6 +3055,9 @@ module.exports = async function handler(req, res) {
       if (linha.negociador_id !== undefined) {
         linha.negociador_id = await idDePerfil(tok, linha.negociador_id);
       }
+      // Pôr de volta em "Cliente na loja" é o cliente que voltou à mesa:
+      // o "finalizar" de antes deixa de valer (decisão 67).
+      if (linha.status === "cliente_na_loja") linha.atendimento_fim_em = null;
       if (!Object.keys(linha).length) return res.status(400).json({ erro: "Nada para atualizar." });
 
       const r = await banco(`${REST("atendimento")}?id=eq.${id}`, {

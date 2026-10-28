@@ -3362,9 +3362,12 @@ a hora e o tipo — nunca o texto.
 
 **"Cliente em loja" é uma regra só** (`emLoja`, no `api/atendimento.js`):
 a lista de Atendimentos mostra a marca e o "finalizar", e a fila usa a
-mesma conta para saber quem está atendendo. Finalizar grava
-`atendimento_fim_em` e **não muda o status** — o status diz como o
-negócio ficou, e finalizar diz só que o cliente saiu da mesa.
+mesma conta para saber quem está atendendo. **Finalizar pergunta como
+o negócio ficou** e grava o status junto do `atendimento_fim_em` — o
+Derek: *"cliente na loja não pode ser se já finalizou"*. A janela não
+oferece "Cliente na loja", e o servidor recusa finalizar sem status. O
+caminho inverso também vale: pôr o status de volta em "Cliente na loja"
+apaga o `atendimento_fim_em`, porque é o cliente que voltou à mesa.
 
 **O que vem depois, combinado com o Derek:** a chamada (janela "Vou
 atender / Passar" em qualquer tela do ERP, três minutos e passa ao
