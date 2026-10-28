@@ -1131,6 +1131,39 @@ async function leads(req, res, tok) {
     const l = paraLead(c);
     if (!l.nome) return res.status(400).json({ erro: "Informe o nome." });
     if (l.agendado_para && !l.status) l.status = "agendado";
+    /* O MESMO TELEFONE É O MESMO LEAD (28/10/2026). O Rafael foi agendado
+     * pela Amanda às 9h10, a confirmação não chegou ao sistema, e às
+     * 10h47 alguém pôs "+ Agendamento" para ele: nasceu um segundo lead,
+     * "RAFAEL", ao lado do "Rafael Soares Tatsch" que já estava em
+     * Agendar — e a conversa ficou num, a visita no outro. Lead em aberto
+     * com o mesmo telefone (DDD + os oito últimos) é reaproveitado: o
+     * nome e o carro que já estavam ficam, o resto entra. */
+    const k = chaveFone(l.telefone);
+    if (k) {
+      try {
+        const padrao = "*" + k.slice(-8).split("").join("*") + "*";
+        const ls = await banco(`${base}?select=id,nome,telefone,carro,cidade,origem,observacoes,agendado_para,remarcacoes,status` +
+          `&status=in.(novo,em_contato,agendado,confirmado,nao_compareceu)&atendimento_id=is.null&excluido_em=is.null` +
+          `&telefone=like.${encodeURIComponent(padrao)}&order=criado_em.desc&limit=20`, { headers: cabecalhos(tok) }) || [];
+        const ja = ls.find((x) => chaveFone(x.telefone) === k);
+        if (ja) {
+          const mudar = {};
+          Object.keys(l).forEach((c) => {
+            if (["nome", "carro", "cidade", "origem"].indexOf(c) >= 0 && ja[c]) return;
+            if (c === "status" && l.status === "novo") return;   // "novo" não puxa de volta quem já andou
+            mudar[c] = l[c];
+          });
+          if (l.observacoes && ja.observacoes) delete mudar.observacoes;
+          if (mudar.agendado_para && ja.agendado_para && ja.agendado_para !== mudar.agendado_para) {
+            mudar.remarcacoes = (Array.isArray(ja.remarcacoes) ? ja.remarcacoes : [])
+              .concat([{ de: ja.agendado_para, para: mudar.agendado_para, em: new Date().toISOString() }]);
+          }
+          const r = await banco(`${base}?id=eq.${ja.id}`, { method: "PATCH", headers: json(tok, { Prefer: "return=representation" }), body: JSON.stringify(mudar) });
+          const salvo = Array.isArray(r) ? r[0] : r;
+          if (salvo) return res.status(200).json({ ok: true, lead: salvo, reaproveitado: true });
+        }
+      } catch (e) { /* procurar falhou: segue criando, como antes */ }
+    }
     const r = await banco(base, { method: "POST", headers: json(tok, { Prefer: "return=representation" }), body: JSON.stringify(l) });
     const salvo = Array.isArray(r) ? r[0] : r;
     if (!salvo) return res.status(403).json({ erro: "O banco recusou o lead." });
@@ -1836,7 +1869,15 @@ const DESMARCA = /ainda n[aã]o|n[aã]o est[aá] confirmad|sujeito a|preciso con
 function dataHoraConfirmada(texto, base) {
   const t = String(texto || "");
   if (!t) return null;
-  const limpo = t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  /* PRAZO NÃO É UMA SEGUNDA HORA (28/10/2026). A confirmação da
+   * Intermedicar termina em "avise com 2 horas de antecedência"; escrito
+   * por extenso passa, mas "me avisa 2h antes" contava como segunda hora
+   * e a trava de "uma hora só" descartava a confirmação inteira.
+   * Duração ("daqui a 2h", "com 2h de antecedência", "2h antes") sai
+   * antes da contagem. */
+  const limpo = t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+    .replace(/\b(?:com|em|daqui a|ate)?\s*\d{1,2}\s*(?:h|hs|hrs?|horas?)\s+(?:de\s+)?(?:antecedencia|antes)\b/g, " ")
+    .replace(/\bdaqui a\s+\d{1,2}\s*(?:h|hs|hrs?|horas?)\b/g, " ");
 
   if (!FECHA.test(limpo)) return null;
   if (DESMARCA.test(limpo)) return null;

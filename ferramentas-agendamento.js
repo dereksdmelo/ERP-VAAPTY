@@ -44,6 +44,11 @@ const MARCA = [
   ["Fechado entao, te espero amanha as 09:30 pra gente avaliar esse Virtus", "06/10 09:30"],
   ["como a gente ja conversou e combinou tudo, seu horario para hoje as 17h", "05/10 17:00"],
   ["te espero sabado as 10h aqui na loja", "10/10 10:00"],
+  // A confirmação da Intermedicar (o Rafael, 28/10/2026, do print do
+  // Derek; a data trocada para caber depois da BASE). A seguinte, com
+  // "2h antes", é a que a trava de uma hora só derrubava.
+  ["✅ *Agendamento Confirmado!* Olá Rafael! Seu horário para a avaliação do veículo está confirmado para *07/10/2026 às 11:00*. *Caso não possa comparecer, pedimos que avise com 2 horas de antecedência.*", "07/10 11:00"],
+  ["Agendado para amanha as 10h, se nao puder vir me avisa umas 2h antes", "06/10 10:00"],
 ];
 
 /* AS QUE NÃO PODEM MARCAR são o coração do teste. Agendamento falso é

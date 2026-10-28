@@ -2212,6 +2212,30 @@ instante está certo em UTC; é se a hora que o negociador vê é a hora
 que a IA combinou. **Quem escrever teste de data aqui lê o valor do
 jeito que a tela lê.**
 
+**A MENSAGEM DA LOJA PARA UM LID SEM MAPA ESPERA, NÃO SOME
+(28/10/2026).** O Derek mostrou o Rafael confirmado pela Amanda
+(Intermedicar, outro aparelho do número da prospecção) para 28/10 às
+11h — e fora da agenda. O banco tinha a resposta do cliente ("ok às
+11:00 horas estarei aí") e não tinha as duas mensagens da Amanda: o
+WhatsApp as entregou à ponte endereçadas pelo LID, sem o telefone, e a
+ponte descartava ("sem telefone (LID sem mapa)" no `/estado`, todas
+"de mim"). Sem a confirmação, o leitor não tinha o que ler e o lead
+ficou em Agendar sem hora. **Acontece na primeira mensagem para número
+novo** — é justamente a prospecção. Agora ela espera na memória do
+container (`esperandoLid`, até 24 h e 500 mensagens) e sai com a hora
+original assim que o mapa chega, quase sempre na primeira resposta do
+cliente; o `/estado` mostra quantas esperam. Container que reinicia
+perde a fila.
+
+**Na mesma leva, o "+ Agendamento" reaproveita o lead do mesmo
+telefone** (DDD + oito últimos) em vez de criar outro: chegou às 10h47
+um segundo "RAFAEL", e a conversa ficou num lead e a visita no outro.
+Nome, carro, cidade e origem que já estavam ficam; "novo" não puxa de
+volta quem já andou. E o leitor de agendamento tira prazo ("2h antes",
+"com 2h de antecedência", "daqui a 2h") antes de contar as horas — não
+foi a causa do Rafael (por extenso passa), mas "me avisa 2h antes"
+derrubava a confirmação na trava de uma hora só.
+
 **O `pushName` DA MENSAGEM QUE SAI É O NOSSO NOME, não o do
 cliente** — e isso virou 213 conversas chamadas "Vaapty Joinville".
 O Derek viu o quadro com sete cartões idênticos e perguntou por quê.

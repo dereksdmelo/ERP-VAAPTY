@@ -133,7 +133,42 @@ async function subirMidia(buf, mime, nome) {
  * fontes, nessa ordem: o que veio junto, o mapa que a ponte vai aprendendo (toda mensagem que traz
  * os dois ensina), e o mapa do proprio WhatsApp (`lidMapping`, que fica guardado com a sessao). */
 const lidPn = new Map();
-function aprenderLid(lid, pn) { if (lid && pn && /@lid$/.test(lid) && /@s\.whatsapp\.net$/.test(pn)) lidPn.set(lid.split(":")[0].replace(/@lid$/, "") , pn.split("@")[0].split(":")[0]); }
+function aprenderLid(lid, pn) {
+  if (!(lid && pn && /@lid$/.test(lid) && /@s\.whatsapp\.net$/.test(pn))) return;
+  const k = lid.split(":")[0].replace(/@lid$/, "");
+  lidPn.set(k, pn.split("@")[0].split(":")[0]);
+  if (esperandoLid.has(k)) soltarLid(k);
+}
+/* O QUE A LOJA MANDOU PARA UM LID SEM MAPA ESPERA, NAO SOME (28/10/2026).
+   A Amanda (Intermedicar, outro aparelho do mesmo numero) abriu a conversa
+   com o Rafael as 9h09 e confirmou o horario as 9h10; o WhatsApp entregou as
+   duas aqui enderecadas pelo LID, sem o telefone, e a ponte descartava —
+   "sem telefone (LID sem mapa)". O cliente respondeu um minuto depois, a
+   resposta trouxe o telefone, mas as duas da loja ja tinham ido embora: o
+   lead ficou em Agendar sem hora e nao apareceu na agenda. Agora a mensagem
+   espera ate o mapa chegar (quase sempre na primeira resposta do cliente) e
+   sai com a hora original. Vive na memoria: o container que reinicia perde a
+   fila, como perde o mapa. */
+const esperandoLid = new Map();   // lid sem sufixo -> [msg, ...]
+const ESPERA_LID_MS = 24 * 3600000;
+function guardarSemLid(k, msg) {
+  let total = 0; for (const l of esperandoLid.values()) total += l.length;
+  if (total >= 500) return false;
+  const l = esperandoLid.get(k) || []; l.push(msg); esperandoLid.set(k, l); return true;
+}
+async function soltarLid(k) {
+  const l = esperandoLid.get(k); if (!l) return; esperandoLid.delete(k);
+  for (const msg of l) { try { await processar(msg); } catch (e) {} }
+}
+setInterval(async () => {
+  for (const [k, l] of [...esperandoLid.entries()]) {
+    const vivos = l.filter((m) => Number(m.messageTimestamp || 0) * 1000 > Date.now() - ESPERA_LID_MS);
+    if (!vivos.length) { esperandoLid.delete(k); continue; }
+    esperandoLid.set(k, vivos);
+    const fone = await foneDoJid({ remoteJid: k + "@lid" }).catch(() => "");
+    if (fone) soltarLid(k);
+  }
+}, 60000);
 async function foneDoJid(key) {
   const cand = [key.remoteJid, key.remoteJidAlt, key.senderPn, key.participantPn, key.participantAlt];
   let pn = "";
@@ -222,6 +257,27 @@ async function traduzir(msg) {
   return null;
 }
 
+async function processar(msg) {
+  const jid = msg.key && msg.key.remoteJid || "";
+  if (!jid || /@g\.us$|@broadcast$|@newsletter$/.test(jid)) return;          // grupo, status, canal: fora
+  if (msg.key.fromMe && enviadosPorMim.has(msg.key.id)) return;               // o que nos mesmos mandamos
+  const dsm = msg.message && msg.message.deviceSentMessage;
+  const chave0 = dsm && dsm.destinationJid ? Object.assign({}, msg.key, { remoteJid: dsm.destinationJid }) : msg.key;
+  const fone = await foneDoJid(chave0);
+  if (!fone) {
+    const lid = [chave0.remoteJid, chave0.remoteJidAlt, chave0.participant].find((j) => j && /@lid$/.test(j)) || "";
+    const k = lid.split(":")[0].replace(/@lid$/, "");
+    if (k && guardarSemLid(k, msg)) pular("LID sem mapa — esperando o telefone", msg);
+    else pular("sem telefone (LID sem mapa)", msg);
+    return;
+  }
+  if (st.numero && fone === st.numero) return;   // conversa consigo mesmo (anotacoes do celular)
+  const chaves = Object.keys(msg.message || {}).filter((k) => ["messageContextInfo", "senderKeyDistributionMessage"].indexOf(k) < 0);
+  if (!chaves.length || chaves[0] === "protocolMessage") return;   // mensagem tecnica, sem conteudo pra pessoa
+  const t = await traduzir(msg); if (!t) { pular("tipo de mensagem não tratado: " + Object.keys(msg.message || {}).join(","), msg); return; }
+  await proErp("/ponte/entrada", Object.assign(t, { fone, eco: !!msg.key.fromMe }));
+}
+
 /* ---------- ligar ---------- */
 async function ligar() {
   if (ligando || !CANAL) return; ligando = true;
@@ -258,19 +314,7 @@ async function ligar() {
     sock.ev.on("messaging-history.set", (h) => { try { for (const x of (h && h.lidPnMappings) || []) aprenderLid(x.lid, x.pn); } catch (e) {} });
     sock.ev.on("messages.upsert", async ({ messages, type }) => {
       if (type !== "notify" && type !== "append") return;
-      for (const msg of messages) {
-        const jid = msg.key && msg.key.remoteJid || "";
-        if (!jid || /@g\.us$|@broadcast$|@newsletter$/.test(jid)) continue;          // grupo, status, canal: fora
-        if (msg.key.fromMe && enviadosPorMim.has(msg.key.id)) continue;               // o que nos mesmos mandamos
-        const dsm = msg.message && msg.message.deviceSentMessage;
-        const chave0 = dsm && dsm.destinationJid ? Object.assign({}, msg.key, { remoteJid: dsm.destinationJid }) : msg.key;
-        const fone = await foneDoJid(chave0); if (!fone) { pular("sem telefone (LID sem mapa)", msg); continue; }
-        if (st.numero && fone === st.numero) continue;   // conversa consigo mesmo (anotacoes do celular)
-        const chaves = Object.keys(msg.message || {}).filter((k) => ["messageContextInfo", "senderKeyDistributionMessage"].indexOf(k) < 0);
-        if (!chaves.length || chaves[0] === "protocolMessage") continue;   // mensagem tecnica, sem conteudo pra pessoa
-        const t = await traduzir(msg); if (!t) { pular("tipo de mensagem não tratado: " + Object.keys(msg.message || {}).join(","), msg); continue; }
-        await proErp("/ponte/entrada", Object.assign(t, { fone, eco: !!msg.key.fromMe }));
-      }
+      for (const msg of messages) { try { await processar(msg); } catch (e) { log.warn({ e: String(e) }, "mensagem nao processada"); } }
     });
     /* RECIBOS (24/09/2026, o Derek: "consegue analisar se chegou pra cliente a mensagem do robo?").
        Entregue/lida chegam por aqui (recibo de cada destinatario) e nao so pelo `messages.update`
@@ -389,7 +433,7 @@ http.createServer(async (req, res) => {
     if (req.headers["x-ponte-segredo"] !== SEGREDO) return json(res, 401, { ok: false, erro: "sem permissão" });
     const canal = u.searchParams.get("canal") || req.headers["x-canal"] || "";
     if (canal && !CANAL) { CANAL = canal; ligar(); }
-    if (u.pathname === "/estado") { if (!sock && !ligando && CANAL) ligar(); return json(res, 200, Object.assign({ ok: true, canal: CANAL, lids: lidPn.size, pulados: pulados.slice(0, 10), testeBotoes: testeLog.slice(0, 9) }, st)); }
+    if (u.pathname === "/estado") { if (!sock && !ligando && CANAL) ligar(); return json(res, 200, Object.assign({ ok: true, canal: CANAL, lids: lidPn.size, esperandoLid: [...esperandoLid.values()].reduce((a, l) => a + l.length, 0), pulados: pulados.slice(0, 10), testeBotoes: testeLog.slice(0, 9) }, st)); }
     if (u.pathname === "/enviar" && req.method === "POST") { const b = JSON.parse(await lerCorpo(req) || "{}"); return json(res, 200, await enviar(b.para, b.conteudo || {})); }
     /* OS GRUPOS DESTE NUMERO (22/10/2026), para o gerente escolher na tela para onde vai o aviso de chegada.
        So id, nome e quantos participantes: os numeros de quem esta no grupo nao saem daqui. */
