@@ -11543,6 +11543,19 @@ function EmLoja({ a, aoFinalizar }) {
   );
 }
 
+/* "Cliente na loja" de quem JÁ NÃO ESTÁ em loja — passou das três
+ * horas sem ninguém finalizar. O status mente, então a linha oferece o
+ * mesmo botão, como "atualizar". */
+function StatusDaLinha({ a, aoFinalizar }) {
+  if (a.status !== "cliente_na_loja") return <Etiqueta status={a.status} />;
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <Etiqueta status={a.status} />
+      <BotaoFinalizar a={a} aoFinalizar={aoFinalizar} rotulo="atualizar" />
+    </span>
+  );
+}
+
 /**
  * FINALIZAR PERGUNTA COMO FICOU (28/10/2026, o Derek: *"tem que
  * selecionar qual o status correto, cliente na loja não pode ser se já
@@ -11740,7 +11753,7 @@ function CRM({ perfil, aoAbrir, mes }) {
                     <span className="text-[16px] font-semibold leading-tight">
                       {a.cliente_nome || "Sem nome"}
                     </span>
-                    {a.em_loja ? <EmLoja a={a} aoFinalizar={finalizado} /> : <Etiqueta status={a.status} />}
+                    {a.em_loja ? <EmLoja a={a} aoFinalizar={finalizado} /> : <StatusDaLinha a={a} aoFinalizar={finalizado} />}
                   </div>
                   <div className="mt-1 text-[14px]" style={{ color: C.mute }}>
                     {v.marca_modelo || a.carro_descricao || "carro não informado"}
@@ -11814,7 +11827,7 @@ function CRM({ perfil, aoAbrir, mes }) {
                       <td className={td} title={a.cliente_nome || ""}>{a.cliente_nome || "—"}</td>
                       <td className={td} style={{ fontFamily: F.mono, color: C.mute }} title={a.cliente_telefone || ""}>{a.cliente_telefone || "—"}</td>
                       <td className={td} style={{ color: C.mute }} title={rotulo(ORIGENS, a.origem)}>{ORIGEM_CURTA[a.origem] || rotulo(ORIGENS, a.origem)}</td>
-                      <td className={td}>{a.em_loja ? <EmLoja a={a} aoFinalizar={finalizado} /> : <Etiqueta status={a.status} />}</td>
+                      <td className={td}>{a.em_loja ? <EmLoja a={a} aoFinalizar={finalizado} /> : <StatusDaLinha a={a} aoFinalizar={finalizado} />}</td>
                       <td className={td} style={num}>{v.fipe_valor ? brl(v.fipe_valor) : "—"}</td>
                       <td className={td} style={num}>{a.pretensao ? brl(a.pretensao) : "—"}</td>
                     </tr>
