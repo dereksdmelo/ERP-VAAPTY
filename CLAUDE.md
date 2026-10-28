@@ -353,6 +353,24 @@ e o computador no mesmo carro, as duas telas pediam a mesma `ordem` e o
 índice único da 0002 recusava a segunda ("Falhou", chave duplicada) —
 o `api/foto.js` passou a pôr a recusada depois da última.
 
+**Até 40 fotos, e celular e computador juntos (28/10/2026).** O Derek:
+*"preciso colocar mais do que 12 fotos. bem mais"* e *"preciso usar ao
+mesmo tempo no celular e no computador"*. Três coisas mudaram por causa
+dos dois pedidos juntos:
+
+- **A capa é a menor ordem, e trocá-la muda UMA linha** (`{capa: id}`
+  no PATCH: a escolhida vira a menor menos um). Renumerar todas eram
+  duas idas ao banco por foto — 80 numa troca, além do teto de
+  subrequisições do Worker. Apagar também não renumera: buraco na
+  ordem não muda quem vem antes de quem. **A ordem pode ser negativa**;
+  as duas voltas do reordenar estacionam em −1.000.000 por isso.
+- **A lista se relê de 15 em 15 s com a aba à vista**, não só ao voltar
+  o foco: o computador na mesa nunca perde o foco enquanto o celular
+  fotografa lá fora. E o aparelho que abriu antes de a ficha existir
+  pergunta pelo id dela no mesmo ritmo — sem o id, não lista nada.
+- **Foto que voltou do aparelho ao abrir nasce "aguardando"**, não
+  "erro": sobe sozinha. Antes cada uma pedia um "Tentar".
+
 **Consequência no gate:** a gravação **não** exige foto
 (`podeSalvar`, [index.html:531](index.html:531)) — se exigisse, nada
 subiria nunca, porque a foto precisa do id que só o salvamento cria. O
@@ -3406,7 +3424,7 @@ com voz e o totem.
   direto. `fRef` acompanha a ficha porque o registro de documento
   acontece depois de um `await` e não pode escrever por cima de estado
   velho.
-- **Fotos.** Sempre por `comprimir()` — 1280 px, JPEG 0.72, máximo 12 —
+- **Fotos.** Sempre por `comprimir()` — 1280 px, JPEG 0.72, máximo 40 —
   e sobem para o Storage assim que são tiradas. O estado de cada uma
   (`aguardando` → `enviando` → `ok` | `erro`) mora no objeto da foto;
   `fotosRef` é a versão autoritativa, porque upload assíncrono não pode

@@ -157,7 +157,10 @@ function statusDerivado(f) {
 const rotulo = (lista, v) => (lista.filter((x) => x[0] === v)[0] || [v, v])[1];
 const corStatus = (v) => (STATUS_AT.filter((x) => x[0] === v)[0] || [0, 0, "#6B6478"])[2];
 
-const MAX_FOTOS = 12;
+// Eram 12; o Derek, em 28/10/2026: "preciso colocar mais do que 12
+// fotos. bem mais". O teto que sobra é o do aparelho (a foto espera no
+// localStorage só até subir) e o do Shinkai, que nunca reclamou.
+const MAX_FOTOS = 40;
 const ESPERA_SEG = 15 * 60;
 // O intervalo entre uma contraproposta e o extrato seguinte. Não é
 // enfeite: é o tempo em que o negociador "vai falar com a mesa" — sem
@@ -1372,6 +1375,17 @@ async function registrarDocumento(reg) {
   });
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.erro || "Não consegui registrar o documento.");
+  return d;
+}
+// A capa é a foto de menor ordem. Pôr uma foto na frente pede UMA linha
+// mudada, no servidor (a ordem dela vira a menor menos um), e não
+// renumerar todas: com 40 fotos eram 80 idas ao banco numa chamada só.
+async function fotoParaCapa(id) {
+  const r = await fetchAut("/api/foto", {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ capa: id }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui trocar a capa.");
   return d;
 }
 async function gravarOrdemFotos(ordens) {
@@ -4414,8 +4428,11 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         .filter((p) => p && p.local)
         .map((p, i) => ({
           chave: p.chave || `p${i}-${Math.random().toString(36).slice(2, 7)}`,
+          // "aguardando", não "erro": sobem sozinhas assim que houver
+          // veículo — antes pediam um "Tentar" em cada uma, e a foto
+          // ficava esquecida no celular (a L200 do Protásio, 28/10).
           local: p.local, largura: p.largura, altura: p.altura, id: null, url: null,
-          estado: "erro", erro: p.erro || "Ficou pendente do atendimento anterior.",
+          estado: "aguardando", erro: "",
         }));
 
       let doServidor = [];
@@ -4516,7 +4533,11 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     try {
       const ordem = Math.max(0, fotosRef.current.findIndex((p) => p.chave === chave));
       const d = await subirFoto(vid, alvo, ordem);
-      mudarFoto(chave, { estado: "ok", id: d.id, caminho: d.caminho, url: d.url, local: null, erro: "" });
+      // A lista pode ter sido relida enquanto ela subia e já trazer esta
+      // foto do servidor: aí a cópia daqui sai, para não aparecer duas.
+      aplicar((prev) => prev.some((p) => p.id === d.id && p.chave !== chave)
+        ? prev.filter((p) => p.chave !== chave)
+        : prev.map((p) => (p.chave === chave ? { ...p, estado: "ok", id: d.id, caminho: d.caminho, url: d.url, local: null, erro: "" } : p)));
     } catch (e) {
       // A imagem continua no aparelho: "tentar de novo" reaproveita.
       mudarFoto(chave, { estado: "erro", erro: e.message });
@@ -4551,16 +4572,11 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     ev.target.value = "";
   };
 
-  const salvarOrdem = async (lista) => {
-    const ordens = lista.map((p, i) => ({ id: p.id, ordem: i })).filter((o) => o.id);
-    if (!ordens.length) return;
-    try { await gravarOrdemFotos(ordens); } catch (e) { setErroFoto(e.message); }
-  };
   const definirCapa = async (i) => {
     const n = [...fotosRef.current];
     const [x] = n.splice(i, 1); n.unshift(x);
     aplicar(() => n);
-    await salvarOrdem(n);
+    if (x && x.id) { try { await fotoParaCapa(x.id); } catch (e) { setErroFoto(e.message); } }
   };
   const removerFoto = async (i) => {
     const alvo = fotosRef.current[i];
@@ -4569,9 +4585,9 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
       try { await apagarFotoServidor(alvo.id); }
       catch (e) { setErroFoto(e.message); return; }
     }
-    const n = fotosRef.current.filter((_, x) => x !== i);
-    aplicar(() => n);
-    await salvarOrdem(n);
+    // Apagar não renumera: buraco na ordem não muda quem vem antes de
+    // quem, e renumerar eram duas idas ao banco por foto.
+    aplicar(() => fotosRef.current.filter((_, x) => x !== i));
   };
 
   /**
@@ -4830,7 +4846,17 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   const placaFicha = String(f.placa || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
   const fotoEsperando = fotos.some((p) => p.estado === "aguardando" && p.local);
   useEffect(() => {
-    if (!pronto || veiculoId || garantindoRef.current || !fotoEsperando) return;
+    if (!pronto || garantindoRef.current || !fotoEsperando) return;
+    // Com veículo: só subir as que esperam (as que voltaram do aparelho
+    // ao abrir, ou as que chegaram enquanto a ficha era criada).
+    if (veiculoId) {
+      garantindoRef.current = true;
+      (async () => {
+        for (const p of fotosRef.current.filter((x) => x.estado === "aguardando" && x.local)) await enviarFoto(p.chave, veiculoId);
+        garantindoRef.current = false;
+      })();
+      return;
+    }
     if (!/^[A-Z]{3}\d[A-Z0-9]\d{2}$/.test(placaFicha)) return;
     garantindoRef.current = true;
     (async () => {
@@ -5107,12 +5133,37 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     const aoVoltar = () => { if (!document.hidden) buscar(); };
     document.addEventListener("visibilitychange", aoVoltar);
     window.addEventListener("focus", buscar);
+    // E de 15 em 15 s com a aba à vista (28/10/2026, o Derek: "preciso
+    // usar ao mesmo tempo no celular e no computador"). Só o foco não
+    // bastava: o computador aberto na mesa nunca perde o foco enquanto o
+    // celular fotografa o carro lá fora. Uma ida ao banco por volta.
+    const t = setInterval(buscar, 15000);
     return () => {
-      vivo = false;
+      vivo = false; clearInterval(t);
       document.removeEventListener("visibilitychange", aoVoltar);
       window.removeEventListener("focus", buscar);
     };
   }, [veiculoId, pronto]);
+
+  // O aparelho que abriu antes de a ficha existir não sabe o id dela, e
+  // sem o id não lista foto nenhuma: o outro aparelho criou a ficha e
+  // subiu doze fotos, e este continuava vazio. Pergunta a cada 15 s até
+  // descobrir.
+  useEffect(() => {
+    if (veiculoId || !pronto || !atendimento || !atendimento.id) return;
+    let vivo = true;
+    const t = setInterval(async () => {
+      if (document.hidden) return;
+      try {
+        const v = await veiculoDoAtendimento(atendimento.id);
+        if (vivo && v && v.id) {
+          setVeiculoId(v.id);
+          window.storage.set(CH_VEIC, JSON.stringify({ id: v.id, placa: v.placa })).catch(() => {});
+        }
+      } catch (e) {}
+    }, 15000);
+    return () => { vivo = false; clearInterval(t); };
+  }, [veiculoId, pronto, atendimento && atendimento.id]);
 
   /**
    * ATENDER O PEDIDO DE ESCUTA (0052).

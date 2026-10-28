@@ -1333,6 +1333,21 @@ module.exports = async function handler(req, res) {
       let corpo = req.body;
       if (corpo && typeof Buffer !== "undefined" && Buffer.isBuffer(corpo)) corpo = corpo.toString("utf8");
       if (typeof corpo === "string") { try { corpo = JSON.parse(corpo); } catch (e) { corpo = null; } }
+      /* CAPA EM UMA LINHA (28/10/2026). Com o teto subindo de 12 para 40
+       * fotos, renumerar todas eram 80 idas ao banco por troca de capa —
+       * além do teto de subrequisições do Worker. A capa é a menor ordem;
+       * a escolhida passa a ser a menor menos um, e mais nada muda. */
+      if (corpo && RX_UUID.test(String(corpo.capa || ""))) {
+        const fid = String(corpo.capa);
+        const f = (await banco(`${REST("foto")}?select=veiculo_id,ordem&id=eq.${fid}&limit=1`, { headers: cabecalhos(tok) }) || [])[0];
+        if (!f) return res.status(404).json({ erro: "Foto não encontrada." });
+        const menor = (await banco(`${REST("foto")}?select=ordem&veiculo_id=eq.${f.veiculo_id}&order=ordem.asc&limit=1`, { headers: cabecalhos(tok) }) || [])[0];
+        if (menor && menor.ordem < f.ordem) {
+          await banco(`${REST("foto")}?id=eq.${fid}`, { method: "PATCH", headers: json(tok), body: JSON.stringify({ ordem: menor.ordem - 1 }) });
+        }
+        return res.status(200).json({ ok: true });
+      }
+
       const ordens = corpo && Array.isArray(corpo.ordens) ? corpo.ordens : null;
       if (!ordens || !ordens.length) return res.status(400).json({ erro: "Mande ordens: [{ id, ordem }]." });
 
@@ -1353,7 +1368,8 @@ module.exports = async function handler(req, res) {
         body: JSON.stringify({ ordem }),
       });
 
-      for (let i = 0; i < alvos.length; i++) await mover(alvos[i].id, -(i + 1));
+      // Estaciona bem longe: a capa pode ter ordem negativa (acima).
+      for (let i = 0; i < alvos.length; i++) await mover(alvos[i].id, -(1000000 + i));
       for (const a of alvos) await mover(a.id, a.ordem);
 
       return res.status(200).json({ ok: true, atualizadas: alvos.length });
