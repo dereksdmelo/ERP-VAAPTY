@@ -20520,40 +20520,73 @@ function FilaDut() {
   );
 }
 
-function TelaADM({ perfil, comp, mes }) {
-  const [lista, setLista] = useState(null);
+/* A ESTEIRA DO NEGÓCIO FECHADO (0089, 28/10/2026). O Derek:
+ * "negócios fechados (revisar) — adm coloca todos os itens; aprovações —
+ * gerentes analisam os documentos revisados pelo adm, pelo menos dois;
+ * pagamentos a realizar — os revisados e aprovados que precisam ser pagos,
+ * e uma opção de ver os que ainda estão em revisão, para o fluxo de caixa".
+ *
+ * Uma tela só, em quatro modos, um por item do menu: a fila muda, o
+ * detalhe do negócio é o mesmo — duas cópias do detalhe divergiriam no
+ * primeiro acréscimo. A etapa vem do servidor (`etapaDe`, api/checklist.js),
+ * não é decidida aqui. */
+const ETAPA_NEG = {
+  revisar: { rot: "revisar", cor: C.laranja },
+  aprovar: { rot: "com os gerentes", cor: C.roxo },
+  pagar: { rot: "a pagar", cor: "#1B5FA8" },
+  pago: { rot: "pago", cor: C.verde },
+};
+const umaDe = (x) => (Array.isArray(x) ? x[0] : x) || null;
+async function lerEsteira(faixa) {
+  const q = faixa ? `&de=${faixa.de}&ate=${faixa.ate}` : "";
+  const r = await fetchAut(`/api/checklist?recurso=esteira${q}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui carregar os negócios fechados.");
+  return d;
+}
+async function moverEsteira(acao, corpo) {
+  const r = await fetchAut(`/api/checklist?recurso=esteira&acao=${acao}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(d.erro || "Não consegui gravar."); e.faltam = d.faltam; throw e; }
+  return d;
+}
+const desembolsoDe = (cl) => {
+  const c = cl || {};
+  const cliente = numeroBR(c.valor_cliente) || 0, quitacao = numeroBR(c.valor_quitacao) || 0, debitos = numeroBR(c.valor_debitos) || 0;
+  return { cliente, quitacao, debitos, total: cliente + quitacao + debitos };
+};
+const quando = (t) => (t ? new Date(t).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "");
+
+// O menu e o roteador precisam concordar, como o ABA_FIN e o ABA_PV.
+const MODO_ADM = { adm: "revisar", adm_aprovacoes: "aprovar", adm_pagamentos: "pagar", adm_dut: "dut" };
+function TelaADM({ perfil, comp, mes, modo = "revisar" }) {
+  const [dados, setDados] = useState(null);
   const [erro, setErro] = useState("");
   const [foco, setFoco] = useState(null);      // atendimento aberto
   const [aba, setAba] = useState("negocio");
-  const [secao, setSecao] = useState("negocios");
   const [cl, setCl] = useState(null);
   const [indo, setIndo] = useState(false);
   const [salvo, setSalvo] = useState(false);
+  const [previsao, setPrevisao] = useState(false);
+  const [motivo, setMotivo] = useState("");
+  const [obsPago, setObsPago] = useState("");
+  const [faltam, setFaltam] = useState(null);
+  const [erroAcao, setErroAcao] = useState("");
 
-  const conferidoEm = (a) => {
-    const c = a.checklist;
-    const linha = Array.isArray(c) ? c[0] : c;
-    return linha ? linha.adm_conferido_em : null;
-  };
-
-  // A fila obedece ao mês do cabeçalho, como o CRM. Sem isso ela
-  // mostrava os 54 fechados de agosto que vieram da planilha e que
-  // ninguém vai conferir — e os de setembro, que são o trabalho de
-  // verdade, ficavam embaixo deles. "Todos os meses" traz de volta:
-  // esconder não é apagar.
-  const carregar = () =>
-    listarAtendimentos({ status: "fechado", limite: 200, ...(comp ? faixaDoMes(comp) : {}) })
-      .then((ls) => setLista(ls.slice().sort((a, b) => {
-        const ca = conferidoEm(a) ? 1 : 0, cb = conferidoEm(b) ? 1 : 0;
-        if (ca !== cb) return ca - cb;                    // pendente primeiro
-        return String(b.data || "").localeCompare(String(a.data || ""));
-      })))
-      .catch((e) => setErro(e.message));
-
-  useEffect(() => { carregar(); }, [comp]);
+  // Revisar obedece ao mês do cabeçalho, como antes: sem isso a fila
+  // mostraria os fechados de agosto que vieram da planilha. Aprovar e
+  // pagar são filas de trabalho e não têm mês — o servidor traz os
+  // últimos 120 dias.
+  const carregar = () => lerEsteira(modo === "revisar" && comp ? faixaDoMes(comp) : null)
+    .then((d) => { setDados(d); if (foco) { const n = (d.negocios || []).find((x) => x.id === foco.id); if (n) setFoco(n); } })
+    .catch((e) => setErro(e.message));
+  useEffect(() => { if (modo !== "dut") { setDados(null); carregar(); } }, [comp, modo]);
+  useEffect(() => { setFoco(null); }, [modo]);
 
   const abrir = async (a) => {
-    setFoco(a); setCl(null); setErro(""); setSalvo(false);
+    setFoco(a); setCl(null); setErro(""); setSalvo(false); setMotivo(""); setObsPago(""); setFaltam(null); setErroAcao("");
     try { setCl((await lerChecklist(a.id)) || {}); }
     catch (e) { setErro(e.message); setCl({}); }
   };
@@ -20568,24 +20601,163 @@ function TelaADM({ perfil, comp, mes }) {
       CL_ADM.forEach(([k]) => { so[k] = !!cl[k]; });
       const d = await salvarChecklist(foco.id, so);
       setCl(d); setSalvo(true);
-      await carregar();
     } catch (e) { setErro(e.message); }
     setIndo(false);
   };
+  const agir = async (acao, corpo) => {
+    setIndo(true); setErroAcao(""); setFaltam(null);
+    try { await moverEsteira(acao, { atendimento_id: foco.id, ...corpo }); setMotivo(""); setObsPago(""); await carregar(); }
+    catch (e) { setErroAcao(e.message); if (e.faltam) setFaltam(e.faltam); }
+    setIndo(false);
+  };
 
-  const pendentes = lista ? lista.filter((a) => !conferidoEm(a)).length : 0;
-
-  if (foco) {
+  if (modo === "dut") {
     return (
       <div>
-        <button onClick={() => { setFoco(null); setCl(null); setAba("negocio"); }} className="text-[14px]" style={{ color: C.roxo, fontWeight: 600 }}>‹ Fila do administrativo</button>
+        <Cabecalho titulo="DUT dos lojistas" sub="Os pedidos de DUT dos lojistas, do recebimento à entrega." />
+        <FilaDut />
+      </div>
+    );
+  }
+
+  const eu = (dados && dados.eu) || {};
+  const minimo = (dados && dados.minimo) || 2;
+  const todos = (dados && dados.negocios) || [];
+  const daFila = modo === "revisar" ? todos
+    : modo === "aprovar" ? todos.filter((a) => a.etapa === "aprovar")
+    : todos.filter((a) => a.etapa === "pagar" || (previsao && (a.etapa === "revisar" || a.etapa === "aprovar")));
+  // Revisar mostra o mês inteiro, com o que falta fazer em cima.
+  const ORDEM = { revisar: 0, aprovar: 1, pagar: 2, pago: 3 };
+  const lista = daFila.slice().sort((a, b) => (ORDEM[a.etapa] - ORDEM[b.etapa]) || String(b.data || "").localeCompare(String(a.data || "")));
+  const soma = (xs) => xs.reduce((t, a) => t + desembolsoDe(a.checklist).total, 0);
+
+  const TITULO = { revisar: "Negócios fechados", aprovar: "Aprovações", pagar: "Pagamentos a realizar" };
+
+  if (foco) {
+    const e = ETAPA_NEG[foco.etapa] || ETAPA_NEG.revisar;
+    const v = umaDe(foco.veiculo) || {};
+    const dz = desembolsoDe(foco.checklist);
+    return (
+      <div>
+        <button onClick={() => { setFoco(null); setCl(null); setAba("negocio"); }} className="text-[14px]" style={{ color: C.roxo, fontWeight: 600 }}>‹ {TITULO[modo]}</button>
         <Cabecalho titulo={foco.cliente_nome || "Sem nome"}
-          sub={foco.carro_descricao || (foco.veiculo && foco.veiculo.marca_modelo) || "—"} />
+          sub={`${foco.carro_descricao || v.marca_modelo || "—"}${v.placa ? ` · ${v.placa}` : ""}`} />
+
+        {/* O QUE ESTA ETAPA PEDE, em cima de tudo: o detalhe embaixo é o
+            mesmo nas três filas. */}
+        <div className="mb-4 rounded-lg p-4" style={{ background: "#fff", border: `1.5px solid ${e.cor}` }}>
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <span className="text-[11px] font-bold uppercase tracking-[0.1em]" style={{ color: e.cor }}>{e.rot}</span>
+            <span className="text-[12px]" style={{ color: C.mute }}>
+              {foco.checklist && foco.checklist.revisado_em ? `revisado por ${foco.revisado_nome || "—"} em ${quando(foco.checklist.revisado_em)}` : "ainda não revisado"}
+              {foco.etapa !== "revisar" && ` · ${foco.aprovacoes.length} de ${minimo} aprovações`}
+            </span>
+          </div>
+          {foco.devolucao && foco.etapa === "revisar" && (
+            <div className="mt-2 rounded-md px-3 py-2 text-[13px]" style={{ background: "#FFF4E5", color: "#7A4A00" }}>
+              Devolvido por {foco.devolucao.nome || "um gerente"} em {quando(foco.devolucao.criado_em)}: <b>{foco.devolucao.motivo}</b>
+            </div>
+          )}
+          {foco.aprovacoes.length > 0 && (
+            <div className="mt-2 text-[12.5px]" style={{ color: C.ink }}>
+              Aprovado por {foco.aprovacoes.map((x) => `${x.nome || "—"} (${quando(x.criado_em)})`).join(", ")}
+            </div>
+          )}
+
+          {modo === "revisar" && eu.adm && foco.etapa === "revisar" && (
+            <div className="mt-3">
+              <p className="mb-2 text-[12.5px]" style={{ color: C.mute }}>
+                Responda todos os itens do check list de documentações (Sim ou Não) e conclua: o negócio vai para os gerentes.
+              </p>
+              <button onClick={() => agir("revisado", {})} disabled={indo}
+                className="rounded-md px-4 py-2 text-[13px] font-semibold text-white" style={{ background: indo ? C.line : C.roxo }}>
+                {indo ? "Gravando…" : "Concluir a revisão"}
+              </button>
+            </div>
+          )}
+          {modo === "revisar" && eu.adm && foco.etapa === "aprovar" && foco.aprovacoes.length === 0 && (
+            <button onClick={() => agir("revisado", { desfazer: true })} disabled={indo} className="mt-3 text-[12.5px] underline" style={{ color: C.mute }}>
+              reabrir a revisão
+            </button>
+          )}
+
+          {modo === "aprovar" && foco.etapa === "aprovar" && (eu.gerente ? (
+            <div className="mt-3 space-y-2">
+              {foco.eu_aprovei ? (
+                <div className="flex items-center gap-3 text-[13px]">
+                  <span style={{ color: C.verde, fontWeight: 600 }}>Você aprovou. Falta {Math.max(0, minimo - foco.aprovacoes.length)} de outro gerente.</span>
+                  <button onClick={() => agir("aprovar", { decisao: "desfazer" })} disabled={indo} className="underline" style={{ color: C.mute }}>desfazer</button>
+                </div>
+              ) : (
+                <button onClick={() => agir("aprovar", { decisao: "aprovado" })} disabled={indo}
+                  className="rounded-md px-4 py-2 text-[13px] font-semibold text-white" style={{ background: indo ? C.line : C.verde }}>
+                  Aprovar
+                </button>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <input value={motivo} onChange={(ev) => setMotivo(ev.target.value)} placeholder="O que o adm precisa corrigir"
+                  className="min-w-0 flex-1 rounded-md border px-2.5 py-1.5 text-[13px]" style={{ borderColor: C.line }} />
+                <button onClick={() => agir("aprovar", { decisao: "devolvido", motivo })} disabled={indo || motivo.trim().length < 3}
+                  className="rounded-md px-3 py-1.5 text-[13px] font-semibold" style={{ color: C.laranja, border: `1px solid ${C.laranja}`, opacity: motivo.trim().length < 3 ? 0.5 : 1 }}>
+                  Devolver ao adm
+                </button>
+              </div>
+            </div>
+          ) : <p className="mt-2 text-[12.5px]" style={{ color: C.mute }}>Só gerente aprova.</p>)}
+
+          {modo === "pagar" && (
+            <div className="mt-3 space-y-2">
+              <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-[13px] sm:grid-cols-4">
+                <div><div style={{ color: C.mute }}>Ao cliente</div><b style={{ fontFamily: F.mono }}>{brl(dz.cliente)}</b></div>
+                <div><div style={{ color: C.mute }}>Quitação</div><b style={{ fontFamily: F.mono }}>{brl(dz.quitacao)}</b></div>
+                <div><div style={{ color: C.mute }}>Débitos</div><b style={{ fontFamily: F.mono }}>{brl(dz.debitos)}</b></div>
+                <div><div style={{ color: C.mute }}>Total a sair</div><b style={{ fontFamily: F.mono, color: e.cor }}>{brl(dz.total)}</b></div>
+              </div>
+              {foco.checklist && foco.checklist.banco_favorecido && (
+                <div className="rounded-md px-3 py-2 text-[12.5px]" style={{ background: "#FBFAFC", border: `1px solid ${C.line}` }}>
+                  <b>{foco.checklist.banco_favorecido}</b>{foco.checklist.banco_documento ? ` · ${foco.checklist.banco_documento}` : ""}
+                  <div style={{ fontFamily: F.mono, color: C.mute }}>
+                    {[foco.checklist.banco_nome, foco.checklist.banco_agencia, foco.checklist.banco_conta].filter(Boolean).join(" · ")}
+                    {foco.checklist.banco_pix ? ` · PIX ${foco.checklist.banco_pix}` : ""}
+                  </div>
+                  <div className="mt-1 text-[11.5px]" style={{ color: C.laranja }}>Confira o favorecido antes de pagar.</div>
+                </div>
+              )}
+              {foco.etapa === "pagar" && (eu.fin ? (
+                <div className="flex flex-wrap gap-2">
+                  <input value={obsPago} onChange={(ev) => setObsPago(ev.target.value)} placeholder="Observação (opcional): conta, comprovante, parcial…"
+                    className="min-w-0 flex-1 rounded-md border px-2.5 py-1.5 text-[13px]" style={{ borderColor: C.line }} />
+                  <button onClick={() => agir("pago", { obs: obsPago })} disabled={indo}
+                    className="rounded-md px-4 py-2 text-[13px] font-semibold text-white" style={{ background: indo ? C.line : C.verde }}>
+                    Marcar como pago
+                  </button>
+                </div>
+              ) : <p className="text-[12.5px]" style={{ color: C.mute }}>Quem marca o pagamento é o financeiro ou o gerente.</p>)}
+              {foco.etapa === "pago" && (
+                <div className="flex items-center gap-3 text-[13px]">
+                  <span style={{ color: C.verde, fontWeight: 600 }}>Pago em {quando(foco.checklist.pago_em)} por {foco.pago_nome || "—"}{foco.checklist.pago_obs ? ` — ${foco.checklist.pago_obs}` : ""}</span>
+                  {eu.fin && <button onClick={() => agir("pago", { desfazer: true })} disabled={indo} className="underline" style={{ color: C.mute }}>desfazer</button>}
+                </div>
+              )}
+              {(foco.etapa === "revisar" || foco.etapa === "aprovar") && (
+                <p className="text-[12.5px]" style={{ color: C.mute }}>Ainda {foco.etapa === "revisar" ? "na revisão do adm" : "com os gerentes"}: entra na previsão do caixa, não se paga ainda.</p>
+              )}
+            </div>
+          )}
+
+          {erroAcao && <p className="mt-2 text-[12.5px]" style={{ color: C.laranja }}>{erroAcao}</p>}
+          {faltam && faltam.length > 0 && (
+            <ul className="mt-1 list-disc pl-5 text-[12px]" style={{ color: C.mute }}>
+              {faltam.slice(0, 12).map((x) => <li key={x}>{x}</li>)}
+              {faltam.length > 12 && <li>e mais {faltam.length - 12}</li>}
+            </ul>
+          )}
+        </div>
 
         <div className="mb-4 flex flex-wrap gap-1.5">
-          {[["negocio", "O negócio"], ["documentos", "Check list de documentações"]].map(([v, r]) => (
-            <button key={v} onClick={() => setAba(v)} className="rounded-full px-3.5 py-1.5 text-[13px] font-semibold"
-              style={{ background: aba === v ? C.roxo : C.paper, color: aba === v ? "#fff" : C.ink, border: `1px solid ${aba === v ? C.roxo : C.line}` }}>{r}</button>
+          {[["negocio", "O negócio"], ["documentos", "Check list de documentações"]].map(([v2, r]) => (
+            <button key={v2} onClick={() => setAba(v2)} className="rounded-full px-3.5 py-1.5 text-[13px] font-semibold"
+              style={{ background: aba === v2 ? C.roxo : C.paper, color: aba === v2 ? "#fff" : C.ink, border: `1px solid ${aba === v2 ? C.roxo : C.line}` }}>{r}</button>
           ))}
         </div>
 
@@ -20631,7 +20803,7 @@ function TelaADM({ perfil, comp, mes }) {
               </div>
 
               <PapeisDoNegocio atendimentoId={foco.id}
-                veiculoId={((foco.veiculo || [])[0] || {}).id || null} />
+                veiculoId={(umaDe(foco.veiculo) || {}).id || null} />
 
               <div className="rounded-lg p-4" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
                 <div className="text-[10px] uppercase tracking-[0.13em]" style={{ color: C.roxo }}>
@@ -20663,55 +20835,60 @@ function TelaADM({ perfil, comp, mes }) {
     );
   }
 
+  const nRevisar = todos.filter((a) => a.etapa === "revisar").length;
+  const sub = !dados ? "Carregando…"
+    : modo === "revisar" ? `${todos.length} fechados · ${nRevisar} para revisar`
+    : modo === "aprovar" ? `${lista.length} esperando aprovação · cada um precisa de ${minimo} gerentes`
+    : `${todos.filter((a) => a.etapa === "pagar").length} a pagar · ${brl(soma(todos.filter((a) => a.etapa === "pagar")))}`;
+
   return (
     <div>
-      <Cabecalho titulo="Administrativo" mes={secao === "negocios" ? mes : null}
-        sub={secao === "dut" ? "Os pedidos de DUT dos lojistas, do recebimento à entrega."
-          : lista ? `${lista.length} fechados · ${pendentes} esperando conferência` : "Carregando…"} />
+      <Cabecalho titulo={TITULO[modo]} mes={modo === "revisar" ? mes : null} sub={sub} />
 
-      {/* Dois trabalhos diferentes no mesmo setor: conferir o negócio
-          que a loja fechou, e preencher o DUT do carro que o lojista
-          comprou. O segundo tem fila própria porque a contraparte é
-          outra -- a rede, não o cliente. */}
-      <div className="mb-4 flex flex-wrap gap-1.5">
-        {[["negocios", "Negócios fechados"], ["dut", "DUT dos lojistas"]].map(([v, r]) => (
-          <button key={v} onClick={() => setSecao(v)}
-            className="rounded-full px-3.5 py-1.5 text-[13px] font-semibold"
-            style={secao === v ? { background: C.roxo, color: "#fff" }
-                               : { background: C.paper, color: C.ink, border: `1px solid ${C.line}` }}>{r}</button>
-        ))}
-      </div>
+      {modo === "pagar" && dados && (
+        <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-[13px]">
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={previsao} onChange={(ev) => setPrevisao(ev.target.checked)} />
+            mostrar também os que estão em revisão e aprovação (previsão de caixa)
+          </label>
+          {previsao && (
+            <span style={{ color: C.mute }}>
+              em revisão {brl(soma(todos.filter((a) => a.etapa === "revisar")))} · com os gerentes {brl(soma(todos.filter((a) => a.etapa === "aprovar")))}
+            </span>
+          )}
+        </div>
+      )}
 
-      {secao === "dut" && <FilaDut />}
-
-      <div className="space-y-2" style={{ display: secao === "negocios" ? "block" : "none" }}>
+      <div className="space-y-2">
         {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
-
-        {lista && !lista.length && (
+        {dados && !lista.length && (
           <p className="text-[12px] leading-relaxed" style={{ color: C.mute }}>
-            Nenhum negócio fechado ainda. A fila enche quando o negociador marca o atendimento como fechado.
+            {modo === "revisar" ? "Nenhum negócio fechado neste mês. A fila enche quando o negociador marca o atendimento como fechado."
+              : modo === "aprovar" ? "Nada esperando aprovação. Entra aqui o que o adm concluiu a revisão."
+              : "Nada a pagar. Entra aqui o negócio revisado pelo adm e aprovado por dois gerentes."}
           </p>
         )}
-
-        {lista && lista.map((a) => {
-          const ok = conferidoEm(a);
+        {lista.map((a) => {
+          const e = ETAPA_NEG[a.etapa] || ETAPA_NEG.revisar;
+          const v = umaDe(a.veiculo) || {};
+          const dz = desembolsoDe(a.checklist);
           return (
             <button key={a.id} onClick={() => abrir(a)}
               className="w-full rounded-lg p-3 text-left"
-              style={{ background: "#fff", border: `1px solid ${ok ? C.line : C.laranja}` }}>
+              style={{ background: "#fff", border: `1px solid ${a.etapa === "pago" ? C.line : e.cor}` }}>
               <div className="flex items-baseline justify-between gap-2">
                 <span className="text-[14px]" style={{ fontWeight: 600 }}>{a.cliente_nome || "Sem nome"}</span>
-                <span className="shrink-0 text-[10px] font-semibold" style={{ color: ok ? C.verde : C.laranja }}>
-                  {ok ? "conferido" : "pendente"}
+                <span className="shrink-0 text-[11px] font-semibold" style={{ color: e.cor }}>
+                  {e.rot}{a.etapa === "aprovar" ? ` ${a.aprovacoes.length}/${minimo}` : ""}{a.eu_aprovei && a.etapa === "aprovar" ? " · você aprovou" : ""}
+                  {a.devolucao && a.etapa === "revisar" ? " · devolvido" : ""}
                 </span>
               </div>
               <div className="text-[12px]" style={{ color: C.mute }}>
-                {a.carro_descricao || (a.veiculo && a.veiculo.marca_modelo) || "—"}
-                {a.veiculo && a.veiculo.placa ? ` · ${a.veiculo.placa}` : ""}
+                {a.carro_descricao || v.marca_modelo || "—"}{v.placa ? ` · ${v.placa}` : ""}{a.negociador_nome ? ` · ${a.negociador_nome}` : ""}
               </div>
               <div className="text-[11px]" style={{ color: C.mute, fontFamily: F.mono }}>
                 {a.data ? String(a.data).split("-").reverse().join("/") : "sem data"}
-                {a.valor_fechado ? ` · ${brl(Number(a.valor_fechado))}` : ""}
+                {modo === "pagar" ? ` · a sair ${brl(dz.total)}` : a.valor_fechado ? ` · ${brl(Number(a.valor_fechado))}` : ""}
               </div>
             </button>
           );
@@ -21762,6 +21939,11 @@ function destinosPara(perfil) {
     // O combinado pronto para mais de uma pessoa (0082). A RLS é do
     // financeiro e do gerente, como a ficha.
     (gerente || (perfil && perfil.financeiro)) ? { id: "remuneracao", rot: "Perfis de remuneração", curto: "Remuner.", area: "gestao" } : null,
+    // Ligar um número da loja é ato de gerente — e o servidor confere
+    // de novo, porque esconder o item é conveniência, não controle. Mora
+    // em Gestão desde 28/10/2026 (o Derek): é cadastro da loja, não
+    // trabalho do administrativo.
+    gerente ? { id: "whatsapp", rot: "Números do WhatsApp", curto: "WhatsApp", area: "gestao" } : null,
     // Área restrita: só quem tem o sinalizador no perfil (0021). A tela
     // esconde o destino; quem protege de verdade é a RLS.
 
@@ -21790,10 +21972,14 @@ function destinosPara(perfil) {
     ] : []),
 
     // ---- o papel e a operação ----
-    adm ? { id: "adm", rot: "Administrativo", curto: "Adm.", area: "adm" } : null,
-    // Ligar um número da loja é ato de gerente — e o servidor confere
-    // de novo, porque esconder o item é conveniência, não controle.
-    gerente ? { id: "whatsapp", rot: "Números do WhatsApp", curto: "WhatsApp", area: "adm" } : null,
+    /* A ESTEIRA DO NEGÓCIO FECHADO (0089, 28/10/2026): o adm revisa, dois
+     * gerentes aprovam, o financeiro paga. Um destino por etapa — eram
+     * duas pílulas no topo de uma tela só, e o DUT, que é outro trabalho
+     * (a contraparte é a rede, não o cliente), ganhou o dele. */
+    adm ? { id: "adm", rot: "Negócios fechados", curto: "Adm.", area: "adm" } : null,
+    gerente ? { id: "adm_aprovacoes", rot: "Aprovações", curto: "Aprov.", area: "adm" } : null,
+    (gerente || (perfil && perfil.financeiro)) ? { id: "adm_pagamentos", rot: "Pagamentos a realizar", curto: "Pagar", area: "adm" } : null,
+    adm ? { id: "adm_dut", rot: "DUT dos lojistas", curto: "DUT", area: "adm" } : null,
   ].filter(Boolean);
 }
 
@@ -24904,7 +25090,7 @@ function App() {
       {tela === "leads" && <LeadsIndicacao />}
       {tela === "extrato" && <TelaExtratoAvulso perfil={perfil} />}
       {tela === "gestor" && <PainelGestor perfil={perfil} comp={compOuAtual} />}
-      {tela === "adm" && <TelaADM perfil={perfil} comp={compOuAtual} mes={mes} />}
+      {MODO_ADM[tela] && <TelaADM perfil={perfil} comp={compOuAtual} mes={mes} modo={MODO_ADM[tela]} />}
       {tela === "gestao" && <TelaGestao perfil={perfil} comp={compOuAtual} />}
       {tela === "remuneracao" && <TelaPerfisRemuneracao />}
       {tela === "conversas" && (

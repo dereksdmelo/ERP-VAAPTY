@@ -4338,6 +4338,53 @@ decisão 23 — uma linha só de "Débitos do veículo" esconderia o
 desconto que se consegue numa multa e não na outra. A comissão nunca
 entra como custo, pela decisão 23.
 
+### 67. A esteira do negócio fechado: revisar, aprovar, pagar (0089)
+
+O Derek, em 28/10/2026, olhando o Administrativo: *"negócios fechados
+(revisar) — adm coloca todos os itens; aprovações — gerentes analisam
+os documentos revisados pelo adm, pelo menos dois revisores; pagamentos
+a realizar — os que já foram revisados e aprovados e precisam ser pagos,
+mas mostra também os fechados em revisão, para programar fluxo de
+caixa"*. E, no mesmo dia: DUT dos lojistas separado no menu, e Números
+do WhatsApp em Gestão.
+
+**Quatro destinos, uma tela** (`TelaADM`, `MODO_ADM`): a fila muda, o
+detalhe do negócio é o mesmo — duas cópias dele divergiriam no primeiro
+acréscimo. Em cima do detalhe, o bloco da etapa diz o que ela pede.
+
+**A etapa é calculada, não gravada** (`etapaDe`, `?recurso=esteira` no
+`api/checklist.js`): `checklist.revisado_em`, as linhas de
+`aprovacao_negocio` e `checklist.pago_em`. Coluna "etapa" seria uma
+segunda verdade que alguém esquece de mudar.
+
+- **Revisar**: o adm conclui só com TODOS os itens do check list de
+  documentações respondidos — "Não" é resposta (decisão 1). Os de pessoa
+  jurídica só contam se algum deles foi respondido: cliente pessoa
+  física não tem contrato social, e exigir resposta ali treinaria a
+  marcar qualquer coisa.
+- **Aprovar**: um gerente por linha, carimbado pelo token (a RLS só
+  deixa cada um escrever a própria decisão). **Duas aprovações**
+  (`APROVACOES_MINIMAS`). Devolver pede o motivo e devolve à fila do adm.
+  **A aprovação vale para a revisão que ela viu**: as que são mais
+  velhas que o `revisado_em` deixam de contar quando o adm revisa de
+  novo.
+- **Pagar**: o total a sair é o líquido ao cliente mais a quitação e os
+  débitos, com os dados do favorecido à vista. "Marcar como pago" é do
+  financeiro ou do gerente, e só depois das duas aprovações. A
+  previsão de caixa liga os que ainda estão em revisão e com os
+  gerentes, com a soma de cada etapa.
+
+**O visto do check list de documentações nunca tinha gravado.** A rota
+conferia o `atendimento_id` da query antes de chegar ao trecho dos
+vistos, e a tela o manda no corpo do PUT — todo visto voltava 400. E o
+trecho chamava `lerCorpo`, que não existia no arquivo. Em 28/10/2026 a
+`checklist_doc` tinha zero linhas desde a 0027. As duas coisas foram
+consertadas junto, porque a revisão depende dela.
+
+**O que ficou de fora:** pagamento parcial (o cliente hoje e a quitação
+amanhã) — a observação do "pago" é onde se anota, por enquanto; e o
+lançamento no financeiro, que continua vindo do extrato.
+
 ### 34. A conferência do administrativo ganhou o resto do negócio
 
 A aba mostrava 36 caixas de visto e mais nada. Faltavam três coisas

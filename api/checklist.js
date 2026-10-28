@@ -49,6 +49,14 @@ function donoDoToken(tok) {
   } catch (e) { return null; }
 }
 
+// O PUT dos vistos chamava `lerCorpo` e ela não existia aqui: era o
+// segundo motivo de nenhum visto ter gravado (28/10/2026).
+async function lerCorpo(req) {
+  let c = req.body;
+  if (c && typeof Buffer !== "undefined" && Buffer.isBuffer(c)) c = c.toString("utf8");
+  if (typeof c === "string") { try { c = JSON.parse(c); } catch (e) { c = null; } }
+  return c && typeof c === "object" ? c : null;
+}
 const texto = (v) => {
   const s = String(v == null ? "" : v).trim();
   return s === "" ? null : s;
@@ -109,6 +117,150 @@ async function eAdministrativo(tok) {
     const eu = Array.isArray(linhas) ? linhas[0] : null;
     return !!(eu && (eu.administrativo || eu.papel === "gerente"));
   } catch (e) { return false; }
+}
+
+/* A ESTEIRA DO NEGÓCIO FECHADO (0089, 28/10/2026). O Derek:
+ *
+ *   negócios fechados (revisar) — o adm coloca todos os itens
+ *   aprovações — os gerentes analisam o que o adm revisou; pelo menos dois
+ *   pagamentos a realizar — revisados e aprovados, esperando o pagamento
+ *   (e a opção de ver os que ainda estão em revisão, para o fluxo de caixa)
+ *
+ * A etapa é CALCULADA, não gravada: revisado_em, as aprovações e pago_em
+ * dizem onde o negócio está, e uma coluna "etapa" seria uma segunda
+ * verdade que alguém esquece de mudar.
+ *
+ * **Aprovação vale para a revisão que ela viu.** Devolver ao adm apaga o
+ * revisado_em; quando o adm conclui de novo, as aprovações de antes ficam
+ * mais velhas que a revisão e deixam de contar — quem aprovou precisa
+ * olhar o que mudou. */
+const APROVACOES_MINIMAS = 2;
+async function quemSou(tok) {
+  const id = donoDoToken(tok);
+  if (!id) return null;
+  const r = await banco(`${URL_BASE}/rest/v1/perfil?select=id,nome,papel,administrativo,financeiro&id=eq.${id}&limit=1`, { headers: cabecalhos(tok) });
+  const eu = Array.isArray(r) ? r[0] : null;
+  if (!eu) return null;
+  const gerente = eu.papel === "gerente";
+  return { ...eu, gerente, adm: !!(eu.administrativo || gerente), fin: !!(eu.financeiro || gerente) };
+}
+const umaLinha = (x) => (Array.isArray(x) ? x[0] : x) || null;
+function etapaDe(cl, aprov) {
+  if (cl && cl.pago_em) return "pago";
+  if (!cl || !cl.revisado_em) return "revisar";
+  const validas = aprov.filter((a) => a.decisao === "aprovado" && String(a.criado_em) >= String(cl.revisado_em));
+  return validas.length >= APROVACOES_MINIMAS ? "pagar" : "aprovar";
+}
+// O que falta o adm responder no check list de documentações. "Não" é
+// resposta (decisão 1: gate que não se satisfaz com a verdade treina a
+// mentir). Os itens de pessoa jurídica só contam se algum deles foi
+// respondido — cliente pessoa física não tem contrato social.
+function faltamNaRevisao(marcas) {
+  const porItem = {};
+  (marcas || []).forEach((m) => { porItem[m.item] = m; });
+  const respondido = (c) => porItem[c] && porItem[c].adm !== null && porItem[c].adm !== undefined;
+  const pj = ITENS_DOC.filter((i) => i[2] === "pj").some((i) => respondido(i[0]));
+  const fixos = ITENS_DOC.filter((i) => i[2] !== "pj" || pj).filter((i) => !respondido(i[0])).map((i) => i[1]);
+  const extras = (marcas || []).filter((m) => /^extra/.test(m.item) && (m.adm === null || m.adm === undefined)).map((m) => m.rotulo || m.item);
+  return fixos.concat(extras);
+}
+async function esteira(req, res, tok) {
+  const eu = await quemSou(tok);
+  if (!eu) return res.status(403).json({ erro: "Sem perfil." });
+  const RA = `${URL_BASE}/rest/v1/aprovacao_negocio`;
+
+  if (req.method === "GET") {
+    // Fechados dos últimos 120 dias, ou do mês pedido. Mais velho que
+    // isso é a planilha importada, que ninguém vai revisar.
+    const de = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.de || "")) ? req.query.de
+      : new Date(Date.now() - 120 * 86400000).toISOString().slice(0, 10);
+    const ate = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.ate || "")) ? `&data=lte.${req.query.ate}` : "";
+    const ats = await banco(`${URL_BASE}/rest/v1/atendimento?select=*,` +
+      `veiculo(id,placa,marca_modelo),checklist(revisado_em,revisado_por,pago_em,pago_por,pago_obs,adm_conferido_em,valor_venda,valor_cliente,` +
+      `valor_quitacao,valor_debitos,valor_cautelar,banco_favorecido,banco_documento,banco_nome,banco_agencia,banco_conta,banco_tipo,banco_pix)` +
+      `&status=eq.fechado&data=gte.${de}${ate}&order=data.desc&limit=300`, { headers: cabecalhos(tok) }) || [];
+    const ids = ats.map((a) => a.id);
+    const [aprov, gente] = await Promise.all([
+      ids.length ? banco(`${RA}?select=atendimento_id,perfil_id,decisao,motivo,criado_em&atendimento_id=in.(${ids.join(",")})`, { headers: cabecalhos(tok) }) : [],
+      banco(`${URL_BASE}/rest/v1/perfil?select=id,nome`, { headers: cabecalhos(tok) }),
+    ]);
+    const nomes = {}; (gente || []).forEach((p) => { nomes[p.id] = p.nome; });
+    const porAt = {};
+    (aprov || []).forEach((a) => { (porAt[a.atendimento_id] = porAt[a.atendimento_id] || []).push({ ...a, nome: nomes[a.perfil_id] || "" }); });
+    const negocios = ats.map((a) => {
+      const cl = umaLinha(a.checklist);
+      const ap = porAt[a.id] || [];
+      const valem = cl && cl.revisado_em ? ap.filter((x) => String(x.criado_em) >= String(cl.revisado_em)) : [];
+      const devolvido = ap.filter((x) => x.decisao === "devolvido").sort((x, y) => String(y.criado_em).localeCompare(String(x.criado_em)))[0];
+      return {
+        ...a, checklist: cl, veiculo: umaLinha(a.veiculo),
+        etapa: etapaDe(cl, ap),
+        aprovacoes: valem.filter((x) => x.decisao === "aprovado"),
+        // A devolução mais recente, enquanto ninguém revisou de novo.
+        devolucao: devolvido && (!cl || !cl.revisado_em || String(devolvido.criado_em) > String(cl.revisado_em)) ? devolvido : null,
+        revisado_nome: cl && cl.revisado_por ? nomes[cl.revisado_por] || "" : "",
+        pago_nome: cl && cl.pago_por ? nomes[cl.pago_por] || "" : "",
+        eu_aprovei: valem.some((x) => x.perfil_id === eu.id && x.decisao === "aprovado"),
+      };
+    });
+    return res.status(200).json({ negocios, minimo: APROVACOES_MINIMAS, eu: { id: eu.id, gerente: eu.gerente, adm: eu.adm, fin: eu.fin } });
+  }
+
+  if (req.method !== "POST") { res.setHeader("Allow", "GET, POST"); return res.status(405).json({ erro: "Use GET ou POST." }); }
+  const c = await lerCorpo(req);
+  const aid = String((c && c.atendimento_id) || "");
+  if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
+  const acao = String(req.query.acao || "");
+  const agora = new Date().toISOString();
+  const gravarCl = async (campos) => {
+    const r = await banco(`${REST}?on_conflict=atendimento_id`, {
+      method: "POST", headers: json(tok, { Prefer: "resolution=merge-duplicates,return=representation" }),
+      body: JSON.stringify({ atendimento_id: aid, ...campos }),
+    });
+    if (!umaLinha(r)) { const e = new Error("A regra do banco recusou."); e.status = 403; throw e; }
+    return umaLinha(r);
+  };
+
+  if (acao === "revisado") {
+    if (!eu.adm) return res.status(403).json({ erro: "Só o administrativo conclui a revisão." });
+    if (c.desfazer) { await gravarCl({ revisado_em: null, revisado_por: null }); return res.status(200).json({ ok: true }); }
+    const marcas = await banco(`${URL_BASE}/rest/v1/checklist_doc?select=item,adm,rotulo&atendimento_id=eq.${aid}`, { headers: cabecalhos(tok) });
+    const faltam = faltamNaRevisao(marcas);
+    if (faltam.length) return res.status(409).json({ erro: `Faltam ${faltam.length} ${faltam.length === 1 ? "item" : "itens"} do check list de documentações.`, faltam });
+    await gravarCl({ revisado_em: agora, revisado_por: eu.id });
+    return res.status(200).json({ ok: true });
+  }
+
+  if (acao === "aprovar") {
+    if (!eu.gerente) return res.status(403).json({ erro: "Só gerente aprova." });
+    const decisao = c.decisao === "devolvido" ? "devolvido" : c.decisao === "desfazer" ? "desfazer" : "aprovado";
+    if (decisao === "desfazer") {
+      await banco(`${RA}?atendimento_id=eq.${aid}&perfil_id=eq.${eu.id}`, { method: "DELETE", headers: cabecalhos(tok) });
+      return res.status(200).json({ ok: true });
+    }
+    const motivo = texto(c.motivo);
+    if (decisao === "devolvido" && (!motivo || motivo.length < 3)) return res.status(400).json({ erro: "Diga o que o adm precisa corrigir." });
+    const cl = umaLinha(await banco(`${REST}?select=revisado_em&atendimento_id=eq.${aid}&limit=1`, { headers: cabecalhos(tok) }));
+    if (!cl || !cl.revisado_em) return res.status(409).json({ erro: "Este negócio ainda não foi revisado pelo administrativo." });
+    await banco(`${RA}?on_conflict=atendimento_id,perfil_id`, {
+      method: "POST", headers: json(tok, { Prefer: "resolution=merge-duplicates,return=minimal" }),
+      body: JSON.stringify({ atendimento_id: aid, perfil_id: eu.id, decisao, motivo, criado_em: agora }),
+    });
+    // Devolver tira da fila dos gerentes e põe de volta na do adm.
+    if (decisao === "devolvido") await gravarCl({ revisado_em: null, revisado_por: null });
+    return res.status(200).json({ ok: true });
+  }
+
+  if (acao === "pago") {
+    if (!eu.fin) return res.status(403).json({ erro: "Só o financeiro ou o gerente marca o pagamento." });
+    if (c.desfazer) { await gravarCl({ pago_em: null, pago_por: null, pago_obs: null }); return res.status(200).json({ ok: true }); }
+    const ap = await banco(`${RA}?select=decisao,criado_em&atendimento_id=eq.${aid}`, { headers: cabecalhos(tok) }) || [];
+    const cl = umaLinha(await banco(`${REST}?select=revisado_em,pago_em&atendimento_id=eq.${aid}&limit=1`, { headers: cabecalhos(tok) }));
+    if (etapaDe(cl, ap) !== "pagar") return res.status(409).json({ erro: `Só se paga depois da revisão do adm e de ${APROVACOES_MINIMAS} aprovações.` });
+    await gravarCl({ pago_em: agora, pago_por: eu.id, pago_obs: texto(c.obs) });
+    return res.status(200).json({ ok: true });
+  }
+  return res.status(400).json({ erro: "Ação desconhecida." });
 }
 
 async function banco(url, opcoes) {
@@ -456,14 +608,25 @@ module.exports = async function handler(req, res) {
     catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Falhou." }); }
   }
 
+  /* O VISTO NUNCA GRAVOU, e isso durou desde a 0027. Esta rota
+   * conferia o `atendimento_id` da QUERY antes de chegar aqui, e a tela
+   * manda o do PUT no corpo: todo visto voltava 400 "atendimento_id
+   * inválido". Em 28/10/2026 a `checklist_doc` tinha zero linhas. A rota
+   * dos documentos lê o atendimento sozinha (query no GET, corpo no PUT),
+   * então ela vem antes da conferência. */
+  if (String(req.query.recurso || "") === "documentos") {
+    try { return await documentos(req, res, tok); }
+    catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Falhou." }); }
+  }
+  if (String(req.query.recurso || "") === "esteira") {
+    try { return await esteira(req, res, tok); }
+    catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Falhou." }); }
+  }
+
   const aid = String(req.query.atendimento_id || "");
   if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
 
   try {
-    if (String(req.query.recurso || "") === "documentos") {
-    try { return await documentos(req, res, tok); }
-    catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Falhou." }); }
-  }
 
     if (req.method === "GET") {
       const r = await banco(`${REST}?select=${CAMPOS}&atendimento_id=eq.${aid}&limit=1`,
