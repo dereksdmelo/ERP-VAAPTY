@@ -906,11 +906,25 @@ async function carros(req, res, tok) {
   // Pega tudo que aponta para estes carros — pelo cabeçalho OU por uma
   // linha de rateio. O PIX do despachante repartido entre dois carros
   // só aparece aqui se as partes forem lidas.
-  const filtro = ids.length ? `or=(estoque_id.in.(${ids.join(",")}),fin_rateio.estoque_id.in.(${ids.join(",")}))` : null;
-  const lanc = ids.length
-    ? await supa(`${base("fin_lancamento")}?select=id,estoque_id,tipo_negociacao,data,debito,credito,descricao,` +
-        `fin_rateio(valor,estoque_id,tipo_negociacao,descricao)&${filtro}&order=data.asc&limit=5000`, { headers: cab(tok) })
-    : [];
+  // São DUAS consultas: o PostgREST não aceita coluna de recurso
+  // embutido dentro de `or=` ("failed to parse logic tree" — a aba
+  // Carros ficou assim até 28/10/2026). Uma pelo cabeçalho, outra pelos
+  // lançamentos que algum rateio liga a estes carros; o id junta as duas.
+  const SEL = `select=id,estoque_id,tipo_negociacao,data,debito,credito,descricao,fin_rateio(valor,estoque_id,tipo_negociacao,descricao)`;
+  let lanc = [];
+  if (ids.length) {
+    const lista = ids.join(",");
+    const [peloCab, rateios] = await Promise.all([
+      supa(`${base("fin_lancamento")}?${SEL}&estoque_id=in.(${lista})&order=data.asc&limit=5000`, { headers: cab(tok) }),
+      supa(`${base("fin_rateio")}?select=lancamento_id&estoque_id=in.(${lista})&limit=5000`, { headers: cab(tok) }),
+    ]);
+    const ja = new Set((peloCab || []).map((l) => l.id));
+    const faltam = [...new Set((rateios || []).map((r) => r.lancamento_id))].filter((id) => id && !ja.has(id));
+    const peloRateio = faltam.length
+      ? await supa(`${base("fin_lancamento")}?${SEL}&id=in.(${faltam.join(",")})&limit=5000`, { headers: cab(tok) })
+      : [];
+    lanc = (peloCab || []).concat(peloRateio || []).sort((a, b) => String(a.data).localeCompare(String(b.data)));
+  }
   const porEstoque = {};
   (lanc || []).forEach((l) => {
     partesDe(l).forEach((p) => {
