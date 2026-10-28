@@ -15727,8 +15727,12 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
     vieram: itens.filter((it) => it.k === "v").length,
     fluxo: itens.filter((it) => it.k === "f").length,
   });
-  const contaSemana = semana.map((d) => contaDoDia(itensDoDia(d)))
+  const soma = (ds) => ds.map((d) => contaDoDia(itensDoDia(d)))
     .reduce((a, c) => ({ agendados: a.agendados + c.agendados, vieram: a.vieram + c.vieram, fluxo: a.fluxo + c.fluxo }), { agendados: 0, vieram: 0, fluxo: 0 });
+  const contaSemana = soma(semana);
+  // A porcentagem só olha os dias que já chegaram: quem está marcado
+  // para sábado ainda não teve como vir.
+  const ateHoje = soma(semana.filter((d) => d <= hoje));
   const rotuloDia = (d) => {
     const p = proximosDias(2);
     if (d === p[0].iso) return "Hoje";
@@ -15760,7 +15764,7 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
               <span className="text-[12.5px]" style={{ color: C.mute }}>
                 <b style={{ color: C.ink }}>{contaSemana.agendados}</b> agendados ·{" "}
                 <b style={{ color: ESTADO_AGENDA.veio.borda }}>{contaSemana.vieram}</b> vieram
-                {semana[0] <= hoje && contaSemana.agendados > 0 && ` (${Math.round((100 * contaSemana.vieram) / contaSemana.agendados)}%)`}
+                {ateHoje.agendados > 0 && ` (${Math.round((100 * ateHoje.vieram) / ateHoje.agendados)}% dos ${ateHoje.agendados} até hoje)`}
                 {contaSemana.fluxo > 0 && ` · +${contaSemana.fluxo} de fluxo`}
               </span>
             </span>
