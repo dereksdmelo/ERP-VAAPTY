@@ -20268,20 +20268,25 @@ const DUT_SITUACAO = {
   recebido:    { rot: "recebido",    cor: "#6D1B9E" },
   pendente:    { rot: "falta algo",  cor: "#E1521F" },
   preenchido:  { rot: "preenchido",  cor: "#8E4FC0" },
-  reconhecido: { rot: "reconhecido", cor: "#4A9E7A" },
+  no_cartorio: { rot: "no cartório", cor: "#1B5FA8" },
+  reconhecido: { rot: "pronto para entrega", cor: "#4A9E7A" },
   entregue:    { rot: "entregue",    cor: "#1D7F58" },
   cancelado:   { rot: "cancelado",   cor: "#6E6879" },
 };
 
 // O que vem depois, por situação — e "reconhecer" pula o
 // preenchimento, porque o lojista já mandou a ATPV pronta.
+// Levar ao cartório é passo próprio desde a 0090 (28/10/2026): antes o
+// "só reconhecer" ia de recebido direto a "Voltou do cartório", e o
+// botão parecia dizer que o papel já tinha voltado.
 const proximoPasso = (p) => {
   if (p.situacao === "recebido" || p.situacao === "pendente") {
     return p.tipo === "reconhecer"
-      ? { para: "reconhecido", rot: "Voltou do cartório" }
+      ? { para: "no_cartorio", rot: "Levei ao cartório" }
       : { para: "preenchido", rot: "Preenchi o documento" };
   }
-  if (p.situacao === "preenchido") return { para: "reconhecido", rot: "Voltou do cartório" };
+  if (p.situacao === "preenchido") return { para: "no_cartorio", rot: "Levei ao cartório" };
+  if (p.situacao === "no_cartorio") return { para: "reconhecido", rot: "Voltou do cartório" };
   if (p.situacao === "reconhecido") return { para: "entregue", rot: p.entrega === "envio" ? "Enviei" : "Entreguei" };
   return null;
 };
@@ -20300,7 +20305,10 @@ function TrilhaDut({ p }) {
   const passos = [
     ["Pedido", p.criado_em, ""],
     ...(p.tipo === "reconhecer" ? [] : [["Preenchido", p.preenchido_em, nome(p.preenchido_por_perfil)]]),
-    ["Cartório", p.reconhecido_em, nome(p.reconhecido_por_perfil)],
+    // Pedido de antes da 0090 não tem a data do cartório; se já voltou,
+    // foi — aparece feito, sem data.
+    ["No cartório", p.cartorio_em || (p.reconhecido_em ? "sem data" : null), nome(p.cartorio_por_perfil)],
+    ["Voltou", p.reconhecido_em, nome(p.reconhecido_por_perfil)],
     ["Entregue", p.entregue_em, nome(p.entregue_por_perfil)],
   ];
   return (
@@ -20308,7 +20316,7 @@ function TrilhaDut({ p }) {
       {passos.map(([rot, em, quem]) => (
         <span key={rot} style={{ color: em ? C.ink : C.mute, opacity: em ? 1 : 0.6 }}>
           <span style={{ color: em ? C.verde : C.mute }}>{em ? "●" : "○"}</span> {rot}{" "}
-          <span style={{ fontVariantNumeric: "tabular-nums", color: C.mute }}>{em ? dataHoraJoinville(em) : "—"}</span>
+          <span style={{ fontVariantNumeric: "tabular-nums", color: C.mute }}>{em ? (dataHoraJoinville(em) || em) : "—"}</span>
           {quem && <span style={{ color: C.mute }}> · {String(quem).split(" ")[0]}</span>}
         </span>
       ))}
@@ -20457,10 +20465,11 @@ function CartaoDut({ p, aoMudar }) {
  * que já existiam (0057): nenhum estado novo, o quadro é leitura. O
  * cartão é o mesmo da lista, e o botão dele é o que move de coluna. */
 const COLUNAS_DUT = [
-  { id: "recebido", rot: "Recebidos", nota: "para preencher ou levar ao cartório" },
+  { id: "recebido", rot: "Recebidos", nota: "para preencher (ou levar, se é só reconhecer)" },
   { id: "pendente", rot: "Falta algo", nota: "esperando o lojista" },
-  { id: "preenchido", rot: "No cartório", nota: "preenchido, esperando o reconhecimento" },
-  { id: "reconhecido", rot: "Prontos para entregar", nota: "voltou do cartório" },
+  { id: "preenchido", rot: "Preenchidos", nota: "prontos para levar ao cartório" },
+  { id: "no_cartorio", rot: "No cartório", nota: "esperando o reconhecimento" },
+  { id: "reconhecido", rot: "Pronto para entrega", nota: "voltou do cartório" },
   { id: "entregue", rot: "Entregues", nota: "os 15 mais recentes" },
 ];
 function FilaDut() {
@@ -20508,7 +20517,7 @@ function FilaDut() {
       {vista === "quadro" && !lista && !erro && <p className="text-[14px]" style={{ color: C.mute }}>carregando…</p>}
       {vista === "quadro" && lista && (
         <div className="rolar overflow-x-auto pb-2">
-          <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${COLUNAS_DUT.length}, minmax(215px, 1fr))` }}>
+          <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${COLUNAS_DUT.length}, minmax(190px, 1fr))` }}>
             {COLUNAS_DUT.map((col) => {
               const doCol = lista.filter((x) => x.situacao === col.id);
               const info = DUT_SITUACAO[col.id] || {};
@@ -20534,8 +20543,8 @@ function FilaDut() {
 
       {vista === "lista" && <>
       <div className="mb-4 flex flex-wrap gap-1.5">
-        {[["abertos", "Em aberto"], ["recebido", "Recebidos"], ["pendente", "Falta algo"],
-          ["preenchido", "No cartório"], ["reconhecido", "Prontos para entregar"], ["entregue", "Entregues"]].map(([v, r]) => (
+        {[["abertos", "Em aberto"], ["recebido", "Recebidos"], ["pendente", "Falta algo"], ["preenchido", "Preenchidos"],
+          ["no_cartorio", "No cartório"], ["reconhecido", "Pronto para entrega"], ["entregue", "Entregues"]].map(([v, r]) => (
           <button key={v} onClick={() => setSituacao(v)}
             className="rounded-full px-3 py-1.5 text-[13px] font-semibold"
             style={situacao === v ? { background: C.roxo, color: "#fff" }
@@ -20558,7 +20567,7 @@ function FilaDut() {
 
       {!!(lista || []).length && situacao === "abertos" && (
         <p className="mb-3 text-[12.5px]" style={{ color: C.mute }}>
-          {conta("recebido")} para preencher · {conta("preenchido")} no cartório ·{" "}
+          {conta("recebido")} recebidos · {conta("preenchido")} preenchidos · {conta("no_cartorio")} no cartório ·{" "}
           {conta("reconhecido")} prontos para entregar
           {conta("pendente") ? ` · ${conta("pendente")} esperando o lojista` : ""}
         </p>

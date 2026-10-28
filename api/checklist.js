@@ -523,12 +523,12 @@ async function dutFila(req, res, tok) {
     }
     const f = [];
     const sit = String(req.query.situacao || "");
-    if (["recebido", "pendente", "preenchido", "reconhecido", "entregue", "cancelado"].indexOf(sit) >= 0) {
+    if (["recebido", "pendente", "preenchido", "no_cartorio", "reconhecido", "entregue", "cancelado"].indexOf(sit) >= 0) {
       f.push(`situacao=eq.${sit}`);
     } else if (sit === "abertos") {
       // O padrão é o que ainda dá trabalho: fila que mostra os
       // entregues junto obriga a procurar o que falta fazer.
-      f.push("situacao=in.(recebido,pendente,preenchido,reconhecido)");
+      f.push("situacao=in.(recebido,pendente,preenchido,no_cartorio,reconhecido)");
     }
     const q = String(req.query.q || "").trim().replace(/[(),*]/g, " ").trim();
     if (q) f.push(`or=(placa.ilike.*${q}*,protocolo.ilike.*${q}*,lojista_nome.ilike.*${q}*,comprador_nome.ilike.*${q}*)`);
@@ -540,7 +540,7 @@ async function dutFila(req, res, tok) {
      * PostgREST não aceitar a dica, a fila volta sem os nomes em vez de
      * não voltar. */
     const resto = `&order=criado_em.desc&limit=${lim}${f.length ? `&${f.join("&")}` : ""}`;
-    const QUEM = ",preenchido_por_perfil:perfil!preenchido_por(nome),reconhecido_por_perfil:perfil!reconhecido_por(nome),entregue_por_perfil:perfil!entregue_por(nome)";
+    const QUEM = ",preenchido_por_perfil:perfil!preenchido_por(nome),cartorio_por_perfil:perfil!cartorio_por(nome),reconhecido_por_perfil:perfil!reconhecido_por(nome),entregue_por_perfil:perfil!entregue_por(nome)";
     let r = await fetch(`${REST_DUT}?select=*,dut_anexo(id,rotulo,nome,tipo)${QUEM}${resto}`, { headers: cabecalhos(tok) });
     if (!r.ok && r.status !== 401) r = await fetch(`${REST_DUT}?select=*,dut_anexo(id,rotulo,nome,tipo)${resto}`, { headers: cabecalhos(tok) });
     if (!r.ok) return res.status(r.status === 401 ? 401 : 502).json({ erro: "Não consegui ler a fila." });
@@ -555,7 +555,8 @@ async function dutFila(req, res, tok) {
     /* O CARIMBO É DO SERVIDOR, não da tela. "Preenchido por quem" é a
      * pergunta que importa quando o cartório devolve o papel errado —
      * e deixar a tela escolher o nome esvazia a resposta (0008). */
-    const PASSOS = { preenchido: "preenchido", reconhecido: "reconhecido", entregue: "entregue" };
+    // "no_cartorio" (0090): levar ao cartório é passo com data e nome.
+    const PASSOS = { preenchido: "preenchido", no_cartorio: "cartorio", reconhecido: "reconhecido", entregue: "entregue" };
     if (PASSOS[c.situacao]) {
       mud.situacao = c.situacao;
       mud[`${PASSOS[c.situacao]}_em`] = new Date().toISOString();
@@ -567,6 +568,7 @@ async function dutFila(req, res, tok) {
     // num pedido que voltou para a fila é mentira que ninguém vê.
     if (c.situacao === "recebido" || c.situacao === "pendente") {
       mud.preenchido_em = null; mud.preenchido_por = null;
+      mud.cartorio_em = null; mud.cartorio_por = null;
       mud.reconhecido_em = null; mud.reconhecido_por = null;
       mud.entregue_em = null; mud.entregue_por = null;
     }

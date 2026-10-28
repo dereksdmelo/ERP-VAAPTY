@@ -2047,11 +2047,21 @@ O nome **não** vai para a consulta pública: quem tem o protocolo não
 precisa saber quem da equipe mexeu.
 
 **A fila abre em QUADRO desde 28/10/2026** (o Derek: *"mostrar em
-kanban, acho que fica melhor"*): Recebidos, Falta algo, No cartório,
-Prontos para entregar e os 15 Entregues mais recentes (`COLUNAS_DUT`).
-As colunas são as situações da 0057 — nenhum estado novo —, o cartão é
-o da lista, e o botão dele é o que move de coluna. A lista continua a
-um clique, e a escolha fica no aparelho.
+kanban, acho que fica melhor"*): Recebidos, Falta algo, Preenchidos, No
+cartório, Pronto para entrega e os 15 Entregues mais recentes
+(`COLUNAS_DUT`). O cartão é o da lista, e o botão dele é o que move de
+coluna. A lista continua a um clique, e a escolha fica no aparelho.
+
+**O quadro mostrou um passo que faltava (0090).** A coluna "No
+cartório" nasceu vazia e o Derek perguntou se o sistema não tinha
+registrado o que a Meiriane levou. Não tinha como: a 0057 tratava
+"preenchido" como se o papel já estivesse lá, e o "só reconhecer" ia
+de recebido direto a "Voltou do cartório" — que era o botão do cartão
+enquanto o papel nem tinha saído, e parecia dizer que já tinha voltado.
+O fluxo dele é **recebido → preenchido → no cartório → pronto para
+entrega → entregue**, e levar ao cartório virou passo com data e nome
+(`no_cartorio`, `cartorio_em`), também na consulta do lojista. Pedido
+de antes disso que já voltou mostra o passo feito "sem data".
 
 **O que ficou de fora:** as 1.278 respostas antigas não foram
 importadas. Elas estão fechadas (o papel já circulou), e trazê-las

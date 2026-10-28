@@ -286,6 +286,7 @@ function pronto(protocolo, faltaram) {
 const PASSOS = [
   ["recebido", "Recebido"],
   ["preenchido", "Documento preenchido"],
+  ["no_cartorio", "Levado ao cartório"],
   ["reconhecido", "Reconhecido em cartório"],
   ["entregue", "Entregue"],
 ];
@@ -307,8 +308,10 @@ async function consultar() {
      * lojista perguntava "quando foi para o cartório?" e ninguém tinha
      * a resposta na tela. O relógio é o de Joinville: um passo das 22h
      * cairia no dia seguinte em UTC. */
-    const quando = { recebido: x.criado_em, preenchido: x.preenchido_em, reconhecido: x.reconhecido_em, entregue: x.entregue_em };
-    const feito = { recebido: true, preenchido: !!x.preenchido_em, reconhecido: !!x.reconhecido_em, entregue: !!x.entregue_em };
+    const quando = { recebido: x.criado_em, preenchido: x.preenchido_em, no_cartorio: x.cartorio_em, reconhecido: x.reconhecido_em, entregue: x.entregue_em };
+    // Pedido de antes da 0090 não tem a data do cartório: se já voltou,
+    // é porque foi — o passo aparece feito, só sem a data.
+    const feito = { recebido: true, preenchido: !!x.preenchido_em, no_cartorio: !!(x.cartorio_em || x.reconhecido_em), reconhecido: !!x.reconhecido_em, entregue: !!x.entregue_em };
     const dataHora = (v) => {
       if (!v) return "";
       const d = new Date(v);
