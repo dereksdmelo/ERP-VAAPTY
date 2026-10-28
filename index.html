@@ -20538,8 +20538,8 @@ const rotuloDia = (dia) => {
   return `${DIA_SEM[d.getDay()]} ${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
 };
 
-async function lerAgenda(de, ate) {
-  const r = await fetchAut(`/api/atendimento?recurso=agenda&de=${de}&ate=${ate || de}`);
+async function lerAgenda(de, ate, perfilId) {
+  const r = await fetchAut(`/api/atendimento?recurso=agenda&de=${de}&ate=${ate || de}${perfilId ? `&perfil_id=${perfilId}` : ""}`);
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.erro || "Não consegui ler a agenda.");
   return d.acoes || [];
@@ -20716,7 +20716,31 @@ function LembreteDoDia({ perfil, forcar, aoFechar }) {
   );
 }
 
+/* DE QUEM É O DIA (28/10/2026). O Derek, olhando o Meu dia dele: *"de
+ * quem é esse dia? … precisava mostrar pra cada membro da equipe só o
+ * seu, e pro gestor o seu mais o da equipe, identificado por pessoa"*.
+ * Estava misturado em dois lugares: a RLS da agenda deixa o gerente ler
+ * TODAS (0046), e a tela pedia sem filtro; e o "Cliente chegou" vinha de
+ * todos os atendimentos do dia, para qualquer pessoa. Agora o dia é de
+ * UMA pessoa — o atendimento conta se ela é quem atendeu (pelo login ou
+ * pelo nome da meta ligada a ele) — e o gerente escolhe "toda a equipe",
+ * em que cada linha diz de quem é. A fila de retornos é da pré-venda:
+ * aparece para quem é pré-venda e na visão da equipe. */
 function TelaMeuDia({ perfil }) {
+  const eGerente = !!(perfil && perfil.papel === "gerente");
+  const [quem, setQuem] = useState("eu");          // eu | todos | <perfil id>
+  const [pessoas, setPessoas] = useState([]);       // acessos (só o gerente lê)
+  const [metas, setMetas] = useState([]);
+  useEffect(() => {
+    listarNegociadores().then(setMetas).catch(() => {});
+    if (eGerente) listarAcessos().then((l) => setPessoas(l.filter((x) => x.ativo))).catch(() => {});
+  }, []);
+  const alvoId = quem === "eu" ? (perfil && perfil.id) : quem === "todos" ? null : quem;
+  const nomeDe = (pid) => { const x = pessoas.filter((p) => p.id === pid)[0]; return x ? x.nome : pid === (perfil && perfil.id) ? perfil.nome : ""; };
+  const papelDe = (pid) => { const x = pessoas.filter((p) => p.id === pid)[0]; return x ? x.papel : pid === (perfil && perfil.id) ? perfil.papel : ""; };
+  // Os nomes com que esta pessoa aparece nos atendimentos: o do login e
+  // o das metas ligadas a ele (decisão 10 — importado só tem o nome).
+  const nomesDe = (pid) => [nomeDe(pid)].concat(metas.filter((n) => n.perfil_id === pid).map((n) => n.nome)).filter(Boolean).map(nomeChave);
   const [dia, setDia] = useState(diaHoje());
   const [acoes, setAcoes] = useState([]);
   const [semana, setSemana] = useState([]);
@@ -20743,7 +20767,7 @@ function TelaMeuDia({ perfil }) {
     // Resposta atrasada não pode sobrescrever dia novo — mesmo cuidado
     // da régua do mês.
     let vivo = true;
-    lerAgenda(seg, diaMais(seg, 5))
+    lerAgenda(seg, diaMais(seg, 5), alvoId)
       .then((l) => { if (vivo) { setSemana(l); setAcoes(l.filter((x) => x.dia === dia)); } })
       .catch((e) => { if (vivo) setErro(e.message); });
     // Só o dia, pelo filtro de data do servidor: trazer o mês inteiro
@@ -20759,31 +20783,37 @@ function TelaMeuDia({ perfil }) {
       .catch(() => {});
     return () => { vivo = false; };
   };
-  useEffect(carregar, [dia, seg]);
+  useEffect(carregar, [dia, seg, quem]);
 
   // A linha do tempo: a agenda e os atendimentos do dia, misturados e
   // ordenados pela hora. O atendimento não vira linha na agenda — ele
   // entra aqui, na leitura, e continua vivendo na própria tabela.
   const linha = useMemo(() => {
+    const equipe = quem === "todos";
+    // Só se mexe na própria linha: a escrita da agenda é do dono (0046).
     const doDia = acoes.map((a) => ({
       id: a.id, hora: hhmm(a.hora), fim: hhmm(a.fim), tipo: a.tipo,
-      titulo: a.titulo, feito: !!a.feito_em, minha: true,
+      titulo: a.titulo, feito: !!a.feito_em, minha: !!perfil && a.perfil_id === perfil.id,
+      quem: equipe ? (nomeDe(a.perfil_id) || "?") : "",
     }));
+    const nomes = alvoId ? nomesDe(alvoId) : [];
+    const atsDela = equipe ? ats : ats.filter((a) => a.negociador_id === alvoId || nomes.indexOf(nomeChave(a.negociador_nome)) >= 0);
+    const verRetornos = equipe || papelDe(alvoId) === "pre_venda";
     // **A linha do atendimento é um EVENTO, não o estado dele.** Ela
     // diz que o cliente chegou àquela hora — e não o status de agora,
     // que mudaria o passado toda vez que o negócio andasse: às 13:19
     // apareceria "Consignado" porque foi isso que ele virou às 16h. O
     // que mudou depois entra como linha própria, na hora em que mudou.
-    const dosAts = ats.map((a) => ({
+    const dosAts = atsDela.map((a) => ({
       id: `at-${a.id}`, hora: hhmm(String(a.criado_em || "").slice(11, 16)), fim: "",
       tipo: "atendimento",
       titulo: `Cliente chegou — ${a.cliente_nome || "sem nome"}${a.carro_descricao ? ` · ${a.carro_descricao}` : ""}`,
-      feito: true, minha: false,
+      feito: true, minha: false, quem: equipe ? (a.negociador_nome || "sem negociador") : "",
     }));
     // Os retornos entram sem hora: são "hoje", não "às 14h". Ficam no
     // fim da lista, junto do resto do plano sem horário — que é onde a
     // pessoa olha quando abre um buraco na agenda.
-    const dosRetornos = []
+    const dosRetornos = !verRetornos ? [] : []
       .concat((retornos.leads || []).map((l) => ({
         id: `lead-${l.id}`, hora: "", fim: "", tipo: "prospeccao",
         titulo: `Ligar de volta — ${l.nome}${l.carro ? ` · ${l.carro}` : ""}${l.telefone ? ` · ${telBR(l.telefone)}` : ""}`,
@@ -20803,7 +20833,7 @@ function TelaMeuDia({ perfil }) {
       if (!y.hora) return -1;
       return x.hora.localeCompare(y.hora);
     });
-  }, [acoes, ats, retornos]);
+  }, [acoes, ats, retornos, quem, pessoas, metas]);
 
   const gravar = async (dados) => {
     setIndo(true); setErro("");
@@ -20841,8 +20871,15 @@ function TelaMeuDia({ perfil }) {
 
   return (
     <div>
-      <Cabecalho titulo="Meu dia"
-        sub={`${rotuloDia(dia)} · ${feitas} registradas${planejadas ? ` · ${planejadas} no plano` : ""}`} />
+      <Cabecalho titulo={quem === "eu" ? "Meu dia" : quem === "todos" ? "O dia da equipe" : `O dia de ${nomeDe(quem) || "…"}`}
+        sub={`${rotuloDia(dia)} · ${feitas} registradas${planejadas ? ` · ${planejadas} no plano` : ""}`}
+        acao={eGerente ? (
+          <select value={quem} onChange={(e) => setQuem(e.target.value)} className="rounded-md border px-2 py-1.5 text-[13px] outline-none" style={inputSty}>
+            <option value="eu">Meu dia</option>
+            <option value="todos">Toda a equipe</option>
+            {pessoas.filter((p) => p.id !== perfil.id).map((p) => <option key={p.id} value={p.id}>{p.nome}</option>)}
+          </select>
+        ) : null} />
 
       {!!verLembrete && (
         <LembreteDoDia perfil={perfil} forcar={verLembrete}
@@ -21009,6 +21046,10 @@ function ItemAgenda({ x, marcar, remover }) {
                  color: x.tipo === "atendimento" ? C.verde : corTipo(x.tipo) }}>
         {x.tipo === "atendimento" ? "Atendimento" : rotTipo(x.tipo)}
       </span>
+      {x.quem && (
+        <span className="max-w-[140px] shrink-0 truncate rounded px-1.5 py-0.5 text-[10.5px] font-semibold" title={x.quem}
+          style={{ background: C.roxoFraco, color: C.roxo }}>{x.quem}</span>
+      )}
       <span className="flex-1 text-[12px] leading-snug" style={{ color: C.ink }}>
         {x.titulo}{x.fim ? ` (até ${x.fim})` : ""}
       </span>
@@ -24124,6 +24165,11 @@ class RedeDeErro extends React.Component {
         String((info && info.componentStack) || "").split("\n").slice(0, 8).join("\n")].join("\n");
       sessionStorage.setItem("vaapty:ultimo-erro", txt);
       console.error("[RedeDeErro]", erro, info && info.componentStack);
+      // E vai para o banco (0083), para a causa ser achada sem depender
+      // de alguém copiar e mandar. Sem sessão, não vai — e tudo bem.
+      fetchAut("/api/perfil?recurso=erro", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ onde: this.props.onde || "", mensagem: String(erro && erro.message || erro),
+          pilha: String((erro && erro.stack) || "").slice(0, 2000) + "\n---\n" + String((info && info.componentStack) || "") }) }).catch(() => {});
     } catch (e) {}
   }
   componentDidUpdate(antes) { if (antes.chave !== this.props.chave && this.state.erro) this.setState({ erro: null }); }

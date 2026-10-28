@@ -783,6 +783,17 @@ A faixa do bônus por período pode pagar **% da rentabilidade do
 período** em vez de R$ (`pct`): o semanal do negociador é 1% de 5 a 10
 mil e valor fixo dali em diante.
 
+**Erro de tela não apaga mais o sistema (28/10/2026).** O Derek:
+*"depois de certo uso vou clicando e ele simplesmente apaga"* — tela
+branca, porque sem rede um erro ao desenhar QUALQUER componente faz o
+React desmontar a aplicação inteira, calado. `RedeDeErro` envolve cada
+destino (trocar de tela é tentar de novo), o atendimento aberto, o
+lembrete e a raiz: o erro aparece onde aconteceu, com "tentar de novo",
+"recarregar" e "copiar o erro", e o menu continua de pé. **E ele vai
+para o banco** (`erro_tela`, 0083, por `?recurso=erro`): quem viu grava
+como si mesmo, o gerente lê — achar a causa não depende de alguém
+copiar e mandar. **Quem for caçar tela branca lê essa tabela primeiro.**
+
 **PATCH que volta vazio é RLS, não erro.** A política deixa qualquer um
 da equipe *ler* todo atendimento, mas só o dono (ou o gerente)
 *escrever*. Quando alguém tenta editar o atendimento de outro, o
@@ -4828,6 +4839,17 @@ atalho de um toque.
 existe para permitir. **Escrever é só do dono, inclusive para o
 gerente** — agenda preenchida por outra pessoa deixa de ser o registro
 de quem viveu o dia.
+
+**O dia é de UMA pessoa (28/10/2026).** O Derek, no dele: *"de quem é
+esse dia?"*. Estava misturado duas vezes: a RLS da 0046 deixa o gerente
+ler TODAS as agendas e a tela pedia sem filtro; e o "Cliente chegou"
+vinha de todos os atendimentos do dia, para qualquer pessoa. Agora a
+agenda é pedida com o `perfil_id` de quem se olha, o atendimento conta
+se a pessoa é quem atendeu (pelo login ou pelo nome da meta ligada a
+ele — importado só tem o nome, decisão 10), e a fila de retornos é da
+pré-venda. **O gerente escolhe "Meu dia", "Toda a equipe" ou uma
+pessoa**; na equipe, cada linha leva o nome de quem é. Marcar e apagar
+só aparecem na linha da própria pessoa.
 
 **A semana fica à vista, de segunda a sábado**, com feitas/total por
 dia. É onde ele planeja, e onde o buraco aparece antes de acontecer.

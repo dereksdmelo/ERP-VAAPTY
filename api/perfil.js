@@ -843,6 +843,21 @@ module.exports = async function handler(req, res) {
     catch (e) { return res.status(500).json({ erro: "Falha ao gerar a senha." }); }
   }
 
+  // O erro de tela que a `RedeDeErro` pegou (0083). Grava como quem viu;
+  // falhar aqui não importa a ninguém — a tela já está mostrando o erro.
+  if (String(req.query.recurso || "") === "erro" && req.method === "POST") {
+    const c = (await lerCorpo(req)) || {};
+    const corta = (v, n) => String(v == null ? "" : v).slice(0, n);
+    try {
+      await fetch(`${URL_BASE}/rest/v1/erro_tela`, {
+        method: "POST", headers: { apikey: ANON, Authorization: tok, "Content-Type": "application/json" },
+        body: JSON.stringify({ onde: corta(c.onde, 200), mensagem: corta(c.mensagem, 1000), pilha: corta(c.pilha, 4000),
+                               navegador: corta(req.headers["user-agent"], 300) }),
+      });
+    } catch (e) {}
+    return res.status(204).end();
+  }
+
   if (String(req.query.recurso || "") === "pessoa") {
     try { return await novaPessoa(req, res, tok); }
     catch (e) { return res.status(502).json({ erro: "Não consegui criar o login." }); }
