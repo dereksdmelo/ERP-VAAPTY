@@ -24107,6 +24107,47 @@ const ABA_PV = {
   pv_canais: "canais", pv_perdidos: "perdidos", pv_excluidos: "excluidos",
 };
 
+/* A REDE DE PROTEÇÃO (28/10/2026). O Derek: *"de vez em quando acontece
+ * isso, depois de certo uso vou clicando e ele simplesmente apaga"* —
+ * tela branca. É o React fazendo o que faz sem rede: um erro ao desenhar
+ * QUALQUER componente desmonta a aplicação inteira, e sem dizer nada.
+ * Agora o erro fica na tela onde aconteceu, com o que dizer a quem
+ * conserta, e o menu continua de pé. `chave` muda com a tela: trocar de
+ * destino é tentar de novo. O último erro fica guardado na aba
+ * (`vaapty:ultimo-erro`) para ser copiado mesmo depois de recarregar. */
+class RedeDeErro extends React.Component {
+  constructor(p) { super(p); this.state = { erro: null, copiado: false }; }
+  static getDerivedStateFromError(erro) { return { erro }; }
+  componentDidCatch(erro, info) {
+    try {
+      const txt = [new Date().toLocaleString("pt-BR"), this.props.onde || "", String(erro && erro.message || erro),
+        String((info && info.componentStack) || "").split("\n").slice(0, 8).join("\n")].join("\n");
+      sessionStorage.setItem("vaapty:ultimo-erro", txt);
+      console.error("[RedeDeErro]", erro, info && info.componentStack);
+    } catch (e) {}
+  }
+  componentDidUpdate(antes) { if (antes.chave !== this.props.chave && this.state.erro) this.setState({ erro: null }); }
+  render() {
+    if (!this.state.erro) return this.props.children;
+    let txt = ""; try { txt = sessionStorage.getItem("vaapty:ultimo-erro") || String(this.state.erro); } catch (e) { txt = String(this.state.erro); }
+    return (
+      <div className="m-4 rounded-xl p-4" style={{ background: "#FDECE4", border: `1px solid ${C.laranja}`, color: C.ink, fontFamily: F.body }}>
+        <div className="text-[15px] font-bold" style={{ color: C.laranja }}>Esta tela deu erro e parou.</div>
+        <p className="mt-1 text-[13px]">O que já estava gravado continua gravado. Tente de novo; se repetir, copie o erro abaixo e mande para quem cuida do sistema.</p>
+        <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-md p-2 text-[11px]" style={{ background: "#fff", fontFamily: F.mono }}>{txt}</pre>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button onClick={() => this.setState({ erro: null })} className="rounded-md px-3 py-1.5 text-[13px] font-semibold text-white" style={{ background: C.roxo }}>Tentar de novo</button>
+          <button onClick={() => location.reload()} className="rounded-md border px-3 py-1.5 text-[13px] font-semibold" style={{ borderColor: C.line, color: C.roxo, background: "#fff" }}>Recarregar a página</button>
+          <button onClick={() => { try { navigator.clipboard.writeText(txt); this.setState({ copiado: true }); } catch (e) {} }}
+            className="rounded-md border px-3 py-1.5 text-[13px] font-semibold" style={{ borderColor: C.line, color: C.mute, background: "#fff" }}>
+            {this.state.copiado ? "✓ copiado" : "Copiar o erro"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+}
+
 function App() {
   const [estado, setEstado] = useState("carregando");   // carregando | fora | esperando | dentro | erro
   const [perfil, setPerfil] = useState(null);
@@ -24231,9 +24272,13 @@ function App() {
   );
 
   if (aberto) {
-    return <VaaptyAponte perfil={perfil} atendimento={aberto}
-             aoVoltar={() => setAberto(null)}
-             aoRecarregar={async () => { try { setAberto(await lerAtendimento(aberto.id)); } catch (e) {} }} />;
+    return (
+      <RedeDeErro onde={`atendimento ${aberto.id}`} chave={aberto.id}>
+        <VaaptyAponte perfil={perfil} atendimento={aberto}
+          aoVoltar={() => setAberto(null)}
+          aoRecarregar={async () => { try { setAberto(await lerAtendimento(aberto.id)); } catch (e) {} }} />
+      </RedeDeErro>
+    );
   }
   const abrir = async (id) => {
     try { setAberto(await lerAtendimento(id)); } catch (e) { alert(e.message); }
@@ -24251,7 +24296,8 @@ function App() {
     <Shell perfil={perfil} tela={tela} setTela={setTela} cheia={tela === "conversas" ? true : tela === "rentabilidade" ? "larga" : false}>
       {/* Fica dentro da casca, sobre qualquer destino: a pergunta
           aparece onde a pessoa estiver, e não só no "Meu dia". */}
-      {pedeLembrete && <LembreteDoDia perfil={perfil} />}
+      {pedeLembrete && <RedeDeErro onde="lembrete"><LembreteDoDia perfil={perfil} /></RedeDeErro>}
+      <RedeDeErro onde={`tela ${tela}`} chave={tela}>
       {tela === "meudia" && <TelaMeuDia perfil={perfil} />}
       {/* As seis seções da pré-venda são destinos do menu; a tela é a
           mesma e recebe qual mostrar. */}
@@ -24277,11 +24323,12 @@ function App() {
       {ABA_FIN[tela] && <TelaFinanceiro perfil={perfil} comp={compOuAtual} mes={mes} aba={ABA_FIN[tela]}
         aoMudarMes={setComp} aoIrPara={(aba) => setTela(DESTINO_FIN[aba])} />}
       {tela === "lojistas" && podeGestao && <TelaVendaLojistas perfil={perfil} />}
+      </RedeDeErro>
     </Shell>
   );
 }
 
-ReactDOM.createRoot(document.getElementById('raiz')).render(<App />);
+ReactDOM.createRoot(document.getElementById('raiz')).render(<RedeDeErro onde="sistema"><App /></RedeDeErro>);
 </script>
 </body>
 </html>
