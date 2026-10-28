@@ -2316,6 +2316,14 @@ o desenha no lugar onde estava — vermelho "não veio" enquanto ninguém
 remarcou (tocar abre o agendador), tracejado "remarcou · para 25/10 às
 10h" depois. Faltas de antes dessa data não têm o horário guardado.
 
+**Cada dia diz quantos estavam agendados e quantos vieram** (28/10/2026,
+o Derek), e a semana soma os dois ao lado do título, com a
+porcentagem. Agendado é todo horário marcado para o dia, inclusive quem
+faltou ou faltou e remarcou — é contra o horário que a pré-venda é
+medida (decisão 49). O fluxo aparece à parte ("+2 fluxo"): ele não foi
+agendado, e somá-lo poria na conta da pré-venda visita que ela não
+trouxe. Dia que não chegou mostra só os agendados.
+
 **Os estados do cartão na agenda** (`ESTADO_AGENDA`), cada um com cor
 E palavra — cor sozinha não se lê ao sol, palavra sozinha não se acha
 numa grade de 60: agendado (branco), confirmou (verde ✓), passou a

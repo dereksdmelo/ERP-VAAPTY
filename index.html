@@ -15587,6 +15587,18 @@ const COR_FLUXO = { fundo: "#E5F0FA", borda: "#2F7CC4", texto: "#1F5C96" };
  * e palavra sozinha não se acha de relance numa grade de 60 cartões.
  * O amarelo é a pergunta em aberto (passou a hora e ninguém disse se
  * veio) — é diferente do vermelho, que é a resposta "não veio". */
+// O topo de cada dia da agenda: quantos estavam marcados e quantos
+// vieram. Dia que ainda não chegou só tem o primeiro número.
+function ContaDoDia({ c, futuro }) {
+  if (!c.agendados && !c.fluxo) return null;
+  return (
+    <div className="mt-0.5 text-[11px] leading-tight" style={{ color: C.mute }}>
+      <b style={{ color: C.ink }}>{c.agendados}</b> agend.
+      {!futuro && <> · <b style={{ color: ESTADO_AGENDA.veio.borda }}>{c.vieram}</b> {c.vieram === 1 ? "veio" : "vieram"}</>}
+      {c.fluxo > 0 && <> · +{c.fluxo} fluxo</>}
+    </div>
+  );
+}
 const ESTADO_AGENDA = {
   agendado:   { rot: "",                fundo: C.paper,   borda: C.line,    hora: C.ink },
   confirmado: { rot: "confirmou",       fundo: C.paper,   borda: C.verde,   hora: C.verde },
@@ -15691,6 +15703,32 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
   // mostrando tudo o que está em aberto.
   const dias = Object.keys(grupos).sort();
   const foraDaSemana = dias.filter((d) => semana.indexOf(d) < 0);
+  /* QUANTOS AGENDADOS E QUANTOS VIERAM, POR DIA (28/10/2026, o Derek).
+   * Agendado é todo horário marcado para o dia — inclusive quem faltou
+   * e quem faltou e já remarcou, porque o horário existiu e é contra
+   * ele que a pré-venda é medida (decisão 49). Veio é quem chegou do
+   * que estava marcado. O fluxo conta à parte: ele não foi agendado, e
+   * somá-lo inflaria o comparecimento da pré-venda com visita que ela
+   * não trouxe. */
+  const itensDoDia = (d) => {
+    const doDia = (grupos[d] || []).slice().sort((x, y) => String(x.agendado_para).localeCompare(String(y.agendado_para)));
+    return [
+      ...doDia.map((l) => ({ k: "l", h: horaBR(l.agendado_para) || "", l })),
+      ...semanaFeita.vieram.filter((l) => String(l.agendado_para || "").slice(0, 10) === d)
+        .map((l) => ({ k: "v", h: horaBR(l.agendado_para), l })),
+      ...semanaFeita.faltaram.flatMap((l) => (l.remarcacoes || [])
+        .filter((r) => r && r.nao_veio && String(r.de || "").slice(0, 10) === d)
+        .map((r) => ({ k: "n", h: horaBR(r.de), l, r }))),
+      ...fluxos.filter((a) => diaSP(a.chegada_em) === d).map((a) => ({ k: "f", h: horaSP(a.chegada_em), a })),
+    ].sort((x, y) => x.h.localeCompare(y.h));
+  };
+  const contaDoDia = (itens) => ({
+    agendados: itens.filter((it) => it.k !== "f").length,
+    vieram: itens.filter((it) => it.k === "v").length,
+    fluxo: itens.filter((it) => it.k === "f").length,
+  });
+  const contaSemana = semana.map((d) => contaDoDia(itensDoDia(d)))
+    .reduce((a, c) => ({ agendados: a.agendados + c.agendados, vieram: a.vieram + c.vieram, fluxo: a.fluxo + c.fluxo }), { agendados: 0, vieram: 0, fluxo: 0 });
   const rotuloDia = (d) => {
     const p = proximosDias(2);
     if (d === p[0].iso) return "Hoje";
@@ -15714,9 +15752,17 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
       {lista && (
         <div>
           <div className="mb-2 flex items-center justify-between">
-            <span className="text-[13px] font-bold uppercase tracking-[0.06em]" style={{ color: C.ink }}>
-              {desloc === 0 ? "Esta semana" : desloc === 1 ? "Semana que vem"
-                : desloc === -1 ? "Semana passada" : `${diaBR(semana[0])} a ${diaBR(semana[5])}`}
+            <span className="flex flex-wrap items-baseline gap-x-3">
+              <span className="text-[13px] font-bold uppercase tracking-[0.06em]" style={{ color: C.ink }}>
+                {desloc === 0 ? "Esta semana" : desloc === 1 ? "Semana que vem"
+                  : desloc === -1 ? "Semana passada" : `${diaBR(semana[0])} a ${diaBR(semana[5])}`}
+              </span>
+              <span className="text-[12.5px]" style={{ color: C.mute }}>
+                <b style={{ color: C.ink }}>{contaSemana.agendados}</b> agendados ·{" "}
+                <b style={{ color: ESTADO_AGENDA.veio.borda }}>{contaSemana.vieram}</b> vieram
+                {semana[0] <= hoje && contaSemana.agendados > 0 && ` (${Math.round((100 * contaSemana.vieram) / contaSemana.agendados)}%)`}
+                {contaSemana.fluxo > 0 && ` · +${contaSemana.fluxo} de fluxo`}
+              </span>
             </span>
             <div className="flex items-center gap-1.5">
               <button onClick={() => setDesloc(desloc - 1)} className="rounded-lg border px-2.5 py-1 text-[13px]"
@@ -15743,16 +15789,8 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
           <div className="rolar overflow-x-auto pb-1">
             <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(6, minmax(130px, 1fr))" }}>
               {semana.map((d) => {
-                const doDia = (grupos[d] || []).slice().sort((x, y) => String(x.agendado_para).localeCompare(String(y.agendado_para)));
-                const itens = [
-                  ...doDia.map((l) => ({ k: "l", h: horaBR(l.agendado_para) || "", l })),
-                  ...semanaFeita.vieram.filter((l) => String(l.agendado_para || "").slice(0, 10) === d)
-                    .map((l) => ({ k: "v", h: horaBR(l.agendado_para), l })),
-                  ...semanaFeita.faltaram.flatMap((l) => (l.remarcacoes || [])
-                    .filter((r) => r && r.nao_veio && String(r.de || "").slice(0, 10) === d)
-                    .map((r) => ({ k: "n", h: horaBR(r.de), l, r }))),
-                  ...fluxos.filter((a) => diaSP(a.chegada_em) === d).map((a) => ({ k: "f", h: horaSP(a.chegada_em), a })),
-                ].sort((x, y) => x.h.localeCompare(y.h));
+                const itens = itensDoDia(d);
+                const c = contaDoDia(itens);
                 const eHoje = d === hoje;
                 return (
                   <div key={d} className="rounded-xl p-2"
@@ -15760,6 +15798,7 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
                     <div className="mb-1.5 px-0.5">
                       <div className="text-[10px] uppercase tracking-[0.07em]" style={{ color: C.mute }}>{diaDaSemana(d).slice(0, 3)}</div>
                       <div className="text-[13px] font-bold" style={{ color: eHoje ? C.roxo : C.ink }}>{diaBR(d).slice(0, 5)}</div>
+                      <ContaDoDia c={c} futuro={d > hoje} />
                     </div>
                     <div className="space-y-1.5">
                       {/* A GRADE É A AGENDA, e por isso ela age — o Derek
