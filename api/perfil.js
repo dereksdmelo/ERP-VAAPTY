@@ -524,8 +524,10 @@ async function acessos(req, res, tok) {
 
 const CAMPOS_DESEMPENHO = [
   "faltas", "atrasos", "perdeu_atendimento", "prospectou", "avaliacao_google",
-  "ficou_mais", "gravou_video", "avaliacao_errada", "postura", "indice_at",
+  "ficou_mais", "gravou_video", "avaliacao_errada", "postura",
 ];
+// `indice_at` saiu da lista: deixou de ser digitado e passou a ser a
+// conta da planilha (regras/indice-at.js). A coluna da 0013 fica, sem uso.
 
 /**
  * A faixa CONFIABILIDADE do dashboard (0013).
@@ -561,7 +563,11 @@ async function desempenho(req, res, tok) {
     const r = await fetch(`${base}?select=*&competencia=eq.${competencia}`, { headers: cab });
     if (!r.ok) return res.status(r.status === 401 ? 401 : 502).json({ erro: "Não consegui ler o desempenho." });
     const d = await r.json().catch(() => []);
-    return res.status(200).json({ competencia, desempenho: Array.isArray(d) ? d : [] });
+    // O SCORE vai calculado, pela conta da planilha (regras/indice-at.js):
+    // a tela não repete a escada de fatores.
+    const { score } = require("../regras/indice-at.js");
+    const linhas = (Array.isArray(d) ? d : []).map((x) => ({ ...x, score: score(x) }));
+    return res.status(200).json({ competencia, desempenho: linhas });
   }
 
   if (req.method === "PUT") {

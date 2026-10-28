@@ -11143,7 +11143,10 @@ function CartaoNegociador({ n, equipe, loja, metaLoja, desempenho, podeEditar, a
         {item("FLUXO", n.fluxo)}
         {item("VENDAS", n.vendas)}
         {item("CONVERSÃO", n.conversao != null ? pc(n.conversao) : "—")}
-        {item("INDICE AT", dsp ? Number(dsp.indice_at) || 0 : "—")}
+        {/* A conta da planilha (regras/indice-at.js): conversão em FRAÇÃO ×
+            SCORE × vendas × 10. O SCORE vem pronto do servidor; sem linha
+            de confiabilidade ele é 1, como na planilha zerada. */}
+        {item("INDICE AT", loja ? "—" : (n.fluxo ? ((n.vendas / n.fluxo) * (dsp && dsp.score != null ? Number(dsp.score) : 1) * n.vendas * 10).toFixed(2).replace(".", ",") : "0,00"))}
       </div>
       {faixa("PERCENTUAL", "#3B3547", PL.cinza)}
       <div className="px-2 py-1 text-center text-[17px]"
@@ -11173,13 +11176,6 @@ function CartaoNegociador({ n, equipe, loja, metaLoja, desempenho, podeEditar, a
                 style={{ borderColor: C.line, fontFamily: F.mono }} />
             </div>
           ))}
-          <div className="flex items-center justify-between gap-1 py-[1px]">
-            <span className="text-[9px]">INDICE AT</span>
-            <input value={edit.indice_at} inputMode="decimal"
-              onChange={(e) => setEdit({ ...edit, indice_at: e.target.value })}
-              className="w-14 rounded border px-1 text-right text-[10px]"
-              style={{ borderColor: C.line, fontFamily: F.mono }} />
-          </div>
           <div className="mt-1 flex gap-1">
             <button onClick={() => { aoSalvar(cad.id, edit); setEdit(null); }}
               className="flex-1 rounded py-1 text-[10px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>Salvar</button>
@@ -11202,16 +11198,13 @@ function CartaoNegociador({ n, equipe, loja, metaLoja, desempenho, podeEditar, a
             })}
           </div>
           {faixa("SCORE", "#3B3547", PL.cinza)}
-          <div className="px-2 py-1 text-center text-[16px]" style={{ fontFamily: F.mono, fontWeight: 700, color: C.mute }}>
-            —
+          <div className="px-2 py-1 text-center text-[16px]" style={{ fontFamily: F.mono, fontWeight: 700 }}>
+            {pc((dsp && dsp.score != null ? Number(dsp.score) : 1) * 100)}
           </div>
-          <p className="px-2 pb-1 text-[8px] leading-tight" style={{ color: C.mute }}>
-            O score sai quando a fórmula da planilha vier — não dá para adivinhar peso de avaliação de gente.
-          </p>
           {podeEditar && (
             <button
               onClick={() => setEdit(CONFIABILIDADE.reduce((o, [k]) => ({ ...o, [k]: String(dsp ? dsp[k] : (k === "postura" ? 100 : 0)) }),
-                { indice_at: String(dsp ? dsp.indice_at : 0) }))}
+                {}))}
               className="w-full py-1 text-[10px] font-semibold" style={{ background: "#F6F4F8", color: C.roxo }}>
               lançar
             </button>
@@ -21206,6 +21199,218 @@ const AREAS = [
   ["adm",        "Administrativo", "adm"],
 ];
 
+/**
+ * ===== a fila da vez (0085, decisão 67) =====
+ *
+ * Quem atende o próximo cliente que chegar. A ordem é o ÍNDICE AT do mês
+ * (regras/indice-at.js, a conta da planilha) entre quem marcou "Estou na
+ * loja" hoje; a vez é o primeiro que não está atendendo — ou, estando
+ * todos, o que tem menos clientes na mesa. Quem calcula é o servidor
+ * (`?recurso=vez`): a tela só mostra, para não haver duas ordens.
+ */
+async function lerVez() {
+  const r = await fetchAut("/api/atendimento?recurso=vez");
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui ler a fila da vez.");
+  return d;
+}
+async function mexerNaVez(acao, corpo) {
+  const r = await fetchAut(`/api/atendimento?recurso=vez&acao=${acao}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo || {}),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui gravar.");
+  return d;
+}
+// A hora de Joinville de um timestamptz. `horaBR` corta a string, e o
+// que vem do banco aqui é UTC: cortar daria três horas a mais.
+const horaSP = (iso) => (iso ? new Date(iso).toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" }) : "");
+const indiceFmt = (n) => (Number(n) || 0).toFixed(2).replace(".", ",");
+
+/**
+ * O aviso de manhã: negociador que não marcou presença não entra na
+ * fila, e ninguém lembra de marcar. Aparece sobre qualquer tela, como o
+ * lembrete do "Meu dia", e some quando ele marca. Fechar vale só até
+ * recarregar — esquecer de vez é sair da fila sem saber.
+ */
+function AvisoPresenca({ perfil, aoIrParaFila }) {
+  const [estado, setEstado] = useState(null);
+  const [fechado, setFechado] = useState(false);
+  const [indo, setIndo] = useState(false);
+  const [erro, setErro] = useState("");
+  useEffect(() => {
+    let vivo = true;
+    lerVez().then((d) => {
+      if (!vivo) return;
+      const eu = (d.ordem || []).concat(d.ausentes || []).find((p) => p.perfil_id === d.eu);
+      setEstado(eu || null);
+    }).catch(() => {});
+    return () => { vivo = false; };
+  }, []);
+  // Só quem está na lista de quem atende (login de negociador) é cobrado.
+  if (!estado || estado.presente || fechado) return null;
+  const marcar = async () => {
+    setIndo(true); setErro("");
+    try { await mexerNaVez("presente"); setEstado({ ...estado, presente: true }); }
+    catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border px-4 py-3"
+      style={{ background: C.roxoFraco, borderColor: "#DCC8EA" }}>
+      <div className="min-w-0 flex-1 text-[14px]">
+        <b>{estado.saiu_em ? "Você marcou que saiu." : "Você ainda não marcou que está na loja."}</b>{" "}
+        <span style={{ color: C.mute }}>Sem isso, você não entra na fila da vez.</span>
+        {erro && <div className="text-[12.5px]" style={{ color: C.laranja }}>{erro}</div>}
+      </div>
+      <BotaoPrimario onClick={marcar} disabled={indo}>{indo ? "Marcando…" : "Estou na loja"}</BotaoPrimario>
+      <button onClick={aoIrParaFila} className="text-[13px] underline" style={{ color: C.roxo }}>ver a fila</button>
+      <button onClick={() => setFechado(true)} className="text-[13px]" style={{ color: C.mute }}>agora não</button>
+    </div>
+  );
+}
+
+function TelaFilaDaVez({ perfil }) {
+  const [d, setD] = useState(null);
+  const [erro, setErro] = useState("");
+  const [indo, setIndo] = useState("");
+  const gerente = !!(perfil && perfil.papel === "gerente");
+
+  const carregar = () => lerVez().then((x) => { setD(x); setErro(""); }).catch((e) => setErro(e.message));
+  // A fila muda quando alguém chega, sai ou termina: relê a cada 20 s
+  // com a aba à vista, que é o ritmo da lista do painel (decisão 45).
+  useEffect(() => {
+    carregar();
+    const t = setInterval(() => { if (!document.hidden) carregar(); }, 20000);
+    return () => clearInterval(t);
+  }, []);
+
+  const fazer = async (chave, acao, corpo) => {
+    setIndo(chave); setErro("");
+    try { await mexerNaVez(acao, corpo); await carregar(); }
+    catch (e) { setErro(e.message); }
+    setIndo("");
+  };
+
+  if (!d) return (
+    <div>
+      <Cabecalho titulo="Fila da vez" sub="Quem atende o próximo cliente." />
+      <p className="text-[14px]" style={{ color: erro ? C.laranja : C.mute }}>{erro || "Carregando…"}</p>
+    </div>
+  );
+
+  const todos = (d.ordem || []).concat(d.ausentes || []);
+  const eu = todos.find((p) => p.perfil_id === d.eu);
+  const daVez = (d.ordem || []).find((p) => p.perfil_id === d.vez);
+  const todosAtendendo = (d.ordem || []).length > 0 && (d.ordem || []).every((p) => p.atendendo.length > 0);
+
+  return (
+    <div>
+      <Cabecalho titulo="Fila da vez"
+        sub={`Pelo índice AT de ${rotuloMes(d.competencia)}, entre quem está na loja hoje.`}
+        acao={eu && (eu.presente
+          ? <button onClick={() => fazer("eu", "saiu")} disabled={!!indo}
+              className="rounded-lg border px-3 py-2 text-[13.5px] font-semibold" style={{ borderColor: C.line, color: C.ink }}>
+              {indo === "eu" ? "Gravando…" : "Saí da loja"}
+            </button>
+          : <BotaoPrimario onClick={() => fazer("eu", "presente")} disabled={!!indo}>
+              {indo === "eu" ? "Marcando…" : "Estou na loja"}
+            </BotaoPrimario>)} />
+
+      {erro && <p className="mb-3 text-[13.5px]" style={{ color: C.laranja }}>{erro}</p>}
+
+      {/* A resposta da tela inteira, em cima: de quem é o próximo. */}
+      <div className="mb-4 rounded-xl px-5 py-4" style={{ background: daVez ? C.roxo : C.paper, color: daVez ? "#fff" : C.ink, border: daVez ? "none" : `1px solid ${C.line}` }}>
+        {daVez ? (
+          <>
+            <div className="text-[12px] uppercase tracking-wide" style={{ opacity: 0.8 }}>o próximo cliente é de</div>
+            <div className="text-[26px] leading-tight" style={{ fontFamily: F.disp, fontWeight: 800 }}>{daVez.nome}</div>
+            {todosAtendendo && (
+              <div className="mt-1 text-[13px]" style={{ opacity: 0.9 }}>
+                Estão todos atendendo — {daVez.nome} pega {daVez.atendendo.length === 1 ? "o segundo cliente" : `o ${daVez.atendendo.length + 1}º cliente`}.
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="text-[15px]">Ninguém marcou que está na loja hoje.</div>
+        )}
+      </div>
+
+      <div className="overflow-hidden rounded-xl border" style={{ borderColor: C.line, background: C.paper }}>
+        <div className="grid grid-cols-[28px_1fr_70px_70px_70px_80px] gap-2 border-b px-3 py-2 text-[11px] uppercase tracking-wide"
+          style={{ borderColor: C.line, color: C.mute }}>
+          <span>#</span><span>na loja</span>
+          <span className="text-right">fluxo</span><span className="text-right">vendas</span>
+          <span className="text-right">score</span><span className="text-right">índice AT</span>
+        </div>
+        {(d.ordem || []).map((p, i) => (
+          <div key={p.perfil_id} className="border-b px-3 py-2.5 last:border-b-0" style={{ borderColor: C.line, background: p.perfil_id === d.vez ? C.roxoFraco : "transparent" }}>
+            <div className="grid grid-cols-[28px_1fr_70px_70px_70px_80px] items-baseline gap-2 text-[14px]">
+              <span style={{ fontFamily: F.mono, color: C.mute }}>{i + 1}</span>
+              <span className="min-w-0">
+                <b>{p.nome}</b>
+                <span className="ml-2 text-[12px]" style={{ color: C.mute }}>desde {horaSP(p.chegou_em)}</span>
+                {p.perfil_id === d.vez && <span className="ml-2 rounded px-1.5 py-0.5 text-[11px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>a vez</span>}
+              </span>
+              <span className="text-right" style={{ fontFamily: F.mono }}>{p.fluxo}</span>
+              <span className="text-right" style={{ fontFamily: F.mono }}>{p.vendas}</span>
+              <span className="text-right" style={{ fontFamily: F.mono }}>{indiceFmt(p.score * 100)}%</span>
+              <span className="text-right" style={{ fontFamily: F.mono, fontWeight: 700 }}>{indiceFmt(p.indice_at)}</span>
+            </div>
+            <div className="ml-[36px] mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px]" style={{ color: C.mute }}>
+              {p.atendendo.length === 0 ? <span style={{ color: C.verde }}>livre</span> : p.atendendo.map((a) => (
+                <span key={a.id} className="inline-flex items-center gap-1.5">
+                  <span style={{ color: C.laranja }}>atendendo {a.cliente || "cliente"}{a.carro ? ` · ${a.carro}` : ""} desde {horaSP(a.desde)}</span>
+                  {(p.perfil_id === d.eu || gerente) && (
+                    <button onClick={() => fazer(a.id, "terminei", { atendimento_id: a.id })} disabled={!!indo}
+                      className="rounded border px-1.5 text-[11.5px] font-semibold" style={{ borderColor: C.line, color: C.roxo }}>
+                      {indo === a.id ? "…" : "terminei"}
+                    </button>
+                  )}
+                </span>
+              ))}
+              {/* Empate no índice (todo mundo zerado no começo do mês) é
+                  decidido pelo mês anterior — e a tela diz isso, senão a
+                  ordem parece aleatória. */}
+              {p.indice_at === 0 && <span>mês anterior {indiceFmt(p.indice_anterior)}</span>}
+              {p.sem_meta && <span>sem meta ligada — score 100%</span>}
+              {gerente && p.perfil_id !== d.eu && (
+                <button onClick={() => fazer(p.perfil_id, "saiu", { perfil_id: p.perfil_id })} disabled={!!indo}
+                  className="underline" style={{ color: C.mute }}>{indo === p.perfil_id ? "…" : "marcar saída"}</button>
+              )}
+            </div>
+          </div>
+        ))}
+        {!(d.ordem || []).length && <div className="px-3 py-4 text-[14px]" style={{ color: C.mute }}>Ninguém na loja ainda.</div>}
+      </div>
+
+      {(d.ausentes || []).length > 0 && (
+        <div className="mt-4">
+          <div className="mb-1.5 text-[12px] uppercase tracking-wide" style={{ color: C.mute }}>fora da fila hoje</div>
+          <div className="flex flex-wrap gap-2">
+            {d.ausentes.map((p) => (
+              <span key={p.perfil_id} className="inline-flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[13px]" style={{ borderColor: C.line, background: C.paper }}>
+                {p.nome}
+                {p.saiu_em && <span style={{ color: C.mute }}>saiu {horaSP(p.saiu_em)}</span>}
+                {/* O gerente marca por quem esqueceu e já está atendendo. */}
+                {(gerente || p.perfil_id === d.eu) && (
+                  <button onClick={() => fazer(p.perfil_id, "presente", { perfil_id: p.perfil_id })} disabled={!!indo}
+                    className="font-semibold" style={{ color: C.roxo }}>{indo === p.perfil_id ? "…" : "está na loja"}</button>
+                )}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <p className="mt-4 text-[12.5px] leading-relaxed" style={{ color: C.mute }}>
+        Índice AT = conversão × score × vendas × 10, a conta da planilha. Empate decide pelo mês anterior, e depois por quem chegou primeiro.
+        "Atendendo" é atendimento de hoje que ainda está na mesa; ele sai com "terminei", quando muda para um status de fim, ou sozinho depois de três horas.
+      </p>
+    </div>
+  );
+}
+
 function destinosPara(perfil) {
   const gerente = !!(perfil && perfil.papel === "gerente");
   const adm = !!(perfil && (perfil.administrativo || gerente));
@@ -21244,6 +21449,9 @@ function destinosPara(perfil) {
 
     // ---- o cliente na mesa e o carro ----
     { id: "atendimentos", rot: "Atendimentos", curto: "Atend.", area: "negociacao", principal: true },
+    // Quem atende o próximo cliente (0085). Todo mundo vê: é a ordem da
+    // casa, e cada um precisa saber quando é a vez dele.
+    { id: "vez", rot: "Fila da vez", curto: "Vez", area: "negociacao", icone: "meudia" },
     // Ferramenta, não destino de todo dia. Todo mundo vê — é uma
     // calculadora, não mostra dado de cliente nenhum.
     { id: "extrato", rot: "Extrato de ofertas", curto: "Extrato", area: "negociacao" },
@@ -24383,6 +24591,10 @@ function App() {
       {/* Fica dentro da casca, sobre qualquer destino: a pergunta
           aparece onde a pessoa estiver, e não só no "Meu dia". */}
       {pedeLembrete && <RedeDeErro onde="lembrete"><LembreteDoDia perfil={perfil} /></RedeDeErro>}
+      {/* Quem não marcou presença não entra na fila da vez (0085). */}
+      {perfil && perfil.papel === "negociador" && tela !== "vez" && (
+        <RedeDeErro onde="presença"><AvisoPresenca perfil={perfil} aoIrParaFila={() => setTela("vez")} /></RedeDeErro>
+      )}
       <RedeDeErro onde={`tela ${tela}`} chave={tela}>
       {tela === "meudia" && <TelaMeuDia perfil={perfil} />}
       {/* As seis seções da pré-venda são destinos do menu; a tela é a
@@ -24390,6 +24602,7 @@ function App() {
       {ABA_PV[tela] && <TelaPreVendas perfil={perfil} aoAbrirAtendimento={abrir} aba={ABA_PV[tela]}
         aoVerConversa={verConversa} mes={mes} comp={compOuAtual} />}
       {tela === "atendimentos" && <CRM perfil={perfil} aoAbrir={abrir} mes={{ ...mes, todos: true }} />}
+      {tela === "vez" && <TelaFilaDaVez perfil={perfil} />}
       {tela === "estoque" && <TelaEstoque perfil={perfil} comp={compOuAtual} mes={mes} />}
       {/* A rota confere de novo: esconder o item do menu é conveniência,
           não controle. Quem chegar aqui por outro caminho não passa. */}

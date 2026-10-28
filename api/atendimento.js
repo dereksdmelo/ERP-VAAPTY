@@ -11,6 +11,7 @@
  * (q busca em cliente, carro e placa), limite.
  *
  * ?recurso=indicacoes      GET lista · POST cria · PATCH ?id= atualiza
+ * ?recurso=vez             a fila da vez: presença, ordem pelo índice AT, "terminei"
  *
  * As indicações moram aqui, e não em api/indicacao.js, porque a Vercel
  * do plano Hobby para em 12 funções e nós estamos nas 12. Um lead de
@@ -924,6 +925,149 @@ function paraLead(c) {
     l.agendado_para = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(t) ? t : null;
   }
   return l;
+}
+
+/* ------------------ a fila da vez (0085, decisão 67) ------------------
+ *
+ * GET  ?recurso=vez                       a ordem de hoje e de quem é a vez
+ * POST ?recurso=vez&acao=presente|saiu    { perfil_id? } — o próprio, ou o gerente por alguém
+ * POST ?recurso=vez&acao=terminei         { atendimento_id }
+ *
+ * A ordem é o ÍNDICE AT do mês (regras/indice-at.js) entre quem marcou
+ * presença hoje. Empate — que é todo mundo nos primeiros dias, com zero
+ * vendas — decide pelo índice do mês anterior, e depois por quem chegou
+ * primeiro.
+ *
+ * A VEZ é o primeiro da ordem que não está atendendo. Estando todos,
+ * é o que tem MENOS clientes na mesa, e entre esses o primeiro da
+ * ordem — o Derek: *"esse tem que atender dois"*.
+ */
+
+// Os status de quem ainda está na mesa. `aguardando` e
+// `aguardando_propostas` entram: o carro foi lançado e o cliente
+// continua sentado esperando a rede responder (a Espera do APONTE).
+const NA_MESA = ["cliente_na_loja", "aberto", "aguardando", "aguardando_propostas",
+                 "em_negociacao", "baixar_expectativa"];
+// Status esquecido não pode pular alguém o dia inteiro.
+const TETO_OCUPADO_MS = 3 * 3600000;
+
+const caixaAlta = (s) => String(s || "").trim().toUpperCase();
+
+async function vez(req, res, tok) {
+  const R = require("../regras/indice-at.js");
+  const hoje = hojeAqui();
+  const eu = donoDoToken(tok);
+  const c = req.method === "POST" ? (await lerCorpo(req)) || {} : {};
+  const acao = String(req.query.acao || "");
+
+  if (req.method === "POST" && (acao === "presente" || acao === "saiu")) {
+    const quem = RX_UUID.test(String(c.perfil_id || "")) ? c.perfil_id : eu;
+    if (!quem) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
+    let d;
+    if (acao === "presente") {
+      // Upsert sem `chegou_em`: quem volta do almoço mantém a hora em
+      // que chegou de manhã, que é o desempate da fila.
+      d = await banco(`${REST("presenca")}?on_conflict=perfil_id,dia`, {
+        method: "POST",
+        headers: json(tok, { Prefer: "resolution=merge-duplicates,return=representation" }),
+        body: JSON.stringify({ perfil_id: quem, dia: hoje, saiu_em: null, atualizado_em: new Date().toISOString() }),
+      });
+    } else {
+      d = await banco(`${REST("presenca")}?perfil_id=eq.${quem}&dia=eq.${hoje}`, {
+        method: "PATCH",
+        headers: json(tok, { Prefer: "return=representation" }),
+        body: JSON.stringify({ saiu_em: new Date().toISOString(), atualizado_em: new Date().toISOString() }),
+      });
+    }
+    // Volta vazio = a RLS recusou: só o gerente marca pelos outros.
+    if (!Array.isArray(d) || !d.length) {
+      return res.status(acao === "saiu" && quem === eu ? 200 : 403)
+        .json(acao === "saiu" && quem === eu ? { ok: true } : { erro: "Só o gerente marca a presença de outra pessoa." });
+    }
+    return res.status(200).json({ ok: true, presenca: d[0] });
+  }
+
+  if (req.method === "POST" && acao === "terminei") {
+    const id = String(c.atendimento_id || "");
+    if (!RX_UUID.test(id)) return res.status(400).json({ erro: "atendimento_id inválido." });
+    const d = await banco(`${REST("atendimento")}?id=eq.${id}`, {
+      method: "PATCH",
+      headers: json(tok, { Prefer: "return=representation" }),
+      body: JSON.stringify({ atendimento_fim_em: new Date().toISOString() }),
+    });
+    if (!Array.isArray(d) || !d.length) return res.status(403).json({ erro: "Só quem atende (ou o gerente) encerra este atendimento." });
+    return res.status(200).json({ ok: true });
+  }
+
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET, POST");
+    return res.status(405).json({ erro: "Use GET ou POST." });
+  }
+
+  const comp = `${hoje.slice(0, 8)}01`;
+  const ant = (() => {
+    const [a, m] = [Number(hoje.slice(0, 4)), Number(hoje.slice(5, 7))];
+    const d = new Date(Date.UTC(m === 1 ? a - 1 : a, m === 1 ? 11 : m - 2, 1));
+    return d.toISOString().slice(0, 10);
+  })();
+  const cab = { headers: cabecalhos(tok) };
+
+  const [presencas, logins, metas, desemp, doMes, deHoje] = await Promise.all([
+    banco(`${REST("presenca")}?select=perfil_id,chegou_em,saiu_em&dia=eq.${hoje}`, cab),
+    banco(`${URL_BASE}/rest/v1/rpc/negociadores_com_login`, { method: "POST", headers: json(tok), body: "{}" }),
+    banco(`${REST("negociador")}?select=id,nome,perfil_id&papel=eq.negociador`, cab),
+    banco(`${REST("desempenho")}?select=*&competencia=in.(${comp},${ant})`, cab),
+    banco(`${REST("atendimento")}?select=negociador_id,negociador_nome,status,data` +
+          `&data=gte.${ant}&data=lte.${hoje}&limit=5000`, cab),
+    banco(`${REST("atendimento")}?select=id,negociador_id,negociador_nome,cliente_nome,carro_descricao,status,` +
+          `chegada_em,criado_em,atendimento_fim_em&data=eq.${hoje}&limit=500`, cab),
+  ]);
+
+  const agora = Date.now();
+  const pessoas = (logins || []).map((p) => {
+    // A pessoa é o LOGIN; a meta ligada a ele (decisão 10) dá a
+    // confiabilidade e mais um nome. Atendimento importado só tem o
+    // nome, então os dois nomes contam.
+    const meta = (metas || []).find((n) => n.perfil_id === p.id);
+    const nomes = [caixaAlta(p.nome)].concat(meta ? [caixaAlta(meta.nome)] : []);
+    const dele = (a) => a.negociador_id === p.id || nomes.indexOf(caixaAlta(a.negociador_nome)) >= 0;
+    const conta = (de) => {
+      const lista = (doMes || []).filter((a) => dele(a) && String(a.data).slice(0, 7) === de.slice(0, 7));
+      return { fluxo: lista.length, vendas: lista.filter((a) => a.status === "fechado").length };
+    };
+    const scoreDe = (cp) => R.score(meta ? (desemp || []).find((d) => d.negociador_id === meta.id && d.competencia === cp) : null);
+    const mes = conta(comp), mesAnt = conta(ant);
+    const score = scoreDe(comp);
+    const naMesa = (deHoje || []).filter((a) => dele(a) && NA_MESA.indexOf(a.status) >= 0 && !a.atendimento_fim_em &&
+      agora - Date.parse(a.chegada_em || a.criado_em) < TETO_OCUPADO_MS)
+      .map((a) => ({ id: a.id, cliente: a.cliente_nome || "", carro: a.carro_descricao || "", desde: a.chegada_em || a.criado_em }));
+    const pres = (presencas || []).find((x) => x.perfil_id === p.id) || null;
+    return {
+      perfil_id: p.id, nome: (meta && meta.nome) || p.nome,
+      presente: !!(pres && !pres.saiu_em), chegou_em: pres ? pres.chegou_em : null, saiu_em: pres ? pres.saiu_em : null,
+      fluxo: mes.fluxo, vendas: mes.vendas, score,
+      indice_at: R.indiceAt({ ...mes, score }),
+      indice_anterior: R.indiceAt({ ...mesAnt, score: scoreDe(ant) }),
+      sem_meta: !meta,
+      atendendo: naMesa,
+    };
+  });
+
+  const ordem = pessoas.filter((p) => p.presente).sort((a, b) =>
+    (b.indice_at - a.indice_at) || (b.indice_anterior - a.indice_anterior) ||
+    (Date.parse(a.chegou_em) - Date.parse(b.chegou_em)));
+  let vezDe = null;
+  if (ordem.length) {
+    const menos = Math.min.apply(null, ordem.map((p) => p.atendendo.length));
+    vezDe = ordem.find((p) => p.atendendo.length === menos).perfil_id;
+  }
+
+  return res.status(200).json({
+    dia: hoje, competencia: comp,
+    ordem, vez: vezDe,
+    ausentes: pessoas.filter((p) => !p.presente).sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR")),
+    eu,
+  });
 }
 
 async function leads(req, res, tok) {
@@ -2680,6 +2824,11 @@ module.exports = async function handler(req, res) {
   if (String(req.query.recurso || "") === "mensagem") {
     try { return await mensagem(req, res, tok); }
     catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Falhou." }); }
+  }
+
+  if (String(req.query.recurso || "") === "vez") {
+    try { return await vez(req, res, tok); }
+    catch (e) { return res.status(e.status || 502).json({ erro: limpar(e.message) }); }
   }
 
   if (String(req.query.recurso || "") === "lead") {

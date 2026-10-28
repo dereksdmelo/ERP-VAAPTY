@@ -3287,6 +3287,50 @@ chamada ao `scheduled` põe prazo nela.
 **O que ela não faz:** marcar "não vem" quando o cliente desmarca. Ela
 deixa de confirmar, e o cartão fica sem ✓ — a pré-venda resolve.
 
+### 67. A fila da vez: o índice AT ordena, a presença filtra
+
+O Derek, em 28/10/2026, para o totem de autoatendimento: quem atende o
+próximo cliente é medido pelo **ÍNDICE AT**, e só entre quem marcou que
+está na loja. É a primeira peça do totem — sem ela não há a quem chamar.
+
+**A conta é a da planilha, e estava escondida numa célula.** A fórmula
+do SCORE (pendência desde a 0013) saiu da aba FLUXO X CONVERSÃO do
+`CRM SETEMBRO 2026.xlsx`: um produto de nove escadas (faltas, atrasos,
+perdeu atendimento e avaliação errada tiram; prospectou, ficou mais,
+vídeo e avaliação no Google somam) vezes a postura. E
+`ÍNDICE AT = conversão × SCORE × vendas × 10`, com a conversão em
+**fração**. Mora em `regras/indice-at.js`, e `ferramentas-indice.js`
+guarda os casos da planilha — ANDRÉ BRUNO 1,08 e 0,77, o 360% que não
+fechava. **O índice deixou de ser digitado**: a coluna `indice_at` da
+0013 fica sem uso, e o campo saiu do "lançar" da confiabilidade.
+
+**Presença é do login, por dia (0085).** É a própria pessoa que marca
+("Estou na loja", aviso sobre qualquer tela até marcar), e o gerente
+marca por quem esqueceu. "Saí" tira da fila sem apagar a hora de
+chegada — voltar do almoço mantém o lugar no desempate. A meta ligada
+ao login (`negociador.perfil_id`, decisão 10) dá a confiabilidade e um
+segundo nome para contar o fluxo importado; sem meta, o SCORE é 100%.
+
+**A ordem**: índice AT do mês; empate (todo mundo zerado nos primeiros
+dias) pelo do mês anterior, depois por quem chegou primeiro. **A vez** é
+o primeiro da ordem que não está atendendo; estando todos, o que tem
+menos clientes na mesa — *"esse tem que atender dois"*.
+
+**"Atendendo" é atendimento de HOJE dele num status de mesa** (`NA_MESA`
+— inclui aguardando propostas, porque o cliente continua sentado na
+Espera) sem `atendimento_fim_em`. Sai com "terminei", com status de fim,
+ou **sozinho depois de três horas**: status esquecido pularia a pessoa o
+dia inteiro, e o erro só apareceria como "ninguém me passa cliente".
+
+**Quem calcula é o servidor** (`?recurso=vez`, no `api/atendimento.js`),
+e a tela "Fila da vez" só mostra. Duas ordens — uma na tela, outra no
+totem — é como o cliente acaba chamado para a pessoa errada.
+
+**O que vem depois, combinado com o Derek:** a chamada (janela "Vou
+atender / Passar" em qualquer tela do ERP, três minutos e passa ao
+próximo), o agendado com negociador próprio que espera por ele, a TV
+com voz e o totem.
+
 ## Convenções do código
 
 - **Português no domínio.** Estado, funções e rótulos em pt-BR

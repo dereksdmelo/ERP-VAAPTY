@@ -219,20 +219,6 @@ nome, CPF, RG e endereço sozinho. Dá, mas não com o que existe hoje:
 **O que destrava:** o Derek escolher o serviço (e o custo por leitura) e
 o jurídico dizer por quanto tempo a imagem pode ficar guardada.
 
-### A fórmula do SCORE de confiabilidade
-
-O dashboard reproduz a aba FLUXO X CONVERSÃO, inclusive a faixa
-CONFIABILIDADE. O que falta é o **SCORE**: tentei derivar a conta dos
-números da planilha e não fecha com nenhuma combinação que testei —
-ANDRÉ BRUNO dá 360,00% com 1 prospecção, 10 avaliações e 7 "ficou
-mais"; ALESSANDRO dá 180,00% com 0, 5 e 2.
-
-Chutar peso de avaliação de gente é pior que deixar em branco, então o
-campo sai com travessão e a tela diz por quê.
-
-**O que destrava:** o Derek clicar na célula do SCORE na planilha e
-mandar a fórmula.
-
 ### As 262 linhas já importadas estão com o mapeamento antigo
 
 A primeira importação (262 linhas) rodou com o parser procurando NEGOCIADOR,
