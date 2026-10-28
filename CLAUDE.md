@@ -2046,6 +2046,13 @@ administrativo mostra a trilha com o primeiro nome de quem marcou.
 O nome **não** vai para a consulta pública: quem tem o protocolo não
 precisa saber quem da equipe mexeu.
 
+**A fila abre em QUADRO desde 28/10/2026** (o Derek: *"mostrar em
+kanban, acho que fica melhor"*): Recebidos, Falta algo, No cartório,
+Prontos para entregar e os 15 Entregues mais recentes (`COLUNAS_DUT`).
+As colunas são as situações da 0057 — nenhum estado novo —, o cartão é
+o da lista, e o botão dele é o que move de coluna. A lista continua a
+um clique, e a escolha fica no aparelho.
+
 **O que ficou de fora:** as 1.278 respostas antigas não foram
 importadas. Elas estão fechadas (o papel já circulou), e trazê-las
 encheria a fila de trabalho que ninguém vai fazer. Se o histórico for

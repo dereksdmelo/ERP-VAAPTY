@@ -20450,15 +20450,35 @@ function CartaoDut({ p, aoMudar }) {
   );
 }
 
+/* O QUADRO DO DUT (28/10/2026, o Derek: "mostrar em kanban, acho que
+ * fica melhor"). O pedido anda numa fila de passos, e a pergunta de quem
+ * abre a tela é "onde está cada um" — que a coluna responde de uma vez e
+ * a lista obrigava a ler cartão por cartão. As colunas são as situações
+ * que já existiam (0057): nenhum estado novo, o quadro é leitura. O
+ * cartão é o mesmo da lista, e o botão dele é o que move de coluna. */
+const COLUNAS_DUT = [
+  { id: "recebido", rot: "Recebidos", nota: "para preencher ou levar ao cartório" },
+  { id: "pendente", rot: "Falta algo", nota: "esperando o lojista" },
+  { id: "preenchido", rot: "No cartório", nota: "preenchido, esperando o reconhecimento" },
+  { id: "reconhecido", rot: "Prontos para entregar", nota: "voltou do cartório" },
+  { id: "entregue", rot: "Entregues", nota: "os 15 mais recentes" },
+];
 function FilaDut() {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
   const [situacao, setSituacao] = useState("abertos");
   const [q, setQ] = useState("");
   const [busca, setBusca] = useState("");
+  const [vista, setVista] = useState(() => { try { return localStorage.getItem("vaapty:dut-vista") || "quadro"; } catch (e) { return "quadro"; } });
+  const trocarVista = (v) => { setVista(v); try { localStorage.setItem("vaapty:dut-vista", v); } catch (e) {} };
 
-  const carregar = () => dutFila({ situacao, q: busca }).then(setLista).catch((e) => setErro(e.message));
-  useEffect(() => { setLista(null); setErro(""); carregar(); }, [situacao, busca]);
+  // No quadro vêm os abertos e os entregues juntos — a última coluna é a
+  // prova de que a fila anda. Entregue mais velho fica na lista.
+  const carregar = () => (vista === "quadro"
+    ? Promise.all([dutFila({ situacao: "abertos", q: busca }), dutFila({ situacao: "entregue", q: busca })])
+      .then(([a, e]) => setLista(a.concat(e.slice().sort((x, y) => String(y.entregue_em || "").localeCompare(String(x.entregue_em || ""))).slice(0, 15))))
+    : dutFila({ situacao, q: busca }).then(setLista)).catch((e) => setErro(e.message));
+  useEffect(() => { setLista(null); setErro(""); carregar(); }, [situacao, busca, vista]);
 
   const mudar = async (id, mud) => {
     const novo = await dutMudar(id, mud);
@@ -20477,6 +20497,42 @@ function FilaDut() {
           style={{ borderColor: C.line, color: C.ink }}>Buscar</button>
       </div>
 
+      <div className="mb-3 flex flex-wrap items-center gap-1.5">
+        {[["quadro", "Quadro"], ["lista", "Lista"]].map(([v, r]) => (
+          <button key={v} onClick={() => trocarVista(v)} className="rounded-lg px-3 py-1.5 text-[13px] font-semibold"
+            style={vista === v ? { background: C.ink, color: "#fff" } : { background: C.paper, color: C.mute, border: `1px solid ${C.line}` }}>{r}</button>
+        ))}
+      </div>
+
+      {vista === "quadro" && erro && <p className="mb-3 text-[14px]" style={{ color: C.laranja }}>{erro}</p>}
+      {vista === "quadro" && !lista && !erro && <p className="text-[14px]" style={{ color: C.mute }}>carregando…</p>}
+      {vista === "quadro" && lista && (
+        <div className="rolar overflow-x-auto pb-2">
+          <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${COLUNAS_DUT.length}, minmax(270px, 1fr))` }}>
+            {COLUNAS_DUT.map((col) => {
+              const doCol = lista.filter((x) => x.situacao === col.id);
+              const info = DUT_SITUACAO[col.id] || {};
+              return (
+                <div key={col.id} className="min-w-0 rounded-xl p-2" style={{ background: C.bg }}>
+                  <div className="mb-2 px-1">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-[13px] font-bold uppercase tracking-[0.05em]" style={{ color: info.cor || C.ink }}>{col.rot}</span>
+                      <span className="text-[13px] font-bold" style={{ color: C.ink }}>{doCol.length}</span>
+                    </div>
+                    <div className="text-[11.5px]" style={{ color: C.mute }}>{col.nota}</div>
+                  </div>
+                  <div className="space-y-2">
+                    {doCol.map((p) => <CartaoDut key={p.id} p={p} aoMudar={mudar} />)}
+                    {!doCol.length && <div className="py-3 text-center text-[12px]" style={{ color: C.mute }}>vazio</div>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {vista === "lista" && <>
       <div className="mb-4 flex flex-wrap gap-1.5">
         {[["abertos", "Em aberto"], ["recebido", "Recebidos"], ["pendente", "Falta algo"],
           ["preenchido", "No cartório"], ["reconhecido", "Prontos para entregar"], ["entregue", "Entregues"]].map(([v, r]) => (
@@ -20511,6 +20567,7 @@ function FilaDut() {
       <div className="grid gap-3 lg:grid-cols-2">
         {(lista || []).map((p) => <CartaoDut key={p.id} p={p} aoMudar={mudar} />)}
       </div>
+      </>}
 
       <p className="mt-4 text-[12.5px] leading-relaxed" style={{ color: C.mute }}>
         O lojista pede em <span style={{ fontFamily: F.mono }}>/dut.html</span> e acompanha pelo
