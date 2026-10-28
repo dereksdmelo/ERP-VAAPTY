@@ -15912,7 +15912,7 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
                           </div>
                         );
                       })}
-                      {!doDia.length && (
+                      {!itens.some((it) => it.k === "l") && (
                         <div className="py-2 text-center text-[11px]" style={{ color: C.mute }}>livre</div>
                       )}
                     </div>
