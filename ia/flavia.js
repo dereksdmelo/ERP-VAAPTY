@@ -223,7 +223,41 @@ function exemplosEmTexto(exemplos) {
  * de `horariosLivres()`; `exemplos` são as correções do gerente
  * (ia_treino, 0069).
  */
-function instrucao(cfg, agora, livres, exemplos) {
+/* A ABERTURA DA RETOMADA (0084), com as palavras do Derek: "Oii fulano,
+ * tudo bem? Aqui é a Flávia da Vaapty. Você tinha um horário agendado
+ * com a gente às xx horas. Aconteceu alguma coisa que você não conseguiu
+ * vir? Está tudo bem?". Duas mensagens, como uma pessoa manda.
+ *
+ * O nome sai do lead, que muitas vezes é o apelido do WhatsApp
+ * ("Klevinho 🛣️", "joserobertod07"): primeiro nome, sem emoji, e só se
+ * parecer nome — com número ou arroba dentro, vai sem nome, que é
+ * melhor do que chamar o cliente pelo usuário dele. */
+function nomeParaChamar(bruto) {
+  const p = String(bruto || "").normalize("NFC").replace(/[^\p{L}\s'-]/gu, " ").trim().split(/\s+/)[0] || "";
+  if (p.length < 2 || /\d|@/.test(String(bruto || "").split(/\s+/)[0] || "")) return "";
+  return p.charAt(0).toUpperCase() + p.slice(1).toLowerCase();
+}
+function quandoFoi(horario, agora) {
+  const dia = String(horario || "").slice(0, 10), hm = String(horario || "").slice(11, 16);
+  if (!dia || !hm) return "";
+  const [h, m] = hm.split(":");
+  const hora = `${Number(h)}h${m === "00" ? "" : m}`;
+  const hoje = agora.slice(0, 10);
+  const ontem = new Date(Date.parse(`${hoje}T12:00:00Z`) - 86400000).toISOString().slice(0, 10);
+  if (dia === hoje) return `hoje às ${hora}`;
+  if (dia === ontem) return `ontem às ${hora}`;
+  return `${["no domingo", "na segunda", "na terça", "na quarta", "na quinta", "na sexta", "no sábado"][new Date(`${dia}T12:00:00Z`).getUTCDay()]}, ${dia.slice(8, 10)}/${dia.slice(5, 7)}, às ${hora}`;
+}
+function aberturaRetomada(lead, agora, iaNome) {
+  const nome = nomeParaChamar(lead && lead.nome);
+  const quando = quandoFoi(lead && lead.horario, agora);
+  return [
+    `Oii${nome ? ` ${nome}` : ""}, tudo bem? Aqui é a ${iaNome || "Flávia"} da Vaapty. Você tinha um horário agendado com a gente${quando ? ` ${quando}` : ""}.`,
+    "Aconteceu alguma coisa que você não conseguiu vir? Está tudo bem?",
+  ];
+}
+
+function instrucao(cfg, agora, livres, exemplos, retomada) {
   const nome = String(cfg.ia_nome || "Flávia").trim();
   return `Você é a ${nome}, do atendimento da Vaapty Joinville no WhatsApp.
 
@@ -291,7 +325,14 @@ WhatsApp: mensagens curtas, português do Brasil, tom simpático e direto, sem f
 Endereço: ${ENDERECO}.
 ${horarioDaLoja(cfg)}
 
-## Agora
+${retomada ? `## Esta conversa é uma RETOMADA
+A primeira mensagem foi NOSSA: o cliente tinha avaliação marcada ${quandoFoi(retomada.horario, agora) || "recentemente"}${retomada.carro ? ` para o ${retomada.carro}` : ""} e não veio. Você já se apresentou e perguntou se aconteceu alguma coisa — não se apresente de novo nem repita a pergunta.
+- Acolha o que ele contar numa frase, com cuidado de verdade e sem cobrança (imprevisto, saúde, trabalho acontecem).
+- Se está tudo bem, chame para remarcar: ofereça DOIS horários da lista, do jeito do roteiro. Se ele já disser quando pode, ofereça os dois mais perto disso.
+- Se ele disser que já vendeu, que desistiu ou pedir para não mandar mais: agradeça numa frase e encerre.
+- Se ele disser que veio sim, ou que está a caminho: diga que vai avisar a equipe, e pare.
+${retomada.carro ? `O carro já é conhecido (${retomada.carro}): não pergunte o modelo de novo.` : ""}
+` : ""}## Agora
 Agora é ${DIAS[diaDaSemana(agora)]}, ${dataBR(agora.slice(0, 10))}/${agora.slice(0, 4)}, ${agora.slice(11)} em Joinville.
 
 ## Horários livres para oferecer
@@ -347,5 +388,5 @@ function lerSaida(texto, livres) {
 
 module.exports = {
   CONFIG_PADRAO, ENDERECO, POR_HORARIO, paredeDe, horariosDoDia, horariosLivres,
-  conversaEmTexto, pontosDe, instrucao, lerSaida, semNumeros,
+  conversaEmTexto, pontosDe, instrucao, lerSaida, semNumeros, aberturaRetomada, nomeParaChamar,
 };

@@ -9785,6 +9785,17 @@ function CartaoCanal({ canal, aoMudar, aoApagar }) {
     catch (x) { setErro(x.message); }
     setOcupado("");
   };
+  /* A FLÁVIA PROCURA QUEM NÃO VEIO (0084). Ela escreve PRIMEIRO, e isso
+   * é o que o WhatsApp mais pune num número ligado por QR: a pergunta
+   * diz o ritmo e o teto antes de ligar. Desligar é na hora. */
+  const virarRetoma = async () => {
+    const ligar = !canal.ia_retoma;
+    if (ligar && !confirm(`A Flávia vai escrever, por "${canal.nome}", para quem está em "não veio" dos últimos 30 dias:\n\n"Oii fulano, tudo bem? Aqui é a Flávia da Vaapty. Você tinha um horário agendado com a gente ontem às 15h. Aconteceu alguma coisa que você não conseguiu vir? Está tudo bem?"\n\nUma pessoa a cada 4 a 7 minutos, de segunda a sábado das 9h às 18h, no máximo 20 por dia, cada um uma vez só. Quando responderem, ela conversa e remarca. A Flávia passa a responder este número também.\n\nMensagem que sai sem o cliente ter escrito antes aumenta o risco de o WhatsApp bloquear o número. Ligar?`)) return;
+    setOcupado("retoma");
+    try { await aoMudar(canal.slug, { ia_retoma: ligar }); setErro(""); }
+    catch (x) { setErro(x.message); }
+    setOcupado("");
+  };
   const apagar = async () => {
     if (!confirm(`Apagar "${canal.nome}"? Só dá para apagar número que nunca recebeu conversa.`)) return;
     setOcupado("apagar");
@@ -9839,6 +9850,29 @@ function CartaoCanal({ canal, aoMudar, aoApagar }) {
               ? { border: `1px solid ${C.laranja}`, color: C.laranja, background: C.paper, opacity: ocupado ? 0.5 : 1 }
               : { background: C.roxo, color: "#fff", opacity: ocupado ? 0.5 : 1 }}>
             {ocupado === "ia" ? "…" : canal.ia_responde ? "Desligar a Flávia" : "Ligar a Flávia"}
+          </button>
+        </div>
+      )}
+
+      {canal.ativo && canal.comercial !== false && canal.telefone && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg px-3 py-2"
+          style={{ background: canal.ia_retoma ? "#FFF6E0" : C.bg }}>
+          <span className="flex-1 text-[13px] leading-snug" style={{ color: canal.ia_retoma ? AMARELO.texto : C.mute }}>
+            {canal.ia_retoma
+              ? <><b>A Flávia está procurando quem não veio</b> por este número — uma a cada 4 a 7 minutos, seg. a sáb. das 9h às 18h, até 20 por dia.</>
+              : "Procurar quem não veio: a Flávia escreve para cada \"não veio\" perguntando o que aconteceu, e remarca."}
+            {canal.retomada && (
+              <span className="mt-0.5 block text-[12px]" style={{ color: C.mute }}>
+                {canal.retomada.enviadas} procurados ({canal.retomada.hoje} hoje){canal.retomada.falharam ? ` · ${canal.retomada.falharam} sem WhatsApp` : ""} · <b style={{ color: C.verde }}>{canal.retomada.reagendados} remarcaram</b>
+              </span>
+            )}
+          </span>
+          <button onClick={virarRetoma} disabled={!!ocupado}
+            className="rounded-lg px-3 py-1.5 text-[13px] font-semibold"
+            style={canal.ia_retoma
+              ? { border: `1px solid ${C.laranja}`, color: C.laranja, background: C.paper, opacity: ocupado ? 0.5 : 1 }
+              : { background: C.roxo, color: "#fff", opacity: ocupado ? 0.5 : 1 }}>
+            {ocupado === "retoma" ? "…" : canal.ia_retoma ? "Parar" : "Procurar quem não veio"}
           </button>
         </div>
       )}

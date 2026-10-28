@@ -3169,6 +3169,48 @@ a instrução manda perguntar o carro.
 **O que ainda não existe:** os lembretes da véspera e do dia, que a
 instrução diz serem automáticos.
 
+### 66. A Flávia procura quem não veio (0084)
+
+O Derek, em 28/10/2026, depois de ver 67 "não veio" e só dois
+remarcados — a Ana e a Camila escreviam, mas quase ninguém respondia e
+nenhuma pré-venda ligava: *"podemos fazer um teste com a Flávia,
+fazendo ela contatar todos os 'não veio' pelo número da prospecção
+ativa"*, com a abertura dele: **"Oii fulano, tudo bem? Aqui é a Flávia
+da Vaapty. Você tinha um horário agendado com a gente às xx horas. /
+Aconteceu alguma coisa que você não conseguiu vir? Está tudo bem?"**
+(`aberturaRetomada`, em `ia/flavia.js`, em duas mensagens).
+
+**É a primeira vez que ela escreve PRIMEIRO**, e mensagem que sai sem o
+cliente ter escrito é o que o WhatsApp mais pune num número por QR.
+Por isso o ritmo e o teto moram no banco (`ia_retomada_proximo`), e
+não no cron: uma a cada 4 a 7 minutos, segunda a sábado das 9h às 18h,
+**no máximo 20 por dia**, cada lead **uma vez só** (`ia_retomada`,
+`lead_id` único — inclusive quando falha, para número sem WhatsApp não
+ser tentado a cada volta).
+
+**Quem NÃO é procurado**, e cada trava tem um caso: quem teve
+atendimento aberto no dia do horário ou depois (veio, e foi marcado
+errado — o Mauro estava a caminho); horário perdido há menos de 3
+horas (atrasado ainda chega); quem falou em outro número nas últimas
+24 horas (a Ana ou a Camila podem estar no meio da mesma retomada);
+quem disse que já vendeu; fora da região marcado.
+
+**O nome sai do lead, e lead é apelido de WhatsApp**: primeiro nome,
+sem emoji, e com número ou arroba vai sem nome ("Oii, tudo bem?").
+
+**Depois da abertura, é a fila normal (decisão 64)** que responde
+quando o cliente responder. Duas peças fazem isso funcionar: a `ia_fila`
+conta os ids da abertura como mensagem da Flávia (sem isso a conversa
+pareceria assumida por uma pessoa e ninguém responderia), e a
+instrução ganha a seção "RETOMADA" com o carro e o horário perdido —
+acolher, oferecer dois horários, parar se já vendeu ou se veio. A
+confirmação de horário devolve o lead para AGENDADO pela `wa_lead_avanca`,
+que acha o lead pelo telefone em qualquer número.
+
+**O interruptor é por número** (`wa_canal.ia_retoma`), no cartão de
+Números do WhatsApp, com os contadores: procurados, hoje, sem WhatsApp
+e quantos remarcaram. Ligar liga a Flávia no número junto.
+
 ### 65. A IA lê o agendado: qual é o carro, e se ele confirmou
 
 O Derek, em 23/10/2026, olhando a agenda com "sem carro" em quase

@@ -2466,6 +2466,20 @@ module.exports = async function handler(req, res) {
       // A contagem vem embutida: sem ela seria uma consulta por número
       // só para saber se dá para apagar.
       const canais = await banco(`${REST_C}?select=*,wa_conversa(count)&order=slug`, { headers: cabecalhos(tok) });
+      // A retomada de quem não veio (0084), por número: quantas saíram,
+      // quantas hoje e quantas já voltaram a ter horário.
+      let ret = [];
+      try { ret = (await banco(`${URL_BASE}/rest/v1/ia_retomada?select=canal,estado,criado_em,lead(status)&limit=2000`, { headers: cabecalhos(tok) })) || []; } catch (e) { ret = []; }
+      const hojeSP = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+      const retPor = {};
+      ret.forEach((r) => {
+        const x = retPor[r.canal] || (retPor[r.canal] = { enviadas: 0, hoje: 0, falharam: 0, reagendados: 0 });
+        if (r.estado === "enviada") x.enviadas++; else x.falharam++;
+        if (new Date(r.criado_em).toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }) === hojeSP) x.hoje++;
+        const st = r.lead && r.lead.status;
+        if (st === "agendado" || st === "confirmado" || st === "compareceu") x.reagendados++;
+      });
+      (canais || []).forEach((c) => { c.retomada = retPor[c.slug] || null; });
       return res.status(200).json({
         canais: (canais || []).map((c) => {
           const n = Array.isArray(c.wa_conversa) ? ((c.wa_conversa[0] || {}).count || 0) : 0;
@@ -2517,6 +2531,12 @@ module.exports = async function handler(req, res) {
       if (typeof c2.ia_responde === "boolean") {
         mud.ia_responde = c2.ia_responde;
         if (c2.ia_responde) mud.ia_desde = new Date().toISOString();
+      }
+      // A retomada de quem não veio (0084). Ligar liga a Flávia junto: é
+      // ela quem responde quando o cliente responder a abertura.
+      if (typeof c2.ia_retoma === "boolean") {
+        mud.ia_retoma = c2.ia_retoma;
+        if (c2.ia_retoma && mud.ia_responde === undefined) { mud.ia_responde = true; mud.ia_desde = new Date().toISOString(); }
       }
       if (!Object.keys(mud).length) return res.status(400).json({ erro: "nada para mudar" });
       const r = await banco(`${REST_C}?slug=eq.${encodeURIComponent(canal)}`, {

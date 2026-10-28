@@ -93,7 +93,11 @@ async function atenderFila(env) {
       Object.keys(cfg).forEach((k) => { if (linha[k] !== undefined && linha[k] !== null) cfg[k] = typeof linha[k] === "string" ? linha[k].slice(0, 5) : linha[k]; });
       if (linha.ia_nome) cfg.ia_nome = linha.ia_nome;
       const livres = FLAVIA.horariosLivres(cfg, agora, (ctx && ctx.ocupados) || []);
-      const sistema = FLAVIA.instrucao(cfg, agora, livres, (ctx && ctx.exemplos) || []);
+      // Conversa que a Flávia abriu procurando quem não veio (0084): ela
+      // precisa saber o que está retomando.
+      let retomada = null;
+      try { retomada = await rpc("ia_retomada_da_conversa", { p_segredo: SEG, p_conversa: item.conversa_id }); } catch (e) {}
+      const sistema = FLAVIA.instrucao(cfg, agora, livres, (ctx && ctx.exemplos) || [], retomada);
 
       const r = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST", signal: AbortSignal.timeout(45000),
@@ -143,6 +147,61 @@ async function atenderFila(env) {
     }
   }
   return { fila: fila.length, feitos };
+}
+
+/* A RETOMADA DE QUEM NÃO VEIO (0084, 28/10/2026). Uma mensagem por volta
+ * do cron, no máximo — quem decide se é hora (dia, horário, intervalo,
+ * teto do dia) é `ia_retomada_proximo`, no banco. Manda a abertura do
+ * Derek em duas mensagens com "digitando…", grava os ids ANTES de pôr a
+ * mensagem na conversa (mesma ordem do atenderFila: senão a volta
+ * seguinte acharia que uma pessoa assumiu) e deixa o resto com a fila
+ * normal, que responde quando o cliente responder. */
+async function retomar(env) {
+  const URL_BASE = env.SUPABASE_URL, ANON = env.SUPABASE_ANON_KEY, SEG = env.IA_SEGREDO;
+  if (!URL_BASE || !ANON || !SEG || !env.PONTE || !env.PONTE_SEGREDO) return { pulado: "falta configuração" };
+  const rpc = async (nome, corpo) => {
+    const r = await fetch(`${URL_BASE}/rest/v1/rpc/${nome}`, {
+      method: "POST", signal: AbortSignal.timeout(20000),
+      headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, "Content-Type": "application/json" },
+      body: JSON.stringify(corpo),
+    });
+    const t = await r.text();
+    if (!r.ok) throw new Error(`${nome}: ${t.slice(0, 200)}`);
+    try { return t ? JSON.parse(t) : null; } catch (e) { return null; }
+  };
+  const lead = await rpc("ia_retomada_proximo", { p_segredo: SEG });
+  if (!lead || !lead.lead_id) return { nada: true };
+  const cfg = await fetch(`${URL_BASE}/rest/v1/rpc/ia_contexto`, { method: "POST", signal: AbortSignal.timeout(20000),
+    headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ p_segredo: SEG, p_conversa: "00000000-0000-0000-0000-000000000000" }) })
+    .then((r) => r.json()).then((d) => (d && d.config) || {}).catch(() => ({}));
+  const agora = FLAVIA.paredeDe(new Date().toISOString());
+  const textos = FLAVIA.aberturaRetomada(lead, agora, cfg.ia_nome);
+  const canal = lead.canal;
+  let para = String(lead.telefone || "").replace(/\D/g, "");
+  if (para.length <= 11) para = `55${para}`;
+  const enviados = [], wa_ids = [];
+  let erro = "";
+  for (const texto of textos) {
+    const r = await env.PONTE.fetch(`https://ponte/enviar?canal=${encodeURIComponent(canal)}`, {
+      method: "POST", signal: AbortSignal.timeout(40000), headers: { "x-ponte-segredo": env.PONTE_SEGREDO, "Content-Type": "application/json" },
+      body: JSON.stringify({ para, conteudo: { type: "text", text: { body: texto }, digitando: ESPERA_ENTRE(texto) } }),
+    });
+    const e = await r.json().catch(() => ({ ok: false, erro: `a ponte respondeu ${r.status}` }));
+    if (!e || !e.ok) { erro = (e && e.erro) || "a ponte não mandou"; break; }
+    enviados.push(texto); wa_ids.push(e.id || `ret-${lead.lead_id}-${enviados.length}`);
+  }
+  // Grava mesmo quando falhou: a trava é "cada lead uma vez", e um número
+  // que não existe no WhatsApp não pode ser tentado a cada volta.
+  await rpc("ia_retomada_gravar", { p_segredo: SEG, p_lead: lead.lead_id, p_canal: canal, p_telefone: para,
+    p_mensagens: enviados, p_wa_ids: wa_ids, p_estado: enviados.length ? "enviada" : "falhou", p_erro: erro || null });
+  for (let i = 0; i < enviados.length; i++) {
+    try {
+      await rpc("wa_receber", { p_canal: canal, p_telefone: para, p_nome: "", p_wa_id: wa_ids[i], p_eco: true,
+        p_tipo: "texto", p_texto: enviados[i], p_anexo: null, p_quando: new Date(Date.now() + i).toISOString(), p_anuncio: null });
+    } catch (e) {}
+  }
+  return { lead: lead.lead_id, enviadas: enviados.length, erro: erro || undefined };
 }
 
 /* TODA CHAMADA DE FORA TEM PRAZO (23/10/2026). Uma pergunta pendurada —
@@ -233,4 +292,4 @@ async function lerLeads(env) {
   return { lidos: feitos };
 }
 
-module.exports = { atenderFila, lerLeads };
+module.exports = { retomar, atenderFila, lerLeads };

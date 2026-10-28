@@ -28,7 +28,7 @@ import perfil from "../api/perfil.js";
 import placa from "../api/placa.js";
 import proposta from "../api/proposta.js";
 import veiculo from "../api/veiculo.js";
-import { atenderFila, lerLeads } from "../ia/atender.js";
+import { atenderFila, lerLeads, retomar } from "../ia/atender.js";
 
 const ROTAS = { atendimento, checklist, documento, financeiro, fipe, foto,
                 funil, importar, perfil, placa, proposta, veiculo };
@@ -187,6 +187,9 @@ export default {
       atenderFila(env).catch((e) => console.error("flavia:", String((e && e.message) || e).slice(0, 200))),
       lerLeads(env).catch((e) => console.error("leitura:", String((e && e.message) || e).slice(0, 200))),
       despertar(env).catch((e) => console.error("despertador:", String((e && e.message) || e).slice(0, 200))),
+      // A Flávia procurando quem não veio (0084): no máximo uma por volta,
+      // e o banco decide se é hora.
+      retomar(env).catch((e) => console.error("retomada:", String((e && e.message) || e).slice(0, 200))),
     ]);
   },
 };
