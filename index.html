@@ -11548,10 +11548,11 @@ function EmLoja({ a, aoFinalizar }) {
  * mesmo botão, como "atualizar". */
 function StatusDaLinha({ a, aoFinalizar }) {
   if (a.status !== "cliente_na_loja") return <Etiqueta status={a.status} />;
+  // O selo roxo saiu daqui: ao lado dele o botão não cabia na coluna, e
+  // o selo é justamente o que está errado.
   return (
-    <span className="inline-flex items-center gap-1.5">
-      <Etiqueta status={a.status} />
-      <BotaoFinalizar a={a} aoFinalizar={aoFinalizar} rotulo="atualizar" />
+    <span title="Estava como cliente na loja e passou de três horas: diga como ficou.">
+      <BotaoFinalizar a={a} aoFinalizar={aoFinalizar} rotulo="atualizar status" />
     </span>
   );
 }
