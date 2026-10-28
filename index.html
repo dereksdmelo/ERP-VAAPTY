@@ -981,6 +981,14 @@ async function waMensagens(id) {
   if (!r.ok) throw new Error(d.erro || "Não consegui abrir a conversa.");
   return d.mensagens || [];
 }
+async function waEnviar(id, texto) {
+  const r = await fetchAut(`/api/atendimento?recurso=conversas&acao=enviar&id=${encodeURIComponent(id)}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ texto }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui enviar.");
+  return d;
+}
 async function waCriarCanal(dados) {
   const r = await fetchAut("/api/atendimento?recurso=wa", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
@@ -9343,7 +9351,24 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe }) {
   const [virando, setVirando] = useState(false);
   const [agendando, setAgendando] = useState(null);
   const [ligandoConv, setLigandoConv] = useState(false);
+  const [rascunho, setRascunho] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const [erroEnvio, setErroEnvio] = useState("");
   const fim = useRef(null);
+  // Trocar de conversa não leva o rascunho junto: o texto de uma pessoa
+  // mandado para outra é o pior erro que esta caixa pode cometer.
+  useEffect(() => { setRascunho(""); setErroEnvio(""); }, [conversa.id]);
+  const enviar = async () => {
+    const texto = rascunho.trim();
+    if (!texto || enviando) return;
+    setEnviando(true); setErroEnvio("");
+    try {
+      await waEnviar(conversa.id, texto);
+      setRascunho("");
+      try { setMsgs(await waMensagens(conversa.id)); } catch (e) {}
+    } catch (e) { setErroEnvio(e.message); }
+    setEnviando(false);
+  };
 
   /* AGENDAR É UM GESTO SÓ, e o lead nasce no caminho.
    *
@@ -9446,17 +9471,30 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe }) {
         <div ref={fim} />
       </div>
 
-      {/* NO LUGAR DA CAIXA DE DIGITAR: daqui só se lê. A resposta é no
-          WhatsApp do número, e o botão leva até lá — uma caixa que não
-          manda nada seria pior que caixa nenhuma (decisão 48). */}
-      <div className="flex items-center gap-2 px-4 py-2.5" style={{ background: WA.barra, borderTop: `1px solid ${WA.linha}` }}>
-        <div className="min-w-0 flex-1 truncate rounded-lg px-3 py-2 text-[13.5px]" style={{ background: "#fff", color: WA.mute }}>
-          Responder é no WhatsApp do número{conversa.canal ? ` (${conversa.canal.nome})` : ""}
+      {/* A CAIXA DE DIGITAR (28/10/2026). Sai do número em que o cliente
+          escreveu, pela ponte — a Amanda clicava aqui e não havia onde
+          escrever. Enter manda, Shift+Enter quebra a linha, como no
+          WhatsApp Web. Mandar daqui tira a Flávia da conversa por 12
+          horas: é uma pessoa que assumiu (decisão 64). */}
+      <div className="px-4 py-2.5" style={{ background: WA.barra, borderTop: `1px solid ${WA.linha}` }}>
+        {erroEnvio && <div className="mb-1.5 text-[12.5px]" style={{ color: C.laranja }}>{erroEnvio}</div>}
+        <div className="flex items-end gap-2">
+          <textarea value={rascunho} rows={1} disabled={enviando}
+            onChange={(e) => setRascunho(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); enviar(); } }}
+            placeholder={`Mensagem pelo número ${conversa.canal ? conversa.canal.nome : ""}`}
+            className="max-h-40 min-w-0 flex-1 resize-none rounded-lg px-3 py-2 text-[14.5px] outline-none"
+            style={{ background: "#fff", color: WA.texto, fieldSizing: "content" }} />
+          <button onClick={enviar} disabled={enviando || !rascunho.trim()}
+            className="shrink-0 rounded-full px-4 py-2 text-[13.5px] font-semibold text-white"
+            style={{ background: WA.verde, opacity: enviando || !rascunho.trim() ? 0.5 : 1 }}>
+            {enviando ? "enviando…" : "Enviar"}
+          </button>
+          <a href={zap(conversa.telefone)} target="_blank" rel="noopener noreferrer" title="Abrir no WhatsApp"
+            className="shrink-0 rounded-full px-3 py-2 text-[12.5px] font-semibold" style={{ color: WA.mute, border: `1px solid ${WA.linha}` }}>
+            WhatsApp
+          </a>
         </div>
-        <a href={zap(conversa.telefone)} target="_blank" rel="noopener noreferrer"
-          className="shrink-0 rounded-full px-4 py-2 text-[13.5px] font-semibold text-white" style={{ background: WA.verde }}>
-          Abrir no WhatsApp
-        </a>
       </div>
 
       {ligandoConv && (

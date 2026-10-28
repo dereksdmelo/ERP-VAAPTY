@@ -1783,6 +1783,18 @@ campo de digitar: campo que não manda nada é pior que campo nenhum.
 O que existe é "Abrir no WhatsApp", que leva para onde a resposta
 realmente acontece.
 
+**Desde 28/10/2026 ela responde** (o Derek, com um vídeo da Amanda
+clicando no rodapé: *"amanda não consegue responder clientes por
+ali"*). A ponte já manda desde a Flávia, então a caixa virou de
+verdade: `?recurso=conversas&acao=enviar` lê a conversa com o token de
+quem escreve (sem a RLS devolver a linha, nada sai), manda pelo número
+em que o cliente escreveu e grava a mensagem como da loja, com o id do
+WhatsApp — a ponte não ecoa o que ela mesma manda. **Esse id fora da
+`ia_resposta` é o que tira a Flávia da conversa por 12 horas**: uma
+pessoa assumiu (decisão 64). Confirmação de horário escrita ali move o
+lead pelo mesmo leitor da ponte. Só texto; arquivo e áudio continuam
+no celular.
+
 **Mídia aparece como linha explicada, não como imagem quebrada.** O
 arquivo não é guardado, e o balão diz qual era o tipo e que ele ficou
 no WhatsApp. **Isto já doeu na primeira hora de uso:** entrou um

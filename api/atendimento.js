@@ -2523,6 +2523,69 @@ module.exports = async function handler(req, res) {
      * **Idempotente**: conversa que já tem lead devolve o mesmo, como
      * o "chegou". Dois toques no botão não criam duas fichas.
      */
+    /* RESPONDER DAQUI (28/10/2026). O Derek mostrou a Amanda, da
+     * pré-venda, clicando no rodapé da conversa e não conseguindo
+     * escrever: *"amanda não consegue responder clientes por ali"*. A
+     * caixa de entrada nasceu só de leitura porque a ponte não mandava
+     * nada (decisão 48); desde a Flávia ela manda, e a resposta pode sair
+     * do número em que o cliente escreveu sem a pessoa ter de achar o
+     * celular dele.
+     *
+     * A conversa é lida com o token de quem escreve: se a RLS não a
+     * devolve, nada sai. A ponte não ecoa o que ela mesma mandou, então
+     * a mensagem é gravada aqui, como da loja (`eco`), com o id que o
+     * WhatsApp devolveu — e é esse id, fora da `ia_resposta`, que faz a
+     * Flávia entender que uma pessoa assumiu e sair da conversa por 12
+     * horas (decisão 64). Uma confirmação de horário escrita aqui move o
+     * lead como a da ponte, pelo mesmo leitor. */
+    if (RX_UUID.test(id) && req.method === "POST" && String(req.query.acao || "") === "enviar") {
+      const c = await lerCorpo(req);
+      const texto = String((c && c.texto) || "").replace(/\r/g, "").trim();
+      if (!texto) return res.status(400).json({ erro: "Escreva a mensagem." });
+      if (texto.length > 4000) return res.status(400).json({ erro: "Mensagem longa demais (o limite é 4.000 caracteres)." });
+      const cv = (await banco(`${REST_CV}?select=id,telefone,wa_canal(slug,nome,ativo)&id=eq.${id}`, { headers: cabecalhos(tok) }) || [])[0];
+      if (!cv || !cv.wa_canal) return res.status(404).json({ erro: "Conversa não encontrada." });
+      if (cv.wa_canal.ativo === false) return res.status(409).json({ erro: "Este número está desativado." });
+      const segredo = process.env.PONTE_SEGREDO || "";
+      const base = process.env.PONTE_URL || "";
+      if (!segredo || (!req.ponte && !base)) return res.status(503).json({ erro: "A ponte do WhatsApp não está configurada." });
+      const slug = cv.wa_canal.slug;
+      let d = {};
+      try {
+        const alvo = `${base || "https://ponte"}/enviar?canal=${encodeURIComponent(slug)}`;
+        const pedido = {
+          method: "POST", signal: AbortSignal.timeout(30000),
+          headers: { "x-ponte-segredo": segredo, "Content-Type": "application/json" },
+          body: JSON.stringify({ para: cv.telefone, conteudo: { type: "text", text: { body: texto } } }),
+        };
+        const r = req.ponte ? await req.ponte.fetch(alvo, pedido) : await fetch(alvo, pedido);
+        d = await r.json().catch(() => ({ ok: false, erro: `a ponte respondeu ${r.status}` }));
+      } catch (e) { d = { ok: false, erro: "a ponte não respondeu" }; }
+      if (!d || !d.ok) return res.status(502).json({ erro: `Não foi enviada: ${limpar((d && d.erro) || "a ponte não mandou")}. O número está conectado em Números do WhatsApp?` });
+      const agora = Date.now();
+      let msgId = null;
+      try {
+        msgId = await banco(`${URL_BASE}/rest/v1/rpc/wa_receber`, {
+          method: "POST", headers: json(tok),
+          body: JSON.stringify({ p_canal: slug, p_telefone: cv.telefone, p_nome: "", p_wa_id: String(d.id || `erp-${agora}`),
+            p_eco: true, p_tipo: "texto", p_texto: texto, p_anexo: null, p_quando: new Date(agora).toISOString(), p_anuncio: null }),
+        });
+      } catch (e) { /* saiu para o cliente; só não ficou registrada aqui */ }
+      if (msgId) {
+        try {
+          const quando = dataHoraConfirmada(texto, agora);
+          if (quando) {
+            const DO_CANAL = { "prospeccao-ativa": "prospeccao", tv: "tv", loja: "fluxo_loja" };
+            await banco(`${URL_BASE}/rest/v1/rpc/wa_lead_avanca`, {
+              method: "POST", headers: json(tok),
+              body: JSON.stringify({ p_mensagem: msgId, p_evento: "agendou", p_quando: quando, p_origem: DO_CANAL[slug] || "outro" }),
+            });
+          }
+        } catch (e) {}
+      }
+      return res.status(200).json({ ok: true, registrada: !!msgId });
+    }
+
     if (RX_UUID.test(id) && req.method === "POST" && String(req.query.acao || "") === "lead") {
       const atual = (await banco(`${REST_CV}?select=id,telefone,nome,lead_id,anuncio,wa_canal(slug,nome,comercial)&id=eq.${id}`,
         { headers: cabecalhos(tok) }) || [])[0];
