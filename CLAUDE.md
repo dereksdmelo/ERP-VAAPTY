@@ -3231,6 +3231,16 @@ acolher, oferecer dois horários, parar se já vendeu ou se veio. A
 confirmação de horário devolve o lead para AGENDADO pela `wa_lead_avanca`,
 que acha o lead pelo telefone em qualquer número.
 
+**Na retomada, ouvir vem antes de remarcar (28/10/2026).** A Sheila
+respondeu "eu fui sim, e perdi meu tempo", e a Flávia perguntou o que
+aconteceu e pediu para remarcar na mesma resposta — ela recusou. O
+Derek: *"devia ter ouvido mais o cliente… depois explicar como foi o
+processo, e só depois de se conectar com o cliente ele deve tentar
+remarcar"*. A seção RETOMADA da instrução é essa ordem: ouvir,
+entender, explicar e remarcar, uma etapa por resposta. **Ela também lê
+o cliente nos outros números (0087)**, e a IA fora do ar não queima a
+mensagem nem deixa a retomada abrir conversa (0086).
+
 **O interruptor é por número** (`wa_canal.ia_retoma`), no cartão de
 Números do WhatsApp, com os contadores: procurados, hoje, sem WhatsApp
 e quantos remarcaram. Ligar liga a Flávia no número junto.

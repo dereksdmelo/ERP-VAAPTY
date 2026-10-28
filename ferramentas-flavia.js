@@ -128,5 +128,8 @@ confere("dois horários, nunca a agenda inteira", ins.includes("Listar mais de D
 confere("ela usa a leitura e pergunta só se faltar", ins.includes("NÃO IDENTIFICADO") && ins.includes("peça com naturalidade o modelo e o ano"), true);
 confere("intermediação, não compra", ins.includes("Nunca diga que \"a loja compra\""), true);
 
+const ret = F.instrucao(cfg, "2026-10-28T13:50", livres, [], { horario: "2026-10-26T14:30:00", carro: "Logan" });
+confere("retomada: ouvir antes de remarcar, uma etapa por resposta", ret.includes("OUVIR, ENTENDER, EXPLICAR") && ret.includes("Não ofereça remarcar nem horário na mesma resposta"), true);
+
 console.log(falhas ? `\n${falhas} falha(s)` : "\ntudo certo");
 process.exit(falhas ? 1 : 0);

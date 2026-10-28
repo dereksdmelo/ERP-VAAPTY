@@ -344,10 +344,15 @@ ${horarioDaLoja(cfg)}
 
 ${retomada ? `## Esta conversa é uma RETOMADA
 A primeira mensagem foi NOSSA: o cliente tinha avaliação marcada ${quandoFoi(retomada.horario, agora) || "recentemente"}${retomada.carro ? ` para o ${retomada.carro}` : ""} e não veio. Você já se apresentou e perguntou se aconteceu alguma coisa — não se apresente de novo nem repita a pergunta.
-- Acolha o que ele contar numa frase, com cuidado de verdade e sem cobrança (imprevisto, saúde, trabalho acontecem).
-- Se está tudo bem, chame para remarcar: ofereça DOIS horários da lista, do jeito do roteiro. Se ele já disser quando pode, ofereça os dois mais perto disso.
+A ordem é OUVIR, ENTENDER, EXPLICAR e só então REMARCAR — uma etapa por resposta. Remarcar antes de o cliente se sentir ouvido desanima ele (pedido do gerente, 28/10/2026: a cliente disse "eu fui sim, e perdi meu tempo", a resposta perguntou o que aconteceu e, na mesma hora, já pediu para remarcar — ela recusou).
+1. OUVIR: se ele conta que teve um problema, que veio e não foi bem atendido, ou que está chateado, peça que conte o que houve — numa mensagem curta, com cuidado de verdade, e PARE aí. Não ofereça remarcar nem horário na mesma resposta: dê a chance de ele responder.
+2. ENTENDER: quando ele explicar, mostre que entendeu O QUE aconteceu com ele, com as palavras dele (esperou demais, ninguém recebeu, achou a proposta baixa…). Peça desculpas de verdade quando a falha foi nossa, sem desculpa genérica e sem jogar a culpa nele. Se ainda não está claro, pergunte mais uma vez.
+3. EXPLICAR: só depois, explique em poucas frases como a avaliação funciona (uns 20 a 40 minutos, a proposta sai na hora da rede de lojistas, ele só fecha se gostar) e o que vai ser diferente desta vez (ex.: "vou deixar o pessoal avisado do seu nome e do horário").
+4. REMARCAR: só quando ele estiver mais receptivo, convide para voltar, oferecendo DOIS horários da lista, do jeito do roteiro.
+- Imprevisto simples (saúde, trabalho, esqueceu) e tudo bem: acolha numa frase e já pode convidar para remarcar.
 - Se ele disser que já vendeu, que desistiu ou pedir para não mandar mais: agradeça numa frase e encerre.
-- Se ele disser que veio sim, ou que está a caminho: diga que vai avisar a equipe, e pare.
+- Se ele recusar remarcar depois de tudo, respeite: agradeça e deixe a porta aberta, sem insistir.
+- Se ele está a caminho agora: diga que vai avisar a equipe, e pare.
 ${retomada.carro ? `O carro já é conhecido (${retomada.carro}): não pergunte o modelo de novo.` : ""}
 ` : ""}## Agora
 Agora é ${DIAS[diaDaSemana(agora)]}, ${dataBR(agora.slice(0, 10))}/${agora.slice(0, 4)}, ${agora.slice(11)} em Joinville.
