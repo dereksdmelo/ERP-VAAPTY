@@ -20839,7 +20839,8 @@ function TelaADM({ perfil, comp, mes, modo = "revisar" }) {
   const sub = !dados ? "Carregando…"
     : modo === "revisar" ? `${todos.length} fechados · ${nRevisar} para revisar`
     : modo === "aprovar" ? `${lista.length} esperando aprovação · cada um precisa de ${minimo} gerentes`
-    : `${todos.filter((a) => a.etapa === "pagar").length} a pagar · ${brl(soma(todos.filter((a) => a.etapa === "pagar")))}`;
+    : `${todos.filter((a) => a.etapa === "pagar").length} a pagar · ${brl(soma(todos.filter((a) => a.etapa === "pagar")))}` +
+      (lista.some((a) => !desembolsoDe(a.checklist).total) ? ` · ${lista.filter((a) => !desembolsoDe(a.checklist).total).length} sem valores no check list` : "");
 
   return (
     <div>
@@ -20888,7 +20889,10 @@ function TelaADM({ perfil, comp, mes, modo = "revisar" }) {
               </div>
               <div className="text-[11px]" style={{ color: C.mute, fontFamily: F.mono }}>
                 {a.data ? String(a.data).split("-").reverse().join("/") : "sem data"}
-                {modo === "pagar" ? ` · a sair ${brl(dz.total)}` : a.valor_fechado ? ` · ${brl(Number(a.valor_fechado))}` : ""}
+                {modo === "pagar" ? (dz.total ? ` · a sair ${brl(dz.total)}` : "") : a.valor_fechado ? ` · ${brl(Number(a.valor_fechado))}` : ""}
+                {/* Zero aqui seria mentira na previsão de caixa: é o
+                    check list que o negociador não preencheu. */}
+                {modo === "pagar" && !dz.total && <span style={{ color: C.laranja, fontFamily: F.body }}> · check list sem valores — o total não entra na soma</span>}
               </div>
             </button>
           );
