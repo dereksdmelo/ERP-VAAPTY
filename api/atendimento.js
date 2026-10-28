@@ -2659,13 +2659,17 @@ module.exports = async function handler(req, res) {
     // `!inner` quando há filtro de canal: sem ele o PostgREST filtra só
     // o embutido e devolve TODAS as conversas, com `wa_canal` nulo nas
     // que não casam -- a lista viria errada parecendo certa.
-    const emb = canal ? "wa_canal!inner(slug,nome,atendente,comercial)" : "wa_canal(slug,nome,atendente,comercial)";
+    // `operacao=1`: só os números fora do funil (0058), para a área do
+    // administrativo — o mesmo `!inner`, pela mesma razão.
+    const soOperacao = String(req.query.operacao || "") === "1";
+    const emb = canal || soOperacao ? "wa_canal!inner(slug,nome,atendente,comercial)" : "wa_canal(slug,nome,atendente,comercial)";
     const partes = [
       `select=id,telefone,nome,ultima_em,primeira_em,ultima_de_fora,respondida_em,anuncio,atendimento_id,lead_id,${emb}`,
       "order=ultima_em.desc",
       `limit=${Math.min(200, Number(req.query.limite) || 60)}`,
     ];
     if (canal) partes.push(`wa_canal.slug=eq.${encodeURIComponent(canal)}`);
+    if (soOperacao) partes.push("wa_canal.comercial=eq.false");
     const busca = String(req.query.busca || "").trim();
     if (busca) {
       // Vírgula e parêntese são sintaxe do `or=` do PostgREST: um nome

@@ -931,11 +931,11 @@ async function dutMudar(id, mud) {
   });
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.erro || "Não consegui salvar.");
-  return d.pedido;
+  return { ...d.pedido, _aviso: d.aviso || null };
 }
 
-async function waConversas({ canal, busca } = {}) {
-  const q = comoQuery({ canal: canal || undefined, busca: busca || undefined });
+async function waConversas({ canal, busca, operacao } = {}) {
+  const q = comoQuery({ canal: canal || undefined, busca: busca || undefined, operacao: operacao ? "1" : undefined });
   const r = await fetchAut(`/api/atendimento?recurso=conversas${q ? `&${q}` : ""}`);
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.erro || "Não consegui carregar as conversas.");
@@ -9598,7 +9598,12 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe }) {
   );
 }
 
-function TelaConversas({ alvo, aoConsumirAlvo }) {
+/* `operacao` (28/10/2026, o Derek: "whats somente do adm pode aparecer
+ * aqui nessa aba lateral também"): só os números que não são canal
+ * comercial (0058) — o do administrativo, que fala com lojista, cartório
+ * e despachante. É o mesmo filtro no servidor, não um seletor escondido:
+ * a pessoa do adm não é gerente e não lê a lista de números. */
+function TelaConversas({ alvo, aoConsumirAlvo, operacao }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
   const [canais, setCanais] = useState([]);
@@ -9652,7 +9657,7 @@ function TelaConversas({ alvo, aoConsumirAlvo }) {
       // em segundo plano olhando para "carregando…" por vinte segundos.
       if (!primeira && document.visibilityState !== "visible") { t = setTimeout(volta, 20000); return; }
       primeira = false;
-      try { const d = await waConversas({ canal, busca }); if (vivo) { setLista(d); setErro(""); } }
+      try { const d = await waConversas({ canal, busca, operacao }); if (vivo) { setLista(d); setErro(""); } }
       catch (e) { if (vivo) setErro(e.message); }
       // Vinte segundos: é um mural, e cinco seria pagar por movimento
       // que ninguém está olhando (mesma conta da decisão 45).
@@ -9696,7 +9701,7 @@ function TelaConversas({ alvo, aoConsumirAlvo }) {
                   {rot}
                 </button>
               ))}
-              {!!canais.length && (
+              {!!canais.length && !operacao && (
                 <select className="ml-auto max-w-[170px] rounded-full px-2.5 py-1 text-[12.5px] outline-none"
                   style={{ background: WA.barra, color: WA.texto, border: "none" }} value={canal} onChange={(e) => setCanal(e.target.value)}>
                   <option value="">Todos os números</option>
@@ -20335,9 +20340,12 @@ function CartaoDut({ p, aoMudar }) {
   const passo = proximoPasso(p);
   const anexos = Array.isArray(p.dut_anexo) ? p.dut_anexo : [];
 
+  // O que aconteceu com o aviso automático ao lojista (pronto ou falta
+  // algo). Fica no cartão para quem moveu saber se precisa mandar à mão.
+  const [aviso, setAviso] = useState(null);
   const agir = async (mud) => {
     setOcupado(true);
-    try { await aoMudar(p.id, mud); setErro(""); }
+    try { setAviso((await aoMudar(p.id, mud)) || null); setErro(""); }
     catch (e) { setErro(e.message); }
     setOcupado(false);
   };
@@ -20395,6 +20403,9 @@ function CartaoDut({ p, aoMudar }) {
       </div>
 
       {erro && <p className="mt-2 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+      {aviso && (aviso.enviado
+        ? <p className="mt-2 text-[12.5px]" style={{ color: C.verde }}>Lojista avisado pelo {aviso.canal || "WhatsApp do adm"}.</p>
+        : <p className="mt-2 text-[12.5px]" style={{ color: C.laranja }}>O lojista não foi avisado ({aviso.erro}). Mande pelo botão WhatsApp.</p>)}
 
       {aberto && (
         <div className="mt-3 space-y-3 border-t pt-3" style={{ borderColor: C.line }}>
@@ -20490,8 +20501,9 @@ function FilaDut() {
   useEffect(() => { setLista(null); setErro(""); carregar(); }, [situacao, busca, vista]);
 
   const mudar = async (id, mud) => {
-    const novo = await dutMudar(id, mud);
+    const { _aviso, ...novo } = await dutMudar(id, mud);
     setLista((ls) => (ls || []).map((x) => (x.id === id ? { ...x, ...novo } : x)));
+    return _aviso;
   };
 
   const conta = (s) => (lista || []).filter((x) => x.situacao === s).length;
@@ -22050,6 +22062,7 @@ function destinosPara(perfil) {
     gerente ? { id: "adm_aprovacoes", rot: "Aprovações", curto: "Aprov.", area: "adm" } : null,
     (gerente || (perfil && perfil.financeiro)) ? { id: "adm_pagamentos", rot: "Pagamentos a realizar", curto: "Pagar", area: "adm" } : null,
     adm ? { id: "adm_dut", rot: "DUT dos lojistas", curto: "DUT", area: "adm" } : null,
+    adm ? { id: "adm_whats", rot: "WhatsApp do adm", curto: "WhatsApp", area: "adm" } : null,
   ].filter(Boolean);
 }
 
@@ -25135,7 +25148,7 @@ function App() {
   if (!permitida && tela !== "atendimentos") { setTela("atendimentos"); return null; }
 
   return (
-    <Shell perfil={perfil} tela={tela} setTela={setTela} cheia={tela === "conversas" ? true : tela === "rentabilidade" ? "larga" : false}>
+    <Shell perfil={perfil} tela={tela} setTela={setTela} cheia={tela === "conversas" || tela === "adm_whats" ? true : tela === "rentabilidade" ? "larga" : false}>
       {/* Fica dentro da casca, sobre qualquer destino: a pergunta
           aparece onde a pessoa estiver, e não só no "Meu dia". */}
       {pedeLembrete && <RedeDeErro onde="lembrete"><LembreteDoDia perfil={perfil} /></RedeDeErro>}
@@ -25163,6 +25176,7 @@ function App() {
       {MODO_ADM[tela] && <TelaADM perfil={perfil} comp={compOuAtual} mes={mes} modo={MODO_ADM[tela]} />}
       {tela === "gestao" && <TelaGestao perfil={perfil} comp={compOuAtual} />}
       {tela === "remuneracao" && <TelaPerfisRemuneracao />}
+      {tela === "adm_whats" && <TelaConversas key="adm" operacao />}
       {tela === "conversas" && (
         <TelaConversas alvo={conversaAlvo} aoConsumirAlvo={() => setConversaAlvo(null)} />
       )}

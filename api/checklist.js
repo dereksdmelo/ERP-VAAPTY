@@ -508,6 +508,66 @@ async function dutPublico(req, res) {
   return res.status(200).json({ id: linha.id, protocolo: linha.protocolo, token });
 }
 
+/* O LOJISTA É AVISADO SOZINHO (28/10/2026). O Derek: "uma automação pra
+ * avisar automaticamente o lojista que o documento já foi reconhecido e
+ * está pronto pra ser retirado… e caso esteja faltando algo, faça a mesma
+ * coisa… tudo pelo celular do adm, é claro".
+ *
+ * Sai pelo número de operação (0058, `comercial = false`) — o do
+ * administrativo, que é o que o lojista conhece —, pela ponte, e entra
+ * na conversa como mensagem da loja: quem abrir o WhatsApp do adm vê o
+ * que foi dito. **Nunca derruba a mudança de etapa**: o pedido já mudou
+ * quando isto roda; se falhar, a tela diz e o botão "WhatsApp" do cartão
+ * continua ali para mandar à mão (a régua do aviso de chegada, decisão
+ * 63). O texto é fixo e curto, e o "falta" é o que a pessoa escreveu —
+ * o mesmo que o lojista lê na consulta do protocolo. */
+function textoAoLojista(p, tipo, site) {
+  const ola = p.lojista_nome ? `Olá, ${String(p.lojista_nome).trim()}!` : "Olá!";
+  const qual = `o DUT da placa ${p.placa} (protocolo ${p.protocolo})`;
+  const corpo = tipo === "pronto"
+    ? (p.entrega === "envio"
+      ? `${ola} ${qual[0].toUpperCase()}${qual.slice(1)} já foi reconhecido em cartório e vai ser enviado. Assim que sair, mandamos o rastreio.`
+      : `${ola} ${qual[0].toUpperCase()}${qual.slice(1)} já foi reconhecido em cartório e está pronto para retirada aqui na Vaapty.`)
+    : `${ola} Sobre ${qual}, está faltando:\n\n${String(p.pendencia || "").trim()}\n\nAssim que estiver resolvido, a gente segue com o pedido.`;
+  return site ? `${corpo}\n\nVocê acompanha pelo protocolo em ${site}/dut.html` : corpo;
+}
+async function avisarLojista(req, tok, p, tipo) {
+  try {
+    let fone = String(p.lojista_whats || "").replace(/\D/g, "");
+    if (fone.length < 10) return { enviado: false, erro: "o pedido não tem o WhatsApp do lojista" };
+    if (fone.length <= 11) fone = `55${fone}`;
+    const segredo = process.env.PONTE_SEGREDO || "";
+    const base = process.env.PONTE_URL || "";
+    if (!segredo || (!req.ponte && !base)) return { enviado: false, erro: "a ponte do WhatsApp não está configurada" };
+    const canais = (await (await fetch(`${URL_BASE}/rest/v1/wa_canal?select=slug,nome&comercial=eq.false&ativo=eq.true&telefone=not.is.null&order=slug`,
+      { headers: cabecalhos(tok) })).json().catch(() => [])) || [];
+    const canal = canais.find((x) => /adm/i.test(`${x.slug} ${x.nome}`)) || canais[0];
+    if (!canal) return { enviado: false, erro: "nenhum número do administrativo ligado" };
+    const host = String((req.headers && (req.headers["x-forwarded-host"] || req.headers.host)) || "");
+    const texto = textoAoLojista(p, tipo, host ? `https://${host}` : "");
+    const alvo = `${base || "https://ponte"}/enviar?canal=${encodeURIComponent(canal.slug)}`;
+    const pedido = {
+      method: "POST", signal: AbortSignal.timeout(30000),
+      headers: { "x-ponte-segredo": segredo, "Content-Type": "application/json" },
+      body: JSON.stringify({ para: fone, conteudo: { type: "text", text: { body: texto } } }),
+    };
+    const r = req.ponte ? await req.ponte.fetch(alvo, pedido) : await fetch(alvo, pedido);
+    const d = await r.json().catch(() => ({}));
+    if (!d || !d.ok) return { enviado: false, erro: String((d && d.erro) || `a ponte respondeu ${r.status}`).slice(0, 160), texto };
+    // Na conversa, como mensagem da loja: a ponte não ecoa o que manda.
+    try {
+      await fetch(`${URL_BASE}/rest/v1/rpc/wa_receber`, {
+        method: "POST", headers: json(tok),
+        body: JSON.stringify({ p_canal: canal.slug, p_telefone: fone, p_nome: "", p_wa_id: String(d.id || `dut-${p.id}-${Date.now()}`),
+          p_eco: true, p_tipo: "texto", p_texto: texto, p_anexo: null, p_quando: new Date().toISOString(), p_anuncio: null }),
+      });
+    } catch (e) {}
+    return { enviado: true, canal: canal.nome, tipo };
+  } catch (e) {
+    return { enviado: false, erro: "a ponte não respondeu" };
+  }
+}
+
 /* A FILA DO ADMINISTRATIVO. Quem decide é a RLS da 0057 — ler é da
  * equipe (o negociador também ouve "cadê o DUT?" na mesa), escrever é
  * de quem é administrativo ou gerente. */
@@ -550,6 +610,10 @@ async function dutFila(req, res, tok) {
   if (req.method === "PATCH" && RX_UUID.test(id)) {
     const c = (req.body && typeof req.body === "object") ? req.body : {};
     const mud = { atualizado_em: new Date().toISOString() };
+    // Como estava antes: o aviso ao lojista só sai quando a etapa MUDA,
+    // não a cada "Salvar" do mesmo pedido.
+    let antes = {};
+    try { antes = ((await (await fetch(`${REST_DUT}?select=situacao,pendencia&id=eq.${id}`, { headers: cabecalhos(tok) })).json()) || [])[0] || {}; } catch (e) {}
     const eu = donoDoToken(tok);
 
     /* O CARIMBO É DO SERVIDOR, não da tela. "Preenchido por quem" é a
@@ -584,7 +648,10 @@ async function dutFila(req, res, tok) {
     // Lista vazia é a RLS recusando, não "não achei" (mesma tradução
     // da decisão 10).
     if (!linha) return res.status(403).json({ erro: "Só o administrativo mexe na fila do DUT." });
-    return res.status(200).json({ pedido: linha });
+    const pronto = linha.situacao === "reconhecido" && antes.situacao !== "reconhecido";
+    const falta = linha.situacao === "pendente" && !!linha.pendencia && (antes.situacao !== "pendente" || antes.pendencia !== linha.pendencia);
+    const aviso = pronto || falta ? await avisarLojista(req, tok, linha, pronto ? "pronto" : "falta") : null;
+    return res.status(200).json({ pedido: linha, aviso });
   }
 
   return res.status(400).json({ erro: "Requisição inválida." });

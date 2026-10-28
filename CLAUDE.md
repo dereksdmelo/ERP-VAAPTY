@@ -2063,6 +2063,25 @@ entrega → entregue**, e levar ao cartório virou passo com data e nome
 (`no_cartorio`, `cartorio_em`), também na consulta do lojista. Pedido
 de antes disso que já voltou mostra o passo feito "sem data".
 
+**O lojista é avisado sozinho, pelo celular do adm (28/10/2026).** O
+Derek: *"avisar automaticamente o lojista que o documento já foi
+reconhecido e está pronto pra ser retirado… e caso esteja faltando
+algo, faça a mesma coisa… tudo pelo celular do adm, é claro"*. Quando o
+pedido VIRA "pronto para entrega", ou quando o "falta algo" é gravado
+ou muda, o `api/checklist.js` (`avisarLojista`) manda a mensagem pelo
+número de operação (0058, `comercial = false`, preferindo o que tem
+"adm" no nome), pela ponte, e a grava na conversa como da loja. O texto
+é fixo (`textoAoLojista`): pronto para retirada (ou "vai ser enviado",
+se a entrega é envio), ou "está faltando:" com o que a pessoa escreveu,
+e o link da consulta do protocolo. **Só na mudança**: salvar o mesmo
+pedido de novo não manda de novo. **Nunca derruba a etapa**: se falhar,
+o cartão diz por quê e o botão WhatsApp continua ali.
+
+**E o WhatsApp do adm mora no Administrativo** (`adm_whats`): a mesma
+caixa de Conversas, com `operacao` — só os números fora do funil, pelo
+filtro do servidor, porque a pessoa do adm não é gerente e não lê a
+lista de números.
+
 **O que ficou de fora:** as 1.278 respostas antigas não foram
 importadas. Elas estão fechadas (o papel já circulou), e trazê-las
 encheria a fila de trabalho que ninguém vai fazer. Se o histórico for
