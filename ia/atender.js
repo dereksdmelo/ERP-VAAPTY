@@ -113,7 +113,7 @@ async function atenderFila(env) {
         method: "POST", signal: AbortSignal.timeout(45000),
         headers: { "x-api-key": CHAVE, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
         body: JSON.stringify({ model: MODELO, max_tokens: 700, system: sistema,
-          messages: [{ role: "user", content: FLAVIA.conversaEmTexto(msgs) }] }),
+          messages: [{ role: "user", content: FLAVIA.conversaEmTexto(msgs, null, (ctx && ctx.outras) || []) }] }),
         });
       } catch (e) { await liberar(`IA sem resposta: ${String((e && e.message) || e).slice(0, 200)}`); continue; }
       const corpo = await r.text();

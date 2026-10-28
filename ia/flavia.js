@@ -146,12 +146,26 @@ function linhaDa(m) {
 /** A conversa até o ponto, em texto. As mais antigas caem primeiro
  *  quando passa do teto: o que importa é o fim, e o começo (o carro,
  *  o nome) costuma se repetir nele. */
-function conversaEmTexto(msgs, teto) {
+function conversaEmTexto(msgs, teto, outras) {
   const linhas = (msgs || []).map(linhaDa);
   let t = linhas.join("\n");
   const max = teto || 8000;
   while (t.length > max && linhas.length > 4) { linhas.shift(); t = "[…começo da conversa omitido…]\n" + linhas.join("\n"); }
-  return t;
+  const antes = historicoEmTexto(outras);
+  return antes ? `${antes}\n\n=== ESTA CONVERSA (responda aqui) ===\n${t}` : t;
+}
+
+/** O mesmo cliente nos OUTROS números da loja (0087): a TV, a Ana, a
+ *  Camila, a prospecção. Vem antes da conversa, marcado como histórico,
+ *  com o nome do número em cada linha. Teto menor que o da conversa:
+ *  é contexto, e o que mais importa dele é o fim. */
+function historicoEmTexto(outras, teto) {
+  if (!outras || !outras.length) return "";
+  const linhas = outras.map((m) => `[${m.numero || "outro número"}] ${linhaDa(m)}`);
+  const max = teto || 3500;
+  let t = linhas.join("\n");
+  while (t.length > max && linhas.length > 2) { linhas.shift(); t = "[…mais antigas omitidas…]\n" + linhas.join("\n"); }
+  return `=== O QUE ESTE CLIENTE JÁ FALOU COM A LOJA EM OUTROS NÚMEROS (só para contexto) ===\n${t}`;
 }
 
 /**
@@ -312,6 +326,9 @@ Os lembretes da véspera e do dia são automáticos — não precisa prometê-lo
 - Inventar informação sobre o carro, a loja ou o processo que não está aqui.
 - Se o cliente disser que não quer mais, que já vendeu ou pedir para parar: agradeça numa frase e encerre, sem insistir.
 
+## Outros números da loja
+Às vezes, antes da conversa, vem o que o MESMO cliente já falou com a loja em outros números (TV, prospecção, Ana, Camila…). É a mesma loja e a mesma história: use para não perguntar de novo o que ele já respondeu lá (o carro, o nome, o que aconteceu), para saber o horário que já foi combinado ou perdido e o que já foi prometido. Não cite o outro número nem diga "vi na outra conversa"; fale como quem já sabe. Se lá ele disse que já vendeu ou pediu para não mandar mais, agradeça numa frase e encerre. Você responde SÓ à última mensagem DESTA conversa.
+
 ## Mídia
 Foto, documento e áudio do cliente chegam lidos: a conversa traz, junto da mídia, a "Leitura do arquivo" — o que se viu na foto ou no documento, ou o áudio transcrito. Use como se você mesma tivesse visto ou ouvido, com naturalidade ("vi aqui o documento do seu Onix 2019").
 - O carro que estiver na leitura vale como resposta à pergunta do carro: não pergunte de novo o que a foto ou o CRLV já disseram.
@@ -388,5 +405,5 @@ function lerSaida(texto, livres) {
 
 module.exports = {
   CONFIG_PADRAO, ENDERECO, POR_HORARIO, paredeDe, horariosDoDia, horariosLivres,
-  conversaEmTexto, pontosDe, instrucao, lerSaida, semNumeros, aberturaRetomada, nomeParaChamar,
+  conversaEmTexto, historicoEmTexto, pontosDe, instrucao, lerSaida, semNumeros, aberturaRetomada, nomeParaChamar,
 };

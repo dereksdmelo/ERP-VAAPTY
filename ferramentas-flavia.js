@@ -85,6 +85,13 @@ confere("número longo da leitura também some", /12345678909/.test(F.conversaEm
 const pm = F.pontosDe([midia("Áudio transcrito: \"quero vender meu Gol\"", "audio")]);
 confere("o ponto do treino mostra o que o áudio disse", pm[0].cliente.includes("quero vender meu Gol"), true);
 
+console.log("o cliente nos outros números (0087)");
+const comOutras = F.conversaEmTexto([M("z", false, "Eu cancelei", "2026-10-28T16:08:48Z")], null,
+  [{ ...M("o1", false, "quero vender meu Gol 2012", "2026-10-20T13:00:00Z"), numero: "Ana" }]);
+confere("o histórico vem antes, com o nome do número", comOutras.indexOf("[Ana] CLIENTE") < comOutras.indexOf("ESTA CONVERSA"), true);
+confere("a última linha continua sendo a desta conversa", comOutras.trim().endsWith("Eu cancelei"), true);
+confere("sem outras conversas, nada muda", F.conversaEmTexto([M("z", false, "oi", "2026-10-28T16:08:48Z")], null, []).includes("OUTROS NÚMEROS"), false);
+
 console.log("quais mídias são lidas (ia/midia.js, o mesmo do treino e do ao vivo)");
 const MID = require("./ia/midia.js");
 const mm = (id, eco, tipo, chave, leitura) => ({ id, eco, tipo: "midia", anexo: { tipo, chave }, leitura: leitura || null });
