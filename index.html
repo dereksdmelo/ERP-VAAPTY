@@ -20508,7 +20508,7 @@ function FilaDut() {
       {vista === "quadro" && !lista && !erro && <p className="text-[14px]" style={{ color: C.mute }}>carregando…</p>}
       {vista === "quadro" && lista && (
         <div className="rolar overflow-x-auto pb-2">
-          <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${COLUNAS_DUT.length}, minmax(270px, 1fr))` }}>
+          <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${COLUNAS_DUT.length}, minmax(215px, 1fr))` }}>
             {COLUNAS_DUT.map((col) => {
               const doCol = lista.filter((x) => x.situacao === col.id);
               const info = DUT_SITUACAO[col.id] || {};
