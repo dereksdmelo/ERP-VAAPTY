@@ -4529,6 +4529,9 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     if (!arqs.length) return;
     const espaco = MAX_FOTOS - fotosRef.current.length;
     if (espaco <= 0) { setErroFoto(`Limite de ${MAX_FOTOS} fotos.`); return; }
+    // Escolher mais do que cabe descartava o excedente calado — mais uma
+    // forma de "selecionei e não foi" (o André, 28/10/2026).
+    const sobra = arqs.length - espaco;
     const novas = [];
     for (const a of arqs.slice(0, espaco)) {
       try {
@@ -4540,6 +4543,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         });
       } catch (e) { setErroFoto(e.message); }
     }
+    if (sobra > 0) setErroFoto(`O limite é ${MAX_FOTOS} fotos: ${sobra === 1 ? "1 ficou de fora" : `${sobra} ficaram de fora`}. Exclua alguma para pôr outra.`);
     if (novas.length) {
       aplicar((prev) => [...prev, ...novas]);
       if (veiculoId) for (const n of novas) await enviarFoto(n.chave, veiculoId);
