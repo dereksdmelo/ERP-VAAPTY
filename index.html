@@ -18884,14 +18884,31 @@ function FinFolha({ comp }) {
     catch (e) { setErro(e.message); }
   };
   const campo = (l, k) => (
-    <input className="w-24 rounded border px-1.5 py-1 text-right text-[12px] outline-none" style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal"
+    <input key={`${l.funcionario_id}-${k}-${l[k]}`} className="w-24 rounded border px-1.5 py-1 text-right text-[12px] outline-none" style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal"
       defaultValue={Number(l[k]) ? Math.round(l[k] * 100) / 100 : ""} onBlur={(e) => { const v = Number(String(e.target.value).replace(/\./g, "").replace(",", ".")) || 0; if (v !== Number(l[k])) gravar(l, { [k]: v }); }} />
   );
   if (erro) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
   if (!d) return <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>;
   const total = d.folha.reduce((t, l) => t + l.liquido, 0);
+  const incluir = async () => {
+    try { await fin("folha", { competencia: comp, acao: "incluir" }, finJson("POST", {})); carregar(); }
+    catch (e) { setErro(e.message); }
+  };
+  /* A FOLHA PUXA O COMBINADO (28/10/2026, o Derek: "essa folha aqui
+   * deveria puxar o que cadastramos no perfil de cada colaborador").
+   * Linha não salva mostra a conta do combinado da ficha (0081) — o fixo
+   * em salário, os bônus em bonificação, o resto em comissão —, a mesma
+   * da folha projetada do DRE. Salvar grava o que está na tela, e a
+   * linha salva passa a mandar: é ela que diz o que foi pago. */
+  const fora = d.fora || [];
   return (
     <div className="space-y-4">
+      {!!fora.length && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg px-3 py-2 text-[13px]" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
+          <span><b>{fora.length}</b> {fora.length === 1 ? "pessoa da equipe não está" : "pessoas da equipe não estão"} na folha: {fora.map((x) => x.nome).join(", ")}.</span>
+          <button onClick={incluir} className="rounded-md px-3 py-1 text-[12.5px] font-semibold text-white" style={{ background: C.roxo }}>pôr na folha</button>
+        </div>
+      )}
       <div className="rolar overflow-x-auto rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
         <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 760 }}>
           <thead><tr>{["Funcionário", "Salário", "Comissão", "Bonificação", "Vales", "Líquido", "Pago em"].map((h, i) => (
@@ -18899,7 +18916,19 @@ function FinFolha({ comp }) {
           <tbody>
             {d.folha.map((l) => (
               <tr key={l.funcionario_id} style={{ borderBottom: `1px solid ${C.line}` }}>
-                <td className="px-2 py-1.5 text-[13px] font-semibold">{l.nome}{!l.gravada && <span className="ml-1 text-[10px] font-normal" style={{ color: C.mute }}>base</span>}</td>
+                <td className="px-2 py-1.5 text-[13px] font-semibold">
+                  {l.nome}
+                  {l.gravada ? <span className="ml-1 text-[10px] font-normal" style={{ color: C.verde }}>salvo</span>
+                    : l.combinado ? <span className="ml-1 text-[10px] font-normal" style={{ color: C.roxo }}>do combinado</span>
+                    : <span className="ml-1 text-[10px] font-normal" style={{ color: C.mute }}>{l.colaborador_id ? "sem combinado na ficha" : "base"}</span>}
+                  {l.combinado && (
+                    <div className="text-[11px] font-normal" style={{ color: C.mute }}
+                      title={(l.combinado.linhas || []).map((x) => `${x.rotulo}: ${rs2(x.valor)}${x.conta ? ` (${x.conta})` : ""}`).join("\n")}>
+                      combinado{l.combinado.perfil ? ` · ${l.combinado.perfil}` : ""}: {rs2(l.combinado.total)}{d.aberto ? ` até hoje · ${rs2(l.combinado.ritmo)} no ritmo` : ""}
+                      {!l.gravada && <button onClick={() => gravar(l, {})} className="ml-2 font-semibold underline" style={{ color: C.roxo }}>salvar</button>}
+                    </div>
+                  )}
+                </td>
                 <td className="px-2 py-1.5 text-right">{campo(l, "salario")}</td>
                 <td className="px-2 py-1.5 text-right">{campo(l, "comissao")}</td>
                 <td className="px-2 py-1.5 text-right">{campo(l, "bonificacao")}</td>

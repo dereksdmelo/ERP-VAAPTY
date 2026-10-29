@@ -1262,26 +1262,63 @@ async function vale(req, res, tok) {
 async function folha(req, res, tok) {
   const comp = competenciaDe(req.query.competencia) || competenciaDe(hojeAqui());
   if (req.method === "GET") {
-    const [funcs, gravadas, vales] = await Promise.all([
+    const [funcs, gravadas, vales, colabs, proj] = await Promise.all([
       supa(`${base("fin_funcionario")}?select=*&order=nome.asc`, { headers: cab(tok) }),
       supa(`${base("fin_folha")}?select=*&competencia=eq.${comp}`, { headers: cab(tok) }),
       supa(`${base("fin_vale")}?select=funcionario_id,valor&competencia=eq.${comp}`, { headers: cab(tok) }),
+      supa(`${base("colaborador")}?select=id,nome_completo,fin_funcionario_id,desligado_em,inicio_em`, { headers: cab(tok) }).catch(() => []),
+      projecaoRemuneracao(tok, comp).catch(() => null),
     ]);
     const gPor = {}; (gravadas || []).forEach((g) => { gPor[g.funcionario_id] = g; });
     const vPor = {}; (vales || []).forEach((v) => { vPor[v.funcionario_id] = (vPor[v.funcionario_id] || 0) + (Number(v.valor) || 0); });
+    /* O COMBINADO DE CADA UM (0081) vira salário, comissão e bonificação:
+     * o fixo é salário, os bônus são bonificação, o resto (variável,
+     * vendas, faixas) é comissão. É sugestão até alguém salvar — a linha
+     * gravada continua mandando, porque é ela que diz o que foi pago. */
+    const colabPorFin = {}; (colabs || []).forEach((c) => { if (c.fin_funcionario_id) colabPorFin[c.fin_funcionario_id] = c; });
+    const projPorColab = {}; ((proj && proj.pessoas) || []).forEach((p) => { projPorColab[p.colaborador_id] = p; });
+    const partes = (calc) => {
+      const ls = (calc && calc.linhas) || [];
+      const soma = (f) => Math.round(ls.filter(f).reduce((t, l) => t + (Number(l.valor) || 0), 0) * 100) / 100;
+      return { salario: soma((l) => l.fixo), comissao: soma((l) => !l.fixo && !l.bonus), bonificacao: soma((l) => l.bonus) };
+    };
     const linhas = (funcs || []).filter((f) => f.ativo || gPor[f.id]).map((f) => {
       const g = gPor[f.id];
-      const salario = g ? Number(g.salario) : Number(f.salario_base) || 0;
-      const comissao = g ? Number(g.comissao) : 0;
-      const bonificacao = g ? Number(g.bonificacao) : 0;
+      const col = colabPorFin[f.id];
+      const p = col && projPorColab[col.id];
+      const combinado = p ? { ...partes(p.agora), total: p.agora.total, ritmo: p.ritmo.total, perfil: p.perfil, linhas: p.agora.linhas } : null;
+      const salario = g ? Number(g.salario) : combinado ? combinado.salario : Number(f.salario_base) || 0;
+      const comissao = g ? Number(g.comissao) : combinado ? combinado.comissao : 0;
+      const bonificacao = g ? Number(g.bonificacao) : combinado ? combinado.bonificacao : 0;
       const valesSoma = vPor[f.id] || 0;
       return {
         funcionario_id: f.id, nome: f.nome, negociador_id: f.negociador_id, gravada: !!g,
+        colaborador_id: col ? col.id : null, combinado,
         salario, comissao, bonificacao, vales: valesSoma,
         liquido: salario + comissao + bonificacao - valesSoma, pago_em: g ? g.pago_em : null,
       };
     });
-    return res.status(200).json({ competencia: comp, folha: linhas });
+    // Quem está na equipe e não está na folha: a ficha sem
+    // `fin_funcionario_id`, ainda não desligada antes deste mês.
+    const fora = (colabs || []).filter((c) => !c.fin_funcionario_id && c.nome_completo && (!c.desligado_em || c.desligado_em >= comp))
+      .map((c) => ({ colaborador_id: c.id, nome: c.nome_completo }));
+    return res.status(200).json({ competencia: comp, folha: linhas, fora, aberto: !!(proj && proj.aberto) });
+  }
+  // Põe na folha quem está na equipe e ainda não está: cria a pessoa da
+  // folha e liga a ficha a ela, como o "pôr na folha" da ficha (0079).
+  if (req.method === "POST" && String(req.query.acao || "") === "incluir") {
+    const colabs = await supa(`${base("colaborador")}?select=id,nome_completo,fin_funcionario_id,desligado_em`, { headers: cab(tok) });
+    const alvo = (colabs || []).filter((c) => !c.fin_funcionario_id && c.nome_completo && (!c.desligado_em || c.desligado_em >= comp));
+    let feitos = 0;
+    for (const c of alvo) {
+      const f = um(await supa(base("fin_funcionario"), { method: "POST", headers: cab(tok, { Prefer: "return=representation" }),
+        body: JSON.stringify({ nome: c.nome_completo, salario_base: 0, ativo: true }) }));
+      if (!f) continue;
+      await supa(`${base("colaborador")}?id=eq.${c.id}`, { method: "PATCH", headers: cab(tok, { Prefer: "return=minimal" }),
+        body: JSON.stringify({ fin_funcionario_id: f.id }) });
+      feitos++;
+    }
+    return res.status(200).json({ ok: true, incluidos: feitos });
   }
   if (req.method === "PUT") {
     const c = await corpoDe(req);
@@ -2016,8 +2053,15 @@ async function pendencias(req, res, tok) {
  * mesmo passo — aritmética, não previsão (decisão 22). Mês fechado
  * tem as duas iguais. */
 async function remuneracao(req, res, tok) {
-  const R = require("../regras/remuneracao.js");
   const comp = competenciaDe(req.query.competencia) || competenciaDe(hojeAqui());
+  return res.status(200).json(await projecaoRemuneracao(tok, comp));
+}
+/* A CONTA DO COMBINADO DO MÊS, para a folha projetada do DRE e para a
+ * Folha (28/10/2026, o Derek: "essa folha aqui deveria puxar o que
+ * cadastramos no perfil de cada colaborador"). Um lugar só: duas contas
+ * do mesmo salário dariam dois salários. */
+async function projecaoRemuneracao(tok, comp) {
+  const R = require("../regras/remuneracao.js");
   const fim = fimDoMes(comp);
   const chave = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/\s+/g, " ").trim();
 
@@ -2100,12 +2144,12 @@ async function remuneracao(req, res, tok) {
     })
     .sort((a, b) => b.agora.total - a.agora.total);
 
-  return res.status(200).json({
+  return {
     competencia: comp, aberto, fator: Math.round(fator * 100) / 100,
     loja, lucro: dreMes.lucro, pessoas,
     total_agora: pessoas.reduce((t, p) => t + p.agora.total, 0),
     total_ritmo: pessoas.reduce((t, p) => t + p.ritmo.total, 0),
-  });
+  };
 }
 
 // Perfis de remuneração (0082): o cadastro genérico, com o combinado

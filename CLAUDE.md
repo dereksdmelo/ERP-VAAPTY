@@ -787,6 +787,18 @@ faixas que **se somam** (180 mil +500 e 230 mil +500 = 1.000), e
 bônus por lucro ganhou **"começa em"**: 50 mil paga o primeiro degrau,
 depois a cada 25 mil.
 
+**A Folha do financeiro puxa o combinado (28/10/2026, o Derek: *"essa
+folha aqui deveria puxar o que cadastramos no perfil de cada
+colaborador"*).** A linha ainda não salva traz a conta do combinado da
+ficha — o fixo em salário, os bônus em bonificação, o resto em
+comissão —, pela mesma `projecaoRemuneracao` da folha projetada do DRE
+(eram duas chamadas da mesma conta, viraram uma função). "Salvar"
+grava o que está na tela, e **a linha salva manda**: é ela que diz o
+que foi pago, e a folha de janeiro não pode mudar se o combinado mudar
+em março. Quem está na equipe e não tem pessoa na folha
+(`colaborador.fin_funcionario_id` vazio) aparece numa tarja com "pôr na
+folha", que cria as pessoas e liga as fichas de uma vez.
+
 **Perfis de remuneração (0082)**, em Gestão abaixo de Equipe: o mesmo
 editor de peças, salvo com nome, para usar em mais de uma pessoa. A
 ficha aponta para o perfil (`remuneracao.perfil_id`) e ainda pode ter
