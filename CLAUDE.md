@@ -2080,7 +2080,9 @@ o cartão diz por quê e o botão WhatsApp continua ali.
 **E o WhatsApp do adm mora no Administrativo** (`adm_whats`): a mesma
 caixa de Conversas, com `operacao` — só os números fora do funil, pelo
 filtro do servidor, porque a pessoa do adm não é gerente e não lê a
-lista de números.
+lista de números. **E sai das Conversas da pré-venda** (`comercial=1`, o
+inverso): conversa com lojista e cartório não é lead, e o número do adm
+nem aparece no seletor de lá.
 
 **O que ficou de fora:** as 1.278 respostas antigas não foram
 importadas. Elas estão fechadas (o papel já circulou), e trazê-las

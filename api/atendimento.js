@@ -2662,7 +2662,10 @@ module.exports = async function handler(req, res) {
     // `operacao=1`: só os números fora do funil (0058), para a área do
     // administrativo — o mesmo `!inner`, pela mesma razão.
     const soOperacao = String(req.query.operacao || "") === "1";
-    const emb = canal || soOperacao ? "wa_canal!inner(slug,nome,atendente,comercial)" : "wa_canal(slug,nome,atendente,comercial)";
+    // `comercial=1`: o inverso, para a pré-venda — o número do adm tem
+    // aba própria no Administrativo e não é conversa de lead (28/10/2026).
+    const soComercial = String(req.query.comercial || "") === "1";
+    const emb = canal || soOperacao || soComercial ? "wa_canal!inner(slug,nome,atendente,comercial)" : "wa_canal(slug,nome,atendente,comercial)";
     const partes = [
       `select=id,telefone,nome,ultima_em,primeira_em,ultima_de_fora,respondida_em,anuncio,atendimento_id,lead_id,${emb}`,
       "order=ultima_em.desc",
@@ -2670,6 +2673,7 @@ module.exports = async function handler(req, res) {
     ];
     if (canal) partes.push(`wa_canal.slug=eq.${encodeURIComponent(canal)}`);
     if (soOperacao) partes.push("wa_canal.comercial=eq.false");
+    if (soComercial) partes.push("wa_canal.comercial=eq.true");
     const busca = String(req.query.busca || "").trim();
     if (busca) {
       // Vírgula e parêntese são sintaxe do `or=` do PostgREST: um nome

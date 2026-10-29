@@ -954,8 +954,8 @@ async function dutMudar(id, mud) {
   return { ...d.pedido, _aviso: d.aviso || null };
 }
 
-async function waConversas({ canal, busca, operacao } = {}) {
-  const q = comoQuery({ canal: canal || undefined, busca: busca || undefined, operacao: operacao ? "1" : undefined });
+async function waConversas({ canal, busca, operacao, comercial } = {}) {
+  const q = comoQuery({ canal: canal || undefined, busca: busca || undefined, operacao: operacao ? "1" : undefined, comercial: comercial ? "1" : undefined });
   const r = await fetchAut(`/api/atendimento?recurso=conversas${q ? `&${q}` : ""}`);
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.erro || "Não consegui carregar as conversas.");
@@ -9677,7 +9677,9 @@ function TelaConversas({ alvo, aoConsumirAlvo, operacao }) {
       // em segundo plano olhando para "carregando…" por vinte segundos.
       if (!primeira && document.visibilityState !== "visible") { t = setTimeout(volta, 20000); return; }
       primeira = false;
-      try { const d = await waConversas({ canal, busca, operacao }); if (vivo) { setLista(d); setErro(""); } }
+      // Na pré-venda, só os números comerciais: o do adm mora na aba dele
+      // no Administrativo (o Derek, 28/10/2026).
+      try { const d = await waConversas({ canal, busca, operacao, comercial: !operacao }); if (vivo) { setLista(d); setErro(""); } }
       catch (e) { if (vivo) setErro(e.message); }
       // Vinte segundos: é um mural, e cinco seria pagar por movimento
       // que ninguém está olhando (mesma conta da decisão 45).
@@ -9725,7 +9727,7 @@ function TelaConversas({ alvo, aoConsumirAlvo, operacao }) {
                 <select className="ml-auto max-w-[170px] rounded-full px-2.5 py-1 text-[12.5px] outline-none"
                   style={{ background: WA.barra, color: WA.texto, border: "none" }} value={canal} onChange={(e) => setCanal(e.target.value)}>
                   <option value="">Todos os números</option>
-                  {canais.map((c) => <option key={c.slug} value={c.slug}>{c.nome}</option>)}
+                  {canais.filter((c) => c.comercial !== false).map((c) => <option key={c.slug} value={c.slug}>{c.nome}</option>)}
                 </select>
               )}
             </div>
