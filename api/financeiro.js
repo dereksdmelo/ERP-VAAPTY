@@ -844,7 +844,114 @@ async function dre(req, res, tok) {
   const comp = competenciaDe(req.query.competencia) || competenciaDe(hojeAqui());
   const n = Math.min(24, Math.max(0, Number(req.query.meses) || 0));
   if (n > 1) return dreMeses(req, res, tok, comp, n);
-  return res.status(200).json(await dreDoMes(tok, comp));
+  const d = await dreDoMes(tok, comp);
+  /* O DRE PROJETADO (28/10/2026, o Derek: "porque os salários da galera
+   * não tá aparecendo direito no DRE projetado?"). O DRE do mês continua
+   * sendo o que passou no banco — é o número que se confere. A projeção
+   * vem à parte e soma o que ainda vai sair: os títulos em aberto, as
+   * contas fixas que ainda nem viraram título, e a folha do combinado
+   * MENOS o que dela já entrou (pago ou em título), para o salário não
+   * contar duas vezes. A rentabilidade é a de até agora: projetar venda
+   * de carro seria número bonito e mentiroso (decisão 22). */
+  try {
+    const [proj, fixas] = await Promise.all([
+      projecaoRemuneracao(tok, comp).catch(() => null),
+      fixasDoMes(tok, comp).catch(() => null),
+    ]);
+    const folhaPrevista = proj ? (proj.aberto ? proj.total_ritmo : proj.total_agora) : 0;
+    const folhaALancar = Math.max(0, folhaPrevista - (d.folha_lancada || 0));
+    const fixasNaoGeradas = fixas ? fixas.contas.filter((x) => x.ativo && !x.titulo).reduce((t, x) => t + x.previsto, 0) : 0;
+    d.projecao = {
+      em_aberto: d.em_aberto, fixas_nao_geradas: fixasNaoGeradas,
+      folha_prevista: folhaPrevista, folha_lancada: d.folha_lancada || 0, folha_a_lancar: folhaALancar,
+      lucro_projetado: d.lucro + d.em_aberto - fixasNaoGeradas - folhaALancar,
+    };
+  } catch (e) { d.projecao = null; }
+  return res.status(200).json(d);
+}
+
+/* AS CONTAS FIXAS (0096). A conta fixa é o cadastro; o mês é um título
+ * (`fin_lancamento` aberto, com `conta_fixa_id`). "Varia com o consumo"
+ * prevê pela média dos três últimos meses PAGOS dela; sem histórico,
+ * vale o valor do cadastro. */
+async function fixasDoMes(tok, comp) {
+  const [contas, doMes, hist] = await Promise.all([
+    supa(`${base("fin_conta_fixa")}?select=*,fin_categoria(id,nome),fin_conta(id,nome)&order=nome.asc`, { headers: cab(tok) }),
+    supa(`${base("fin_lancamento")}?select=id,conta_fixa_id,debito,credito,situacao,vencimento,data&conta_fixa_id=not.is.null&competencia=eq.${comp}&situacao=neq.cancelado`, { headers: cab(tok) }),
+    supa(`${base("fin_lancamento")}?select=conta_fixa_id,debito,competencia&conta_fixa_id=not.is.null&situacao=eq.efetivado&competencia=lt.${comp}&order=competencia.desc&limit=2000`, { headers: cab(tok) }),
+  ]);
+  const doMesPor = {}; (doMes || []).forEach((l) => { doMesPor[l.conta_fixa_id] = l; });
+  const histPor = {}; (hist || []).forEach((l) => { (histPor[l.conta_fixa_id] = histPor[l.conta_fixa_id] || []).push(Number(l.debito) || 0); });
+  const lista = (contas || []).map((c) => {
+    const ult = (histPor[c.id] || []).slice(0, 3);
+    const media = ult.length ? Math.round((ult.reduce((t, v) => t + v, 0) / ult.length) * 100) / 100 : null;
+    const estimativa = c.tipo === "variavel" && media != null ? media : Number(c.valor) || 0;
+    const t = doMesPor[c.id] || null;
+    return { ...c, estimativa, media_3: media, meses_historico: ult.length,
+      titulo: t ? { id: t.id, situacao: t.situacao, valor: Number(t.debito) || Number(t.credito) || 0, vencimento: t.vencimento } : null,
+      previsto: t ? (Number(t.debito) || 0) : estimativa };
+  });
+  return { competencia: comp, contas: lista };
+}
+async function contasFixas(req, res, tok) {
+  const comp = competenciaDe(req.query.competencia) || competenciaDe(hojeAqui());
+  const acao = String(req.query.acao || "");
+  if (req.method === "GET") {
+    const d = await fixasDoMes(tok, comp);
+    const ativas = d.contas.filter((x) => x.ativo);
+    return res.status(200).json({ ...d,
+      total_previsto: ativas.reduce((t, x) => t + x.previsto, 0),
+      faltam_gerar: ativas.filter((x) => !x.titulo).length });
+  }
+  const c = await corpoDe(req) || {};
+  if (req.method === "POST" && acao === "gerar") {
+    // Um título por conta ativa que ainda não tem o do mês. O índice
+    // único (conta, competência) barra a segunda geração do mesmo mês.
+    const d = await fixasDoMes(tok, comp);
+    const fim = fimDoMes(comp);
+    const novos = d.contas.filter((x) => x.ativo && !x.titulo).map((x) => {
+      const dia = String(Math.min(Number(x.dia_vencimento) || 10, Number(fim.slice(8, 10)))).padStart(2, "0");
+      const venc = `${comp.slice(0, 8)}${dia}`;
+      return { conta_id: x.conta_id || null, data: venc, competencia: comp, categoria_id: x.categoria_id || null,
+        descricao: x.nome, favorecido: x.favorecido || null, debito: x.estimativa, credito: 0,
+        situacao: "aberto", vencimento: venc, origem: "conta_fixa", conta_fixa_id: x.id,
+        observacao: x.tipo === "variavel" ? "Valor estimado — ajuste quando a conta chegar." : null };
+    }).filter((x) => x.debito > 0);
+    if (!novos.length) return res.status(200).json({ ok: true, criados: 0 });
+    const r = await supa(base("fin_lancamento"), { method: "POST", headers: cab(tok, REP), body: JSON.stringify(novos) });
+    return res.status(201).json({ ok: true, criados: (r || []).length });
+  }
+  // Ajustar o valor do título do mês (a conta de consumo que chegou).
+  if (req.method === "PATCH" && acao === "valor") {
+    const id = idOuNulo(c.titulo_id);
+    const v = decimal(c.valor);
+    if (!id || !(v > 0)) return res.status(400).json({ erro: "Título e valor." });
+    const r = await supa(`${base("fin_lancamento")}?id=eq.${id}&situacao=eq.aberto`, { method: "PATCH", headers: cab(tok, REP),
+      body: JSON.stringify({ debito: v, observacao: null }) });
+    if (!um(r)) return res.status(409).json({ erro: "O título não está mais em aberto." });
+    return res.status(200).json({ ok: true });
+  }
+  if (req.method === "POST" || req.method === "PATCH") {
+    const id = req.method === "PATCH" ? idOuNulo(req.query.id) : null;
+    if (req.method === "PATCH" && !id) return res.status(400).json({ erro: "id inválido." });
+    const linha = {};
+    if (c.nome !== undefined) linha.nome = texto(c.nome);
+    if (c.categoria_id !== undefined) linha.categoria_id = idOuNulo(c.categoria_id);
+    if (c.conta_id !== undefined) linha.conta_id = idOuNulo(c.conta_id);
+    if (c.favorecido !== undefined) linha.favorecido = texto(c.favorecido);
+    if (c.tipo !== undefined) linha.tipo = c.tipo === "variavel" ? "variavel" : "fixa";
+    if (c.valor !== undefined) linha.valor = decimal(c.valor) || 0;
+    if (c.dia_vencimento !== undefined) linha.dia_vencimento = Math.min(31, Math.max(1, Math.trunc(Number(c.dia_vencimento) || 10)));
+    if (c.ativo !== undefined) linha.ativo = !!c.ativo;
+    if (c.observacao !== undefined) linha.observacao = texto(c.observacao);
+    if (req.method === "POST" && !linha.nome) return res.status(400).json({ erro: "Dê um nome à conta." });
+    const r = await supa(req.method === "POST" ? base("fin_conta_fixa") : `${base("fin_conta_fixa")}?id=eq.${id}`,
+      { method: req.method, headers: cab(tok, REP), body: JSON.stringify(linha) });
+    if (!um(r)) return recusado(res);
+    return res.status(200).json({ ok: true, conta: um(r) });
+  }
+  res.setHeader("Allow", "GET, POST, PATCH");
+  return res.status(405).json({ erro: "Use GET, POST ou PATCH." });
 }
 
 // O DRE de um mês, como objeto: a tela o lê pelo `dre`, e o combinado de
@@ -854,7 +961,7 @@ async function dreDoMes(tok, comp) {
     supa(`${base("fin_lancamento")}?select=debito,credito,situacao,categoria_id,estoque_id,tipo_negociacao,funcionario_id,` +
       `fin_rateio(valor,categoria_id,estoque_id,tipo_negociacao,funcionario_id)&situacao=in.(aberto,efetivado)&competencia=eq.${comp}&limit=10000`,
       { headers: cab(tok) }),
-    supa(`${base("fin_categoria")}?select=id,nome,grupo,no_dre,ordem`, { headers: cab(tok) }),
+    supa(`${base("fin_categoria")}?select=id,nome,grupo,no_dre,ordem,pede_funcionario`, { headers: cab(tok) }),
   ]);
   const catPorId = {};
   (cats || []).forEach((c) => { catPorId[c.id] = c; });
@@ -862,6 +969,9 @@ async function dreDoMes(tok, comp) {
   const por = {};
   let semCategoria = 0;
   let emAberto = 0;
+  // O que da folha já entrou nesta competência (paga ou em título), para
+  // a projeção não contar o salário duas vezes.
+  let folhaLancada = 0;
   (lanc || []).forEach((l) => {
     // O DRE do mês continua sendo o que passou no banco — é o número
     // que o Derek confere hoje. O que está em aberto vai à parte, para
@@ -872,6 +982,7 @@ async function dreDoMes(tok, comp) {
     partesDe(l).forEach((p) => {
       const c = p.categoria_id ? catPorId[p.categoria_id] : null;
       if (c && !c.no_dre) return;
+      if ((c && c.pede_funcionario) || p.funcionario_id) folhaLancada += -p.valor;
       if (aberto) { emAberto += p.valor; return; }
       if (!c) { semCategoria += p.valor; return; }
       por[c.id] = por[c.id] || { id: c.id, nome: c.nome, grupo: c.grupo, ordem: c.ordem, valor: 0 };
@@ -887,7 +998,7 @@ async function dreDoMes(tok, comp) {
     { bruta: 0, liquida: 0, venda: 0 });
 
   return {
-    competencia: comp, linhas, total_despesas: totalDespesas, sem_categoria: semCategoria, em_aberto: emAberto,
+    competencia: comp, linhas, total_despesas: totalDespesas, sem_categoria: semCategoria, em_aberto: emAberto, folha_lancada: folhaLancada,
     carros_vendidos: vendidos.length, rentabilidade: rent.liquida, rentabilidade_bruta: rent.bruta, faturamento: rent.venda,
     lucro: rent.liquida + totalDespesas + semCategoria,
   };
@@ -2176,6 +2287,7 @@ const perfilRemuneracao = cadastro("perfil_remuneracao", [["nome", texto], ["des
   ["remuneracao", (v) => require("../regras/remuneracao.js").limpar(v)], ["ativo", bool]], "nome.asc");
 
 const RECURSOS = { conta, categoria, funcionario, favorecido, lancamento, importar, dre, carros, vale, folha, remuneracao,
+                   "contas-fixas": contasFixas,
                    "perfil-remuneracao": perfilRemuneracao,
                    fechamento, orcamento, ano, rateio, negociacao, titulo, fluxo, log, recibo, pendencias, recebimentos, saldos,
                    estoque: estoqueLista };

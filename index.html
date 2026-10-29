@@ -16445,7 +16445,8 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
    * favorecido ainda se editam dentro de Lançamentos, e um grupo com um
    * atalho para a mesma tela seria menu que promete o que não tem. */
   const TITULO = { pendencias: "Pendências", lancamentos: "Lançamentos", recebimentos: "Recebimentos", contas: "A pagar / receber",
-    carros: "Carros", fechamento: "Fechamento", dre: "DRE", ano: "Ano", folha: "Folha", caixas: "Contas e caixas" };
+    carros: "Carros", fechamento: "Fechamento", dre: "DRE", ano: "Ano", folha: "Folha", caixas: "Contas e caixas",
+    fixas: "Contas fixas", plano: "Plano de contas" };
   const SUB = {
     pendencias: "Tudo que pede ação, num lugar só.",
     lancamentos: "O extrato do banco: categorizar, ligar ao carro, fechar o mês.",
@@ -16457,13 +16458,15 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
     ano: "Os doze meses lado a lado, como o fluxo de caixa da planilha.",
     folha: "Salário, comissão, bonificação e vales.",
     caixas: "Os bancos e o dinheiro em espécie: quanto tem em cada lugar.",
+    fixas: "O que sai todo mês: gera os títulos do mês e entra na projeção do DRE.",
+    plano: "As categorias do DRE: em que grupo cada uma entra, e se é custo fixo ou variável.",
   };
   // Quem vem de uma pendência chega no MÊS dela: o lançamento sem
   // categoria de agosto não está na tela de outubro.
   const irPara = (a, c) => { if (c && aoMudarMes) aoMudarMes(competenciaDe(c)); if (aoIrPara) aoIrPara(a); };
   return (
     <div>
-      <Cabecalho titulo={TITULO[aba] || "Financeiro"} mes={aba === "pendencias" || aba === "caixas" || aba === "ano" ? null : mes} sub={SUB[aba]} />
+      <Cabecalho titulo={TITULO[aba] || "Financeiro"} mes={aba === "pendencias" || aba === "caixas" || aba === "ano" || aba === "plano" ? null : mes} sub={SUB[aba]} />
       {aba === "pendencias" && <FinPendencias aoIr={irPara} />}
       {aba === "lancamentos" && <FinLancamentos comp={comp} />}
       {aba === "recebimentos" && <FinRecebimentos comp={comp} />}
@@ -16474,6 +16477,203 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
       {aba === "carros" && <FinCarros comp={comp} />}
       {aba === "folha" && <FinFolha comp={comp} />}
       {aba === "caixas" && <FinCaixas />}
+      {aba === "fixas" && <FinContasFixas comp={comp} />}
+      {aba === "plano" && <FinPlanoContas />}
+    </div>
+  );
+}
+
+/* CONTAS FIXAS (0096, 28/10/2026, o Derek: "tem contas fixas que são
+ * 100% fixas e outras são fixas porque tem todo mês mas variam de acordo
+ * com o consumo, preciso compor elas pra poder considerar numa projeção
+ * de DRE"). A conta é o cadastro; o mês é um título em aberto, gerado
+ * por um botão — e gerar de novo não duplica. A que varia nasce com a
+ * média dos três últimos meses pagos e se ajusta aqui quando a conta
+ * chega: o extrato só baixa título de valor exato (decisão 26). */
+function FinContasFixas({ comp }) {
+  const [d, setD] = useState(null); const [erro, setErro] = useState(""); const [aviso, setAviso] = useState("");
+  const [cats, setCats] = useState([]); const [contas, setContas] = useState([]);
+  const [nova, setNova] = useState(null); const [indo, setIndo] = useState(false);
+  const carregar = () => fin("contas-fixas", { competencia: comp }).then((x) => { setD(x); setErro(""); }).catch((e) => setErro(e.message));
+  useEffect(() => { setD(null); carregar(); }, [comp]);
+  useEffect(() => {
+    fin("categoria").then((x) => setCats((x.lista || []).filter((c) => c.ativa !== false))).catch(() => {});
+    fin("conta").then((x) => setContas((x.lista || []).filter((c) => c.ativa !== false && c.ativo !== false))).catch(() => {});
+  }, []);
+  const salvar = async (id, mud) => {
+    try { await fin("contas-fixas", id ? { id } : {}, finJson(id ? "PATCH" : "POST", mud)); carregar(); return true; }
+    catch (e) { setErro(e.message); return false; }
+  };
+  const gerar = async () => {
+    setIndo(true); setAviso("");
+    try { const r = await fin("contas-fixas", { competencia: comp, acao: "gerar" }, finJson("POST", {})); setAviso(r.criados ? `${r.criados} título${r.criados === 1 ? "" : "s"} gerado${r.criados === 1 ? "" : "s"} em ${rotuloMes(comp)} — aparecem em A pagar / receber.` : "Nada para gerar: todas já têm o título do mês."); carregar(); }
+    catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+  const ajustar = async (c, v) => {
+    const valor = numBR(v); if (!(valor > 0) || !c.titulo) return;
+    try { await fin("contas-fixas", { acao: "valor" }, finJson("PATCH", { titulo_id: c.titulo.id, valor })); carregar(); }
+    catch (e) { setErro(e.message); }
+  };
+  if (erro && !d) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
+  if (!d) return <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>;
+  const ativas = d.contas.filter((x) => x.ativo);
+  const inativas = d.contas.filter((x) => !x.ativo);
+  const sel = "rounded border px-1.5 py-1 text-[12.5px] outline-none";
+  const linhaForm = (c, mudar) => (
+    <>
+      <input className={`${sel} min-w-[160px] flex-1`} style={inputSty} placeholder="Nome (ex.: Aluguel, Energia)" value={c.nome || ""} onChange={(e) => mudar({ nome: e.target.value })} />
+      <select className={sel} style={inputSty} value={c.tipo || "fixa"} onChange={(e) => mudar({ tipo: e.target.value })}>
+        <option value="fixa">valor fixo</option><option value="variavel">varia com o consumo</option>
+      </select>
+      <input className={`${sel} w-24 text-right`} style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal" placeholder={c.tipo === "variavel" ? "estimativa" : "valor"}
+        value={c.valor == null ? "" : c.valor} onChange={(e) => mudar({ valor: e.target.value })} />
+      <label className="flex items-center gap-1 text-[12px]" style={{ color: C.mute }}>dia
+        <input className={`${sel} w-12 text-center`} style={inputSty} inputMode="numeric" value={c.dia_vencimento || ""} onChange={(e) => mudar({ dia_vencimento: e.target.value })} />
+      </label>
+      <select className={sel} style={inputSty} value={c.categoria_id || ""} onChange={(e) => mudar({ categoria_id: e.target.value || null })}>
+        <option value="">categoria…</option>{cats.map((k) => <option key={k.id} value={k.id}>{k.nome}</option>)}
+      </select>
+      <select className={sel} style={inputSty} value={c.conta_id || ""} onChange={(e) => mudar({ conta_id: e.target.value || null })}>
+        <option value="">sai de qualquer conta</option>{contas.map((k) => <option key={k.id} value={k.id}>{k.nome}</option>)}
+      </select>
+    </>
+  );
+  return (
+    <div className="space-y-4">
+      {(erro || aviso) && <p className="text-[13px]" style={{ color: erro ? C.laranja : C.verde }}>{erro || aviso}</p>}
+      <div className="flex flex-wrap items-center gap-3 rounded-xl p-3" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        <div>
+          <div className="text-[12px]" style={{ color: C.mute }}>Previsto em {rotuloMes(comp)}</div>
+          <div className="text-[20px] font-bold" style={{ fontVariantNumeric: "tabular-nums", color: C.laranja }}>{rs2(d.total_previsto)}</div>
+        </div>
+        <div className="text-[12.5px]" style={{ color: C.mute }}>{ativas.length} conta{ativas.length === 1 ? "" : "s"} · {d.faltam_gerar} sem o título do mês</div>
+        <button onClick={gerar} disabled={indo || !d.faltam_gerar} className="ml-auto rounded-lg px-4 py-2 text-[13px] font-semibold text-white"
+          style={{ background: indo || !d.faltam_gerar ? C.line : C.roxo }}>{indo ? "Gerando…" : `Gerar os títulos de ${rotuloMes(comp)}`}</button>
+      </div>
+
+      <div className="rolar overflow-x-auto rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 860 }}>
+          <thead><tr>{["Conta", "Tipo", "Valor / estimativa", "Vence", "Categoria", `${rotuloMes(comp)}`, ""].map((h, i) => (
+            <th key={h + i} className="whitespace-nowrap px-2 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.04em]" style={{ color: C.mute, borderBottom: `1px solid ${C.line}` }}>{h}</th>))}</tr></thead>
+          <tbody>
+            {ativas.map((c) => (
+              <tr key={c.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                <td className="px-2 py-1.5 text-[13px] font-semibold">{c.nome}{c.favorecido ? <div className="text-[11px] font-normal" style={{ color: C.mute }}>{c.favorecido}</div> : null}</td>
+                <td className="px-2 py-1.5 text-[12px]">{c.tipo === "variavel" ? "varia com o consumo" : "valor fixo"}</td>
+                <td className="px-2 py-1.5 text-[12.5px]" style={{ fontVariantNumeric: "tabular-nums" }}>
+                  {c.tipo === "variavel"
+                    ? <>{rs2(c.estimativa)}<div className="text-[11px]" style={{ color: C.mute }}>{c.meses_historico ? `média de ${c.meses_historico} ${c.meses_historico === 1 ? "mês pago" : "meses pagos"}` : "estimativa do cadastro"}</div></>
+                    : rs2(c.valor)}
+                </td>
+                <td className="px-2 py-1.5 text-[12.5px]">dia {c.dia_vencimento}</td>
+                <td className="px-2 py-1.5 text-[12.5px]" style={{ color: c.fin_categoria ? C.ink : C.laranja }}>{c.fin_categoria ? c.fin_categoria.nome : "sem categoria"}</td>
+                <td className="px-2 py-1.5 text-[12.5px]">
+                  {!c.titulo ? <span style={{ color: C.mute }}>não gerado</span>
+                    : c.titulo.situacao === "efetivado" ? <span style={{ color: C.verde, fontWeight: 600 }}>pago {rs2(c.titulo.valor)}</span>
+                    : (
+                      <span className="flex items-center gap-1.5">
+                        <span style={{ color: AMARELO.texto }}>em aberto</span>
+                        <input key={`${c.titulo.id}-${c.titulo.valor}`} className="w-24 rounded border px-1.5 py-0.5 text-right text-[12px] outline-none" style={{ ...inputSty, fontFamily: F.mono }}
+                          inputMode="decimal" defaultValue={Math.round(c.titulo.valor * 100) / 100}
+                          title="O valor da conta que chegou: o extrato só baixa título de valor exato."
+                          onBlur={(e) => { if (numBR(e.target.value) !== c.titulo.valor) ajustar(c, e.target.value); }} />
+                      </span>
+                    )}
+                </td>
+                <td className="px-2 py-1.5 text-right">
+                  <button onClick={() => setNova({ ...c })} className="text-[12px] font-semibold" style={{ color: C.roxo }}>editar</button>
+                  <button onClick={() => salvar(c.id, { ativo: false })} className="ml-2 text-[12px]" style={{ color: C.mute }}>desativar</button>
+                </td>
+              </tr>
+            ))}
+            {!ativas.length && <tr><td colSpan={7} className="px-3 py-6 text-center text-[13px]" style={{ color: C.mute }}>Nenhuma conta fixa ainda. Cadastre o aluguel, a internet, a energia…</td></tr>}
+          </tbody>
+        </table>
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2" style={{ borderTop: `1px solid ${C.line}` }}>
+          {nova ? (
+            <>
+              {linhaForm(nova, (m) => setNova({ ...nova, ...m }))}
+              <button onClick={async () => { const { id, fin_categoria, fin_conta, estimativa, media_3, meses_historico, titulo, previsto, criado_em, ...mud } = nova;
+                if (await salvar(id, mud)) setNova(null); }} className="rounded-md px-3 py-1.5 text-[12.5px] font-semibold text-white" style={{ background: C.roxo }}>{nova.id ? "salvar" : "cadastrar"}</button>
+              <button onClick={() => setNova(null)} className="text-[12.5px]" style={{ color: C.mute }}>cancelar</button>
+            </>
+          ) : (
+            <button onClick={() => setNova({ nome: "", tipo: "fixa", valor: "", dia_vencimento: 10, categoria_id: null, conta_id: null })}
+              className="text-[13px] font-semibold" style={{ color: C.roxo }}>+ conta fixa</button>
+          )}
+        </div>
+      </div>
+      {!!inativas.length && (
+        <p className="text-[12px]" style={{ color: C.mute }}>
+          Desativadas: {inativas.map((c, i) => <span key={c.id}>{i ? ", " : ""}{c.nome} <button onClick={() => salvar(c.id, { ativo: true })} className="underline" style={{ color: C.roxo }}>reativar</button></span>)}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/* O PLANO DE CONTAS (28/10/2026, o Derek: "tem que ter um plano de contas
+ * pro DRE… uma aba pra isso… se já tiver precisa estar à disposição, até
+ * porque se precisar editar"). Já existia — `fin_categoria` (0021, 0028)
+ * — mas só se editava de dentro de Lançamentos. Aqui, uma linha por
+ * categoria: o grupo (o que decide se entra no DRE), se é custo fixo ou
+ * variável (o Fechamento, decisão 32), se pede a pessoa (folha), a ordem
+ * e se está ativa. Desativa-se, não se apaga: lançamento antigo continua
+ * apontando para ela. */
+const GRUPO_CAT_ROT = { despesa: "despesa", receita: "receita", negociacao: "negociação (carro)", retirada: "retirada de sócio", transferencia: "transferência", saldo: "saldo" };
+function FinPlanoContas() {
+  const [lista, setLista] = useState(null); const [erro, setErro] = useState(""); const [novo, setNovo] = useState("");
+  const [so, setSo] = useState("ativas");
+  const carregar = () => fin("categoria").then((x) => { setLista(x.lista || []); setErro(""); }).catch((e) => setErro(e.message));
+  useEffect(() => { carregar(); }, []);
+  const mudar = async (id, mud) => {
+    setLista((ls) => ls.map((c) => (c.id === id ? { ...c, ...mud } : c)));
+    try { await fin("categoria", { id }, finJson("PATCH", mud)); } catch (e) { setErro(e.message); carregar(); }
+  };
+  if (erro && !lista) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
+  if (!lista) return <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>;
+  const mostradas = lista.filter((c) => so === "todas" || c.ativa !== false)
+    .slice().sort((a, b) => String(a.grupo).localeCompare(String(b.grupo)) || (a.ordem || 0) - (b.ordem || 0) || String(a.nome).localeCompare(String(b.nome)));
+  const sel = "rounded border px-1.5 py-1 text-[12.5px] outline-none";
+  return (
+    <div className="space-y-3">
+      {erro && <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+      <div className="flex flex-wrap items-center gap-2">
+        {[["ativas", "Ativas"], ["todas", "Todas"]].map(([v, r]) => (
+          <button key={v} onClick={() => setSo(v)} className="rounded-full px-3 py-1 text-[12.5px] font-semibold"
+            style={{ background: so === v ? C.roxoFraco : "transparent", color: so === v ? C.roxo : C.mute }}>{r}</button>
+        ))}
+        <span className="text-[12px]" style={{ color: C.mute }}>Entra no DRE: despesa e receita com "no DRE" ligado. Negociação, retirada e transferência ficam fora.</span>
+      </div>
+      <div className="rolar overflow-x-auto rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 820 }}>
+          <thead><tr>{["Categoria", "Grupo", "No DRE", "Custo", "Pede a pessoa", "Ordem", ""].map((h) => (
+            <th key={h} className="whitespace-nowrap px-2 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.04em]" style={{ color: C.mute, borderBottom: `1px solid ${C.line}` }}>{h}</th>))}</tr></thead>
+          <tbody>
+            {mostradas.map((c) => (
+              <tr key={c.id} style={{ borderBottom: `1px solid ${C.line}`, opacity: c.ativa === false ? 0.5 : 1 }}>
+                <td className="px-2 py-1"><input key={`${c.id}-${c.nome}`} className={`${sel} w-full`} style={inputSty} defaultValue={c.nome}
+                  onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== c.nome) mudar(c.id, { nome: v }); }} /></td>
+                <td className="px-2 py-1"><select className={sel} style={inputSty} value={c.grupo || "despesa"} onChange={(e) => mudar(c.id, { grupo: e.target.value })}>
+                  {Object.entries(GRUPO_CAT_ROT).map(([v, r]) => <option key={v} value={v}>{r}</option>)}</select></td>
+                <td className="px-2 py-1"><input type="checkbox" checked={!!c.no_dre} onChange={(e) => mudar(c.id, { no_dre: e.target.checked })} /></td>
+                <td className="px-2 py-1"><select className={sel} style={inputSty} value={c.tipo_custo || "fixa"} onChange={(e) => mudar(c.id, { tipo_custo: e.target.value })}>
+                  <option value="fixa">fixo</option><option value="variavel">variável</option></select></td>
+                <td className="px-2 py-1"><input type="checkbox" checked={!!c.pede_funcionario} onChange={(e) => mudar(c.id, { pede_funcionario: e.target.checked })} /></td>
+                <td className="px-2 py-1"><input key={`${c.id}-o-${c.ordem}`} className={`${sel} w-16 text-right`} style={inputSty} inputMode="numeric" defaultValue={c.ordem || 0}
+                  onBlur={(e) => { const v = Number(e.target.value) || 0; if (v !== (c.ordem || 0)) mudar(c.id, { ordem: v }); }} /></td>
+                <td className="px-2 py-1 text-right"><button onClick={() => mudar(c.id, { ativa: c.ativa === false })} className="text-[12px] underline" style={{ color: c.ativa === false ? C.verde : C.mute }}>{c.ativa === false ? "reativar" : "desativar"}</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="flex items-center gap-2 px-3 py-2" style={{ borderTop: `1px solid ${C.line}` }}>
+          <input className="flex-1 rounded-lg border px-3 py-1.5 text-[13px] outline-none" style={inputSty} placeholder="Nova categoria" value={novo} onChange={(e) => setNovo(e.target.value)} />
+          <button onClick={async () => { if (!novo.trim()) return; try { await fin("categoria", null, finJson("POST", { nome: novo.trim(), grupo: "despesa", no_dre: true })); setNovo(""); carregar(); } catch (e) { setErro(e.message); } }}
+            className="text-[13px] font-semibold" style={{ color: C.roxo }}>cadastrar</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -18116,6 +18316,25 @@ function FinDRE({ comp }) {
         )}
         <div className="mt-3 text-[12px]" style={{ color: C.mute }}>Lucro</div>
         <div className="text-[26px] font-bold" style={{ fontVariantNumeric: "tabular-nums", color: d.lucro >= 0 ? C.verde : C.laranja }}>{rs2(d.lucro)}</div>
+        {/* O DRE PROJETADO (28/10/2026): o lucro de cima é o que passou no
+            banco; este soma o que ainda vai sair no mês. */}
+        {d.projecao && (
+          <div className="mt-4 rounded-lg p-3" style={{ background: C.bg }}>
+            <div className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: C.mute }}>Projetado até o fim do mês</div>
+            {[["Títulos em aberto", d.projecao.em_aberto],
+              ["Contas fixas ainda sem título", -d.projecao.fixas_nao_geradas],
+              [`Folha ainda a lançar (prevista ${rs2(d.projecao.folha_prevista)} − lançada ${rs2(d.projecao.folha_lancada)})`, -d.projecao.folha_a_lancar]].map(([r, v]) => (
+              <div key={r} className="mt-1 flex items-baseline justify-between gap-2 text-[12px]">
+                <span style={{ color: C.mute }}>{r}</span><span style={{ fontVariantNumeric: "tabular-nums", color: v < 0 ? C.laranja : C.ink }}>{rs2(v)}</span>
+              </div>
+            ))}
+            <div className="mt-2 flex items-baseline justify-between gap-2">
+              <span className="text-[12px] font-semibold">Lucro projetado</span>
+              <span className="text-[20px] font-bold" style={{ fontVariantNumeric: "tabular-nums", color: d.projecao.lucro_projetado >= 0 ? C.verde : C.laranja }}>{rs2(d.projecao.lucro_projetado)}</span>
+            </div>
+            <p className="mt-1 text-[10.5px] leading-snug" style={{ color: C.mute }}>A rentabilidade é a de até agora — venda de carro não se projeta. A folha vem do combinado de cada um, no ritmo do mês, menos o que dela já foi pago ou lançado.</p>
+          </div>
+        )}
         <p className="mt-3 text-[11px] leading-snug" style={{ color: C.mute }}>Como na planilha: despesa é crédito − débito por categoria, e a rentabilidade líquida dos carros vendidos no mês entra como receita. Negociação, retirada e transferência ficam fora.</p>
       </div>
     </div>
@@ -22591,7 +22810,9 @@ function destinosPara(perfil) {
       { id: "fin_dre",         rot: "DRE",               curto: "Financ.", area: "financeiro", aba: "dre",         grupo: "fim do mês", icone: "financeiro" },
       { id: "fin_ano",         rot: "Ano",               curto: "Financ.", area: "financeiro", aba: "ano",         grupo: "fim do mês", icone: "financeiro" },
       { id: "fin_folha",       rot: "Folha",             curto: "Financ.", area: "financeiro", aba: "folha",       grupo: "fim do mês", icone: "financeiro" },
+      { id: "fin_fixas",       rot: "Contas fixas",      curto: "Financ.", area: "financeiro", aba: "fixas",       grupo: "fim do mês", icone: "financeiro" },
       { id: "fin_caixas",      rot: "Contas e caixas",   curto: "Financ.", area: "financeiro", aba: "caixas",      grupo: "cadastros",  icone: "financeiro" },
+      { id: "fin_plano",       rot: "Plano de contas",   curto: "Financ.", area: "financeiro", aba: "plano",       grupo: "cadastros",  icone: "financeiro" },
     ] : []),
 
     // ---- o papel e a operação ----
@@ -25492,6 +25713,7 @@ function TelaGestao({ perfil, comp }) {
 const ABA_FIN = {
   fin_pendencias: "pendencias", fin_lancamentos: "lancamentos", fin_recebimentos: "recebimentos", fin_contas: "contas",
   fin_carros: "carros", fin_fechamento: "fechamento", fin_dre: "dre", fin_ano: "ano", fin_folha: "folha", fin_caixas: "caixas",
+  fin_fixas: "fixas", fin_plano: "plano",
 };
 const DESTINO_FIN = Object.fromEntries(Object.entries(ABA_FIN).map(([d, a]) => [a, d]));
 

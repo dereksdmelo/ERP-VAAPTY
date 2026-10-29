@@ -3090,6 +3090,42 @@ saem da agenda de HOJE. Só pesa no horário que já tinha gente demais.
 horário (`POR_HORARIO = 2`, chute meu); e a IA ainda não manda os
 lembretes — no treino ela só responde ao que o cliente mandou.
 
+### 69. Contas fixas, plano de contas e o DRE projetado (0096)
+
+O Derek, em 28/10/2026, três pedidos seguidos: *"aba pra contas fixas,
+para que eu possa gerar todos os meses (tem contas fixas que são 100%
+fixas e outras… variam de acordo com o consumo, preciso compor elas pra
+poder considerar numa projeção de DRE)"*; *"tem que ter um plano de
+contas pro DRE… se já tiver precisa estar à disposição"*; e *"por que os
+salários da galera não tá aparecendo direito no DRE projetado?"*.
+
+**Contas fixas** (Financeiro → fim do mês): a conta é o cadastro
+(`fin_conta_fixa`); o mês é um título em aberto (`fin_lancamento` com
+`conta_fixa_id`), gerado por "Gerar os títulos do mês" — um por conta
+por competência, com índice único, então gerar de novo não duplica.
+**"Varia com o consumo" prevê pela média dos três últimos meses pagos**
+dela; sem histórico, vale o valor do cadastro. O título nasce com a
+estimativa e se ajusta na própria tela quando a conta chega — e precisa
+ser ajustado, porque o extrato só baixa título de valor exato (decisão
+26): estimativa que não bate deixaria o título aberto ao lado do
+lançamento real.
+
+**Plano de contas** (Financeiro → cadastros): `fin_categoria` já existia
+(0021, 0028) e só se editava de dentro de Lançamentos. Agora é tela: o
+grupo (que decide se entra no DRE), "no DRE", custo fixo ou variável (o
+Fechamento, decisão 32), "pede a pessoa" (folha), ordem e ativa.
+Desativa-se, não se apaga.
+
+**O DRE projetado** fica ao lado do lucro, e o lucro de cima não muda: é
+o que passou no banco, o número que se confere. A projeção soma o que
+ainda vai sair no mês — títulos em aberto, contas fixas que ainda nem
+viraram título, e a **folha do combinado (decisão 10) menos o que dela
+já foi pago ou lançado** (`folha_lancada`, pelas categorias que pedem a
+pessoa) —, para o salário não contar duas vezes. A rentabilidade é a de
+até agora: venda de carro não se projeta (decisão 22). **O salário não
+aparecia** porque o DRE só vê o que passou no banco e foi categorizado:
+em outubro, R$ 596,77 em "Salario" e R$ 73 mil em "Sem categoria".
+
 ### 61. Contas e caixas: o dinheiro da gaveta também é conta
 
 O Derek, em 19/10/2026: *"preciso poder cadastrar contas bancárias e
