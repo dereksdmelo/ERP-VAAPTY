@@ -18873,6 +18873,9 @@ function FinCarros({ comp }) {
 function FinFolha({ comp }) {
   const [d, setD] = useState(null); const [erro, setErro] = useState(""); const [vales, setVales] = useState([]);
   const [novoFunc, setNovoFunc] = useState(""); const [novoVale, setNovoVale] = useState(null);
+  // Recado de "pôr na folha" (quem não entrou e por quê) — declarado aqui
+  // em cima, antes dos retornos antecipados: hook depois deles quebra a tela.
+  const [aviso, setAviso] = useState("");
   const carregar = () => {
     setErro("");
     fin("folha", { competencia: comp }).then(setD).catch((e) => setErro(e.message));
@@ -18887,12 +18890,18 @@ function FinFolha({ comp }) {
     <input key={`${l.funcionario_id}-${k}-${l[k]}`} className="w-24 rounded border px-1.5 py-1 text-right text-[12px] outline-none" style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal"
       defaultValue={Number(l[k]) ? Math.round(l[k] * 100) / 100 : ""} onBlur={(e) => { const v = Number(String(e.target.value).replace(/\./g, "").replace(",", ".")) || 0; if (v !== Number(l[k])) gravar(l, { [k]: v }); }} />
   );
-  if (erro) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
+  // Erro sem a folha carregada é o único que ocupa a tela; com a folha
+  // na mão, ele aparece em cima dela — um aviso não pode apagar a tabela.
+  if (erro && !d) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
   if (!d) return <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>;
   const total = d.folha.reduce((t, l) => t + l.liquido, 0);
   const incluir = async () => {
-    try { await fin("folha", { competencia: comp, acao: "incluir" }, finJson("POST", {})); carregar(); }
-    catch (e) { setErro(e.message); }
+    setAviso("");
+    try {
+      const r = await fin("folha", { competencia: comp, acao: "incluir" }, finJson("POST", {}));
+      if (r.falhas && r.falhas.length) setAviso(`${r.incluidos} incluídos. Não entraram: ${r.falhas.map((x) => `${x.nome} (${x.erro})`).join(", ")}.`);
+      carregar();
+    } catch (e) { setAviso(e.message); }
   };
   /* A FOLHA PUXA O COMBINADO (28/10/2026, o Derek: "essa folha aqui
    * deveria puxar o que cadastramos no perfil de cada colaborador").
@@ -18903,6 +18912,7 @@ function FinFolha({ comp }) {
   const fora = d.fora || [];
   return (
     <div className="space-y-4">
+      {(erro || aviso) && <p className="text-[13px]" style={{ color: C.laranja }}>{erro || aviso}</p>}
       {!!fora.length && (
         <div className="flex flex-wrap items-center gap-3 rounded-lg px-3 py-2 text-[13px]" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
           <span><b>{fora.length}</b> {fora.length === 1 ? "pessoa da equipe não está" : "pessoas da equipe não estão"} na folha: {fora.map((x) => x.nome).join(", ")}.</span>

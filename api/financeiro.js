@@ -1309,16 +1309,34 @@ async function folha(req, res, tok) {
   if (req.method === "POST" && String(req.query.acao || "") === "incluir") {
     const colabs = await supa(`${base("colaborador")}?select=id,nome_completo,fin_funcionario_id,desligado_em`, { headers: cab(tok) });
     const alvo = (colabs || []).filter((c) => !c.fin_funcionario_id && c.nome_completo && (!c.desligado_em || c.desligado_em >= comp));
+    /* NOME REPETIDO NÃO PARA A FILA (28/10/2026). A folha tem índice
+     * único no nome (0021), e a equipe tinha duas fichas "MARCOS" e
+     * "Marcos": o primeiro "pôr na folha" parou no meio, com parte da
+     * equipe dentro. A ficha é por pessoa (decisão 10), então são duas
+     * pessoas — a segunda entra como "Marcos (2)", e o nome se corrige
+     * depois. E um erro numa pessoa não derruba as outras: cada uma
+     * entra ou volta em `falhas` com o motivo. */
     let feitos = 0;
+    const falhas = [];
     for (const c of alvo) {
-      const f = um(await supa(base("fin_funcionario"), { method: "POST", headers: cab(tok, { Prefer: "return=representation" }),
-        body: JSON.stringify({ nome: c.nome_completo, salario_base: 0, ativo: true }) }));
-      if (!f) continue;
-      await supa(`${base("colaborador")}?id=eq.${c.id}`, { method: "PATCH", headers: cab(tok, { Prefer: "return=minimal" }),
-        body: JSON.stringify({ fin_funcionario_id: f.id }) });
-      feitos++;
+      try {
+        let f = null;
+        for (let n = 1; n <= 5 && !f; n++) {
+          const nome = n === 1 ? c.nome_completo : `${c.nome_completo} (${n})`;
+          try {
+            f = um(await supa(base("fin_funcionario"), { method: "POST", headers: cab(tok, { Prefer: "return=representation" }),
+              body: JSON.stringify({ nome, salario_base: 0, ativo: true }) }));
+          } catch (e) {
+            if (!/fin_funcionario_nome|duplicate|repetido/i.test(String(e.message || ""))) throw e;
+          }
+        }
+        if (!f) { falhas.push({ nome: c.nome_completo, erro: "nome já usado na folha" }); continue; }
+        await supa(`${base("colaborador")}?id=eq.${c.id}`, { method: "PATCH", headers: cab(tok, { Prefer: "return=minimal" }),
+          body: JSON.stringify({ fin_funcionario_id: f.id }) });
+        feitos++;
+      } catch (e) { falhas.push({ nome: c.nome_completo, erro: String(e.message || e).slice(0, 120) }); }
     }
-    return res.status(200).json({ ok: true, incluidos: feitos });
+    return res.status(200).json({ ok: true, incluidos: feitos, falhas });
   }
   if (req.method === "PUT") {
     const c = await corpoDe(req);

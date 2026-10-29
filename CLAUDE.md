@@ -797,7 +797,12 @@ grava o que está na tela, e **a linha salva manda**: é ela que diz o
 que foi pago, e a folha de janeiro não pode mudar se o combinado mudar
 em março. Quem está na equipe e não tem pessoa na folha
 (`colaborador.fin_funcionario_id` vazio) aparece numa tarja com "pôr na
-folha", que cria as pessoas e liga as fichas de uma vez.
+folha", que cria as pessoas e liga as fichas de uma vez. **Nome repetido não
+para a fila**: a primeira vez parou no meio, com parte da equipe dentro,
+porque havia duas fichas "MARCOS" e "Marcos" e a folha tem índice único
+no nome (0021). Como a ficha é por pessoa, a segunda entra como "Marcos
+(2)" — o nome se corrige depois —, e quem não entrar volta com o motivo
+sem derrubar os outros.
 
 **Perfis de remuneração (0082)**, em Gestão abaixo de Equipe: o mesmo
 editor de peças, salvo com nome, para usar em mais de uma pessoa. A
