@@ -146,7 +146,10 @@ async function quemSou(tok) {
 }
 const umaLinha = (x) => (Array.isArray(x) ? x[0] : x) || null;
 function etapaDe(cl, aprov) {
-  if (cl && cl.pago_em) return "pago";
+  // Depois do pagamento vem o arquivamento (0094): pago e não arquivado
+  // está "arquivar"; com a data, "arquivado".
+  if (cl && cl.arquivado_em) return "arquivado";
+  if (cl && cl.pago_em) return "arquivar";
   if (!cl || !cl.revisado_em) return "revisar";
   const validas = aprov.filter((a) => a.decisao === "aprovado" && String(a.criado_em) >= String(cl.revisado_em));
   return validas.length >= APROVACOES_MINIMAS ? "pagar" : "aprovar";
@@ -177,7 +180,7 @@ async function esteira(req, res, tok) {
       : new Date(Date.now() - 120 * 86400000).toISOString().slice(0, 10);
     const ate = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.ate || "")) ? `&data=lte.${req.query.ate}` : "";
     const ats = await banco(`${URL_BASE}/rest/v1/atendimento?select=*,` +
-      `veiculo(id,placa,marca_modelo),checklist(revisado_em,revisado_por,pago_em,pago_por,pago_obs,adm_conferido_em,valor_venda,valor_cliente,` +
+      `veiculo(id,placa,marca_modelo),checklist(revisado_em,revisado_por,pago_em,pago_por,pago_obs,arquivado_em,arquivado_por,adm_conferido_em,valor_venda,valor_cliente,` +
       `valor_quitacao,valor_debitos,valor_cautelar,banco_favorecido,banco_documento,banco_nome,banco_agencia,banco_conta,banco_tipo,banco_pix)` +
       `&status=eq.fechado&data=gte.${de}${ate}&order=data.desc&limit=300`, { headers: cabecalhos(tok) }) || [];
     const ids = ats.map((a) => a.id);
@@ -201,6 +204,7 @@ async function esteira(req, res, tok) {
         devolucao: devolvido && (!cl || !cl.revisado_em || String(devolvido.criado_em) > String(cl.revisado_em)) ? devolvido : null,
         revisado_nome: cl && cl.revisado_por ? nomes[cl.revisado_por] || "" : "",
         pago_nome: cl && cl.pago_por ? nomes[cl.pago_por] || "" : "",
+        arquivado_nome: cl && cl.arquivado_por ? nomes[cl.arquivado_por] || "" : "",
         eu_aprovei: valem.some((x) => x.perfil_id === eu.id && x.decisao === "aprovado"),
       };
     });
@@ -259,6 +263,32 @@ async function esteira(req, res, tok) {
     const cl = umaLinha(await banco(`${REST}?select=revisado_em,pago_em&atendimento_id=eq.${aid}&limit=1`, { headers: cabecalhos(tok) }));
     if (etapaDe(cl, ap) !== "pagar") return res.status(409).json({ erro: `Só se paga depois da revisão do adm e de ${APROVACOES_MINIMAS} aprovações.` });
     await gravarCl({ pago_em: agora, pago_por: eu.id, pago_obs: texto(c.obs) });
+    return res.status(200).json({ ok: true });
+  }
+  /* ARQUIVAR (0094): o adm termina de juntar os comprovantes e fecha a
+   * pasta. A trava é a do grupo Arquivamento do check list: todo item
+   * respondido (Sim ou Não, decisão 1), e o que foi marcado Sim e pede
+   * papel tem que ter o papel anexado — "arquivado" sem o comprovante na
+   * pasta é exatamente o que esta etapa existe para impedir. */
+  if (acao === "arquivado") {
+    if (!eu.adm) return res.status(403).json({ erro: "Só o administrativo arquiva." });
+    if (c.desfazer) { await gravarCl({ arquivado_em: null, arquivado_por: null }); return res.status(200).json({ ok: true }); }
+    const cl = umaLinha(await banco(`${REST}?select=pago_em&atendimento_id=eq.${aid}&limit=1`, { headers: cabecalhos(tok) }));
+    if (!cl || !cl.pago_em) return res.status(409).json({ erro: "Só se arquiva depois do pagamento." });
+    const itens = (await itensDoc(tok)).filter((i) => i[2] === "arquivamento");
+    const [marcas, anexos] = await Promise.all([
+      banco(`${URL_BASE}/rest/v1/checklist_doc?select=item,adm&atendimento_id=eq.${aid}`, { headers: cabecalhos(tok) }),
+      banco(`${URL_BASE}/rest/v1/anexo?select=rotulo&atendimento_id=eq.${aid}&rotulo=like.doc:*`, { headers: cabecalhos(tok) }),
+    ]);
+    const m = {}; (marcas || []).forEach((x) => { m[x.item] = x; });
+    const temPapel = new Set((anexos || []).map((a) => String(a.rotulo || "").slice(4)));
+    const faltam = itens.filter((i) => {
+      const v = m[i[0]] && m[i[0]].adm;
+      if (v === null || v === undefined) return true;
+      return v === true && i[4] && !temPapel.has(i[0]);
+    }).map((i) => (m[i[0]] && m[i[0]].adm === true ? `${i[1]} (marcado, sem o arquivo)` : i[1]));
+    if (faltam.length) return res.status(409).json({ erro: `Falta${faltam.length === 1 ? "" : "m"} ${faltam.length} comprovante${faltam.length === 1 ? "" : "s"} do arquivamento.`, faltam });
+    await gravarCl({ arquivado_em: agora, arquivado_por: eu.id });
     return res.status(200).json({ ok: true });
   }
   return res.status(400).json({ erro: "Ação desconhecida." });

@@ -4455,6 +4455,15 @@ trecho chamava `lerCorpo`, que não existia no arquivo. Em 28/10/2026 a
 `checklist_doc` tinha zero linhas desde a 0027. As duas coisas foram
 consertadas junto, porque a revisão depende dela.
 
+- **Arquivar** (0094, o Derek no mesmo dia: *"depois de pagamento a
+  realizar, o card vai para a aba de arquivamento, ali o adm termina de
+  adicionar todos os comprovantes e arquiva"*): pago e não arquivado é
+  "arquivar"; a aba se divide em em arquivamento e arquivados. A trava é
+  o grupo Arquivamento do check list (que o gerente edita): todo item
+  respondido, e o que foi marcado Sim e pede papel com o arquivo
+  anexado — "arquivado" sem o comprovante na pasta é o que esta etapa
+  existe para impedir.
+
 **O que ficou de fora:** pagamento parcial (o cliente hoje e a quitação
 amanhã) — a observação do "pago" é onde se anota, por enquanto; e o
 lançamento no financeiro, que continua vindo do extrato.
