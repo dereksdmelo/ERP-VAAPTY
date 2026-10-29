@@ -18322,8 +18322,12 @@ function FinDRE({ comp }) {
           <div className="mt-4 rounded-lg p-3" style={{ background: C.bg }}>
             <div className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: C.mute }}>Projetado até o fim do mês</div>
             {[["Títulos em aberto", d.projecao.em_aberto],
-              ["Contas fixas ainda sem título", -d.projecao.fixas_nao_geradas],
-              [`Folha ainda a lançar (prevista ${rs2(d.projecao.folha_prevista)} − lançada ${rs2(d.projecao.folha_lancada)})`, -d.projecao.folha_a_lancar]].map(([r, v]) => (
+              ["Contas fixas ainda sem título", -d.projecao.fixas_nao_geradas]].concat(
+              d.projecao.folha_partes
+                ? d.projecao.folha_partes.filter((x) => x.prevista || x.lancado).map((x) => [
+                    `${x.categoria || x.parte} (folha: prevista ${rs2(x.prevista)} − lançada ${rs2(x.lancado)})`, -x.a_lancar])
+                : [[`Folha ainda a lançar (prevista ${rs2(d.projecao.folha_prevista)} − lançada ${rs2(d.projecao.folha_lancada)})`, -d.projecao.folha_a_lancar]]
+            ).map(([r, v]) => (
               <div key={r} className="mt-1 flex items-baseline justify-between gap-2 text-[12px]">
                 <span style={{ color: C.mute }}>{r}</span><span style={{ fontVariantNumeric: "tabular-nums", color: v < 0 ? C.laranja : C.ink }}>{rs2(v)}</span>
               </div>
@@ -18332,7 +18336,7 @@ function FinDRE({ comp }) {
               <span className="text-[12px] font-semibold">Lucro projetado</span>
               <span className="text-[20px] font-bold" style={{ fontVariantNumeric: "tabular-nums", color: d.projecao.lucro_projetado >= 0 ? C.verde : C.laranja }}>{rs2(d.projecao.lucro_projetado)}</span>
             </div>
-            <p className="mt-1 text-[10.5px] leading-snug" style={{ color: C.mute }}>A rentabilidade é a de até agora — venda de carro não se projeta. A folha vem do combinado de cada um, no ritmo do mês, menos o que dela já foi pago ou lançado.</p>
+            <p className="mt-1 text-[10.5px] leading-snug" style={{ color: C.mute }}>A rentabilidade é a de até agora — venda de carro não se projeta. A folha é a da aba Folha (a linha salva, ou o combinado no ritmo do mês), cada parte na categoria escolhida lá, menos o que já entrou nela. Salário pago e não categorizado conta duas vezes — categorize em Lançamentos.</p>
           </div>
         )}
         <p className="mt-3 text-[11px] leading-snug" style={{ color: C.mute }}>Como na planilha: despesa é crédito − débito por categoria, e a rentabilidade líquida dos carros vendidos no mês entra como receita. Negociação, retirada e transferência ficam fora.</p>
@@ -19095,6 +19099,16 @@ function FinFolha({ comp }) {
   // Recado de "pôr na folha" (quem não entrou e por quê) — declarado aqui
   // em cima, antes dos retornos antecipados: hook depois deles quebra a tela.
   const [aviso, setAviso] = useState("");
+  // Em que categoria do DRE entra cada parte da folha (0097).
+  const [cfgFolha, setCfgFolha] = useState(null); const [catsFolha, setCatsFolha] = useState([]);
+  useEffect(() => {
+    fin("config-folha").then((x) => setCfgFolha(x.config || {})).catch(() => setCfgFolha({}));
+    fin("categoria").then((x) => setCatsFolha((x.lista || []).filter((c) => c.ativa !== false))).catch(() => {});
+  }, []);
+  const mudarCfgFolha = async (k, v) => {
+    setCfgFolha((c) => ({ ...c, [k]: v || null }));
+    try { await fin("config-folha", null, finJson("PUT", { [k]: v || null })); } catch (e) { setAviso(e.message); }
+  };
   const carregar = () => {
     setErro("");
     fin("folha", { competencia: comp }).then(setD).catch((e) => setErro(e.message));
@@ -19132,6 +19146,26 @@ function FinFolha({ comp }) {
   return (
     <div className="space-y-4">
       {(erro || aviso) && <p className="text-[13px]" style={{ color: C.laranja }}>{erro || aviso}</p>}
+      {/* EM QUE CATEGORIA DO DRE CADA PARTE ENTRA (0097, o Derek: "uma
+          parte é prestação de serviços, outra comissão e outra
+          bonificação… importante poder configurar isso na aba folha").
+          O DRE projetado põe a folha prevista nessas categorias e
+          desconta o que já entrou nelas. */}
+      {cfgFolha && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg px-3 py-2 text-[12.5px]" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+          <span className="text-[11px] font-bold uppercase tracking-[0.06em]" style={{ color: C.mute }}>No DRE</span>
+          {[["folha_cat_salario", "Salário"], ["folha_cat_comissao", "Comissão"], ["folha_cat_bonificacao", "Bonificação"]].map(([k, r]) => (
+            <label key={k} className="flex items-center gap-1.5">
+              {r} entra em
+              <select className="rounded border px-1.5 py-1 text-[12.5px] outline-none" style={{ ...inputSty, borderColor: cfgFolha[k] ? C.line : C.laranja }}
+                value={cfgFolha[k] || ""} onChange={(e) => mudarCfgFolha(k, e.target.value)}>
+                <option value="">escolha a categoria…</option>
+                {catsFolha.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+              </select>
+            </label>
+          ))}
+        </div>
+      )}
       {!!fora.length && (
         <div className="flex flex-wrap items-center gap-3 rounded-lg px-3 py-2 text-[13px]" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
           <span><b>{fora.length}</b> {fora.length === 1 ? "pessoa da equipe não está" : "pessoas da equipe não estão"} na folha: {fora.map((x) => x.nome).join(", ")}.</span>

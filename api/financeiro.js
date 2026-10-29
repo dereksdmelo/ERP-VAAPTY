@@ -854,16 +854,41 @@ async function dre(req, res, tok) {
    * contar duas vezes. A rentabilidade é a de até agora: projetar venda
    * de carro seria número bonito e mentiroso (decisão 22). */
   try {
-    const [proj, fixas] = await Promise.all([
-      projecaoRemuneracao(tok, comp).catch(() => null),
+    const [folha, fixas, cfg, cats] = await Promise.all([
+      folhaDoMes(tok, comp).catch(() => null),
       fixasDoMes(tok, comp).catch(() => null),
+      supa(`${base("fin_config")}?select=*&id=eq.1`, { headers: cab(tok) }).then(um).catch(() => null),
+      supa(`${base("fin_categoria")}?select=id,nome`, { headers: cab(tok) }).catch(() => []),
     ]);
-    const folhaPrevista = proj ? (proj.aberto ? proj.total_ritmo : proj.total_agora) : 0;
-    const folhaALancar = Math.max(0, folhaPrevista - (d.folha_lancada || 0));
+    const nomeCat = {}; (cats || []).forEach((c) => { nomeCat[c.id] = c.nome; });
+    /* A FOLHA POR PARTE (0097, o Derek: "uma parte é categorizada como
+     * prestação de serviços, outra como comissão e outra como
+     * bonificação"). A prevista é a da aba Folha: a linha salva manda;
+     * sem ela, o combinado NO RITMO do mês; sem combinado, o salário
+     * base. Cada parte desconta o que já entrou na categoria dela. */
+    const prev = { salario: 0, comissao: 0, bonificacao: 0 };
+    ((folha && folha.linhas) || []).forEach((l) => {
+      const fonte = !l.gravada && l.combinado && folha.aberto ? l.combinado.ritmo_partes : l;
+      ["salario", "comissao", "bonificacao"].forEach((k) => { prev[k] += Number(fonte[k]) || 0; });
+    });
+    ((folha && folha.so_combinado) || []).forEach((p) => { ["salario", "comissao", "bonificacao"].forEach((k) => { prev[k] += Number(p[k]) || 0; }); });
+    const catDe = { salario: cfg && cfg.folha_cat_salario, comissao: cfg && cfg.folha_cat_comissao, bonificacao: cfg && cfg.folha_cat_bonificacao };
+    const partesFolha = ["salario", "comissao", "bonificacao"].map((k) => {
+      const cat = catDe[k];
+      const lancado = cat ? (d.lancado_por_cat[cat] || 0) : 0;
+      return { parte: k, categoria_id: cat || null, categoria: cat ? nomeCat[cat] || "" : null,
+        prevista: Math.round(prev[k] * 100) / 100, lancado: Math.round(lancado * 100) / 100,
+        a_lancar: Math.max(0, Math.round((prev[k] - lancado) * 100) / 100) };
+    });
+    // Sem categoria configurada, a régua antiga: tudo que pede a pessoa.
+    const semConfig = !partesFolha.some((x) => x.categoria_id);
+    const folhaPrevista = partesFolha.reduce((t, x) => t + x.prevista, 0);
+    const folhaALancar = semConfig ? Math.max(0, folhaPrevista - (d.folha_lancada || 0)) : partesFolha.reduce((t, x) => t + x.a_lancar, 0);
     const fixasNaoGeradas = fixas ? fixas.contas.filter((x) => x.ativo && !x.titulo).reduce((t, x) => t + x.previsto, 0) : 0;
     d.projecao = {
       em_aberto: d.em_aberto, fixas_nao_geradas: fixasNaoGeradas,
-      folha_prevista: folhaPrevista, folha_lancada: d.folha_lancada || 0, folha_a_lancar: folhaALancar,
+      folha_prevista: folhaPrevista, folha_lancada: semConfig ? (d.folha_lancada || 0) : partesFolha.reduce((t, x) => t + x.lancado, 0),
+      folha_a_lancar: folhaALancar, folha_partes: semConfig ? null : partesFolha,
       lucro_projetado: d.lucro + d.em_aberto - fixasNaoGeradas - folhaALancar,
     };
   } catch (e) { d.projecao = null; }
@@ -893,6 +918,24 @@ async function fixasDoMes(tok, comp) {
   });
   return { competencia: comp, contas: lista };
 }
+// Em que categoria do DRE entra cada parte da folha (0097).
+async function configFolha(req, res, tok) {
+  if (req.method === "GET") {
+    const c = um(await supa(`${base("fin_config")}?select=*&id=eq.1`, { headers: cab(tok) }));
+    return res.status(200).json({ config: c || {} });
+  }
+  if (req.method === "PUT") {
+    const c = await corpoDe(req) || {};
+    const linha = { id: 1, atualizado_em: new Date().toISOString() };
+    ["folha_cat_salario", "folha_cat_comissao", "folha_cat_bonificacao"].forEach((k) => { if (c[k] !== undefined) linha[k] = idOuNulo(c[k]); });
+    const r = await supa(`${base("fin_config")}?on_conflict=id`, { method: "POST", headers: cab(tok, { Prefer: "resolution=merge-duplicates,return=representation" }), body: JSON.stringify(linha) });
+    if (!um(r)) return recusado(res);
+    return res.status(200).json({ config: um(r) });
+  }
+  res.setHeader("Allow", "GET, PUT");
+  return res.status(405).json({ erro: "Use GET ou PUT." });
+}
+
 async function contasFixas(req, res, tok) {
   const comp = competenciaDe(req.query.competencia) || competenciaDe(hojeAqui());
   const acao = String(req.query.acao || "");
@@ -972,6 +1015,9 @@ async function dreDoMes(tok, comp) {
   // O que da folha já entrou nesta competência (paga ou em título), para
   // a projeção não contar o salário duas vezes.
   let folhaLancada = 0;
+  // Quanto saiu (ou vai sair, em título) por categoria nesta competência:
+  // a projeção da folha desconta daqui o que de cada parte já entrou.
+  const lancadoPorCat = {};
   (lanc || []).forEach((l) => {
     // O DRE do mês continua sendo o que passou no banco — é o número
     // que o Derek confere hoje. O que está em aberto vai à parte, para
@@ -983,6 +1029,7 @@ async function dreDoMes(tok, comp) {
       const c = p.categoria_id ? catPorId[p.categoria_id] : null;
       if (c && !c.no_dre) return;
       if ((c && c.pede_funcionario) || p.funcionario_id) folhaLancada += -p.valor;
+      if (p.categoria_id && p.valor < 0) lancadoPorCat[p.categoria_id] = (lancadoPorCat[p.categoria_id] || 0) - p.valor;
       if (aberto) { emAberto += p.valor; return; }
       if (!c) { semCategoria += p.valor; return; }
       por[c.id] = por[c.id] || { id: c.id, nome: c.nome, grupo: c.grupo, ordem: c.ordem, valor: 0 };
@@ -998,7 +1045,7 @@ async function dreDoMes(tok, comp) {
     { bruta: 0, liquida: 0, venda: 0 });
 
   return {
-    competencia: comp, linhas, total_despesas: totalDespesas, sem_categoria: semCategoria, em_aberto: emAberto, folha_lancada: folhaLancada,
+    competencia: comp, linhas, total_despesas: totalDespesas, sem_categoria: semCategoria, em_aberto: emAberto, folha_lancada: folhaLancada, lancado_por_cat: lancadoPorCat,
     carros_vendidos: vendidos.length, rentabilidade: rent.liquida, rentabilidade_bruta: rent.bruta, faturamento: rent.venda,
     lucro: rent.liquida + totalDespesas + semCategoria,
   };
@@ -1370,50 +1417,61 @@ async function vale(req, res, tok) {
  * o líquido é calculado aqui e gravado, para que a folha de janeiro
  * não mude se a regra mudar em março.
  */
+/* A FOLHA DO MÊS, como a aba Folha a mostra — e o DRE projetado lê a
+ * mesma, para a folha prevista ser uma só nas duas telas. */
+async function folhaDoMes(tok, comp) {
+    const [funcs, gravadas, vales, colabs, proj] = await Promise.all([
+    supa(`${base("fin_funcionario")}?select=*&order=nome.asc`, { headers: cab(tok) }),
+    supa(`${base("fin_folha")}?select=*&competencia=eq.${comp}`, { headers: cab(tok) }),
+    supa(`${base("fin_vale")}?select=funcionario_id,valor&competencia=eq.${comp}`, { headers: cab(tok) }),
+    supa(`${base("colaborador")}?select=id,nome_completo,fin_funcionario_id,desligado_em,inicio_em`, { headers: cab(tok) }).catch(() => []),
+    projecaoRemuneracao(tok, comp).catch(() => null),
+  ]);
+  const gPor = {}; (gravadas || []).forEach((g) => { gPor[g.funcionario_id] = g; });
+  const vPor = {}; (vales || []).forEach((v) => { vPor[v.funcionario_id] = (vPor[v.funcionario_id] || 0) + (Number(v.valor) || 0); });
+  /* O COMBINADO DE CADA UM (0081) vira salário, comissão e bonificação:
+   * o fixo é salário, os bônus são bonificação, o resto (variável,
+   * vendas, faixas) é comissão. É sugestão até alguém salvar — a linha
+   * gravada continua mandando, porque é ela que diz o que foi pago. */
+  const colabPorFin = {}; (colabs || []).forEach((c) => { if (c.fin_funcionario_id) colabPorFin[c.fin_funcionario_id] = c; });
+  const projPorColab = {}; ((proj && proj.pessoas) || []).forEach((p) => { projPorColab[p.colaborador_id] = p; });
+  const partes = (calc) => {
+    const ls = (calc && calc.linhas) || [];
+    const soma = (f) => Math.round(ls.filter(f).reduce((t, l) => t + (Number(l.valor) || 0), 0) * 100) / 100;
+    return { salario: soma((l) => l.fixo), comissao: soma((l) => !l.fixo && !l.bonus), bonificacao: soma((l) => l.bonus) };
+  };
+  const linhas = (funcs || []).filter((f) => f.ativo || gPor[f.id]).map((f) => {
+    const g = gPor[f.id];
+    const col = colabPorFin[f.id];
+    const p = col && projPorColab[col.id];
+    const combinado = p ? { ...partes(p.agora), total: p.agora.total, ritmo: p.ritmo.total, ritmo_partes: partes(p.ritmo), perfil: p.perfil, linhas: p.agora.linhas } : null;
+    const salario = g ? Number(g.salario) : combinado ? combinado.salario : Number(f.salario_base) || 0;
+    const comissao = g ? Number(g.comissao) : combinado ? combinado.comissao : 0;
+    const bonificacao = g ? Number(g.bonificacao) : combinado ? combinado.bonificacao : 0;
+    const valesSoma = vPor[f.id] || 0;
+    return {
+      funcionario_id: f.id, nome: f.nome, negociador_id: f.negociador_id, gravada: !!g,
+      colaborador_id: col ? col.id : null, combinado,
+      salario, comissao, bonificacao, vales: valesSoma,
+      liquido: salario + comissao + bonificacao - valesSoma, pago_em: g ? g.pago_em : null,
+    };
+  });
+  // Quem está na equipe e não está na folha: a ficha sem
+  // `fin_funcionario_id`, ainda não desligada antes deste mês.
+  const fora = (colabs || []).filter((c) => !c.fin_funcionario_id && c.nome_completo && (!c.desligado_em || c.desligado_em >= comp))
+    .map((c) => ({ colaborador_id: c.id, nome: c.nome_completo }));
+  // Quem tem combinado e não está na folha: entra só na projeção.
+  const ligados = new Set(Object.values(colabPorFin).map((c) => c.id));
+  const soCombinado = ((proj && proj.pessoas) || []).filter((p) => !ligados.has(p.colaborador_id))
+    .map((p) => ({ nome: p.nome, ...partes(proj.aberto ? p.ritmo : p.agora) }));
+  return { linhas, fora, aberto: !!(proj && proj.aberto), so_combinado: soCombinado };
+}
+
 async function folha(req, res, tok) {
   const comp = competenciaDe(req.query.competencia) || competenciaDe(hojeAqui());
   if (req.method === "GET") {
-    const [funcs, gravadas, vales, colabs, proj] = await Promise.all([
-      supa(`${base("fin_funcionario")}?select=*&order=nome.asc`, { headers: cab(tok) }),
-      supa(`${base("fin_folha")}?select=*&competencia=eq.${comp}`, { headers: cab(tok) }),
-      supa(`${base("fin_vale")}?select=funcionario_id,valor&competencia=eq.${comp}`, { headers: cab(tok) }),
-      supa(`${base("colaborador")}?select=id,nome_completo,fin_funcionario_id,desligado_em,inicio_em`, { headers: cab(tok) }).catch(() => []),
-      projecaoRemuneracao(tok, comp).catch(() => null),
-    ]);
-    const gPor = {}; (gravadas || []).forEach((g) => { gPor[g.funcionario_id] = g; });
-    const vPor = {}; (vales || []).forEach((v) => { vPor[v.funcionario_id] = (vPor[v.funcionario_id] || 0) + (Number(v.valor) || 0); });
-    /* O COMBINADO DE CADA UM (0081) vira salário, comissão e bonificação:
-     * o fixo é salário, os bônus são bonificação, o resto (variável,
-     * vendas, faixas) é comissão. É sugestão até alguém salvar — a linha
-     * gravada continua mandando, porque é ela que diz o que foi pago. */
-    const colabPorFin = {}; (colabs || []).forEach((c) => { if (c.fin_funcionario_id) colabPorFin[c.fin_funcionario_id] = c; });
-    const projPorColab = {}; ((proj && proj.pessoas) || []).forEach((p) => { projPorColab[p.colaborador_id] = p; });
-    const partes = (calc) => {
-      const ls = (calc && calc.linhas) || [];
-      const soma = (f) => Math.round(ls.filter(f).reduce((t, l) => t + (Number(l.valor) || 0), 0) * 100) / 100;
-      return { salario: soma((l) => l.fixo), comissao: soma((l) => !l.fixo && !l.bonus), bonificacao: soma((l) => l.bonus) };
-    };
-    const linhas = (funcs || []).filter((f) => f.ativo || gPor[f.id]).map((f) => {
-      const g = gPor[f.id];
-      const col = colabPorFin[f.id];
-      const p = col && projPorColab[col.id];
-      const combinado = p ? { ...partes(p.agora), total: p.agora.total, ritmo: p.ritmo.total, perfil: p.perfil, linhas: p.agora.linhas } : null;
-      const salario = g ? Number(g.salario) : combinado ? combinado.salario : Number(f.salario_base) || 0;
-      const comissao = g ? Number(g.comissao) : combinado ? combinado.comissao : 0;
-      const bonificacao = g ? Number(g.bonificacao) : combinado ? combinado.bonificacao : 0;
-      const valesSoma = vPor[f.id] || 0;
-      return {
-        funcionario_id: f.id, nome: f.nome, negociador_id: f.negociador_id, gravada: !!g,
-        colaborador_id: col ? col.id : null, combinado,
-        salario, comissao, bonificacao, vales: valesSoma,
-        liquido: salario + comissao + bonificacao - valesSoma, pago_em: g ? g.pago_em : null,
-      };
-    });
-    // Quem está na equipe e não está na folha: a ficha sem
-    // `fin_funcionario_id`, ainda não desligada antes deste mês.
-    const fora = (colabs || []).filter((c) => !c.fin_funcionario_id && c.nome_completo && (!c.desligado_em || c.desligado_em >= comp))
-      .map((c) => ({ colaborador_id: c.id, nome: c.nome_completo }));
-    return res.status(200).json({ competencia: comp, folha: linhas, fora, aberto: !!(proj && proj.aberto) });
+    const f = await folhaDoMes(tok, comp);
+    return res.status(200).json({ competencia: comp, folha: f.linhas, fora: f.fora, aberto: f.aberto });
   }
   // Põe na folha quem está na equipe e ainda não está: cria a pessoa da
   // folha e liga a ficha a ela, como o "pôr na folha" da ficha (0079).
@@ -2287,7 +2345,7 @@ const perfilRemuneracao = cadastro("perfil_remuneracao", [["nome", texto], ["des
   ["remuneracao", (v) => require("../regras/remuneracao.js").limpar(v)], ["ativo", bool]], "nome.asc");
 
 const RECURSOS = { conta, categoria, funcionario, favorecido, lancamento, importar, dre, carros, vale, folha, remuneracao,
-                   "contas-fixas": contasFixas,
+                   "contas-fixas": contasFixas, "config-folha": configFolha,
                    "perfil-remuneracao": perfilRemuneracao,
                    fechamento, orcamento, ano, rateio, negociacao, titulo, fluxo, log, recibo, pendencias, recebimentos, saldos,
                    estoque: estoqueLista };

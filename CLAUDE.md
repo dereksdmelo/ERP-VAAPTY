@@ -3126,6 +3126,18 @@ até agora: venda de carro não se projeta (decisão 22). **O salário não
 aparecia** porque o DRE só vê o que passou no banco e foi categorizado:
 em outubro, R$ 596,77 em "Salario" e R$ 73 mil em "Sem categoria".
 
+**A folha tem três destinos no DRE, e quem escolhe é a aba Folha
+(0097, `fin_config`)** (o Derek: *"uma parte é categorizada como
+prestação de serviços, outra como comissão e outra como bonificação…
+importante poder configurar isso na aba folha"*). Salário, comissão e
+bonificação apontam cada um para uma categoria (nasceram em "Prestação de
+Serviço", "Comissão" e "Bonificação"). O projetado usa a MESMA folha da
+aba (`folhaDoMes`: a linha salva manda; sem ela, o combinado no ritmo
+do mês; sem combinado, o salário base; e quem tem combinado mas não está
+na folha), separa por parte e desconta de cada uma o que já entrou na
+categoria dela neste mês (`lancado_por_cat`, pago ou em título). Sem
+categoria escolhida, vale a régua antiga (o que pede a pessoa).
+
 ### 61. Contas e caixas: o dinheiro da gaveta também é conta
 
 O Derek, em 19/10/2026: *"preciso poder cadastrar contas bancárias e
