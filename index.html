@@ -100,6 +100,18 @@ const ORIGENS = [
   ["outdoor", "Outdoor"], ["recuperacao", "Recuperação"], ["faceleads", "Faceleads"],
   ["outro", "Outro"],
 ];
+/* COMO O CLIENTE DE FLUXO CONHECEU A LOJA (0098). O Derek, em
+ * 29/10/2026: "se for de fluxo também temos que perguntar qual origem:
+ * viu na TV? viu na fachada? ouviu na rádio? viu no Facebook e veio
+ * direto? pesquisou no Google? foi indicação?". A origem continua
+ * "Fluxo de loja" — ele entrou pela porta —; isto é o porquê. */
+const COMO_CONHECEU = ["TV", "Fachada da loja", "Rádio", "Facebook / Instagram", "Google", "Indicação", "Já é cliente", "Outdoor", "Outro"];
+// Quem agendou (0098): o carimbo do banco; sem ele, o nome digitado de
+// quem prospectou. Agendamento de antes do carimbo que a conversa não
+// explicou fica "não registrado", em vez de um palpite.
+const quemAgendou = (l) => (l && (l.agendado_por_nome || l.prospector_nome)) || "";
+const linhaAgendou = (l) => [quemAgendou(l) ? `por ${quemAgendou(l)}` : "agendou: não registrado",
+  l && l.origem && l.origem !== "outro" ? rotulo(ORIGENS, l.origem) : ""].filter(Boolean).join(" · ");
 /**
  * Os quinze status que a casa usa, na ordem da planilha — o negociador
  * já procura nessa sequência.
@@ -8392,7 +8404,7 @@ function Etiqueta({ status }) {
 function NovoAtendimento({ perfil, aoCriar, aoCancelar }) {
   const [d, setD] = useState({
     cliente_nome: "", cliente_telefone: "", carro_descricao: "",
-    origem: "fluxo_loja", prospec: "", pretensao: "", negociador_nome: "",
+    origem: "fluxo_loja", prospec: "", pretensao: "", negociador_nome: "", como_conheceu: "",
   });
   const [equipe, setEquipe] = useState([]);
   const [indo, setIndo] = useState(false);
@@ -8410,7 +8422,9 @@ function NovoAtendimento({ perfil, aoCriar, aoCancelar }) {
       .catch(() => {});
   }, []);
 
+  const falta = d.origem === "fluxo_loja" && (!d.como_conheceu || d.como_conheceu === "Outro");
   const criar = async () => {
+    if (falta) { setErro("Pergunte ao cliente como ele conheceu a Vaapty."); return; }
     setErro(""); setIndo(true);
     try {
       // O id é o do negociador ESCOLHIDO no campo, não o de quem está
@@ -8467,6 +8481,7 @@ function NovoAtendimento({ perfil, aoCriar, aoCancelar }) {
             </select>
           </Campo>
         </div>
+        {d.origem === "fluxo_loja" && <ComoConheceu valor={d.como_conheceu} aoMudar={(v) => set("como_conheceu", v)} />}
         <Campo label="Quem prospectou">
           <select className={inputCls} style={inputSty} value={d.prospec} onChange={(e) => set("prospec", e.target.value)}>
             <option value="">FLUXO — entrou sozinho</option>
@@ -13522,6 +13537,31 @@ function metasQueAtendem(equipe) {
     (n.ativo || (at && n.perfil_id && at.some((x) => x.id === n.perfil_id))));
 }
 
+/* As opções em chips, porque a pergunta é feita com o cliente na frente:
+ * um toque, não uma lista. "Outro" abre o campo para dizer qual. */
+function ComoConheceu({ valor, aoMudar }) {
+  const v = valor || "";
+  const outro = v === "Outro" || /^Outro: /.test(v);
+  return (
+    <Campo label="Como conheceu a Vaapty?" nota="Pergunte ao cliente. É o que diz se a TV, a fachada ou o Google trazem gente pela porta.">
+      <div className="flex flex-wrap gap-1.5">
+        {COMO_CONHECEU.map((o) => {
+          const on = o === "Outro" ? outro : v === o;
+          return (
+            <button key={o} type="button" onClick={() => aoMudar(o)}
+              className="rounded-full border px-2.5 py-1 text-[12.5px] font-semibold"
+              style={{ borderColor: on ? C.roxo : C.line, background: on ? C.roxo : "#fff", color: on ? "#fff" : C.ink }}>{o}</button>
+          );
+        })}
+      </div>
+      {outro && (
+        <input className={`${inputCls} mt-1.5`} style={inputSty} placeholder="qual? (ex.: passou na frente, evento…)" autoFocus
+          value={v.replace(/^Outro(: )?/, "")} onChange={(e) => aoMudar(e.target.value ? `Outro: ${e.target.value}` : "Outro")} />
+      )}
+    </Campo>
+  );
+}
+
 function JanelaChegou({ lead, equipe, aoFechar, aoPronto, fluxo }) {
   lead = lead || {};
   const agora = () => new Date().toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
@@ -13538,9 +13578,12 @@ function JanelaChegou({ lead, equipe, aoFechar, aoPronto, fluxo }) {
   const [indo, setIndo] = useState(false);
   const [erro, setErro] = useState("");
   const [semAviso, setSemAviso] = useState(null);
+  const [como, setComo] = useState("");
+  const [origem, setOrigem] = useState(lead.origem || "");
   const n = negs.filter((x) => x.id === neg)[0];
   const futuro = dia > hojeEmSP() || (dia === hojeEmSP() && hora > agora());
-  const pronto = n && nome.trim() && dia && hora && !futuro;
+  const comoOk = !fluxo || (como && como !== "Outro");
+  const pronto = n && nome.trim() && dia && hora && !futuro && comoOk;
 
   const confirmar = async () => {
     setIndo(true); setErro("");
@@ -13551,7 +13594,7 @@ function JanelaChegou({ lead, equipe, aoFechar, aoPronto, fluxo }) {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             cliente_nome: nome.trim(), cliente_telefone: telefone.trim() || null, carro_descricao: carro.trim() || null,
-            origem: "fluxo_loja", status: "cliente_na_loja", prospec: "FLUXO",
+            origem: "fluxo_loja", status: "cliente_na_loja", prospec: "FLUXO", como_conheceu: como,
             negociador_id: n.id, negociador_nome: n.nome,
             data: dia, chegada_em: `${dia}T${hora}:00-03:00`, avisar_grupo: true,
           }),
@@ -13563,6 +13606,7 @@ function JanelaChegou({ lead, equipe, aoFechar, aoPronto, fluxo }) {
         d = await leadCompareceu(lead.id, {
           negociador_id: n.id, negociador_nome: n.nome,
           cliente_nome: nome.trim(), carro: carro.trim(), chegada: `${dia}T${hora}`,
+          origem: origem || undefined,
         });
       }
       const av = d.aviso || {};
@@ -13614,6 +13658,15 @@ function JanelaChegou({ lead, equipe, aoFechar, aoPronto, fluxo }) {
             <Campo label="Carro">
               <input className={inputCls} style={inputSty} value={carro} placeholder="ex.: Kwid" onChange={(e) => setCarro(e.target.value)} />
             </Campo>
+            {fluxo ? <ComoConheceu valor={como} aoMudar={setComo} /> : (
+              <Campo label="De onde o cliente veio"
+                nota={`${quemAgendou(lead) ? `Agendado por ${quemAgendou(lead)}. ` : ""}A origem veio do número de WhatsApp; confirme com ele.`}>
+                <select className={inputCls} style={inputSty} value={origem} onChange={(e) => setOrigem(e.target.value)}>
+                  <option value="">não informada</option>
+                  {ORIGENS.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
+                </select>
+              </Campo>
+            )}
             <div className="grid grid-cols-2 gap-2">
               <Campo label="Data">
                 <input type="date" className={inputCls} style={inputSty} value={dia} max={hojeEmSP()} onChange={(e) => setDia(e.target.value)} />
@@ -15852,6 +15905,9 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
                               <div className="truncate text-[11px]" style={{ color: C.mute, opacity: a.carro_descricao ? 1 : 0.55 }}>
                                 {a.carro_descricao || "sem carro"}{a.negociador_nome ? ` · ${a.negociador_nome}` : ""}
                               </div>
+                              <div className="truncate text-[10.5px]" style={{ color: COR_FLUXO.texto, opacity: a.como_conheceu ? 1 : 0.6 }}>
+                                {a.como_conheceu ? `conheceu: ${a.como_conheceu}` : "como conheceu: não perguntado"}
+                              </div>
                             </button>
                           );
                         }
@@ -15877,6 +15933,7 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
                                 {novaData ? `para ${diaBR(String(l.agendado_para).slice(0, 10)).slice(0, 5)} às ${horaBR(l.agendado_para)}`
                                   : it.k === "n" ? "toque para remarcar" : (l.carro || "sem carro")}
                               </div>
+                              <div className="truncate text-[10.5px]" style={{ color: C.mute }}>{linhaAgendou(l)}</div>
                             </button>
                           );
                         }
@@ -15904,6 +15961,10 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
                               <div className="truncate text-[11px]" style={{ color: C.mute, opacity: l.carro ? 1 : 0.55 }}>
                                 {l.carro || "sem carro"}
                               </div>
+                              {/* QUEM AGENDOU E DE ONDE VEIO (0098, o Derek:
+                                  *"qual a pré-vendas que agendou o cliente; se
+                                  foi uma IA, qual IA"*). */}
+                              <div className="truncate text-[10.5px]" style={{ color: C.mute }} title={linhaAgendou(l)}>{linhaAgendou(l)}</div>
                             </button>
                             {aberto && (
                               <div className="space-y-1 border-t p-1.5" style={{ borderColor: C.line }}>
@@ -15998,7 +16059,7 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
                           <span style={{ fontVariantNumeric: "tabular-nums" }}>{horaBR(l.agendado_para)}</span> · {l.nome}{l.carro ? <span style={{ color: C.mute }}> — {l.carro}</span> : null}
                         </div>
                         <div className="text-[13px]" style={{ color: C.mute }}>
-                          {[l.carro, l.negociador_nome || (l.negociador && l.negociador.nome) || "sem negociador"].filter(Boolean).join(" · ")}
+                          {[l.carro, l.negociador_nome || (l.negociador && l.negociador.nome) || "sem negociador", linhaAgendou(l)].filter(Boolean).join(" · ")}
                           {!!remarcou && <span style={{ color: AMARELO.texto }}> · remarcou {remarcou}×</span>}
                         </div>
                       </div>

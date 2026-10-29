@@ -116,7 +116,7 @@ const FONTE = {
   origem: "origem", status: "status", carro_descricao: "carro_descricao",
   pretensao: "pretensao", valor_fechado: "valor_fechado",
   forma_fechamento: "forma_fechamento", proximo_contato: "proximo_contato",
-  observacoes: "observacoes", chegada_em: "chegada_em",
+  observacoes: "observacoes", chegada_em: "chegada_em", como_conheceu: "como_conheceu",
 };
 
 function paraColunas(c) {
@@ -148,6 +148,9 @@ function paraColunas(c) {
     origem: daLista(c.origem, ORIGENS),
     status: daLista(c.status, STATUS),
     carro_descricao: texto(c.carro_descricao),
+    // Como o cliente de fluxo conheceu a loja (0098): a origem continua
+    // `fluxo_loja`; isto é o porquê de ele ter entrado.
+    como_conheceu: texto(c.como_conheceu),
     pretensao: decimal(c.pretensao),
     valor_fechado: decimal(c.valor_fechado),
     forma_fechamento: texto(c.forma_fechamento),
@@ -1314,11 +1317,15 @@ async function leads(req, res, tok) {
       cliente_nome: nome,
       cliente_telefone: atual.telefone,
       carro_descricao: carro,
-      origem: atual.origem || "outro",
+      // A origem pode ser corrigida na janela (0098): a que veio do número
+      // de WhatsApp é palpite, e quem pergunta na mesa sabe a verdade.
+      origem: daLista(corpo.origem, ORIGENS) || atual.origem || "outro",
       status: "cliente_na_loja",
       negociador_id: await idDePerfil(tok, corpo.negociador_id),
       negociador_nome: texto(corpo.negociador_nome) || atual.negociador_nome,
-      prospec: atual.prospector_nome,
+      // Quem trouxe é a coluna PROSPEC da planilha; sem o nome digitado,
+      // vale quem agendou (0098).
+      prospec: atual.prospector_nome || atual.agendado_por_nome,
       observacoes: atual.observacoes,
     };
     const criado = await banco(REST("atendimento"), {
@@ -1331,7 +1338,7 @@ async function leads(req, res, tok) {
     // cliente, e o quadro continuaria chamando-o pelo apelido do WhatsApp.
     await banco(`${base}?id=eq.${id}`, {
       method: "PATCH", headers: cabJson,
-      body: JSON.stringify({ status: "compareceu", atendimento_id: at.id, nome, carro }),
+      body: JSON.stringify({ status: "compareceu", atendimento_id: at.id, nome, carro, origem: novoAt.origem }),
     });
     const aviso = await avisoDeChegada(req, tok, at);
     return res.status(201).json({ ok: true, atendimento: at, atendimento_id: at.id, aviso });

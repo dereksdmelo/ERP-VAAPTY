@@ -2379,6 +2379,30 @@ medida (decisão 49). O fluxo aparece à parte ("+2 fluxo"): ele não foi
 agendado, e somá-lo poria na conta da pré-venda visita que ela não
 trouxe. Dia que não chegou mostra só os agendados.
 
+**Cada cartão diz quem agendou e de onde o cliente veio (0098, o
+Derek, 29/10/2026: *"qual a pré-vendas que agendou o cliente; se foi
+uma IA, qual IA; se foi uma pessoa, qual a pessoa"*).** É carimbo do
+banco, não campo da tela: o gatilho `lead_marca_agendou` grava
+`agendado_por_nome` e `agendado_em` toda vez que o horário muda. Com
+usuário (o agendador, a caixa de Conversas) vale o perfil; sem usuário
+(a ponte, o cron), `wa_lead_avanca` decide pela mensagem que confirmou —
+id da Flávia em `ia_resposta`/`ia_retomada` → "IA - Flávia"; número de
+IA → "IA - Ana" / "IA - Camila"; o resto → "Celular · <número>", que é
+alguém digitando direto no aparelho (não dá para saber quem). Vale o
+último a marcar; os anteriores estão em `remarcacoes`. Os 339 que já
+estavam agendados foram preenchidos pela última mensagem da loja que
+cita a hora marcada: 320 achados, 19 ficam "não registrado" — palpite
+seria pior. No "Chegou", quem agendou vira o PROSPEC do atendimento
+quando ninguém digitou o prospector.
+
+**O cliente de fluxo responde como conheceu a loja** (`como_conheceu`,
+0098, chips em `ComoConheceu`): TV, fachada, rádio, Facebook/Instagram,
+Google, indicação, já é cliente, outdoor ou outro. É obrigatório na
+janela do fluxo e no "Novo atendimento" com origem fluxo. A origem
+continua `fluxo_loja` — é como o funil o conta —; isto é o porquê. No
+"Chegou" do agendado, a origem do lead aparece para ser confirmada com
+o cliente: a que vem do número de WhatsApp é palpite.
+
 **Os estados do cartão na agenda** (`ESTADO_AGENDA`), cada um com cor
 E palavra — cor sozinha não se lê ao sol, palavra sozinha não se acha
 numa grade de 60: agendado (branco), confirmou (verde ✓), passou a
