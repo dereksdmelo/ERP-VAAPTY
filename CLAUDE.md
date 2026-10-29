@@ -4502,6 +4502,13 @@ vem do cadastro, não da tela). **O link leva o carro junto**:
 e telefone do lojista não viajam na URL. "Abrir no WhatsApp deste
 computador" continua ali, para quando a ponte estiver fora.
 
+**"Comunicado de venda" na linha (0093, o Derek no mesmo dia).** É o
+que a Vaapty faz no Detran quando o lojista não transfere, e tira da
+loja a responsabilidade pelo carro dali em diante. Fica registrado com
+a data, a observação e quem fez (`estoque.comunicado_*`), aparece em azul
+na situação, e **não tira o carro da lista**: a transferência continua
+devendo, e os lembretes continuam.
+
 ### 34. A conferência do administrativo ganhou o resto do negócio
 
 A aba mostrava 36 caixas de visto e mais nada. Faltavam três coisas

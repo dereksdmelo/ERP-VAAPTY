@@ -20871,7 +20871,7 @@ function TelaTransferencias() {
     catch (e) { setErro(e.message); }
   };
   const marcar = async () => {
-    try { await post("transferido", { estoque_id: marcando.id, data: marcando.data, obs: marcando.obs }); setMarcando(null); carregar(); }
+    try { await post(marcando.qual || "transferido", { estoque_id: marcando.id, data: marcando.data, obs: marcando.obs }); setMarcando(null); carregar(); }
     catch (e) { setErro(e.message); }
   };
   const manual = async (c, acao) => {
@@ -20982,6 +20982,12 @@ function TelaTransferencias() {
                     <td className="px-2.5 py-2 font-semibold" style={{ color: c.transferido_em ? C.verde : venceu ? "#C62828" : perto ? C.laranja : C.ink }}>
                       {c.transferido_em ? `transferido ${diaBR(c.transferido_em)}` : resta == null ? "—" : venceu ? `venceu há ${-resta} dia${resta === -1 ? "" : "s"}` : resta === 0 ? "vence hoje" : `faltam ${resta} dia${resta === 1 ? "" : "s"}`}
                       {c.transferido_obs && <div className="text-[11px] font-normal" style={{ color: C.mute }}>{c.transferido_obs}</div>}
+                      {c.comunicado_em && (
+                        <div className="text-[11px] font-normal" style={{ color: "#1B5FA8" }}>
+                          comunicado de venda {diaBR(c.comunicado_em)}{c.comunicado_obs ? ` · ${c.comunicado_obs}` : ""}
+                          {!c.transferido_em && <button onClick={async () => { try { await post("comunicado", { estoque_id: c.id, desfazer: true }); carregar(); } catch (e) { setErro(e.message); } }} className="ml-1 underline" style={{ color: C.mute }}>desfazer</button>}
+                        </div>
+                      )}
                     </td>
                     <td className="px-2.5 py-2 text-[12px]">{c.dut ? <span title={c.dut.protocolo}>{(DUT_SITUACAO[c.dut.situacao] || {}).rot || c.dut.situacao}</span> : <span style={{ color: C.mute }}>—</span>}</td>
                     <td className="px-2.5 py-2 text-[12px]" style={{ color: C.mute }}>
@@ -20991,6 +20997,7 @@ function TelaTransferencias() {
                     <td className="px-2.5 py-2">
                       {marcando && marcando.id === c.id ? (
                         <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-[11.5px] font-semibold" style={{ color: C.mute }}>{marcando.qual === "comunicado" ? "Comunicado em" : "Transferido em"}</span>
                           <input type="date" value={marcando.data} max={hoje} onChange={(e) => setMarcando({ ...marcando, data: e.target.value })}
                             className="rounded border px-1.5 py-1 text-[12px]" style={{ borderColor: C.line }} />
                           <input value={marcando.obs} onChange={(e) => setMarcando({ ...marcando, obs: e.target.value })} placeholder="obs."
@@ -21002,7 +21009,11 @@ function TelaTransferencias() {
                         <div className="flex flex-wrap items-center gap-1.5">
                           {c.transferido_em
                             ? <button onClick={async () => { try { await post("transferido", { estoque_id: c.id, desfazer: true }); carregar(); } catch (e) { setErro(e.message); } }} className="text-[12px] underline" style={{ color: C.mute }}>desfazer</button>
-                            : <button onClick={() => setMarcando({ id: c.id, data: hoje, obs: "" })} className="rounded px-2 py-1 text-[12px] font-semibold text-white" style={{ background: C.roxo }}>Transferido</button>}
+                            : <button onClick={() => setMarcando({ id: c.id, qual: "transferido", data: hoje, obs: "" })} className="rounded px-2 py-1 text-[12px] font-semibold text-white" style={{ background: C.roxo }}>Transferido</button>}
+                          {!c.transferido_em && !c.comunicado_em && (
+                            <button onClick={() => setMarcando({ id: c.id, qual: "comunicado", data: hoje, obs: "" })}
+                              className="rounded border px-2 py-1 text-[12px] font-semibold" style={{ borderColor: "#1B5FA8", color: "#1B5FA8" }}>Comunicado de venda</button>
+                          )}
                           {fone && <button onClick={() => setEscrevendo({ c, texto: textoPronto(c), indo: false, erro: "" })}
                             className="rounded border px-2 py-1 text-[12px]" style={{ borderColor: C.line, color: C.ink }}>WhatsApp</button>}
                           {fone && !c.transferido_em && <button onClick={() => manual(c, "crlv")} className="text-[12px] underline" style={{ color: C.roxo }}>mandar CRLV</button>}

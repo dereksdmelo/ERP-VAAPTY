@@ -695,7 +695,7 @@ async function transferencia(req, res, tok) {
 
   if (req.method === "GET") {
     const [carros, cfg] = await Promise.all([
-      fetch(`${RE}?select=id,atendimento_id,vendido_em,entrou_em,semana_venda,transferido_em,transferido_obs,natureza,` +
+      fetch(`${RE}?select=id,atendimento_id,vendido_em,entrou_em,semana_venda,transferido_em,transferido_obs,comunicado_em,comunicado_obs,natureza,` +
         `veiculo(placa,marca_modelo),comprador(id,nome,telefone)&situacao=eq.vendido&natureza=neq.indicacao&order=vendido_em.desc.nullslast,entrou_em.desc&limit=1000`,
         { headers: cabecalhos(tok) }).then((r) => r.json()).catch(() => []),
       fetch(`${URL_BASE}/rest/v1/config_loja?select=lojista_lembretes,lojista_boas_vindas,lojista_crlv&id=eq.1`, { headers: cabecalhos(tok) })
@@ -736,6 +736,18 @@ async function transferencia(req, res, tok) {
 
   const eid = String(c.estoque_id || "");
   if (!RX_UUID.test(eid)) return res.status(400).json({ erro: "estoque_id inválido." });
+
+  // O comunicado de venda no Detran (0093): o carro continua na lista até
+  // ser transferido, mas fica registrado quando e por quem foi feito.
+  if (acao === "comunicado") {
+    const mud = c.desfazer ? { comunicado_em: null, comunicado_por: null, comunicado_obs: null }
+      : { comunicado_em: /^\d{4}-\d{2}-\d{2}$/.test(String(c.data || "")) ? c.data : new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }),
+          comunicado_por: eu.id, comunicado_obs: texto(c.obs) };
+    const r = await fetch(`${RE}?id=eq.${eid}`, { method: "PATCH", headers: json(tok, { Prefer: "return=representation" }), body: JSON.stringify(mud) });
+    const x = await r.json().catch(() => []);
+    if (!Array.isArray(x) || !x[0]) return res.status(403).json({ erro: "A regra do banco recusou." });
+    return res.status(200).json({ ok: true });
+  }
 
   if (acao === "transferido") {
     const mud = c.desfazer ? { transferido_em: null, transferido_por: null, transferido_obs: null }
