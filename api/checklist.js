@@ -237,7 +237,8 @@ async function esteira(req, res, tok) {
   }
 
   if (acao === "aprovar") {
-    if (!eu.gerente) return res.status(403).json({ erro: "Só gerente aprova." });
+    // Revisor: gerente ou quem é do financeiro (0095).
+    if (!eu.fin) return res.status(403).json({ erro: "Quem aprova é o revisor: gerente ou financeiro." });
     const decisao = c.decisao === "devolvido" ? "devolvido" : c.decisao === "desfazer" ? "desfazer" : "aprovado";
     if (decisao === "desfazer") {
       await banco(`${RA}?atendimento_id=eq.${aid}&perfil_id=eq.${eu.id}`, { method: "DELETE", headers: cabecalhos(tok) });
@@ -527,7 +528,7 @@ async function documentos(req, res, tok) {
      * revisores" viraria um. */
     if (linha.gerencia !== undefined || linha.financeiro !== undefined) {
       const eu2 = await quemSou(tok);
-      if (!eu2 || !(eu2.gerente || eu2.fin)) return res.status(403).json({ erro: "Só gerente revisa." });
+      if (!eu2 || !(eu2.gerente || eu2.fin)) return res.status(403).json({ erro: "Quem revisa é o gerente ou o financeiro." });
       const outra = linha.gerencia !== undefined ? "financeiro" : "gerencia";
       const qual = linha.gerencia !== undefined ? "gerencia" : "financeiro";
       if (linha[qual] !== null) {

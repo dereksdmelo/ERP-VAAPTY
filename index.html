@@ -20147,7 +20147,7 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
             {semAnexo} com visto e sem anexo
           </span>
         )}
-        {!revisor && podeVisto && <span className="text-[11px]" style={{ color: C.mute }}>Você marca a coluna do adm; Revisor 1 e 2 são de dois gerentes diferentes.</span>}
+        {!revisor && podeVisto && <span className="text-[11px]" style={{ color: C.mute }}>Você marca a coluna do adm; Revisor 1 e 2 são de dois revisores diferentes (gerente ou financeiro).</span>}
         {!!fila.length && (
           <button onClick={comecarConferencia} className="rounded-lg px-3 py-1.5 text-[12.5px] font-semibold text-white" style={{ background: C.roxo }}>
             Conferir documentos{revisor ? " (revisor)" : ""}
@@ -20866,7 +20866,7 @@ function FilaDut() {
  * não é decidida aqui. */
 const ETAPA_NEG = {
   revisar: { rot: "revisar", cor: C.laranja },
-  aprovar: { rot: "com os gerentes", cor: C.roxo },
+  aprovar: { rot: "com os revisores", cor: C.roxo },
   pagar: { rot: "a pagar", cor: "#1B5FA8" },
   pago: { rot: "pago", cor: C.verde },
   // Depois do pagamento, a pasta (0094).
@@ -21253,11 +21253,11 @@ function TelaADM({ perfil, comp, mes, modo = "revisar" }) {
             </button>
           )}
 
-          {modo === "aprovar" && foco.etapa === "aprovar" && (eu.gerente ? (
+          {modo === "aprovar" && foco.etapa === "aprovar" && (eu.fin ? (
             <div className="mt-3 space-y-2">
               {foco.eu_aprovei ? (
                 <div className="flex items-center gap-3 text-[13px]">
-                  <span style={{ color: C.verde, fontWeight: 600 }}>Você aprovou. Falta {Math.max(0, minimo - foco.aprovacoes.length)} de outro gerente.</span>
+                  <span style={{ color: C.verde, fontWeight: 600 }}>Você aprovou. Falta {Math.max(0, minimo - foco.aprovacoes.length)} de outro revisor.</span>
                   <button onClick={() => agir("aprovar", { decisao: "desfazer" })} disabled={indo} className="underline" style={{ color: C.mute }}>desfazer</button>
                 </div>
               ) : (
@@ -21275,7 +21275,7 @@ function TelaADM({ perfil, comp, mes, modo = "revisar" }) {
                 </button>
               </div>
             </div>
-          ) : <p className="mt-2 text-[12.5px]" style={{ color: C.mute }}>Só gerente aprova.</p>)}
+          ) : <p className="mt-2 text-[12.5px]" style={{ color: C.mute }}>Quem aprova é o revisor: gerente ou financeiro.</p>)}
 
           {modo === "pagar" && (
             <div className="mt-3 space-y-2">
@@ -21312,7 +21312,7 @@ function TelaADM({ perfil, comp, mes, modo = "revisar" }) {
                 </div>
               )}
               {(foco.etapa === "revisar" || foco.etapa === "aprovar") && (
-                <p className="text-[12.5px]" style={{ color: C.mute }}>Ainda {foco.etapa === "revisar" ? "na revisão do adm" : "com os gerentes"}: entra na previsão do caixa, não se paga ainda.</p>
+                <p className="text-[12.5px]" style={{ color: C.mute }}>Ainda {foco.etapa === "revisar" ? "na revisão do adm" : "com os revisores"}: entra na previsão do caixa, não se paga ainda.</p>
               )}
             </div>
           )}
@@ -21437,7 +21437,7 @@ function TelaADM({ perfil, comp, mes, modo = "revisar" }) {
   const nRevisar = todos.filter((a) => a.etapa === "revisar").length;
   const sub = !dados ? "Carregando…"
     : modo === "revisar" ? `${todos.length} fechados · ${nRevisar} para revisar`
-    : modo === "aprovar" ? `${lista.length} esperando aprovação · cada um precisa de ${minimo} gerentes`
+    : modo === "aprovar" ? `${lista.length} esperando aprovação · cada um precisa de ${minimo} revisores diferentes`
     : modo === "arquivar" ? `${todos.filter((a) => a.etapa === "arquivar").length} em arquivamento · ${todos.filter((a) => a.etapa === "arquivado").length} arquivados`
     : `${todos.filter((a) => a.etapa === "pagar").length} a pagar · ${brl(soma(todos.filter((a) => a.etapa === "pagar")))}` +
       (lista.some((a) => !desembolsoDe(a.checklist).total) ? ` · ${lista.filter((a) => !desembolsoDe(a.checklist).total).length} sem valores no check list` : "");
@@ -21462,7 +21462,7 @@ function TelaADM({ perfil, comp, mes, modo = "revisar" }) {
           </label>
           {previsao && (
             <span style={{ color: C.mute }}>
-              em revisão {brl(soma(todos.filter((a) => a.etapa === "revisar")))} · com os gerentes {brl(soma(todos.filter((a) => a.etapa === "aprovar")))}
+              em revisão {brl(soma(todos.filter((a) => a.etapa === "revisar")))} · com os revisores {brl(soma(todos.filter((a) => a.etapa === "aprovar")))}
             </span>
           )}
         </div>
@@ -21475,7 +21475,7 @@ function TelaADM({ perfil, comp, mes, modo = "revisar" }) {
             {modo === "revisar" ? "Nenhum negócio fechado neste mês. A fila enche quando o negociador marca o atendimento como fechado."
               : modo === "aprovar" ? "Nada esperando aprovação. Entra aqui o que o adm concluiu a revisão."
               : modo === "arquivar" ? (verArquivados ? "Nenhum negócio arquivado ainda." : "Nada para arquivar. Entra aqui o negócio que já foi pago.")
-              : "Nada a pagar. Entra aqui o negócio revisado pelo adm e aprovado por dois gerentes."}
+              : "Nada a pagar. Entra aqui o negócio revisado pelo adm e aprovado por dois revisores."}
           </p>
         )}
         {lista.map((a) => {
@@ -22590,7 +22590,9 @@ function destinosPara(perfil) {
      * duas pílulas no topo de uma tela só, e o DUT, que é outro trabalho
      * (a contraparte é a rede, não o cliente), ganhou o dele. */
     adm ? { id: "adm", rot: "Negócios fechados", curto: "Adm.", area: "adm" } : null,
-    gerente ? { id: "adm_aprovacoes", rot: "Aprovações", curto: "Aprov.", area: "adm" } : null,
+    // Revisor é gerente ou quem é do financeiro (0095): "pode ser o
+    // gerente, o financeiro, ou eu mesmo… tendo dois está ótimo".
+    (gerente || (perfil && perfil.financeiro)) ? { id: "adm_aprovacoes", rot: "Aprovações", curto: "Aprov.", area: "adm" } : null,
     (gerente || (perfil && perfil.financeiro)) ? { id: "adm_pagamentos", rot: "Pagamentos a realizar", curto: "Pagar", area: "adm" } : null,
     adm ? { id: "adm_arquivo", rot: "Arquivamento", curto: "Arquivo", area: "adm" } : null,
     adm ? { id: "adm_dut", rot: "DUT dos lojistas", curto: "DUT", area: "adm" } : null,

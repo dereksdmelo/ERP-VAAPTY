@@ -4246,6 +4246,13 @@ outro** no mesmo item: a tela trava a coluna e o servidor recusa com
 409. O revisor cai sozinho na coluna livre (`colunaMinha`): a 1 se
 ninguém revisou, a 2 se a 1 é de outra pessoa.
 
+**A aprovação do negócio também é de REVISOR (0095)** (o Derek: *"pode
+ser o gerente, o financeiro, ou eu mesmo… tendo dois está ótimo"*): a
+RLS da `aprovacao_negocio` passou de `e_gerente()` para `e_financeiro()`
+(que inclui o gerente), o destino Aprovações aparece para os dois, e a
+tela diz "revisores" onde dizia "gerentes". A regra que importa não
+mudou: cada um grava só a própria decisão, e são duas pessoas.
+
 **"Visto e sem anexo" é um aviso no topo.** O administrativo anexa
 antes; a conferência olha o que está lá. Sem esse aviso, "sim" vira
 palavra sem lastro. Os itens que são pergunta de sim/não — *Trocar de
