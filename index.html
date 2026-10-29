@@ -20010,18 +20010,28 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
     catch (e) { setErro(e.message); }
   };
 
+  /* O CLIQUE ACENDE NA HORA E NADA SE MEXE (28/10/2026, o Derek: "dá um
+   * lagzinho… seria legal se clicasse e só ligasse sem mexer nada na
+   * tela"). Eram duas coisas: depois de cada visto a tela relia o check
+   * list INTEIRO do servidor e redesenhava; e, em "Só o que falta", o
+   * item que ficava completo sumia, e tudo abaixo subia debaixo do dedo.
+   * Agora o visto vai otimista — com o nome e o dia de quem marcou já
+   * escritos — e o servidor só é relido se a gravação falhar. O item
+   * tocado fica na lista até a próxima abertura. */
+  const [tocados, setTocados] = useState(() => new Set());
   const marcar = async (item, visto, valor) => {
     setErro("");
-    // Otimista: o administrativo passa 36 itens em sequência, e esperar
-    // o servidor a cada clique trava a mão.
+    setTocados((t) => (t.has(item) ? t : new Set(t).add(item)));
     setD((x) => {
       const marcas = (x.marcas || []).slice();
       const i = marcas.findIndex((m) => m.item === item);
-      const nova = { ...(i >= 0 ? marcas[i] : { item }), [visto]: valor };
+      const nova = { ...(i >= 0 ? marcas[i] : { item }), [visto]: valor,
+        [`${visto}_nome`]: valor == null ? null : (perfil && perfil.nome) || "você",
+        [`${visto}_em`]: valor == null ? null : new Date().toISOString() };
       if (i >= 0) marcas[i] = nova; else marcas.push(nova);
       return { ...x, marcas };
     });
-    try { await marcarChecklistDoc({ atendimento_id: atendimentoId, item, [visto]: valor }); carregar(); }
+    try { await marcarChecklistDoc({ atendimento_id: atendimentoId, item, [visto]: valor }); }
     catch (e) { setErro(e.message); carregar(); }
   };
 
@@ -20131,7 +20141,7 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
       {erro && <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
 
       {GRUPOS_DOC.map(([g, rot]) => {
-        const itens = d.itens.filter((it) => it[2] === g && (so === "todos" || pendente(it)));
+        const itens = d.itens.filter((it) => it[2] === g && (so === "todos" || pendente(it) || tocados.has(it[0])));
         if (!itens.length) return null;
         const tres = itens[0][3] === "tres";
         return (

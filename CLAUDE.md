@@ -4230,7 +4230,12 @@ Sim/Não da coluna de quem olha (gerência para o gerente, adm para o
 administrativo, financeiro para o financeiro). Marcar pula para o
 próximo papel cujo item ainda não tem esse visto — os outros papéis do
 mesmo item ficam para trás, porque o visto é do item. "Conferir
-documentos" começa do primeiro pendente.
+documentos" começa do primeiro pendente. **E o clique não tem atraso nem mexe a
+tela** (o Derek: *"dá um lagzinho"*): o visto acende na hora, já com o
+nome e o dia de quem marcou, e o servidor só é relido se a gravação
+falhar — antes, cada clique relia o check list inteiro, e em "Só o que
+falta" o item completo sumia e a lista subia debaixo do dedo. O item
+tocado fica à vista até a próxima abertura.
 
 **"Visto e sem anexo" é um aviso no topo.** O administrativo anexa
 antes; a conferência olha o que está lá. Sem esse aviso, "sim" vira
