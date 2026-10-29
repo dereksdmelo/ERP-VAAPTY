@@ -4237,6 +4237,15 @@ falhar — antes, cada clique relia o check list inteiro, e em "Só o que
 falta" o item completo sumia e a lista subia debaixo do dedo. O item
 tocado fica à vista até a próxima abertura.
 
+**Gerência e financeiro viraram REVISOR 1 e REVISOR 2** (o Derek, no
+mesmo dia). As colunas no banco continuam `gerencia` e `financeiro` — os
+vistos dados não mudam de lugar —, mas o que elas querem dizer é "duas
+pessoas diferentes conferiram", a mesma régua das duas aprovações. Só
+gerente (ou quem é do financeiro) revisa, e **quem deu um não dá o
+outro** no mesmo item: a tela trava a coluna e o servidor recusa com
+409. O revisor cai sozinho na coluna livre (`colunaMinha`): a 1 se
+ninguém revisou, a 2 se a 1 é de outra pessoa.
+
 **"Visto e sem anexo" é um aviso no topo.** O administrativo anexa
 antes; a conferência olha o que está lá. Sem esse aviso, "sim" vira
 palavra sem lastro. Os itens que são pergunta de sim/não — *Trocar de

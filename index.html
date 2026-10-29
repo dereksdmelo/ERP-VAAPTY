@@ -19068,7 +19068,7 @@ function VisorAnexos({ anexos, inicio, aoFechar, conferencia }) {
               );
               return (
                 <span className="flex items-center gap-1.5">
-                  <span className="text-[11px] uppercase tracking-[0.06em]" style={{ opacity: 0.7 }}>{conferencia.rot}</span>
+                  <span className="text-[11px] uppercase tracking-[0.06em]" style={{ opacity: 0.7 }}>{typeof conferencia.rot === "function" ? conferencia.rot(a._item) : conferencia.rot}</span>
                   {bt(true, "Sim, ok", C.verde)}{bt(false, "Não", C.laranja)}
                 </span>
               );
@@ -19154,7 +19154,9 @@ const GRUPOS_DOC = [
   // Os que a casa acrescentou para este carro em particular.
   ["extra", "Deste carro"],
 ];
-const VISTO_ROT = { adm: "Adm.", gerencia: "Gerência", financeiro: "Financeiro" };
+// As colunas no banco continuam gerencia e financeiro; o que elas dizem
+// desde 28/10/2026 é "dois revisores diferentes" (o Derek).
+const VISTO_ROT = { adm: "Adm.", gerencia: "Revisor 1", financeiro: "Revisor 2" };
 
 async function estoqueDoAtendimento(atendimentoId) {
   const r = await fetchAut(`/api/veiculo?recurso=estoque&atendimento_id=${encodeURIComponent(atendimentoId)}`);
@@ -20026,6 +20028,7 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
       const marcas = (x.marcas || []).slice();
       const i = marcas.findIndex((m) => m.item === item);
       const nova = { ...(i >= 0 ? marcas[i] : { item }), [visto]: valor,
+        [`${visto}_por`]: valor == null ? null : perfil && perfil.id,
         [`${visto}_nome`]: valor == null ? null : (perfil && perfil.nome) || "você",
         [`${visto}_em`]: valor == null ? null : new Date().toISOString() };
       if (i >= 0) marcas[i] = nova; else marcas.push(nova);
@@ -20060,22 +20063,42 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
    * próximo papel cujo item ainda não tem esse visto. A coluna é a do
    * papel da pessoa: gerência para o gerente, adm para o administrativo,
    * financeiro para o financeiro. */
-  const meuVisto = perfil && perfil.papel === "gerente" ? "gerencia" : podeVisto ? "adm" : "financeiro";
-  const fila = d.itens.filter((it) => it[4] && (it[3] === "tres" || meuVisto === "adm"))
+  /* QUAL COLUNA É MINHA, item a item: o revisor cai na coluna livre — a
+   * 1 se ninguém revisou, a 2 se a 1 é de outra pessoa —, e na que já é
+   * dele se ele já revisou. Com os dois revisores sendo outros, o item
+   * está feito para ele. O adm (que não é revisor) fica na coluna do adm. */
+  const eu = perfil && perfil.id;
+  const revisor = !!(perfil && (perfil.papel === "gerente" || perfil.financeiro));
+  const colunaMinha = (cod) => {
+    if (!revisor) return podeVisto ? "adm" : null;
+    const m = marcaDe(cod);
+    if (m.gerencia != null && m.gerencia_por === eu) return "gerencia";
+    if (m.financeiro != null && m.financeiro_por === eu) return "financeiro";
+    if (m.gerencia == null) return "gerencia";
+    if (m.financeiro == null) return "financeiro";
+    return null;
+  };
+  const meuVisto = revisor ? "gerencia" : podeVisto ? "adm" : "financeiro";
+  const estadoMeu = (cod) => { const c = colunaMinha(cod); return c ? marcaDe(cod)[c] : true; };
+  const fila = d.itens.filter((it) => it[4] && (it[3] === "tres" || !revisor))
     .flatMap((it) => geradosDoItem(it[0]).map(comoItem).concat(doItem(it[0])).map((a) => ({ ...a, _item: it[0], _rot: it[1], _k: `${it[0]}:${a.id}` })));
   const abrirNaFila = (cod, id) => {
     const i = fila.findIndex((x) => x._item === cod && x.id === id);
     setVisor({ lista: fila, i: Math.max(0, i), conferir: true });
   };
   const comecarConferencia = () => {
-    const i = fila.findIndex((x) => marcaDe(x._item)[meuVisto] == null);
+    const i = fila.findIndex((x) => estadoMeu(x._item) == null);
     setVisor({ lista: fila, i: i < 0 ? 0 : i, conferir: true });
   };
 
   const caixa = (it, visto) => {
     const m = marcaDe(it[0]);
     const v = m[visto];
-    const trava = !podeVisto && visto !== "financeiro";
+    // Adm: do administrativo. Revisor 1 e 2: de quem revisa, e nunca as
+    // duas pela mesma pessoa no mesmo item (o servidor confere de novo).
+    const outra = visto === "gerencia" ? "financeiro" : visto === "financeiro" ? "gerencia" : null;
+    const souOOutro = !!(outra && m[outra] != null && m[`${outra}_por`] === eu);
+    const trava = visto === "adm" ? !podeVisto : (!revisor || souOOutro);
     const bt = (valor, rot, cor) => (
       <button key={rot} disabled={trava}
         onClick={() => marcar(it[0], visto, v === valor ? null : valor)}
@@ -20124,10 +20147,10 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
             {semAnexo} com visto e sem anexo
           </span>
         )}
-        {!podeVisto && <span className="text-[11px]" style={{ color: C.mute }}>Você marca só a coluna do financeiro — adm e gerência são do administrativo.</span>}
+        {!revisor && podeVisto && <span className="text-[11px]" style={{ color: C.mute }}>Você marca a coluna do adm; Revisor 1 e 2 são de dois gerentes diferentes.</span>}
         {!!fila.length && (
           <button onClick={comecarConferencia} className="rounded-lg px-3 py-1.5 text-[12.5px] font-semibold text-white" style={{ background: C.roxo }}>
-            Conferir documentos ({VISTO_ROT[meuVisto]})
+            Conferir documentos{revisor ? " (revisor)" : ""}
           </button>
         )}
         {perfil && perfil.papel === "gerente" && (
@@ -20275,7 +20298,11 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
       )}
 
       {visor && <VisorAnexos anexos={visor.lista} inicio={visor.i} aoFechar={() => setVisor(null)}
-        conferencia={visor.conferir ? { rot: VISTO_ROT[meuVisto], estado: (cod) => marcaDe(cod)[meuVisto], aoMarcar: (cod, v) => marcar(cod, meuVisto, v) } : null} />}
+        conferencia={visor.conferir ? {
+          rot: (cod) => { const c = colunaMinha(cod); return c ? VISTO_ROT[c] : "já tem os dois revisores"; },
+          estado: estadoMeu,
+          aoMarcar: (cod, v) => { const c = colunaMinha(cod); if (c) marcar(cod, c, v); },
+        } : null} />}
 
       {so === "pendentes" && !faltam && (
         <div className="rounded-xl px-4 py-8 text-center" style={{ background: "#E8F3EE", border: `1px solid ${C.line}` }}>

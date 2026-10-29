@@ -514,8 +514,29 @@ async function documentos(req, res, tok) {
 
     // O visto do administrativo e o da gerência são permissão, não
     // conveniência de tela: quem não é adm nem gerente não carimba.
-    if ((linha.adm !== undefined || linha.gerencia !== undefined) && !adm) {
+    if (linha.adm !== undefined && !adm) {
       return res.status(403).json({ erro: "Só o administrativo ou o gerente dá esse visto." });
+    }
+    /* REVISOR 1 E REVISOR 2 (28/10/2026, o Derek: "ao invés de gerente e
+     * financeiro, podemos colocar REVISOR 1, REVISOR 2"). As colunas no
+     * banco continuam `gerencia` e `financeiro` — os vistos antigos não
+     * mudam de lugar —, mas o que elas querem dizer é "duas pessoas
+     * diferentes conferiram". Por isso: só gerente (ou quem é do
+     * financeiro) revisa, e QUEM DEU UM NÃO DÁ O OUTRO no mesmo item. Sem
+     * essa trava o mesmo gerente marcaria as duas colunas, e "dois
+     * revisores" viraria um. */
+    if (linha.gerencia !== undefined || linha.financeiro !== undefined) {
+      const eu2 = await quemSou(tok);
+      if (!eu2 || !(eu2.gerente || eu2.fin)) return res.status(403).json({ erro: "Só gerente revisa." });
+      const outra = linha.gerencia !== undefined ? "financeiro" : "gerencia";
+      const qual = linha.gerencia !== undefined ? "gerencia" : "financeiro";
+      if (linha[qual] !== null) {
+        const atual = ((await banco(`${RESTD}?select=${outra},${outra}_por&atendimento_id=eq.${aid}&item=eq.${encodeURIComponent(item)}&limit=1`,
+          { headers: cabecalhos(tok) })) || [])[0];
+        if (atual && atual[outra] !== null && atual[`${outra}_por`] === eu) {
+          return res.status(409).json({ erro: "Você já é o outro revisor deste item — o segundo visto precisa ser de outra pessoa." });
+        }
+      }
     }
 
     const r = await banco(`${RESTD}?on_conflict=atendimento_id,item`, {
