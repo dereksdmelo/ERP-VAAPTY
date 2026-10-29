@@ -155,7 +155,8 @@ function etapaDe(cl, aprov) {
 // resposta (decisão 1: gate que não se satisfaz com a verdade treina a
 // mentir). Os itens de pessoa jurídica só contam se algum deles foi
 // respondido — cliente pessoa física não tem contrato social.
-function faltamNaRevisao(marcas) {
+function faltamNaRevisao(marcas, itens) {
+  const ITENS_DOC = itens;
   const porItem = {};
   (marcas || []).forEach((m) => { porItem[m.item] = m; });
   const respondido = (c) => porItem[c] && porItem[c].adm !== null && porItem[c].adm !== undefined;
@@ -225,7 +226,7 @@ async function esteira(req, res, tok) {
     if (!eu.adm) return res.status(403).json({ erro: "Só o administrativo conclui a revisão." });
     if (c.desfazer) { await gravarCl({ revisado_em: null, revisado_por: null }); return res.status(200).json({ ok: true }); }
     const marcas = await banco(`${URL_BASE}/rest/v1/checklist_doc?select=item,adm,rotulo&atendimento_id=eq.${aid}`, { headers: cabecalhos(tok) });
-    const faltam = faltamNaRevisao(marcas);
+    const faltam = faltamNaRevisao(marcas, await itensDoc(tok));
     if (faltam.length) return res.status(409).json({ erro: `Faltam ${faltam.length} ${faltam.length === 1 ? "item" : "itens"} do check list de documentações.`, faltam });
     await gravarCl({ revisado_em: agora, revisado_por: eu.id });
     return res.status(200).json({ ok: true });
@@ -334,7 +335,81 @@ const ITENS_DOC = [
   ["transf_procuracao", "Cópia Procuração", "transferencia", "um", true],
   ["transf_comunicado_venda", "Comunicado Venda", "transferencia", "um", true],
 ];
-const CODIGOS_DOC = ITENS_DOC.map((x) => x[0]);
+
+/* A LISTA MORA NO BANCO DESDE A 0091 (28/10/2026, o Derek: "lista de
+ * documentos exigidos editável"). `ITENS_DOC` acima continua como o
+ * ponto de partida e a rede: se a leitura falhar, ou a tabela estiver
+ * vazia, vale a lista de sempre — check list que some no meio da
+ * conferência seria pior que check list desatualizado. Os desativados
+ * saem da conferência mas continuam valendo para o visto que já foi
+ * dado com eles (o código é a chave do visto e do anexo). */
+async function listaDoc(tok, tambemInativos) {
+  try {
+    const r = await fetch(`${URL_BASE}/rest/v1/doc_exigido?select=codigo,rotulo,grupo,vistos,pede_doc,ordem,ativo&order=ordem.asc,codigo.asc`,
+      { headers: cabecalhos(tok) });
+    if (!r.ok) return null;
+    const ls = await r.json().catch(() => null);
+    if (!Array.isArray(ls) || !ls.length) return null;
+    return tambemInativos ? ls : ls.filter((x) => x.ativo !== false);
+  } catch (e) { return null; }
+}
+async function itensDoc(tok) {
+  const ls = await listaDoc(tok, false);
+  return ls ? ls.map((x) => [x.codigo, x.rotulo, x.grupo, x.vistos, x.pede_doc !== false]) : ITENS_DOC;
+}
+const GRUPOS_DOC_OK = ["pf", "pj", "arquivamento", "transferencia"];
+
+/* O EDITOR DA LISTA: o gerente lê tudo (inclusive o desativado) e grava
+ * a lista inteira de uma vez. Item novo ganha o código no servidor, a
+ * partir do rótulo — código escolhido na tela colidiria com o de outro
+ * item e herdaria os vistos dele. */
+async function docExigido(req, res, tok) {
+  if (req.method === "GET") {
+    const ls = await listaDoc(tok, true);
+    return res.status(200).json({
+      itens: ls || ITENS_DOC.map((x, i) => ({ codigo: x[0], rotulo: x[1], grupo: x[2], vistos: x[3], pede_doc: x[4], ordem: (i + 1) * 10, ativo: true })),
+      do_banco: !!ls,
+    });
+  }
+  if (req.method !== "PUT") { res.setHeader("Allow", "GET, PUT"); return res.status(405).json({ erro: "Use GET ou PUT." }); }
+  const eu = await quemSou(tok);
+  if (!eu || !eu.gerente) return res.status(403).json({ erro: "Só o gerente muda a lista de documentos." });
+  const c = await lerCorpo(req);
+  const itens = c && Array.isArray(c.itens) ? c.itens : null;
+  if (!itens || !itens.length) return res.status(400).json({ erro: "Mande a lista." });
+  const usados = new Set();
+  const semAcento = (t) => String(t).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const linhas = [];
+  for (let i = 0; i < itens.length; i++) {
+    const x = itens[i] || {};
+    const rotulo = texto(x.rotulo);
+    if (!rotulo) return res.status(400).json({ erro: `O item ${i + 1} está sem nome.` });
+    let codigo = String(x.codigo || "").trim();
+    if (!/^[a-z0-9_]{2,60}$/.test(codigo)) {
+      const base = semAcento(rotulo).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40) || "item";
+      codigo = base; let n = 2;
+      while (usados.has(codigo) || /^extra/.test(codigo)) codigo = `${base}_${n++}`;
+    }
+    if (usados.has(codigo)) return res.status(400).json({ erro: `"${rotulo}" aparece duas vezes.` });
+    usados.add(codigo);
+    linhas.push({
+      codigo, rotulo,
+      grupo: GRUPOS_DOC_OK.indexOf(x.grupo) >= 0 ? x.grupo : "pf",
+      vistos: x.vistos === "um" ? "um" : "tres",
+      pede_doc: x.pede_doc !== false,
+      ordem: (i + 1) * 10,
+      ativo: x.ativo !== false,
+      atualizado_em: new Date().toISOString(),
+    });
+  }
+  const r = await fetch(`${URL_BASE}/rest/v1/doc_exigido?on_conflict=codigo`, {
+    method: "POST", headers: json(tok, { Prefer: "resolution=merge-duplicates,return=representation" }),
+    body: JSON.stringify(linhas),
+  });
+  const salvo = await r.json().catch(() => null);
+  if (!r.ok || !Array.isArray(salvo)) return res.status(r.ok ? 403 : 502).json({ erro: (salvo && salvo.message) || "O banco recusou a lista." });
+  return res.status(200).json({ ok: true, itens: salvo });
+}
 
 async function documentos(req, res, tok) {
   const RESTD = `${URL_BASE}/rest/v1/checklist_doc`;
@@ -365,7 +440,7 @@ async function documentos(req, res, tok) {
     const extras = (linhas || [])
       .filter((m) => /^extra/.test(m.item) && m.rotulo)
       .map((m) => [m.item, m.rotulo, m.grupo || "extra", "tres", m.pede_doc !== false]);
-    return res.status(200).json({ itens: ITENS_DOC.concat(extras), marcas });
+    return res.status(200).json({ itens: (await itensDoc(tok)).concat(extras), marcas });
   }
 
   if (req.method === "PUT") {
@@ -375,7 +450,10 @@ async function documentos(req, res, tok) {
     if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
     const item = String(corpo.item || "");
     const eExtra = /^extra_[a-z0-9_]{1,40}$/.test(item);
-    if (CODIGOS_DOC.indexOf(item) < 0 && !eExtra) return res.status(400).json({ erro: "Item desconhecido." });
+    // Item desativado ainda aceita visto: o que já foi dado com ele não
+    // pode ficar sem como ser corrigido.
+    const conhecidos = ((await listaDoc(tok, true)) || ITENS_DOC.map((x) => ({ codigo: x[0] }))).map((x) => x.codigo);
+    if (conhecidos.indexOf(item) < 0 && !eExtra) return res.status(400).json({ erro: "Item desconhecido." });
 
     const eu = donoDoToken(tok);
     const adm = await eAdministrativo(tok);
@@ -685,6 +763,10 @@ module.exports = async function handler(req, res) {
    * então ela vem antes da conferência. */
   if (String(req.query.recurso || "") === "documentos") {
     try { return await documentos(req, res, tok); }
+    catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Falhou." }); }
+  }
+  if (String(req.query.recurso || "") === "doc-exigido") {
+    try { return await docExigido(req, res, tok); }
     catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Falhou." }); }
   }
   if (String(req.query.recurso || "") === "esteira") {

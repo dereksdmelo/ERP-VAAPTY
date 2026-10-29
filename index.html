@@ -19743,6 +19743,109 @@ function DocumentosAssinados({ atendimentoId, perfil }) {
   );
 }
 
+/* A LISTA DE DOCUMENTOS EXIGIDOS, EDITÁVEL (0091, 28/10/2026, o Derek).
+ * Vale para todo negócio a partir de agora: o que se muda aqui muda a
+ * conferência de todos os carros, inclusive os já abertos. Por isso
+ * desativa e não apaga — o visto e o anexo já dados com um item ficam
+ * amarrados ao código dele, e o rótulo pode mudar à vontade. O que é só
+ * de um carro continua no "+ item deste carro", no fim da conferência. */
+function EditorDocsExigidos({ aoFechar, aoSalvar }) {
+  const [itens, setItens] = useState(null);
+  const [erro, setErro] = useState("");
+  const [indo, setIndo] = useState(false);
+  useEffect(() => {
+    fetchAut("/api/checklist?recurso=doc-exigido").then((r) => r.json())
+      .then((d) => setItens((d.itens || []).map((x, i) => ({ ...x, _k: x.codigo || `n${i}` }))))
+      .catch(() => setErro("Não consegui carregar a lista."));
+  }, []);
+  const grupos = GRUPOS_DOC.filter(([g]) => g !== "extra");
+  const mudar = (k, mud) => setItens((ls) => ls.map((x) => (x._k === k ? { ...x, ...mud } : x)));
+  // Subir e descer trocam com o vizinho DO MESMO GRUPO: a ordem que
+  // interessa é a de dentro do bloco que a pessoa vê.
+  const mover = (k, d) => setItens((ls) => {
+    const i = ls.findIndex((x) => x._k === k); if (i < 0) return ls;
+    const g = ls[i].grupo;
+    let j = i + d; while (j >= 0 && j < ls.length && ls[j].grupo !== g) j += d;
+    if (j < 0 || j >= ls.length) return ls;
+    const n = ls.slice(); [n[i], n[j]] = [n[j], n[i]]; return n;
+  });
+  const novo = (g) => setItens((ls) => ls.concat([{ _k: `n${Date.now()}`, codigo: "", rotulo: "", grupo: g, vistos: g === "pf" || g === "pj" ? "tres" : "um", pede_doc: true, ativo: true }]));
+  const salvar = async () => {
+    setIndo(true); setErro("");
+    try {
+      // A ordem final é a dos blocos na tela, um grupo depois do outro.
+      const ordem = grupos.flatMap(([g]) => itens.filter((x) => x.grupo === g))
+        .concat(itens.filter((x) => !grupos.some(([g]) => g === x.grupo)));
+      const r = await fetchAut("/api/checklist?recurso=doc-exigido", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itens: ordem.map(({ _k, ...x }) => x) }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.erro || "Não consegui salvar.");
+      aoSalvar();
+    } catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4" style={{ background: "rgba(20,10,30,0.45)" }}
+      onClick={(e) => { if (e.target === e.currentTarget) aoFechar(); }}>
+      <div className="w-full max-w-3xl rounded-xl p-4" style={{ background: C.paper }}>
+        <div className="mb-1 flex items-baseline justify-between gap-3">
+          <h3 className="text-[17px] font-bold">Documentos exigidos</h3>
+          <button onClick={aoFechar} className="text-[13px]" style={{ color: C.mute }}>fechar</button>
+        </div>
+        <p className="mb-3 text-[12.5px] leading-relaxed" style={{ color: C.mute }}>
+          Vale para todos os negócios, inclusive os já abertos. Desativar tira o item da conferência sem apagar os vistos e anexos que já foram dados com ele.
+          Documento que é só de um carro se acrescenta no próprio carro, no fim do check list.
+        </p>
+        {!itens && !erro && <p className="text-[13px]" style={{ color: C.mute }}>carregando…</p>}
+        {itens && grupos.map(([g, rot]) => {
+          const doGrupo = itens.filter((x) => x.grupo === g);
+          return (
+            <div key={g} className="mb-3 rounded-lg" style={{ border: `1px solid ${C.line}` }}>
+              <div className="px-3 py-1.5 text-[11.5px] font-semibold uppercase tracking-[0.06em]" style={{ color: C.mute, borderBottom: `1px solid ${C.line}` }}>{rot}</div>
+              {doGrupo.map((x) => (
+                <div key={x._k} className="flex flex-wrap items-center gap-2 px-3 py-1.5" style={{ borderBottom: `1px solid ${C.line}`, opacity: x.ativo === false ? 0.45 : 1 }}>
+                  <div className="flex flex-col">
+                    <button onClick={() => mover(x._k, -1)} className="px-1 text-[11px] leading-none" style={{ color: C.mute }} aria-label="Subir">▲</button>
+                    <button onClick={() => mover(x._k, 1)} className="px-1 text-[11px] leading-none" style={{ color: C.mute }} aria-label="Descer">▼</button>
+                  </div>
+                  <input value={x.rotulo} onChange={(e) => mudar(x._k, { rotulo: e.target.value })} placeholder="Nome do documento"
+                    className="min-w-[180px] flex-1 rounded-md border px-2 py-1 text-[13.5px]" style={{ borderColor: C.line }} />
+                  <select value={x.grupo} onChange={(e) => mudar(x._k, { grupo: e.target.value })} className="rounded-md border px-1.5 py-1 text-[12.5px]" style={{ borderColor: C.line }}>
+                    {grupos.map(([g2, r2]) => <option key={g2} value={g2}>{r2}</option>)}
+                  </select>
+                  <select value={x.vistos} onChange={(e) => mudar(x._k, { vistos: e.target.value })} className="rounded-md border px-1.5 py-1 text-[12.5px]" style={{ borderColor: C.line }}>
+                    <option value="tres">adm, gerência e financeiro</option>
+                    <option value="um">só o adm</option>
+                  </select>
+                  <label className="flex items-center gap-1 text-[12.5px]">
+                    <input type="checkbox" checked={x.pede_doc !== false} onChange={(e) => mudar(x._k, { pede_doc: e.target.checked })} />pede anexo
+                  </label>
+                  <button onClick={() => (x.codigo ? mudar(x._k, { ativo: x.ativo === false }) : setItens((ls) => ls.filter((y) => y._k !== x._k)))}
+                    className="text-[12px] underline" style={{ color: x.ativo === false ? C.verde : C.laranja }}>
+                    {!x.codigo ? "tirar" : x.ativo === false ? "reativar" : "desativar"}
+                  </button>
+                </div>
+              ))}
+              <button onClick={() => novo(g)} className="px-3 py-1.5 text-[12.5px] font-semibold" style={{ color: C.roxo }}>+ documento</button>
+            </div>
+          );
+        })}
+        {erro && <p className="mb-2 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+        {itens && (
+          <div className="flex justify-end gap-2">
+            <button onClick={aoFechar} className="rounded-md px-3 py-2 text-[13px]" style={{ color: C.mute }}>cancelar</button>
+            <button onClick={salvar} disabled={indo} className="rounded-md px-4 py-2 text-[13px] font-semibold text-white" style={{ background: indo ? C.line : C.roxo }}>
+              {indo ? "Salvando…" : "Salvar a lista"}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ChecklistDocumentos({ atendimentoId, perfil }) {
   const [d, setD] = useState(null);
   const [erro, setErro] = useState("");
@@ -19754,6 +19857,7 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
 
   const [docs, setDocs] = useState([]);
   const [novoItem, setNovoItem] = useState("");
+  const [editandoLista, setEditandoLista] = useState(false);
 
   const carregarAnexos = () =>
     listarAnexos(atendimentoId).then(setAnexos).catch(() => {});
@@ -19908,7 +20012,13 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
           </span>
         )}
         {!podeVisto && <span className="text-[11px]" style={{ color: C.mute }}>Você marca só a coluna do financeiro — adm e gerência são do administrativo.</span>}
+        {perfil && perfil.papel === "gerente" && (
+          <button onClick={() => setEditandoLista(true)} className="ml-auto text-[12.5px] font-semibold underline" style={{ color: C.roxo }}>
+            editar a lista de documentos
+          </button>
+        )}
       </div>
+      {editandoLista && <EditorDocsExigidos aoFechar={() => setEditandoLista(false)} aoSalvar={() => { setEditandoLista(false); carregar(); }} />}
 
       {erro && <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
 

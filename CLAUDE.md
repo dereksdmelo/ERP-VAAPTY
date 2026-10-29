@@ -4179,6 +4179,20 @@ casa muda o processo, e migração para acrescentar uma linha de
 conferência seria atrito à toa. `ITENS_DOC` em `api/checklist.js` é a
 fonte, e a tela a recebe do servidor — assim as duas não divergem.
 
+**Desde 28/10/2026 ela mora no banco e o gerente a edita** (0091,
+`doc_exigido`; o Derek: *"lista de documentos exigidos editável"*). O
+raciocínio de cima virou o contrário: justamente porque muda com o
+processo, quem muda é o gerente, sem deploy. "Editar a lista de
+documentos", no próprio check list, renomeia, cria, troca de grupo,
+decide se pede anexo e quem dá visto, reordena e **desativa — não
+apaga**: o código é a chave do visto (`checklist_doc.item`) e do anexo
+(`doc:<código>`), então o rótulo muda à vontade e o código fica. Item
+novo ganha o código no servidor, a partir do nome. `ITENS_DOC` continua
+no código como ponto de partida (foi a semente da 0091) e como rede: se
+a leitura falhar, vale ela. A mudança vale para todos os negócios,
+inclusive os abertos; o que é de um carro só continua no "+ item deste
+carro".
+
 **Quem carimba é o servidor.** O visto grava quem e quando a partir do
 token, e `adm`/`gerencia` só de quem é administrativo ou gerente. A
 tela desabilitar o botão é conveniência; a recusa é no servidor.
