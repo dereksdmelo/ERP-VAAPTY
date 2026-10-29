@@ -646,6 +646,145 @@ async function avisarLojista(req, tok, p, tipo) {
   }
 }
 
+/* PELO NÚMERO DO ADM, texto ou arquivo, e gravado na conversa como da
+ * loja (a ponte não ecoa o que manda). Um lugar só para o DUT e para as
+ * transferências: o canal é o de operação (0058) com "adm" no nome. */
+async function mandarPeloAdm(req, tok, telefone, conteudo, textoNaConversa) {
+  let fone = String(telefone || "").replace(/\D/g, "");
+  if (fone.length < 10) return { enviado: false, erro: "o lojista não tem WhatsApp com DDD no cadastro" };
+  if (fone.length <= 11) fone = `55${fone}`;
+  const segredo = process.env.PONTE_SEGREDO || "";
+  const base = process.env.PONTE_URL || "";
+  if (!segredo || (!req.ponte && !base)) return { enviado: false, erro: "a ponte do WhatsApp não está configurada" };
+  const canais = (await (await fetch(`${URL_BASE}/rest/v1/wa_canal?select=slug,nome&comercial=eq.false&ativo=eq.true&telefone=not.is.null&order=slug`,
+    { headers: cabecalhos(tok) })).json().catch(() => [])) || [];
+  const canal = canais.find((x) => /adm/i.test(`${x.slug} ${x.nome}`)) || canais[0];
+  if (!canal) return { enviado: false, erro: "nenhum número do administrativo ligado" };
+  try {
+    const alvo = `${base || "https://ponte"}/enviar?canal=${encodeURIComponent(canal.slug)}`;
+    const pedido = {
+      method: "POST", signal: AbortSignal.timeout(40000),
+      headers: { "x-ponte-segredo": segredo, "Content-Type": "application/json" },
+      body: JSON.stringify({ para: fone, conteudo }),
+    };
+    const r = req.ponte ? await req.ponte.fetch(alvo, pedido) : await fetch(alvo, pedido);
+    const d = await r.json().catch(() => ({}));
+    if (!d || !d.ok) return { enviado: false, erro: String((d && d.erro) || `a ponte respondeu ${r.status}`).slice(0, 160), fone };
+    try {
+      await fetch(`${URL_BASE}/rest/v1/rpc/wa_receber`, {
+        method: "POST", headers: json(tok),
+        body: JSON.stringify({ p_canal: canal.slug, p_telefone: fone, p_nome: "", p_wa_id: String(d.id || `adm-${Date.now()}`),
+          p_eco: true, p_tipo: conteudo.type === "document" ? "midia" : "texto", p_texto: textoNaConversa || "",
+          p_anexo: conteudo.type === "document" ? { tipo: "document", nome: conteudo.document.filename || "" } : null,
+          p_quando: new Date().toISOString(), p_anuncio: null }),
+      });
+    } catch (e) {}
+    return { enviado: true, canal: canal.nome, id: d.id || null, fone };
+  } catch (e) { return { enviado: false, erro: "a ponte não respondeu", fone }; }
+}
+
+/* A TRANSFERÊNCIA DOS CARROS VENDIDOS AOS LOJISTAS (0092, 28/10/2026).
+ * A lista é do adm e do gerente; os interruptores das automações, do
+ * gerente. O prazo é de 3 meses da venda (`regras/lojista.js`). */
+const LOJ = require("../regras/lojista.js");
+async function transferencia(req, res, tok) {
+  const eu = await quemSou(tok);
+  if (!eu || !eu.adm) return res.status(403).json({ erro: "As transferências são do administrativo." });
+  const RE = `${URL_BASE}/rest/v1/estoque`;
+  const site = (() => { const h = String((req.headers && (req.headers["x-forwarded-host"] || req.headers.host)) || ""); return h ? `https://${h}` : ""; })();
+
+  if (req.method === "GET") {
+    const [carros, cfg] = await Promise.all([
+      fetch(`${RE}?select=id,atendimento_id,vendido_em,entrou_em,semana_venda,transferido_em,transferido_obs,natureza,` +
+        `veiculo(placa,marca_modelo),comprador(id,nome,telefone)&situacao=eq.vendido&natureza=neq.indicacao&order=vendido_em.desc.nullslast,entrou_em.desc&limit=1000`,
+        { headers: cabecalhos(tok) }).then((r) => r.json()).catch(() => []),
+      fetch(`${URL_BASE}/rest/v1/config_loja?select=lojista_lembretes,lojista_boas_vindas,lojista_crlv&id=eq.1`, { headers: cabecalhos(tok) })
+        .then((r) => r.json()).then((x) => (Array.isArray(x) && x[0]) || {}).catch(() => ({})),
+    ]);
+    const lista = Array.isArray(carros) ? carros : [];
+    const ids = lista.filter((c) => !c.transferido_em).map((c) => c.id);
+    const avisos = ids.length ? await fetch(`${URL_BASE}/rest/v1/aviso_lojista?select=estoque_id,tipo,estado,criado_em&estoque_id=in.(${ids.slice(0, 400).join(",")})`,
+      { headers: cabecalhos(tok) }).then((r) => r.json()).catch(() => []) : [];
+    const placas = Array.from(new Set(lista.map((c) => c.veiculo && c.veiculo.placa).filter(Boolean)));
+    const duts = placas.length ? await fetch(`${URL_BASE}/rest/v1/dut_pedido?select=placa,situacao,protocolo,criado_em&placa=in.(${placas.slice(0, 400).map((p) => encodeURIComponent(p)).join(",")})&order=criado_em.desc`,
+      { headers: cabecalhos(tok) }).then((r) => r.json()).catch(() => []) : [];
+    const porAviso = {}; (Array.isArray(avisos) ? avisos : []).forEach((a) => { (porAviso[a.estoque_id] = porAviso[a.estoque_id] || []).push(a); });
+    const porDut = {}; (Array.isArray(duts) ? duts : []).forEach((d) => { if (!porDut[d.placa]) porDut[d.placa] = d; });
+    return res.status(200).json({
+      carros: lista.map((c) => {
+        const base = c.vendido_em || c.entrou_em || null;
+        return { ...c, base, estimada: !c.vendido_em, prazo: base ? LOJ.prazoDe(base) : null,
+          avisos: porAviso[c.id] || [], dut: c.veiculo && porDut[c.veiculo.placa] || null };
+      }),
+      config: cfg, eu: { gerente: eu.gerente, adm: eu.adm },
+    });
+  }
+
+  const c = await lerCorpo(req) || {};
+  const acao = String(req.query.acao || "");
+
+  if (acao === "config") {
+    if (!eu.gerente) return res.status(403).json({ erro: "Só o gerente liga e desliga as automações." });
+    const mud = {};
+    ["lojista_lembretes", "lojista_boas_vindas", "lojista_crlv"].forEach((k) => { if (typeof c[k] === "boolean") mud[k] = c[k]; });
+    if (!Object.keys(mud).length) return res.status(400).json({ erro: "Nada para mudar." });
+    const r = await fetch(`${URL_BASE}/rest/v1/config_loja?id=eq.1`, { method: "PATCH", headers: json(tok, { Prefer: "return=representation" }), body: JSON.stringify(mud) });
+    const x = await r.json().catch(() => []);
+    if (!Array.isArray(x) || !x[0]) return res.status(403).json({ erro: "A regra do banco recusou." });
+    return res.status(200).json({ config: x[0] });
+  }
+
+  const eid = String(c.estoque_id || "");
+  if (!RX_UUID.test(eid)) return res.status(400).json({ erro: "estoque_id inválido." });
+
+  if (acao === "transferido") {
+    const mud = c.desfazer ? { transferido_em: null, transferido_por: null, transferido_obs: null }
+      : { transferido_em: /^\d{4}-\d{2}-\d{2}$/.test(String(c.data || "")) ? c.data : new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }),
+          transferido_por: eu.id, transferido_obs: texto(c.obs) };
+    const r = await fetch(`${RE}?id=eq.${eid}`, { method: "PATCH", headers: json(tok, { Prefer: "return=representation" }), body: JSON.stringify(mud) });
+    const x = await r.json().catch(() => []);
+    if (!Array.isArray(x) || !x[0]) return res.status(403).json({ erro: "A regra do banco recusou." });
+    return res.status(200).json({ ok: true });
+  }
+
+  /* BOAS-VINDAS E CRLV. Do clique de quem confirmou a venda (com
+   * `auto`, obedecem aos interruptores e saem uma vez por carro) ou do
+   * botão da tela (sem `auto`, mandam de novo se a pessoa pediu). */
+  if (acao === "boas-vindas" || acao === "crlv") {
+    const car = ((await fetch(`${RE}?select=id,atendimento_id,vendido_em,veiculo(placa,marca_modelo),comprador(nome,telefone)&id=eq.${eid}`,
+      { headers: cabecalhos(tok) }).then((r) => r.json()).catch(() => [])) || [])[0];
+    if (!car) return res.status(404).json({ erro: "Carro não encontrado no estoque." });
+    const cfg = c.auto ? ((await fetch(`${URL_BASE}/rest/v1/config_loja?select=lojista_boas_vindas,lojista_crlv&id=eq.1`, { headers: cabecalhos(tok) })
+      .then((r) => r.json()).catch(() => [])) || [])[0] || {} : { lojista_boas_vindas: true, lojista_crlv: true };
+    const jaFoi = c.auto ? ((await fetch(`${URL_BASE}/rest/v1/aviso_lojista?select=tipo&estoque_id=eq.${eid}&estado=eq.enviado`, { headers: cabecalhos(tok) })
+      .then((r) => r.json()).catch(() => [])) || []).map((a) => a.tipo) : [];
+    const x = { nome: car.comprador && car.comprador.nome, carro: car.veiculo && car.veiculo.marca_modelo, placa: car.veiculo && car.veiculo.placa, vendido_em: car.vendido_em };
+    const fone = car.comprador && car.comprador.telefone;
+    const gravar = (tipo, r, txt) => fetch(`${URL_BASE}/rest/v1/aviso_lojista?on_conflict=estoque_id,tipo`, {
+      method: "POST", headers: json(tok, { Prefer: "resolution=merge-duplicates,return=minimal" }),
+      body: JSON.stringify({ estoque_id: eid, tipo, estado: r.enviado ? "enviado" : "falhou", telefone: r.fone || null, texto: txt, erro: r.erro || null, wa_id: r.id || null, criado_em: new Date().toISOString() }),
+    }).catch(() => {});
+    const saida = {};
+    if (acao === "boas-vindas" && cfg.lojista_boas_vindas && jaFoi.indexOf("boas_vindas") < 0) {
+      const txt = LOJ.textoLojista("boas_vindas", x, site);
+      saida.boas_vindas = await mandarPeloAdm(req, tok, fone, { type: "text", text: { body: txt } }, txt);
+      await gravar("boas_vindas", saida.boas_vindas, txt);
+    }
+    if (cfg.lojista_crlv && jaFoi.indexOf("crlv") < 0 && (acao === "crlv" || acao === "boas-vindas")) {
+      let arq = null;
+      try { arq = car.atendimento_id ? await require("./foto.js").crlvParaLojista(tok, car.atendimento_id) : null; } catch (e) {}
+      if (arq) {
+        const leg = LOJ.textoLojista("crlv", x, site);
+        saida.crlv = await mandarPeloAdm(req, tok, fone,
+          { type: "document", document: { link: arq.url, filename: `CRLV ${x.placa || ""}.pdf`.replace(/\s+\.pdf$/, ".pdf"), mime_type: arq.tipo, caption: leg } }, leg);
+        await gravar("crlv", saida.crlv, leg);
+      } else saida.crlv = { enviado: false, erro: "o CRLV não está anexado no check list de documentações" };
+    }
+    return res.status(200).json(saida);
+  }
+  return res.status(400).json({ erro: "Ação desconhecida." });
+}
+
 /* A FILA DO ADMINISTRATIVO. Quem decide é a RLS da 0057 — ler é da
  * equipe (o negociador também ouve "cadê o DUT?" na mesa), escrever é
  * de quem é administrativo ou gerente. */
@@ -763,6 +902,10 @@ module.exports = async function handler(req, res) {
    * então ela vem antes da conferência. */
   if (String(req.query.recurso || "") === "documentos") {
     try { return await documentos(req, res, tok); }
+    catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Falhou." }); }
+  }
+  if (String(req.query.recurso || "") === "transferencia") {
+    try { return await transferencia(req, res, tok); }
     catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Falhou." }); }
   }
   if (String(req.query.recurso || "") === "doc-exigido") {

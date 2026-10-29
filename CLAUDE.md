@@ -4435,6 +4435,49 @@ consertadas junto, porque a revisão depende dela.
 amanhã) — a observação do "pago" é onde se anota, por enquanto; e o
 lançamento no financeiro, que continua vindo do extrato.
 
+### 68. A transferência dos carros vendidos aos lojistas (0092)
+
+O Derek, em 28/10/2026: *"um controle pra se certificar que todos os
+carros, dentro do prazo de 3 meses que nós damos para os lojistas,
+sejam transferidos… em vermelho quais já passaram de 3 meses"*, com
+lembretes automáticos pelo telefone do adm a 2 meses, 1 mês, 2 semanas,
+1 semana e no vencimento; boas-vindas na compra com o link do DUT; e o
+CRLV, *"algo que eles sempre pedem"*.
+
+**A tela é Administrativo → Transferências** (`TelaTransferencias`): o
+carro vendido (não comissão de indicação) que não tem
+`estoque.transferido_em`, com o prazo, quantos dias faltam ou passaram,
+o DUT da placa se houver, o último aviso, e "Transferido" com a data.
+
+**O prazo conta da VENDA** (`regras/lojista.js`, `prazoDe`, a mesma
+conta do `+ interval '3 months'` do Postgres — 30/11 vira 28/02, não
+02/03). Em 28/10/2026 só **26 de 506** vendidos tinham o dia da venda: o
+resto veio da planilha. Esses ficam fora da lista por padrão (com a
+data da compra como estimativa, encheriam o vermelho de carro que já
+foi transferido) e **a automação nunca fala deles** — mensagem com
+prazo inventado é pior que nenhuma.
+
+**Três interruptores, do gerente, que nascem desligados** (`config_loja`):
+lembretes de prazo, boas-vindas na venda e CRLV junto.
+- **Lembretes**: o cron (`ia/lojistas.js`) manda um por volta;
+  `lojista_aviso_proximo` decide — ligado, segunda a sábado 9h–18h,
+  até 30 por dia, 90 s entre um e outro — e escolhe **só o estágio mais
+  recente** que chegou: ligar com um carro de 80 dias manda "faltam 2
+  semanas", não quatro mensagens atrasadas. Cada estágio sai uma vez por
+  carro (`aviso_lojista`, único), inclusive quando falha.
+- **Boas-vindas e CRLV** saem do "Confirmar a venda"
+  (`boasVindasLojista`, depois do Shinkai) e nunca derrubam a venda. O
+  CRLV é o anexo do item CRLV do check list de documentações, lido com
+  o token de quem vendeu e assinado em `api/foto.js`
+  (`crlvParaLojista`, decisão 9). **Em 28/10/2026 nenhum carro tinha o
+  CRLV anexado** — o automático só vai funcionar quando o adm anexar na
+  revisão; a tela tem "mandar CRLV" para quando chegar depois.
+
+Tudo sai pelo número de operação com "adm" no nome (`mandarPeloAdm`) e
+entra na conversa do WhatsApp do adm, onde a resposta do lojista cai.
+Só lojista com WhatsApp com DDD no cadastro: em 28/10/2026, 19 dos 37
+vendidos dos últimos 120 dias.
+
 ### 34. A conferência do administrativo ganhou o resto do negócio
 
 A aba mostrava 36 caixas de visto e mais nada. Faltavam três coisas

@@ -1455,3 +1455,27 @@ async function baixarParaIA(linhas, teto) {
 }
 module.exports.midiaParaIA = midiaParaIA;
 module.exports.midiaParaIAServidor = midiaParaIAServidor;
+
+/* O CRLV DO CARRO, PARA MANDAR AO LOJISTA (0092, 28/10/2026). O Derek:
+ * "o sistema pode mandar automaticamente o CRLV do veículo para o lojista,
+ * algo que eles sempre pedem". O arquivo é o anexo do item "CRLV" do
+ * check list de documentações (`doc:crlv`) ou um anexo rotulado CRLV na
+ * negociação. A ordem é a da decisão 9: o anexo é LIDO com o token de
+ * quem pediu — sem a RLS devolver a linha, a chave não toca o bucket — e
+ * só então o link é assinado, por uma hora, que é o tempo de a ponte
+ * baixar. Nada aqui vai para log. */
+async function crlvParaLojista(tok, atendimentoId) {
+  if (!RX_UUID.test(String(atendimentoId || ""))) return null;
+  const ls = await banco(`${REST("anexo")}?select=id,caminho,nome,tipo,rotulo,criado_em&atendimento_id=eq.${atendimentoId}` +
+    `&rotulo=ilike.*crlv*&order=criado_em.desc&limit=1`, { headers: cabecalhos(tok) });
+  const a = Array.isArray(ls) ? ls[0] : null;
+  if (!a || !a.caminho) return null;
+  const r = await arquivos(`${STORAGE()}/object/sign/${BUCKET_DOC}`, {
+    method: "POST", headers: jsonArquivo(), body: JSON.stringify({ expiresIn: VALIDADE, paths: [a.caminho] }),
+  });
+  const x = Array.isArray(r) ? r[0] : null;
+  const url = x && (x.signedURL || x.signedUrl);
+  if (!url) return null;
+  return { url: url.charAt(0) === "/" ? `${STORAGE()}${url}` : url, nome: a.nome || "CRLV.pdf", tipo: a.tipo || "application/pdf" };
+}
+module.exports.crlvParaLojista = crlvParaLojista;

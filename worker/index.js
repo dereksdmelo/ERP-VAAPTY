@@ -29,6 +29,7 @@ import placa from "../api/placa.js";
 import proposta from "../api/proposta.js";
 import veiculo from "../api/veiculo.js";
 import { atenderFila, lerLeads, retomar } from "../ia/atender.js";
+import { avisarPrazos } from "../ia/lojistas.js";
 
 const ROTAS = { atendimento, checklist, documento, financeiro, fipe, foto,
                 funil, importar, perfil, placa, proposta, veiculo };
@@ -190,6 +191,9 @@ export default {
       // A Flávia procurando quem não veio (0084): no máximo uma por volta,
       // e o banco decide se é hora.
       retomar(env).catch((e) => console.error("retomada:", String((e && e.message) || e).slice(0, 200))),
+      // Os lembretes de prazo de transferência aos lojistas (0092): um
+      // por volta, e o banco decide se é hora e se está ligado.
+      avisarPrazos(env).catch((e) => console.error("lojistas:", String((e && e.message) || e).slice(0, 200))),
     ]);
   },
 };

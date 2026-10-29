@@ -807,9 +807,29 @@ async function vendaNoShinkai(estoqueId, corpo) {
 /* Confirmar a venda aqui e levá-la ao Shinkai, numa sequência só. A
    venda daqui grava PRIMEIRO e vale sozinha: se o Shinkai falhar, ela
    não se desfaz — a tela diz o que houve e oferece mandar de novo. */
+// As boas-vindas ao lojista e o CRLV (0092): saem pelo WhatsApp do adm
+// se os interruptores estiverem ligados, uma vez por carro. Nunca
+// derrubam a venda — o carro já está vendido quando isto roda.
+async function boasVindasLojista(estoqueId) {
+  try {
+    const r = await fetchAut("/api/checklist?recurso=transferencia&acao=boas-vindas", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ estoque_id: estoqueId, auto: true }),
+    });
+    const d = await r.json().catch(() => ({}));
+    const partes = [];
+    if (d.boas_vindas) partes.push(d.boas_vindas.enviado ? "O lojista recebeu as boas-vindas pelo WhatsApp do adm." : `As boas-vindas não saíram: ${d.boas_vindas.erro}.`);
+    if (d.crlv) partes.push(d.crlv.enviado ? "O CRLV foi junto." : `O CRLV não foi: ${d.crlv.erro}.`);
+    return partes.join(" ");
+  } catch (x) { return ""; }
+}
 async function venderEMandar(e, dados) {
   await atualizarEstoque(e.id, dados);
   if (e.natureza === "indicacao") return { recado: "" };
+  const r0 = await venderNoShinkai(e);
+  const bv = await boasVindasLojista(e.id);
+  return bv ? { ...r0, recado: [r0.recado, bv].filter(Boolean).join(" ") } : r0;
+}
+async function venderNoShinkai(e) {
   try {
     let r = await vendaNoShinkai(e.id, { acao: "vendido" });
     if (r.conflito) {
@@ -20747,6 +20767,180 @@ const desembolsoDe = (cl) => {
 };
 const quando = (t) => (t ? new Date(t).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "");
 
+/* AS TRANSFERÊNCIAS DOS CARROS VENDIDOS AOS LOJISTAS (0092, 28/10/2026).
+ * O Derek: "um controle pra se certificar que todos os carros, dentro do
+ * prazo de 3 meses que nós damos para os lojistas, sejam transferidos…
+ * em vermelho quais já passaram de 3 meses". O prazo conta da venda; o
+ * carro da planilha antiga não tem o dia e fica de fora por padrão — com
+ * a data estimada pela compra, ele encheria o vermelho de carro que
+ * provavelmente já foi transferido. A automação só fala de data que
+ * existe (o banco garante, em `lojista_aviso_proximo`). */
+const ROT_AVISO_LOJ = { boas_vindas: "boas-vindas", crlv: "CRLV", d2m: "faltam 2 meses", d1m: "falta 1 mês", d2s: "faltam 2 semanas", d1s: "falta 1 semana", venceu: "venceu" };
+function TelaTransferencias() {
+  const [d, setD] = useState(null);
+  const [erro, setErro] = useState("");
+  const [filtro, setFiltro] = useState("faltam");
+  const [estimadas, setEstimadas] = useState(false);
+  const [marcando, setMarcando] = useState(null);   // { id, data, obs }
+  const [recado, setRecado] = useState({});
+  const [q, setQ] = useState("");
+  const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+  const carregar = () => fetchAut("/api/checklist?recurso=transferencia").then(async (r) => {
+    const x = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(x.erro || "Não consegui carregar.");
+    setD(x); setErro("");
+  }).catch((e) => setErro(e.message));
+  useEffect(() => { carregar(); }, []);
+  const post = async (acao, corpo) => {
+    const r = await fetchAut(`/api/checklist?recurso=transferencia&acao=${acao}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo),
+    });
+    const x = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(x.erro || "Não consegui gravar.");
+    return x;
+  };
+  const dias = (a, b) => Math.round((Date.parse(`${a}T12:00:00Z`) - Date.parse(`${b}T12:00:00Z`)) / 86400000);
+  const carros = (d && d.carros) || [];
+  const comPrazo = carros.filter((c) => c.prazo && (estimadas || !c.estimada));
+  const faltam = comPrazo.filter((c) => !c.transferido_em);
+  const vencidos = faltam.filter((c) => c.prazo < hoje);
+  const semData = carros.filter((c) => c.estimada && !c.transferido_em).length;
+  const busca = q.trim().toUpperCase();
+  const lista = (filtro === "transferidos" ? comPrazo.filter((c) => c.transferido_em) : filtro === "vencidos" ? vencidos : faltam)
+    .filter((c) => !busca || `${(c.veiculo && c.veiculo.placa) || ""} ${(c.veiculo && c.veiculo.marca_modelo) || ""} ${(c.comprador && c.comprador.nome) || ""}`.toUpperCase().includes(busca))
+    .slice().sort((a, b) => filtro === "transferidos" ? String(b.transferido_em).localeCompare(String(a.transferido_em)) : String(a.prazo).localeCompare(String(b.prazo)));
+  const cfg = (d && d.config) || {};
+  const gerente = !!(d && d.eu && d.eu.gerente);
+  const virar = async (k) => {
+    try { const x = await post("config", { [k]: !cfg[k] }); setD((dd) => ({ ...dd, config: x.config })); }
+    catch (e) { setErro(e.message); }
+  };
+  const marcar = async () => {
+    try { await post("transferido", { estoque_id: marcando.id, data: marcando.data, obs: marcando.obs }); setMarcando(null); carregar(); }
+    catch (e) { setErro(e.message); }
+  };
+  const manual = async (c, acao) => {
+    setRecado((r) => ({ ...r, [c.id]: "mandando…" }));
+    try {
+      const x = await post(acao, { estoque_id: c.id });
+      const p = acao === "crlv" ? x.crlv : x.boas_vindas;
+      setRecado((r) => ({ ...r, [c.id]: p ? (p.enviado ? "enviado pelo WhatsApp do adm" : `não foi: ${p.erro}`) : "nada para mandar" }));
+      carregar();
+    } catch (e) { setRecado((r) => ({ ...r, [c.id]: e.message })); }
+  };
+  const AUTOS = [
+    ["lojista_lembretes", "Lembretes de prazo", "faltando 2 meses, 1 mês, 2 semanas, 1 semana e no vencimento"],
+    ["lojista_boas_vindas", "Boas-vindas na venda", "com o link do DUT e o prazo de 3 meses"],
+    ["lojista_crlv", "CRLV junto", "o arquivo anexado no item CRLV do check list de documentações"],
+  ];
+  return (
+    <div>
+      <Cabecalho titulo="Transferências"
+        sub={d ? `${faltam.length} faltam transferir · ${vencidos.length} com o prazo de 3 meses vencido` : "Carregando…"} />
+
+      <div className="mb-4 rounded-lg p-3" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: C.mute }}>Automações pelo WhatsApp do adm</div>
+        <div className="flex flex-wrap gap-x-6 gap-y-2">
+          {AUTOS.map(([k, rot, nota]) => (
+            <label key={k} className="flex items-start gap-2 text-[13px]" style={{ opacity: gerente ? 1 : 0.7 }}>
+              <input type="checkbox" checked={!!cfg[k]} disabled={!gerente} onChange={() => virar(k)} className="mt-0.5" />
+              <span><b>{rot}</b> <span style={{ color: C.mute }}>— {nota}</span></span>
+            </label>
+          ))}
+        </div>
+        <p className="mt-2 text-[11.5px]" style={{ color: C.mute }}>
+          Os lembretes saem de segunda a sábado, das 9h às 18h, até 30 por dia, e cada um uma vez só por carro — ligar com um carro já perto do prazo manda só o aviso da vez, não os atrasados.
+          Só carro com data de venda e lojista com WhatsApp com DDD. {gerente ? "" : "Quem liga e desliga é o gerente."}
+        </p>
+      </div>
+
+      <div className="mb-3 flex flex-wrap items-center gap-1.5">
+        {[["faltam", `Faltam transferir ${faltam.length}`], ["vencidos", `Vencidos ${vencidos.length}`], ["transferidos", "Transferidos"]].map(([v, r]) => (
+          <button key={v} onClick={() => setFiltro(v)} className="rounded-full px-3 py-1.5 text-[13px] font-semibold"
+            style={filtro === v ? { background: v === "vencidos" ? C.laranja : C.roxo, color: "#fff" } : { background: C.paper, color: C.mute, border: `1px solid ${C.line}` }}>{r}</button>
+        ))}
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Placa, carro ou lojista"
+          className="ml-2 min-w-[180px] rounded-lg border px-2.5 py-1.5 text-[13px]" style={{ borderColor: C.line }} />
+        {semData > 0 && (
+          <label className="ml-auto flex items-center gap-1.5 text-[12.5px]" style={{ color: C.mute }}>
+            <input type="checkbox" checked={estimadas} onChange={(e) => setEstimadas(e.target.checked)} />
+            incluir {semData} da planilha antiga, sem data de venda (prazo estimado pela compra)
+          </label>
+        )}
+      </div>
+
+      {erro && <p className="mb-2 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+      {d && !lista.length && <p className="text-[13px]" style={{ color: C.mute }}>{filtro === "transferidos" ? "Nenhum carro marcado como transferido ainda." : "Nada aqui."}</p>}
+
+      {!!lista.length && (
+        <div className="rolar overflow-x-auto rounded-lg" style={{ border: `1px solid ${C.line}` }}>
+          <table className="w-full text-[13px]" style={{ minWidth: 980, fontVariantNumeric: "tabular-nums" }}>
+            <thead>
+              <tr style={{ background: C.bg, color: C.mute }}>
+                {["Placa", "Carro", "Lojista", "Venda", "Prazo", "Situação", "DUT", "Último aviso", ""].map((h) => (
+                  <th key={h} className="px-2.5 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.05em]">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {lista.map((c) => {
+                const placa = (c.veiculo && c.veiculo.placa) || "—";
+                const resta = c.prazo ? dias(c.prazo, hoje) : null;
+                const venceu = !c.transferido_em && resta != null && resta < 0;
+                const perto = !c.transferido_em && resta != null && resta >= 0 && resta <= 14;
+                const ultimo = (c.avisos || []).slice().sort((a, b) => String(b.criado_em).localeCompare(String(a.criado_em)))[0];
+                const fone = c.comprador && c.comprador.telefone;
+                return (
+                  <tr key={c.id} style={{ borderTop: `1px solid ${C.line}`, background: venceu ? "#FDECEC" : "#fff" }}>
+                    <td className="px-2.5 py-2 font-bold" style={{ fontFamily: F.mono }}>{placa}</td>
+                    <td className="px-2.5 py-2">{(c.veiculo && c.veiculo.marca_modelo) || "—"}</td>
+                    <td className="px-2.5 py-2">
+                      <div>{(c.comprador && c.comprador.nome) || "—"}</div>
+                      <div className="text-[11.5px]" style={{ color: fone ? C.mute : C.laranja }}>{fone || "sem WhatsApp no cadastro"}</div>
+                    </td>
+                    <td className="px-2.5 py-2">{c.base ? diaBR(c.base) : "—"}{c.estimada && <div className="text-[11px]" style={{ color: C.mute }}>≈ pela compra</div>}</td>
+                    <td className="px-2.5 py-2">{c.prazo ? diaBR(c.prazo) : "—"}</td>
+                    <td className="px-2.5 py-2 font-semibold" style={{ color: c.transferido_em ? C.verde : venceu ? "#C62828" : perto ? C.laranja : C.ink }}>
+                      {c.transferido_em ? `transferido ${diaBR(c.transferido_em)}` : resta == null ? "—" : venceu ? `venceu há ${-resta} dia${resta === -1 ? "" : "s"}` : resta === 0 ? "vence hoje" : `faltam ${resta} dia${resta === 1 ? "" : "s"}`}
+                      {c.transferido_obs && <div className="text-[11px] font-normal" style={{ color: C.mute }}>{c.transferido_obs}</div>}
+                    </td>
+                    <td className="px-2.5 py-2 text-[12px]">{c.dut ? <span title={c.dut.protocolo}>{(DUT_SITUACAO[c.dut.situacao] || {}).rot || c.dut.situacao}</span> : <span style={{ color: C.mute }}>—</span>}</td>
+                    <td className="px-2.5 py-2 text-[12px]" style={{ color: C.mute }}>
+                      {ultimo ? <>{ROT_AVISO_LOJ[ultimo.tipo] || ultimo.tipo} · {diaBR(ultimo.criado_em)}{ultimo.estado === "falhou" && <span style={{ color: C.laranja }}> (falhou)</span>}</> : "—"}
+                      {recado[c.id] && <div style={{ color: C.ink }}>{recado[c.id]}</div>}
+                    </td>
+                    <td className="px-2.5 py-2">
+                      {marcando && marcando.id === c.id ? (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <input type="date" value={marcando.data} max={hoje} onChange={(e) => setMarcando({ ...marcando, data: e.target.value })}
+                            className="rounded border px-1.5 py-1 text-[12px]" style={{ borderColor: C.line }} />
+                          <input value={marcando.obs} onChange={(e) => setMarcando({ ...marcando, obs: e.target.value })} placeholder="obs."
+                            className="w-24 rounded border px-1.5 py-1 text-[12px]" style={{ borderColor: C.line }} />
+                          <button onClick={marcar} className="rounded px-2 py-1 text-[12px] font-semibold text-white" style={{ background: C.verde }}>ok</button>
+                          <button onClick={() => setMarcando(null)} className="text-[12px]" style={{ color: C.mute }}>✕</button>
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {c.transferido_em
+                            ? <button onClick={async () => { try { await post("transferido", { estoque_id: c.id, desfazer: true }); carregar(); } catch (e) { setErro(e.message); } }} className="text-[12px] underline" style={{ color: C.mute }}>desfazer</button>
+                            : <button onClick={() => setMarcando({ id: c.id, data: hoje, obs: "" })} className="rounded px-2 py-1 text-[12px] font-semibold text-white" style={{ background: C.roxo }}>Transferido</button>}
+                          {fone && <a href={zap(fone, `Olá! Sobre a transferência do ${(c.veiculo && c.veiculo.marca_modelo) || "carro"} placa ${placa}:`)} target="_blank" rel="noopener noreferrer"
+                            className="rounded border px-2 py-1 text-[12px]" style={{ borderColor: C.line, color: C.ink }}>WhatsApp</a>}
+                          {fone && !c.transferido_em && <button onClick={() => manual(c, "crlv")} className="text-[12px] underline" style={{ color: C.roxo }}>mandar CRLV</button>}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // O menu e o roteador precisam concordar, como o ABA_FIN e o ABA_PV.
 const MODO_ADM = { adm: "revisar", adm_aprovacoes: "aprovar", adm_pagamentos: "pagar", adm_dut: "dut" };
 function TelaADM({ perfil, comp, mes, modo = "revisar" }) {
@@ -22172,6 +22366,7 @@ function destinosPara(perfil) {
     gerente ? { id: "adm_aprovacoes", rot: "Aprovações", curto: "Aprov.", area: "adm" } : null,
     (gerente || (perfil && perfil.financeiro)) ? { id: "adm_pagamentos", rot: "Pagamentos a realizar", curto: "Pagar", area: "adm" } : null,
     adm ? { id: "adm_dut", rot: "DUT dos lojistas", curto: "DUT", area: "adm" } : null,
+    adm ? { id: "adm_transf", rot: "Transferências", curto: "Transf.", area: "adm" } : null,
     adm ? { id: "adm_whats", rot: "WhatsApp do adm", curto: "WhatsApp", area: "adm" } : null,
   ].filter(Boolean);
 }
@@ -25287,6 +25482,7 @@ function App() {
       {tela === "gestao" && <TelaGestao perfil={perfil} comp={compOuAtual} />}
       {tela === "remuneracao" && <TelaPerfisRemuneracao />}
       {tela === "adm_whats" && <TelaConversas key="adm" operacao />}
+      {tela === "adm_transf" && <TelaTransferencias />}
       {tela === "conversas" && (
         <TelaConversas alvo={conversaAlvo} aoConsumirAlvo={() => setConversaAlvo(null)} />
       )}
