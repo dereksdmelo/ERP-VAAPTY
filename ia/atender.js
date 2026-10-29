@@ -193,6 +193,14 @@ async function retomar(env) {
   const agora = FLAVIA.paredeDe(new Date().toISOString());
   const textos = FLAVIA.aberturaRetomada(lead, agora, cfg.ia_nome);
   const canal = lead.canal;
+  // NÚMERO DESCONECTADO NÃO QUEIMA LEAD (29/10/2026). A Prospecção Ativa
+  // caiu às 10h24 no meio da retomada, e as voltas seguintes gravaram
+  // quatro leads como "falhou" — e cada lead só é procurado uma vez.
+  // Pergunta antes; e se o envio voltar "desconectado", não grava.
+  const est = await env.PONTE.fetch(`https://ponte/estado?canal=${encodeURIComponent(canal)}`,
+    { headers: { "x-ponte-segredo": env.PONTE_SEGREDO }, signal: AbortSignal.timeout(20000) })
+    .then((r) => r.json()).catch(() => null);
+  if (!est || est.estado !== "conectado") return { pulado: `${canal} não está conectado (${(est && est.estado) || "sem resposta"})` };
   let para = String(lead.telefone || "").replace(/\D/g, "");
   if (para.length <= 11) para = `55${para}`;
   const enviados = [], wa_ids = [];
@@ -206,8 +214,11 @@ async function retomar(env) {
     if (!e || !e.ok) { erro = (e && e.erro) || "a ponte não mandou"; break; }
     enviados.push(texto); wa_ids.push(e.id || `ret-${lead.lead_id}-${enviados.length}`);
   }
-  // Grava mesmo quando falhou: a trava é "cada lead uma vez", e um número
-  // que não existe no WhatsApp não pode ser tentado a cada volta.
+  // Falha do NOSSO lado (número caiu, ponte fora) não é do lead: não grava,
+  // e ele volta na próxima volta com o número de pé.
+  if (!enviados.length && /desconectado|QR|ponte/i.test(erro)) return { pulado: erro };
+  // Grava quando a falha é do lead: a trava é "cada lead uma vez", e um
+  // número que não existe no WhatsApp não pode ser tentado a cada volta.
   await rpc("ia_retomada_gravar", { p_segredo: SEG, p_lead: lead.lead_id, p_canal: canal, p_telefone: para,
     p_mensagens: enviados, p_wa_ids: wa_ids, p_estado: enviados.length ? "enviada" : "falhou", p_erro: erro || null });
   for (let i = 0; i < enviados.length; i++) {
