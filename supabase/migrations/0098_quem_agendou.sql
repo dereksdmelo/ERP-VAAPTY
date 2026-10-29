@@ -218,3 +218,31 @@ update lead l set agendado_por_nome = case
   end
   from alvo a
  where a.id = l.id and a.achado is not null;
+
+-- E quem não veio: o horário saiu do lead ao marcar a falta (decisão
+-- 51), mas ficou em `remarcacoes` com `nao_veio` — é por ele que se acha
+-- a mensagem que confirmou.
+with alvo as (
+  select l.id,
+         (select m.wa_id || '|' || coalesce(ca.atendente, '') || '|' || coalesce(ca.nome, '')
+            from wa_conversa cv
+            join wa_canal ca on ca.id = cv.canal_id
+            join wa_mensagem m on m.conversa_id = cv.id and m.eco
+           where cv.lead_id = l.id
+             and m.texto ~ ('(^|\D)0?' || extract(hour from (r.x->>'de')::timestamptz at time zone 'UTC')::int || '\s*(h|:|horas)')
+           order by m.quando desc limit 1) as achado
+    from lead l
+    cross join lateral (select x from jsonb_array_elements(l.remarcacoes) x
+                         where (x->>'nao_veio')::boolean order by x->>'em' desc limit 1) r
+   where l.agendado_por_nome is null and l.remarcacoes is not null
+)
+update lead l set agendado_por_nome = case
+    when exists (select 1 from ia_resposta r where r.wa_ids ? split_part(a.achado, '|', 1))
+      or exists (select 1 from ia_retomada r where r.wa_ids ? split_part(a.achado, '|', 1))
+      then 'IA - ' || coalesce((select nullif(btrim(ia_nome), '') from config_loja where id = 1), 'Flávia')
+    when split_part(a.achado, '|', 2) = 'ia'
+      then 'IA - ' || btrim(regexp_replace(split_part(a.achado, '|', 3), '^\s*IA\s*[-–]?\s*', '', 'i'))
+    else 'Celular · ' || split_part(a.achado, '|', 3)
+  end
+  from alvo a
+ where a.id = l.id and a.achado is not null;
