@@ -4478,6 +4478,16 @@ entra na conversa do WhatsApp do adm, onde a resposta do lojista cai.
 Só lojista com WhatsApp com DDD no cadastro: em 28/10/2026, 19 dos 37
 vendidos dos últimos 120 dias.
 
+**O botão "WhatsApp" da linha manda pelo número do adm, não pelo
+WhatsApp do computador** (o Derek, no mesmo dia). Ele abre uma janela
+com a mensagem pronta e editável — "Opa Fulano, segue o link pra
+preencher os dados da transferência do CARRO placa X: … O prazo é/era
+dia dd/mm" — e "Enviar" sai pela ponte (`?acao=mensagem`, o telefone
+vem do cadastro, não da tela). **O link leva o carro junto**:
+`dut.html?placa=…&veiculo=…` preenche os dois campos, e só eles — nome
+e telefone do lojista não viajam na URL. "Abrir no WhatsApp deste
+computador" continua ali, para quando a ponte estiver fora.
+
 ### 34. A conferência do administrativo ganhou o resto do negócio
 
 A aba mostrava 36 caixas de visto e mais nada. Faltavam três coisas

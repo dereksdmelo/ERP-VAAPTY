@@ -747,6 +747,21 @@ async function transferencia(req, res, tok) {
     return res.status(200).json({ ok: true });
   }
 
+  /* UMA MENSAGEM ESCRITA NA TELA, pelo WhatsApp do adm (28/10/2026, o
+   * Derek: "ao invés de abrir o whats, pode abrir direto o whats do adm
+   * conectado já com a mensagem pré-pronta"). O telefone vem do cadastro
+   * do comprador, lido aqui pelo token — a tela manda só o carro e o texto. */
+  if (acao === "mensagem") {
+    const txt = String(c.texto || "").replace(/\r/g, "").trim();
+    if (!txt) return res.status(400).json({ erro: "Escreva a mensagem." });
+    if (txt.length > 2000) return res.status(400).json({ erro: "Mensagem longa demais." });
+    const car = ((await fetch(`${RE}?select=id,comprador(telefone)&id=eq.${eid}`, { headers: cabecalhos(tok) })
+      .then((r) => r.json()).catch(() => [])) || [])[0];
+    if (!car) return res.status(404).json({ erro: "Carro não encontrado no estoque." });
+    const r = await mandarPeloAdm(req, tok, car.comprador && car.comprador.telefone, { type: "text", text: { body: txt } }, txt);
+    return r.enviado ? res.status(200).json(r) : res.status(502).json({ erro: `Não foi: ${r.erro}.` });
+  }
+
   /* BOAS-VINDAS E CRLV. Do clique de quem confirmou a venda (com
    * `auto`, obedecem aos interruptores e saem uma vez por carro) ou do
    * botão da tela (sem `auto`, mandam de novo se a pessoa pediu). */

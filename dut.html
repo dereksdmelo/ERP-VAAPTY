@@ -202,8 +202,8 @@ function campoArquivo(id, titulo, dica) {
     <div class="nomearq" id="n_${id}"></div>
   </div>`;
 }
-function trocar(t) { tipo = t; desenhar(); }
-function trocarEntrega(e) { entrega = e; desenhar(); }
+function trocar(t) { tipo = t; desenhar(); preencherDoLink(); }
+function trocarEntrega(e) { entrega = e; desenhar(); preencherDoLink(); }
 
 /* O ARQUIVO VIRA BASE64 AQUI, no navegador. O corpo do POST é JSON
    porque o Worker do Cloudflare lê corpo como texto — binário cru
@@ -332,6 +332,23 @@ async function consultar() {
 }
 
 desenhar();
+
+/* O LINK QUE O ADM MANDA JÁ TRAZ O CARRO (28/10/2026, o Derek: "manda o
+   link pra ele preencher ao invés de pedir os dados"). `?placa=` e
+   `?veiculo=` preenchem os dois campos — só o carro, que não é dado
+   pessoal; nome e telefone do lojista não viajam na URL. O que a pessoa
+   já digitou não é trocado. */
+function preencherDoLink() {
+  try {
+    const q = new URLSearchParams(location.search);
+    [["placa", "placa"], ["veiculo", "veiculo"]].forEach(([p, id]) => {
+      const v = (q.get(p) || "").trim().slice(0, 80);
+      if (v && el(id) && !el(id).value) el(id).value = p === "placa" ? v.toUpperCase().replace(/[^A-Z0-9]/g, "") : v;
+    });
+  } catch (e) {}
+}
+// Trocar o tipo redesenha o formulário: o carro do link volta junto.
+preencherDoLink();
 </script>
 </body>
 </html>

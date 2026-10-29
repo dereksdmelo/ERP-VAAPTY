@@ -20784,7 +20784,31 @@ function TelaTransferencias() {
   const [marcando, setMarcando] = useState(null);   // { id, data, obs }
   const [recado, setRecado] = useState({});
   const [q, setQ] = useState("");
+  const [escrevendo, setEscrevendo] = useState(null);   // { c, texto, indo, erro }
   const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+  /* A MENSAGEM PRÉ-PRONTA (28/10/2026, o Derek): sai pelo WhatsApp do
+   * adm, não pelo WhatsApp do computador, e leva o link do formulário do
+   * DUT já com o carro — "manda o link pra ele preencher ao invés de
+   * pedir os dados". O texto fica editável antes de mandar. */
+  const textoPronto = (c) => {
+    const nome = String((c.comprador && c.comprador.nome) || "").trim().split(/[\s-]+/)[0] || "";
+    const Nome = nome ? nome.charAt(0).toUpperCase() + nome.slice(1).toLowerCase() : "";
+    const carro = String((c.veiculo && c.veiculo.marca_modelo) || "").trim();
+    const placa = (c.veiculo && c.veiculo.placa) || "";
+    const qs = new URLSearchParams({ ...(placa ? { placa } : {}), ...(carro ? { veiculo: carro } : {}) }).toString();
+    const link = `${location.origin}/dut.html${qs ? `?${qs}` : ""}`;
+    const prazo = c.prazo ? `${c.prazo < hoje ? "O prazo era" : "O prazo é"} dia ${diaBR(c.prazo)}.` : "";
+    return [`Opa${Nome ? ` ${Nome}` : ""}, segue o link pra preencher os dados da transferência do ${carro || "carro"}${placa ? ` placa ${placa}` : ""}:`, link, prazo].filter(Boolean).join("\n\n");
+  };
+  const mandarEscrita = async () => {
+    const e = escrevendo; if (!e || !e.texto.trim()) return;
+    setEscrevendo({ ...e, indo: true, erro: "" });
+    try {
+      await post("mensagem", { estoque_id: e.c.id, texto: e.texto });
+      setRecado((r) => ({ ...r, [e.c.id]: "mensagem enviada pelo WhatsApp do adm" }));
+      setEscrevendo(null);
+    } catch (x) { setEscrevendo({ ...e, indo: false, erro: x.message }); }
+  };
   const carregar = () => fetchAut("/api/checklist?recurso=transferencia").then(async (r) => {
     const x = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(x.erro || "Não consegui carregar.");
@@ -20872,6 +20896,30 @@ function TelaTransferencias() {
       {erro && <p className="mb-2 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
       {d && !lista.length && <p className="text-[13px]" style={{ color: C.mute }}>{filtro === "transferidos" ? "Nenhum carro marcado como transferido ainda." : "Nada aqui."}</p>}
 
+      {escrevendo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(20,10,30,0.45)" }}
+          onClick={(ev) => { if (ev.target === ev.currentTarget && !escrevendo.indo) setEscrevendo(null); }}>
+          <div className="w-full max-w-lg rounded-xl p-4" style={{ background: C.paper }}>
+            <div className="mb-1 text-[16px] font-bold">Mensagem pelo WhatsApp do adm</div>
+            <div className="mb-3 text-[12.5px]" style={{ color: C.mute }}>
+              Para {(escrevendo.c.comprador && escrevendo.c.comprador.nome) || "o lojista"} · {escrevendo.c.comprador && escrevendo.c.comprador.telefone}
+            </div>
+            <textarea value={escrevendo.texto} onChange={(ev) => setEscrevendo({ ...escrevendo, texto: ev.target.value })} rows={7}
+              className="w-full rounded-lg border px-3 py-2 text-[14px]" style={{ borderColor: C.line }} />
+            {escrevendo.erro && <p className="mt-1 text-[12.5px]" style={{ color: C.laranja }}>{escrevendo.erro}</p>}
+            <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+              <a href={zap(escrevendo.c.comprador && escrevendo.c.comprador.telefone, escrevendo.texto)} target="_blank" rel="noopener noreferrer"
+                className="mr-auto text-[12px] underline" style={{ color: C.mute }}>abrir no WhatsApp deste computador</a>
+              <button onClick={() => setEscrevendo(null)} disabled={escrevendo.indo} className="rounded-md px-3 py-2 text-[13px]" style={{ color: C.mute }}>cancelar</button>
+              <button onClick={mandarEscrita} disabled={escrevendo.indo || !escrevendo.texto.trim()}
+                className="rounded-md px-4 py-2 text-[13px] font-semibold text-white" style={{ background: escrevendo.indo ? C.line : "#25A244" }}>
+                {escrevendo.indo ? "Enviando…" : "Enviar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {!!lista.length && (
         <div className="rolar overflow-x-auto rounded-lg" style={{ border: `1px solid ${C.line}` }}>
           <table className="w-full text-[13px]" style={{ minWidth: 980, fontVariantNumeric: "tabular-nums" }}>
@@ -20924,8 +20972,8 @@ function TelaTransferencias() {
                           {c.transferido_em
                             ? <button onClick={async () => { try { await post("transferido", { estoque_id: c.id, desfazer: true }); carregar(); } catch (e) { setErro(e.message); } }} className="text-[12px] underline" style={{ color: C.mute }}>desfazer</button>
                             : <button onClick={() => setMarcando({ id: c.id, data: hoje, obs: "" })} className="rounded px-2 py-1 text-[12px] font-semibold text-white" style={{ background: C.roxo }}>Transferido</button>}
-                          {fone && <a href={zap(fone, `Olá! Sobre a transferência do ${(c.veiculo && c.veiculo.marca_modelo) || "carro"} placa ${placa}:`)} target="_blank" rel="noopener noreferrer"
-                            className="rounded border px-2 py-1 text-[12px]" style={{ borderColor: C.line, color: C.ink }}>WhatsApp</a>}
+                          {fone && <button onClick={() => setEscrevendo({ c, texto: textoPronto(c), indo: false, erro: "" })}
+                            className="rounded border px-2 py-1 text-[12px]" style={{ borderColor: C.line, color: C.ink }}>WhatsApp</button>}
                           {fone && !c.transferido_em && <button onClick={() => manual(c, "crlv")} className="text-[12px] underline" style={{ color: C.roxo }}>mandar CRLV</button>}
                         </div>
                       )}
