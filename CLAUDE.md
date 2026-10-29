@@ -4222,6 +4222,16 @@ porque o Safari do iPhone às vezes se recusa a desenhar PDF embutido,
 e a tela precisa dizer o que fazer em vez de mostrar um retângulo
 branco.
 
+**Confere-se dentro do visor (28/10/2026, o Derek: *"o gerente possa
+abrir o documento e ao abrir ele já possa dar o ok… e passar para o
+próximo"*).** Abrir qualquer papel do check list abre o visor com a FILA
+de todos os papéis, na ordem da lista; em cima, o nome do item e o
+Sim/Não da coluna de quem olha (gerência para o gerente, adm para o
+administrativo, financeiro para o financeiro). Marcar pula para o
+próximo papel cujo item ainda não tem esse visto — os outros papéis do
+mesmo item ficam para trás, porque o visto é do item. "Conferir
+documentos" começa do primeiro pendente.
+
 **"Visto e sem anexo" é um aviso no topo.** O administrativo anexa
 antes; a conferência olha o que está lá. Sem esse aviso, "sim" vira
 palavra sem lastro. Os itens que são pergunta de sim/não — *Trocar de

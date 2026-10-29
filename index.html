@@ -19005,8 +19005,21 @@ function FinFolha({ comp }) {
  * mostrada**, não antes: são ~9 KB cada, e um negócio com treze
  * documentos baixaria tudo para o administrativo olhar um.
  */
-function VisorAnexos({ anexos, inicio, aoFechar }) {
+function VisorAnexos({ anexos, inicio, aoFechar, conferencia }) {
   const [i, setI] = useState(inicio || 0);
+  const [acabou, setAcabou] = useState(false);
+  // Marcar e ir para o próximo papel cujo item ainda está sem o visto
+  // desta pessoa — primeiro para a frente, depois do começo. Os outros
+  // papéis do MESMO item ficam para trás: o visto é do item.
+  const conferir = (valor) => {
+    const atual = anexos[i];
+    if (!conferencia || !atual || !atual._item) return;
+    conferencia.aoMarcar(atual._item, valor);
+    const falta = (x) => x._item && x._item !== atual._item && conferencia.estado(x._item) == null;
+    let j = anexos.findIndex((x, k) => k > i && falta(x));
+    if (j < 0) j = anexos.findIndex((x, k) => k < i && falta(x));
+    if (j < 0) setAcabou(true); else setI(j);
+  };
   const [htmls, setHtmls] = useState({});
   const quadro = useRef(null);
   const a = anexos[i];
@@ -19043,7 +19056,26 @@ function VisorAnexos({ anexos, inicio, aoFechar }) {
   return (
     <div className="fixed inset-0 z-50 flex flex-col" style={{ background: "rgba(24,18,33,0.92)" }} onClick={aoFechar}>
       <div className="flex items-center gap-3 px-4 py-2.5 text-[13px]" style={{ color: "#fff" }} onClick={(e) => e.stopPropagation()}>
-        <span className="min-w-0 flex-1 truncate">{a.nome || "documento"}</span>
+        {conferencia && a._item ? (
+          <span className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+            <b className="truncate text-[14px]">{a._rot}</b>
+            <span className="truncate" style={{ opacity: 0.7 }}>{a.nome || "documento"}</span>
+            {(() => {
+              const v = conferencia.estado(a._item);
+              const bt = (valor, rot, cor) => (
+                <button key={rot} onClick={() => conferir(valor)} className="rounded-md px-3 py-1 text-[13px] font-bold"
+                  style={{ background: v === valor ? cor : "rgba(255,255,255,0.12)", color: "#fff", border: `1px solid ${v === valor ? cor : "rgba(255,255,255,0.35)"}` }}>{rot}</button>
+              );
+              return (
+                <span className="flex items-center gap-1.5">
+                  <span className="text-[11px] uppercase tracking-[0.06em]" style={{ opacity: 0.7 }}>{conferencia.rot}</span>
+                  {bt(true, "Sim, ok", C.verde)}{bt(false, "Não", C.laranja)}
+                </span>
+              );
+            })()}
+            {acabou && <span className="rounded-md px-2 py-0.5 text-[12px] font-semibold" style={{ background: C.verde }}>tudo conferido na sua coluna</span>}
+          </span>
+        ) : <span className="min-w-0 flex-1 truncate">{a.nome || "documento"}</span>}
         <span style={{ opacity: 0.7 }}>{i + 1} de {anexos.length}</span>
         {doc
           ? <button onClick={imprimir} disabled={!html || !!erroDoc} className="font-semibold" style={{ color: "#fff", textDecoration: "underline", opacity: html && !erroDoc ? 1 : 0.4 }}>imprimir</button>
@@ -20010,6 +20042,26 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
   const anexados = d.itens.filter((it) => it[4] && temPapel(it[0])).length;
   const pedemDoc = d.itens.filter((it) => it[4]).length;
 
+  /* CONFERIR NO VISOR (28/10/2026, o Derek: "o gerente possa abrir o
+   * documento e ao abrir ele já possa dar o ok no documento por ali
+   * mesmo, e passar para o próximo"). O visor recebe TODOS os papéis do
+   * check list, na ordem da lista, cada um sabendo de que item é; em cima
+   * fica o Sim/Não da coluna de quem está olhando, e marcar pula para o
+   * próximo papel cujo item ainda não tem esse visto. A coluna é a do
+   * papel da pessoa: gerência para o gerente, adm para o administrativo,
+   * financeiro para o financeiro. */
+  const meuVisto = perfil && perfil.papel === "gerente" ? "gerencia" : podeVisto ? "adm" : "financeiro";
+  const fila = d.itens.filter((it) => it[4] && (it[3] === "tres" || meuVisto === "adm"))
+    .flatMap((it) => geradosDoItem(it[0]).map(comoItem).concat(doItem(it[0])).map((a) => ({ ...a, _item: it[0], _rot: it[1], _k: `${it[0]}:${a.id}` })));
+  const abrirNaFila = (cod, id) => {
+    const i = fila.findIndex((x) => x._item === cod && x.id === id);
+    setVisor({ lista: fila, i: Math.max(0, i), conferir: true });
+  };
+  const comecarConferencia = () => {
+    const i = fila.findIndex((x) => marcaDe(x._item)[meuVisto] == null);
+    setVisor({ lista: fila, i: i < 0 ? 0 : i, conferir: true });
+  };
+
   const caixa = (it, visto) => {
     const m = marcaDe(it[0]);
     const v = m[visto];
@@ -20063,6 +20115,11 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
           </span>
         )}
         {!podeVisto && <span className="text-[11px]" style={{ color: C.mute }}>Você marca só a coluna do financeiro — adm e gerência são do administrativo.</span>}
+        {!!fila.length && (
+          <button onClick={comecarConferencia} className="rounded-lg px-3 py-1.5 text-[12.5px] font-semibold text-white" style={{ background: C.roxo }}>
+            Conferir documentos ({VISTO_ROT[meuVisto]})
+          </button>
+        )}
         {perfil && perfil.papel === "gerente" && (
           <button onClick={() => setEditandoLista(true)} className="ml-auto text-[12.5px] font-semibold underline" style={{ color: C.roxo }}>
             editar a lista de documentos
@@ -20123,7 +20180,7 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
                         item: o contrato existe, só não é arquivo anexado. */}
                     {geradosDoItem(it[0]).map((x, gk) => (
                       <button key={x.id}
-                        onClick={() => setVisor({ lista: geradosDoItem(it[0]).map(comoItem).concat(arqs), i: gk })}
+                        onClick={() => abrirNaFila(it[0], `d${x.id}`)}
                         className="rounded-lg px-2 py-1 text-[11px] font-semibold"
                         style={{ background: C.roxoFraco, color: C.roxo }}>
                         {ROT_DOC[x.tipo] || x.tipo} · {diaBR(x.gerado_em)}{x.protocolo ? ` · ${x.protocolo}` : ""}
@@ -20131,7 +20188,7 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
                     ))}
                     {arqs.map((a, k) => (
                       <span key={a.id} className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px]" style={{ background: C.bg }}>
-                        <button onClick={() => setVisor({ lista: geradosDoItem(it[0]).map(comoItem).concat(arqs), i: geradosDoItem(it[0]).length + k })} style={{ color: C.roxo, fontWeight: 600 }}>
+                        <button onClick={() => abrirNaFila(it[0], a.id)} style={{ color: C.roxo, fontWeight: 600 }}>
                           {/pdf/i.test(a.tipo || "") ? "PDF" : "IMG"} · {String(a.nome || "arquivo").slice(0, 22)}
                           {/^doc:/.test(a.rotulo || "") ? "" : " · da negociação"}
                         </button>
@@ -20207,7 +20264,8 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
         </div>
       )}
 
-      {visor && <VisorAnexos anexos={visor.lista} inicio={visor.i} aoFechar={() => setVisor(null)} />}
+      {visor && <VisorAnexos anexos={visor.lista} inicio={visor.i} aoFechar={() => setVisor(null)}
+        conferencia={visor.conferir ? { rot: VISTO_ROT[meuVisto], estado: (cod) => marcaDe(cod)[meuVisto], aoMarcar: (cod, v) => marcar(cod, meuVisto, v) } : null} />}
 
       {so === "pendentes" && !faltam && (
         <div className="rounded-xl px-4 py-8 text-center" style={{ background: "#E8F3EE", border: `1px solid ${C.line}` }}>
