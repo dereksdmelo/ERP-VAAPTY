@@ -614,6 +614,12 @@ async function juntarAtendimentos(fica, sai) {
   if (!r.ok) throw new Error(d.erro || "Não consegui juntar.");
   return d;
 }
+async function excluirAtendimento(id, naoVeio) {
+  const r = await fetchAut(`/api/atendimento?id=${encodeURIComponent(id)}${naoVeio ? "&nao_veio=1" : ""}`, { method: "DELETE" });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui excluir.");
+  return d;
+}
 async function lerAtendimento(id) {
   const r = await fetchAut(`/api/atendimento?id=${encodeURIComponent(id)}`);
   const d = await r.json().catch(() => ({}));
@@ -11852,6 +11858,114 @@ function JuntarRepetidos({ par, aoFechar, aoFeito }) {
   );
 }
 
+// O mesmo resumo do servidor (`resumoDup`), montado da linha da lista,
+// para escolher o par à mão. As fotos não vêm na lista: a janela decide
+// pelo carro.
+const resumoDaLista = (a) => {
+  const v = (a.veiculo || [])[0] || null;
+  const l = (a.lead || [])[0] || null;
+  return {
+    id: a.id, data: a.data, criado_em: a.criado_em, cliente_nome: a.cliente_nome, negociador_nome: a.negociador_nome,
+    status: a.status, origem: a.origem, prospec: a.prospec, tem_veiculo: !!v, fotos: 0,
+    carro: v ? [v.placa, v.marca_modelo].filter(Boolean).join(" · ") : (a.carro_descricao || ""),
+    do_lead: !!l, agendado_por: l ? l.agendado_por_nome || "" : "",
+  };
+};
+
+/* O "⋯" DA LINHA (03/11/2026, o Derek: "como faz pra excluir o
+ * atendimento?" e "como faz pra juntar?"). Juntar com qualquer outro do
+ * mesmo dia — a tarja só acha o par pelo telefone ou pelo nome, e o
+ * negociador às vezes escreveu outro nome. Excluir é do gerente, e
+ * quando o atendimento veio da pré-venda pergunta se o cliente veio: é
+ * isso que decide se a visita continua contando. */
+function AcoesAtendimento({ a, lista, gerente, aoFechar, aoJuntar, aoExcluido }) {
+  const [modo, setModo] = useState("");
+  const [naoVeio, setNaoVeio] = useState(false);
+  const [indo, setIndo] = useState(false);
+  const [erro, setErro] = useState("");
+  const doLead = !!(a.lead || []).length;
+  const doDia = lista.filter((x) => x.id !== a.id && x.data === a.data);
+  const excluir = async () => {
+    setIndo(true); setErro("");
+    try { await excluirAtendimento(a.id, naoVeio); aoExcluido(); }
+    catch (e) { setErro(e.message); setIndo(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center lg:items-center" style={{ background: "rgba(24,18,33,0.45)" }}
+      onClick={(e) => { e.stopPropagation(); aoFechar(); }}>
+      <div className="w-full max-w-md rounded-t-2xl p-4 lg:rounded-2xl" style={{ background: C.paper }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-baseline justify-between">
+          <span className="text-[17px] font-bold">{a.cliente_nome || "Sem nome"}</span>
+          <button onClick={aoFechar} className="text-[13px]" style={{ color: C.mute }}>fechar</button>
+        </div>
+        <div className="text-[12.5px]" style={{ color: C.mute }}>
+          {diaBR(a.data)} · aberto às {horaSP(a.criado_em)} · {a.negociador_nome || "sem negociador"}{doLead ? " · veio da pré-venda" : ""}
+        </div>
+
+        {!modo && (
+          <div className="mt-3 grid gap-2">
+            <button onClick={() => setModo("juntar")} className="rounded-lg border px-3 py-2.5 text-left text-[14px] font-semibold" style={{ borderColor: C.line }}>
+              Juntar com outro atendimento do mesmo cliente
+              <span className="block text-[12px] font-normal" style={{ color: C.mute }}>Quando a pré-venda e o negociador abriram dois para a mesma pessoa.</span>
+            </button>
+            {gerente && (
+              <button onClick={() => setModo("excluir")} className="rounded-lg border px-3 py-2.5 text-left text-[14px] font-semibold" style={{ borderColor: C.line, color: C.laranja }}>
+                Excluir este atendimento
+                <span className="block text-[12px] font-normal" style={{ color: C.mute }}>Aberto por engano, ou cliente que não existe.</span>
+              </button>
+            )}
+          </div>
+        )}
+
+        {modo === "juntar" && (
+          <div className="mt-3">
+            <div className="text-[12.5px]" style={{ color: C.mute }}>Com qual? (atendimentos do mesmo dia)</div>
+            <div className="mt-1.5 grid max-h-[50vh] gap-1.5 overflow-y-auto">
+              {doDia.map((x) => {
+                const v = (x.veiculo || [])[0] || {};
+                return (
+                  <button key={x.id} onClick={() => aoJuntar([resumoDaLista(a), resumoDaLista(x)])}
+                    className="rounded-lg border px-3 py-2 text-left text-[13.5px]" style={{ borderColor: C.line }}>
+                    <b>{x.cliente_nome || "Sem nome"}</b>
+                    <span style={{ color: C.mute }}> · {horaSP(x.criado_em)} · {x.negociador_nome || "sem negociador"}
+                      {(x.lead || []).length ? " · pré-venda" : ""}{v.marca_modelo || x.carro_descricao ? ` · ${v.marca_modelo || x.carro_descricao}` : ""}</span>
+                  </button>
+                );
+              })}
+              {!doDia.length && <p className="text-[13px]" style={{ color: C.mute }}>Não há outro atendimento neste dia na lista. Confira o mês escolhido no alto.</p>}
+            </div>
+            <button onClick={() => setModo("")} className="mt-2 text-[12.5px]" style={{ color: C.mute }}>voltar</button>
+          </div>
+        )}
+
+        {modo === "excluir" && (
+          <div className="mt-3">
+            <p className="text-[13.5px]">
+              O atendimento some da lista, com o check list e os documentos dele. A ficha do carro e as fotos ficam guardadas, mas soltas. <b>Não tem como desfazer.</b>
+            </p>
+            {doLead && (
+              <div className="mt-2 rounded-lg p-2.5 text-[13px]" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
+                Ele veio da pré-venda. <b>Se o cliente veio e tem outro atendimento, use "Juntar"</b> — excluir não leva o lead para o outro.
+                <label className="mt-2 flex items-center gap-2" style={{ color: C.ink }}>
+                  <input type="checkbox" checked={naoVeio} onChange={(e) => setNaoVeio(e.target.checked)} />
+                  O cliente não veio (a pré-venda marcou "chegou" por engano): o lead volta para "não veio".
+                </label>
+              </div>
+            )}
+            {erro && <p className="mt-2 text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
+            <div className="mt-3 flex gap-2">
+              <button onClick={() => setModo("")} className="rounded-lg border px-4 text-[14px]" style={{ borderColor: C.line }}>voltar</button>
+              <button onClick={excluir} disabled={indo} className="flex-1 rounded-lg py-2.5 text-[14px] font-semibold text-white" style={{ background: C.laranja, opacity: indo ? 0.5 : 1 }}>
+                {indo ? "excluindo…" : "Excluir"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function CRM({ perfil, aoAbrir, mes }) {
   const { comp, setComp, MESES } = mes;
   const [lista, setLista] = useState([]);
@@ -11867,6 +11981,8 @@ function CRM({ perfil, aoAbrir, mes }) {
   // esconde o par neste aparelho — nome igual nem sempre é a mesma pessoa.
   const [repetidos, setRepetidos] = useState([]);
   const [juntando, setJuntando] = useState(null);
+  const [acoes, setAcoes] = useState(null);
+  const gerente = !!perfil && perfil.papel === "gerente";
   const [verRep, setVerRep] = useState(false);
   const [naoDup, setNaoDup] = useState(() => { try { return JSON.parse(localStorage.getItem("vaapty:nao-repetido") || "[]"); } catch (e) { return []; } });
   const lerRepetidos = () => lerDuplicados().then(setRepetidos).catch(() => {});
@@ -11965,6 +12081,11 @@ function CRM({ perfil, aoAbrir, mes }) {
           )}
         </div>
       )}
+      {acoes && (
+        <AcoesAtendimento a={acoes} lista={lista} gerente={gerente} aoFechar={() => setAcoes(null)}
+          aoJuntar={(par) => { setAcoes(null); setJuntando(par); }}
+          aoExcluido={() => { setAcoes(null); lerRepetidos(); carregar(filtrosAtuais({ q: busca })); }} />
+      )}
       {juntando && (
         <JuntarRepetidos par={juntando} aoFechar={() => setJuntando(null)}
           aoFeito={() => { setJuntando(null); lerRepetidos(); carregar(filtrosAtuais({ q: busca })); }} />
@@ -12039,7 +12160,11 @@ function CRM({ perfil, aoAbrir, mes }) {
                     <span className="text-[16px] font-semibold leading-tight">
                       {a.cliente_nome || "Sem nome"}
                     </span>
-                    {a.em_loja ? <EmLoja a={a} aoFinalizar={finalizado} /> : <StatusDaLinha a={a} aoFinalizar={finalizado} />}
+                    <span className="flex items-center gap-1">
+                      {a.em_loja ? <EmLoja a={a} aoFinalizar={finalizado} /> : <StatusDaLinha a={a} aoFinalizar={finalizado} />}
+                      <span role="button" tabIndex={0} title="Juntar ou excluir" onClick={(e) => { e.stopPropagation(); setAcoes(a); }}
+                        className="rounded px-1.5 text-[18px] leading-none" style={{ color: C.mute }}>⋯</span>
+                    </span>
                   </div>
                   <div className="mt-1 text-[14px]" style={{ color: C.mute }}>
                     {v.marca_modelo || a.carro_descricao || "carro não informado"}
@@ -12113,7 +12238,13 @@ function CRM({ perfil, aoAbrir, mes }) {
                       <td className={td} title={a.cliente_nome || ""}>{a.cliente_nome || "—"}</td>
                       <td className={td} style={{ fontFamily: F.mono, color: C.mute }} title={a.cliente_telefone || ""}>{a.cliente_telefone || "—"}</td>
                       <td className={td} style={{ color: C.mute }} title={rotulo(ORIGENS, a.origem)}>{ORIGEM_CURTA[a.origem] || rotulo(ORIGENS, a.origem)}</td>
-                      <td className={td}>{a.em_loja ? <EmLoja a={a} aoFinalizar={finalizado} /> : <StatusDaLinha a={a} aoFinalizar={finalizado} />}</td>
+                      <td className={td}>
+                        <span className="flex items-center justify-between gap-1">
+                          {a.em_loja ? <EmLoja a={a} aoFinalizar={finalizado} /> : <StatusDaLinha a={a} aoFinalizar={finalizado} />}
+                          <button title="Juntar ou excluir" onClick={(e) => { e.stopPropagation(); setAcoes(a); }}
+                            className="shrink-0 rounded px-1 text-[16px] leading-none" style={{ color: C.mute }}>⋯</button>
+                        </span>
+                      </td>
                       <td className={td} style={num}>{v.fipe_valor ? brl(v.fipe_valor) : "—"}</td>
                       <td className={td} style={num}>{a.pretensao ? brl(a.pretensao) : "—"}</td>
                     </tr>

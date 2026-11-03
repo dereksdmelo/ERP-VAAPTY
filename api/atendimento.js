@@ -210,7 +210,7 @@ async function lerCorpo(req) {
 // saber, na lista, o que já foi conferido — sem isso seria uma consulta
 // por linha. Vem como objeto porque a 0008 tem unique em
 // atendimento_id; a tela aceita os dois formatos por segurança.
-const EMBUTIDO = "*,veiculo(id,placa,marca_modelo,ano_fabricacao,ano_modelo,km_atual,fipe_valor,valor_por,status),proposta(id,lojista,valor,apresentada),checklist(adm_conferido_em,valor_debitos,valor_quitacao,valor_cautelar,comissao_vaapty,valor_cliente)";
+const EMBUTIDO = "*,veiculo(id,placa,marca_modelo,ano_fabricacao,ano_modelo,km_atual,fipe_valor,valor_por,status),proposta(id,lojista,valor,apresentada),checklist(adm_conferido_em,valor_debitos,valor_quitacao,valor_cautelar,comissao_vaapty,valor_cliente),lead(id,agendado_por_nome)";
 
 const STATUS_INDICACAO = ["novo", "em_contato", "agendado", "virou_atendimento", "sem_interesse"];
 
@@ -882,10 +882,26 @@ async function agenda(req, res, tok) {
     return res.status(200).json({ ok: true, acao: salvo });
   }
 
+  /* EXCLUIR (03/11/2026, o Derek: "como faz pra excluir o atendimento?").
+   * É do gerente (RLS da 0004); a resposta vazia é a RLS recusando. O que
+   * pendura no atendimento vai junto (check list, documentos anexados,
+   * espelho da negociação); o carro e as fotos ficam, soltos.
+   *
+   * **O lead decide o que a visita foi.** Com `nao_veio=1` (a pré-venda
+   * marcou "chegou" por engano), ele volta para "não veio". Sem, ele
+   * continua "compareceu" — a visita conta, só não tem mais atendimento.
+   * Quando o cliente veio e há outro atendimento dele, o certo é juntar. */
   if (req.method === "DELETE") {
     const id = String(req.query.id || "");
     if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido." });
-    await banco(`${REST_A}?id=eq.${id}`, { method: "DELETE", headers: cabecalhos(tok) });
+    const leads = await banco(`${REST("lead")}?select=id&atendimento_id=eq.${id}`, { headers: cabecalhos(tok) }) || [];
+    const apagado = await banco(`${REST_A}?id=eq.${id}`, { method: "DELETE", headers: cabecalhos(tok, { Prefer: "return=representation" }) });
+    if (!Array.isArray(apagado) || !apagado.length) return res.status(403).json({ erro: "Só o gerente exclui atendimento." });
+    if (String(req.query.nao_veio || "") === "1" && leads.length) {
+      await banco(`${REST("lead")}?id=in.(${leads.map((l) => l.id).join(",")})`, {
+        method: "PATCH", headers: json(tok), body: JSON.stringify({ status: "nao_compareceu" }),
+      }).catch(() => {});
+    }
     return res.status(200).json({ ok: true });
   }
 

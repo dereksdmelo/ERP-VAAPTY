@@ -4132,6 +4132,13 @@ de donos diferentes. Atendimentos mostra a tarja dos repetidos dos
 "Novo atendimento" procura o cliente no dia antes de abrir e oferece
 "Abrir esse".
 
+**Cada linha da lista tem um "⋯"** com "Juntar com outro atendimento"
+(qualquer um do mesmo dia — a tarja só acha o par pelo telefone ou pelo
+nome) e, para o gerente, "Excluir". Excluir leva o que pendura no
+atendimento e deixa o carro e as fotos soltos; quando ele veio da
+pré-venda, pergunta se o cliente veio — "não veio" devolve o lead para
+"não veio", senão a visita continua contando sem atendimento.
+
 **O agendador pede o carro** (03/11/2026, o Derek: *"os agendamentos
 estão ficando sem carros"*). É um campo só, no mesmo `Agendador` de
 todas as telas; não trava, e a leitura da conversa (decisão 65) ainda
