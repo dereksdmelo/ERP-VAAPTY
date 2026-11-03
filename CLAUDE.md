@@ -1320,6 +1320,20 @@ saída.
 `moldura` produz — é isso que a torna confiável. Manter duas versões do
 mesmo texto jurídico seria repetir a armadilha do `documentos.js`.
 
+**Desde 03/11/2026 o contrato vai como PDF, não como Markdown.** O
+Derek: *"está perdendo a formatação e não está indo com as assinaturas
+localizadas"*. O Markdown achatava as tabelas em "rótulo: valor", perdia
+sublinhado e alinhamento, e o ZapSign punha a assinatura numa folha no
+fim. Agora o MESMO HTML impresso (a fonte continua uma só) vira PDF no
+navegador (`contratoEmPdf`: pdfmake + html-to-pdfmake, do CDN, só na hora
+do envio), e cada lugar de assinatura leva uma âncora em branco —
+`<span data-ancora="signer1">` no molde, `<<signer1>>` no PDF — que o
+ZapSign usa para pôr a assinatura ali (`signature_placement` no
+signatário). O bloco de assinaturas não quebra de página: no primeiro
+teste a âncora ficou numa folha e o traço na outra. **Quem acrescentar
+signatário acrescenta a âncora `signerN` no molde, na ordem da lista.**
+Se o PDF falhar no aparelho, vai o Markdown e a tela avisa.
+
 **A chave da conta (`ZAPSIGN_TOKEN`) só existe em variável de
 ambiente.** Não está no repositório, não vai ao navegador, não aparece
 em log. O `GET /api/documento?recurso=zapsign` responde apenas se ela
