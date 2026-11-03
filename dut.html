@@ -202,8 +202,44 @@ function campoArquivo(id, titulo, dica) {
     <div class="nomearq" id="n_${id}"></div>
   </div>`;
 }
-function trocar(t) { tipo = t; desenhar(); preencherDoLink(); }
-function trocarEntrega(e) { entrega = e; desenhar(); preencherDoLink(); }
+function trocar(t) { guardarRascunho(); tipo = t; desenhar(); preencherDoLink(); voltarRascunho(); }
+function trocarEntrega(e) { guardarRascunho(); entrega = e; desenhar(); preencherDoLink(); voltarRascunho(); }
+
+/* O RASCUNHO NÃO SE PERDE (03/11/2026, o Derek: "o lojista preenche e dá
+   erro… e quando dá esse erro ele perde tudo o que preencheu e fica
+   frustrado"). Cada tecla guarda os campos NESTE aparelho; voltam depois
+   de um erro, de trocar o tipo do pedido (que redesenha o formulário) ou
+   de fechar a página. Os arquivos não: o navegador não deixa guardar —
+   escolhe-se de novo. Enviado, o carro e o comprador saem do rascunho; o
+   nome e o WhatsApp do lojista ficam para o próximo pedido. */
+const RASCUNHO = "vaapty:dut-rascunho";
+const CAMPOS_R = ["placa", "veiculo", "comprador_nome", "comprador_doc", "comprador_rg", "comprador_endereco",
+  "valor_venda", "km", "data_venda", "endereco_envio", "lojista_nome", "lojista_whats"];
+function lerRascunho() {
+  try {
+    const r = JSON.parse(localStorage.getItem(RASCUNHO) || "null") || {};
+    return r.em && Date.now() - r.em > 14 * 86400000 ? {} : r;
+  } catch (e) { return {}; }
+}
+function guardarRascunho() {
+  try {
+    const r = lerRascunho();
+    CAMPOS_R.forEach((id) => { if (el(id)) r[id] = el(id).value; });
+    r.tipo = tipo; r.entrega = entrega; r.em = Date.now();
+    localStorage.setItem(RASCUNHO, JSON.stringify(r));
+  } catch (e) {}
+}
+function voltarRascunho() {
+  const r = lerRascunho();
+  CAMPOS_R.forEach((id) => { if (el(id) && !el(id).value && r[id]) el(id).value = r[id]; });
+}
+function limparRascunho() {
+  try {
+    const r = lerRascunho();
+    localStorage.setItem(RASCUNHO, JSON.stringify({ lojista_nome: r.lojista_nome || "", lojista_whats: r.lojista_whats || "", em: Date.now() }));
+  } catch (e) {}
+}
+document.addEventListener("input", (e) => { if (e.target && CAMPOS_R.indexOf(e.target.id) >= 0) guardarRascunho(); });
 
 /* O ARQUIVO VIRA BASE64 AQUI, no navegador. O corpo do POST é JSON
    porque o Worker do Cloudflare lê corpo como texto — binário cru
@@ -244,8 +280,8 @@ async function enviar() {
         lojista_nome: v("lojista_nome"), lojista_whats: v("lojista_whats"),
       }),
     });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.erro || "Não consegui enviar.");
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(`${d.erro || "Não consegui enviar."} (código ${r.status})`);
 
     // Os anexos vão em seguida, com o token que só volta uma vez.
     // Falha de anexo não perde o pedido: ele já existe, e a tela diz o
@@ -261,9 +297,15 @@ async function enviar() {
         if (!ra.ok) faltaram.push(ROTULO[id] || id);
       } catch (e) { faltaram.push(ROTULO[id] || id); }
     }
+    limparRascunho();
     pronto(d.protocolo, faltaram);
   } catch (e) {
-    erro.textContent = e.message || "Não consegui enviar.";
+    // O erro diz o que houve e que nada se perdeu: os campos continuam aí
+    // (e no rascunho), e o print desta mensagem é o que acha a causa.
+    const m = String((e && e.message) || "");
+    const semRede = /failed to fetch|load failed|networkerror|network/i.test(m);
+    erro.textContent = (semRede ? "Sem conexão com a internet agora." : (m || "Não consegui enviar."))
+      + " Seus dados continuam aqui — é só tentar de novo. Se repetir, mande um print desta mensagem para a Vaapty.";
     b.disabled = false; b.textContent = "Enviar pedido";
   }
 }
@@ -331,6 +373,20 @@ async function consultar() {
   }
 }
 
+// O rascunho de outro carro não volta quando o link traz um carro novo —
+// só o nome e o WhatsApp do lojista, que são os mesmos.
+(function () {
+  const r = lerRascunho();
+  let placaLink = "";
+  try { placaLink = (new URLSearchParams(location.search).get("placa") || "").toUpperCase().replace(/[^A-Z0-9]/g, ""); } catch (e) {}
+  const placaRasc = String(r.placa || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (placaLink && placaRasc && placaLink !== placaRasc) {
+    try { localStorage.setItem(RASCUNHO, JSON.stringify({ lojista_nome: r.lojista_nome || "", lojista_whats: r.lojista_whats || "", em: Date.now() })); } catch (e) {}
+    return;
+  }
+  if (r.tipo === "reconhecer" || r.tipo === "preencher") tipo = r.tipo;
+  if (r.entrega === "envio" || r.entrega === "retirada") entrega = r.entrega;
+})();
 desenhar();
 
 /* O LINK QUE O ADM MANDA JÁ TRAZ O CARRO (28/10/2026, o Derek: "manda o
@@ -349,6 +405,7 @@ function preencherDoLink() {
 }
 // Trocar o tipo redesenha o formulário: o carro do link volta junto.
 preencherDoLink();
+voltarRascunho();
 </script>
 </body>
 </html>
