@@ -1130,6 +1130,92 @@ async function waMidia(req, res) {
   return res.status(200).json({ ok: true, chave: caminho, bytes: buf.length });
 }
 
+/* MANDAR ARQUIVO PELA CAIXA DE CONVERSAS (03/11/2026, o Derek: "o whats do
+ * ADM … mandar comprovantes, CRLV, tudo que é importante nos grupos").
+ *
+ * A ordem é a da decisão 9: a conversa é lida com o TOKEN de quem manda
+ * (sem a RLS devolvendo, nada sai); só depois a chave de serviço guarda o
+ * arquivo e assina um link de uma hora, que a ponte baixa para mandar. O
+ * arquivo fica na mesma pasta das mídias que chegam (`wa/`), então abre na
+ * conversa pelo mesmo `wa-arquivo`. Os tipos são os que o bucket aceita
+ * (TIPOS_WA); Word e Excel não vão — mandar em PDF. */
+async function waEnvio(req, res, tok) {
+  if (req.method !== "POST") { res.setHeader("Allow", "POST"); return res.status(405).json({ erro: "Use POST." }); }
+  let c = req.body;
+  if (c && typeof Buffer !== "undefined" && Buffer.isBuffer(c)) c = c.toString("utf8");
+  if (typeof c === "string") { try { c = JSON.parse(c); } catch (e) { c = null; } }
+  if (!c || typeof c !== "object") return res.status(400).json({ erro: "Envio inválido." });
+  const cid = String(c.conversa_id || "");
+  if (!RX_UUID.test(cid)) return res.status(400).json({ erro: "Conversa inválida." });
+  const tipo = String(c.tipo || "").split(";")[0].trim().toLowerCase();
+  const ext = TIPOS_WA[tipo];
+  if (!ext) return res.status(415).json({ erro: `Esse tipo de arquivo não vai pelo sistema (${tipo || "desconhecido"}). Mande PDF, foto, áudio ou vídeo.` });
+  let cru = String(c.arquivo_base64 || "").trim();
+  if (cru.slice(0, 5) === "data:") { const v = cru.indexOf(","); cru = v < 0 ? "" : cru.slice(v + 1); }
+  cru = cru.replace(/\s/g, "");
+  if (!cru || !/^[A-Za-z0-9+/]+={0,2}$/.test(cru)) return res.status(400).json({ erro: "Arquivo inválido." });
+  const buf = Buffer.from(cru, "base64");
+  if (!buf.length) return res.status(400).json({ erro: "Arquivo vazio." });
+  if (buf.length > MAX_DOC) return res.status(413).json({ erro: "O arquivo passa de 10 MB." });
+  const nome = String(c.nome || `arquivo.${ext}`).replace(/[\r\n]/g, " ").slice(0, 120);
+  const legenda = String(c.legenda || "").slice(0, 1000);
+
+  const cv = ((await banco(`${REST("wa_conversa")}?select=id,telefone,grupo,wa_canal(slug,ativo)&id=eq.${cid}`, { headers: cabecalhos(tok) })) || [])[0];
+  const ca = cv && (Array.isArray(cv.wa_canal) ? cv.wa_canal[0] : cv.wa_canal);
+  if (!cv || !ca) return res.status(404).json({ erro: "Conversa não encontrada." });
+  if (ca.ativo === false) return res.status(409).json({ erro: "Este número está desativado." });
+  const segredo = process.env.PONTE_SEGREDO || "";
+  const base = process.env.PONTE_URL || "";
+  if (!segredo || (!req.ponte && !base)) return res.status(503).json({ erro: "A ponte do WhatsApp não está configurada." });
+
+  const caminho = `${PASTA_WA}/${String(ca.slug).replace(/[^\w-]/g, "")}/envio-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  await arquivos(`${STORAGE()}/object/${BUCKET_DOC}/${paraURL(caminho)}`, {
+    method: "POST", headers: hArquivo({ "Content-Type": tipo, "Cache-Control": "3600", "x-upsert": "false" }), body: buf,
+  });
+  const assinado = await arquivos(`${STORAGE()}/object/sign/${BUCKET_DOC}/${paraURL(caminho)}`, {
+    method: "POST", headers: hArquivo({ "Content-Type": "application/json" }), body: JSON.stringify({ expiresIn: 3600 }),
+  });
+  const link = assinado && assinado.signedURL ? `${STORAGE()}${assinado.signedURL}` : "";
+  if (!link) return res.status(502).json({ erro: "Não consegui preparar o arquivo." });
+
+  // Áudio de voz é ogg; outro áudio (mp3, m4a) vai como documento, que
+  // abre em qualquer celular — mandado como "voz" ele não tocaria.
+  const qual = tipo.indexOf("image/") === 0 ? "image" : tipo.indexOf("video/") === 0 ? "video" : tipo === "audio/ogg" ? "audio" : "document";
+  const conteudo = qual === "document"
+    ? { type: "document", document: { link, filename: nome, mime_type: tipo, caption: legenda || undefined } }
+    : qual === "audio" ? { type: "audio", audio: { link } }
+    : { type: qual, [qual]: { link, caption: legenda || undefined } };
+  let d = {};
+  try {
+    const alvo = `${base || "https://ponte"}/enviar?canal=${encodeURIComponent(ca.slug)}`;
+    const pedido = {
+      method: "POST", signal: AbortSignal.timeout(60000),
+      headers: { "x-ponte-segredo": segredo, "Content-Type": "application/json" },
+      body: JSON.stringify({ para: cv.telefone, conteudo }),
+    };
+    const r = req.ponte ? await req.ponte.fetch(alvo, pedido) : await fetch(alvo, pedido);
+    d = await r.json().catch(() => ({ ok: false, erro: `a ponte respondeu ${r.status}` }));
+  } catch (e) { d = { ok: false, erro: "a ponte não respondeu" }; }
+  if (!d || !d.ok) return res.status(502).json({ erro: `Não foi enviado: ${limpar((d && d.erro) || "a ponte não mandou")}.` });
+
+  // Gravado como mensagem da loja, com o arquivo — a ponte não ecoa o que
+  // ela mesma manda.
+  const agora = Date.now();
+  const anexo = { tipo: qual === "document" ? "document" : qual, mime: tipo, nome, legenda, voz: qual === "audio", chave: caminho };
+  const wa = String(d.id || `erp-${agora}`);
+  const comum = { p_canal: ca.slug, p_wa_id: wa, p_eco: true, p_tipo: "midia", p_texto: legenda, p_anexo: anexo, p_quando: new Date(agora).toISOString() };
+  try {
+    if (cv.grupo) {
+      await banco(`${URL_BASE}/rest/v1/rpc/wa_receber_grupo`, { method: "POST", headers: json(tok),
+        body: JSON.stringify({ ...comum, p_grupo: cv.telefone, p_nome: "", p_autor: "" }) });
+    } else {
+      await banco(`${URL_BASE}/rest/v1/rpc/wa_receber`, { method: "POST", headers: json(tok),
+        body: JSON.stringify({ ...comum, p_telefone: cv.telefone, p_nome: "", p_anuncio: null }) });
+    }
+  } catch (e) { return res.status(200).json({ ok: true, registrada: false }); }
+  return res.status(200).json({ ok: true, registrada: true });
+}
+
 async function waArquivo(req, res, tok) {
   const id = String(req.query.id || "");
   if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido" });
@@ -1206,6 +1292,11 @@ module.exports = async function handler(req, res) {
 
   const tok = tokenDe(req);
   if (!tok) return res.status(401).json(SEM_LOGIN);
+
+  if (String(req.query.recurso || "") === "wa-envio") {
+    try { return await waEnvio(req, res, tok); }
+    catch (e) { return res.status(502).json({ erro: limpar(e.message) || "Não consegui mandar o arquivo." }); }
+  }
 
   if (String(req.query.recurso || "") === "wa-arquivo") {
     try { return await waArquivo(req, res, tok); }

@@ -165,7 +165,7 @@ async function preVendas(req, res, tok, de, ate) {
     // O lead é procurado numa janela MAIOR que o período: quem escreveu
     // no dia 30 costuma ser agendado em seguida, e cortar no último dia
     // do mês faria o canal parecer que não converte.
-    puxar(`${URL_BASE}/rest/v1/lead?select=id,telefone,status,origem,agendado_para,atendimento_id,criado_em&limit=${TETO}`),
+    puxar(`${URL_BASE}/rest/v1/lead?select=id,telefone,status,origem,agendado_para,atendimento_id,criado_em&order=criado_em.desc&limit=${TETO}`),
     // Só os COMERCIAIS: o administrativo atende lojista e cartório, e
     // contá-lo aqui derrubaria a conversão de um número que nunca teve
     // a intenção de converter (0058).

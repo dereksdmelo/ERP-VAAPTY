@@ -1922,6 +1922,29 @@ gerente. Mensagem que sai não cria lead (0059). A janela avisa do risco
 de bloqueio: mandar para muita gente que nunca falou com o número é o
 que derrubou a Prospecção em 29/10/2026.
 
+**Os grupos entram no WhatsApp do adm, e a caixa manda arquivo (0104,
+03/11/2026).** O Derek: *"o whats do ADM tenha acesso aos grupos pra
+mandar comprovantes, CRLV… e também poder acessar, baixar, ouvir áudios,
+vídeos, documentos"*. A ponte descartava todo grupo; agora passa os de
+**número de operação** (`comercial = false`) — ela pergunta ao ERP no
+`/ponte/estado` (`wa_canal_grupos`) e de novo a cada 10 min. Os
+comerciais e os das IAs continuam sem grupo: encheriam a pré-venda e
+nunca viram lead. A conversa de grupo é a mesma `wa_conversa` (o id
+`…@g.us` no telefone, o nome do grupo no `nome`, `grupo = true`) e cada
+mensagem leva o `autor`; grava `wa_receber_grupo`, que recusa canal
+comercial. O 📎 da caixa manda PDF, foto, áudio ou vídeo até 10 MB
+(`?recurso=wa-envio` no `api/foto.js`, pela ordem da decisão 9: lê a
+conversa com o token, só então a chave guarda e assina), com o texto
+digitado como legenda; o arquivo fica em `wa/`, então abre e baixa como
+o que chega. Word e Excel não vão — o bucket não aceita; mande em PDF.
+**Publicar a ponte pede "Reiniciar" no número**, senão ele segue com o
+programa velho.
+
+**A lista de conversas lia os leads sem ordem e com teto** (`limit=1000`
+com 1.486 leads): o lead recente sumia e a conversa do Kiko, ligada a um
+lead que compareceu, aparecia "sem contato". Agora vêm os leads da página
+pelo id e os mais recentes; as Ações e o funil ganharam ordem também.
+
 **Mídia aparece como linha explicada, não como imagem quebrada.** O
 arquivo não é guardado, e o balão diz qual era o tipo e que ele ficou
 no WhatsApp. **Isto já doeu na primeira hora de uso:** entrou um

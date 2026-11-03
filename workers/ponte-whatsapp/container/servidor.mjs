@@ -29,6 +29,24 @@ let CANAL = process.env.CANAL || "";
 
 const st = { estado: "iniciando", qr: "", numero: "", nome: "", desde: Date.now(), erro: "" };
 let sock = null, ligando = false, tentativas = 0;
+/* GRUPOS SO NO NUMERO DE OPERACAO (03/11/2026, o Derek: "o whats do ADM tenha acesso aos grupos"). O ERP diz,
+   na resposta do /ponte/estado, se este numero recebe grupo (0104: `comercial = false`). Os comerciais e os das IAs
+   continuam sem grupo. */
+let aceitaGrupos = false;
+const nomesDeGrupo = new Map();
+async function nomeDoGrupo(jid) {
+  const c = nomesDeGrupo.get(jid); if (c && Date.now() - c.q < 3600000) return c.nome;
+  let nome = (c && c.nome) || "";
+  try { const g = await sock.groupMetadata(jid); nome = (g && g.subject) || nome; } catch (e) {}
+  nomesDeGrupo.set(jid, { nome, q: Date.now() });
+  return nome;
+}
+async function perguntarGrupos() {
+  const d = await proErp("/ponte/estado", { estado: "conectado", numero: st.numero, nome: st.nome });
+  aceitaGrupos = !!(d && d.grupos);
+}
+// Mudar o numero de comercial para operacao (ou o contrario) vale sem reiniciar.
+setInterval(() => { if (sock && st.estado === "conectado") perguntarGrupos(); }, 600000);
 const enviadosPorMim = new Set();                  // ids que ESTE programa mandou: o eco deles nao volta como "mandado pelo celular"
 const botoesPorConversa = new Map();               // jid -> [{id,title}] — pra entender "1", "2" ou o texto do botao
 
@@ -259,7 +277,20 @@ async function traduzir(msg) {
 
 async function processar(msg) {
   const jid = msg.key && msg.key.remoteJid || "";
-  if (!jid || /@g\.us$|@broadcast$|@newsletter$/.test(jid)) return;          // grupo, status, canal: fora
+  if (!jid || /@broadcast$|@newsletter$/.test(jid)) return;                    // status e canal: fora
+  if (/@g\.us$/.test(jid)) {                                                   // grupo: so no numero de operacao
+    if (!aceitaGrupos) return;
+    if (msg.key.fromMe && enviadosPorMim.has(msg.key.id)) return;
+    const chs = Object.keys(msg.message || {}).filter((k) => ["messageContextInfo", "senderKeyDistributionMessage"].indexOf(k) < 0);
+    if (!chs.length || chs[0] === "protocolMessage") return;
+    const tg = await traduzir(msg); if (!tg) { pular("tipo de mensagem não tratado (grupo): " + chs.join(","), msg); return; }
+    const quem = msg.key.participant || msg.participant || "";
+    let foneAutor = "";
+    try { foneAutor = quem ? await foneDoJid({ remoteJid: quem, participant: quem, participantPn: msg.key.participantPn, participantAlt: msg.key.participantAlt }) : ""; } catch (e) {}
+    const autor = msg.key.fromMe ? "" : [msg.pushName || "", foneAutor].filter(Boolean).join(" · ");
+    await proErp("/ponte/entrada", Object.assign(tg, { fone: jid, eco: !!msg.key.fromMe, autor, grupo: { id: jid, nome: await nomeDoGrupo(jid) } }));
+    return;
+  }
   if (msg.key.fromMe && enviadosPorMim.has(msg.key.id)) return;               // o que nos mesmos mandamos
   const dsm = msg.message && msg.message.deviceSentMessage;
   const chave0 = dsm && dsm.destinationJid ? Object.assign({}, msg.key, { remoteJid: dsm.destinationJid }) : msg.key;
@@ -292,7 +323,7 @@ async function ligar() {
       if (u.connection === "open") {
         tentativas = 0; st.estado = "conectado"; st.qr = ""; st.desde = Date.now();
         st.numero = String((sock.user && sock.user.id) || "").split(":")[0].split("@")[0]; st.nome = (sock.user && sock.user.name) || "";
-        proErp("/ponte/estado", { estado: "conectado", numero: st.numero, nome: st.nome });
+        perguntarGrupos();
       }
       if (u.connection === "close") {
         const cod = u.lastDisconnect && u.lastDisconnect.error && u.lastDisconnect.error.output && u.lastDisconnect.error.output.statusCode;

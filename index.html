@@ -1136,6 +1136,28 @@ async function waEnviar(id, texto) {
   if (!r.ok) throw new Error(d.erro || "Não consegui enviar.");
   return d;
 }
+/* Arquivo pela caixa (03/11/2026): comprovante, CRLV, foto, áudio — vai
+ * em base64 dentro de JSON (o adaptador lê o corpo como texto, decisão
+ * 50), e o servidor guarda, manda pela ponte e grava na conversa. */
+function arquivoEmBase64(arquivo) {
+  return new Promise((ok, falha) => {
+    const r = new FileReader();
+    r.onload = () => ok(String(r.result || "").replace(/^data:[^,]*,/, ""));
+    r.onerror = () => falha(new Error("Não consegui ler o arquivo."));
+    r.readAsDataURL(arquivo);
+  });
+}
+async function waEnviarArquivo(conversaId, arquivo, legenda) {
+  if (arquivo.size > 10 * 1024 * 1024) throw new Error("O arquivo passa de 10 MB.");
+  const arquivo_base64 = await arquivoEmBase64(arquivo);
+  const r = await fetchAut("/api/foto?recurso=wa-envio", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ conversa_id: conversaId, nome: arquivo.name, tipo: arquivo.type, legenda, arquivo_base64 }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui mandar o arquivo.");
+  return d;
+}
 async function waCriarCanal(dados) {
   const r = await fetchAut("/api/atendimento?recurso=wa", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
@@ -9835,8 +9857,17 @@ function Balao({ m, primeiro = true }) {
             <path d="M0 0h8L1.5 9.5C.9 10.3 0 9.9 0 8.9z" fill={meu ? WA.meu : WA.dele} />
           </svg>
         )}
+        {/* No grupo, quem escreveu (0104): sem isso o balão não diz se foi o
+            lojista, o despachante ou o cartório. */}
+        {!meu && m.autor && (
+          <div className="mb-0.5 text-[12px] font-semibold" style={{ color: "#06CF9C" }}>{m.autor}</div>
+        )}
         {m.tipo === "midia" && (
           <div className="mb-1">
+            {url && (
+              <a href={`${url}${url.indexOf("?") >= 0 ? "&" : "?"}download=${encodeURIComponent(anexo.nome || `${QUE[anexo.tipo] || "arquivo"}`)}`}
+                className="mb-1 inline-block text-[11.5px] font-semibold" style={{ color: WA.mute }}>⬇ baixar</a>
+            )}
             {url && anexo.tipo === "image" && (
               <a href={url} target="_blank" rel="noopener noreferrer">
                 <img src={url} alt={QUE[anexo.tipo] || "arquivo"} className="max-h-[320px] rounded-lg" />
@@ -9897,6 +9928,21 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe }) {
   const [enviando, setEnviando] = useState(false);
   const [erroEnvio, setErroEnvio] = useState("");
   const fim = useRef(null);
+  const campoArquivo = useRef(null);
+  const ehGrupo = !!conversa.grupo;
+  /* O ANEXO usa o que está digitado como legenda: é como se manda
+     "segue o CRLV do Onix" junto do arquivo, num gesto só. */
+  const mandarArquivo = async (arquivo) => {
+    if (!arquivo || enviando) return;
+    setEnviando(true); setErroEnvio("");
+    try {
+      await waEnviarArquivo(conversa.id, arquivo, rascunho.trim());
+      setRascunho("");
+      try { setMsgs(await waMensagens(conversa.id)); } catch (e) {}
+    } catch (e) { setErroEnvio(e.message); }
+    setEnviando(false);
+    if (campoArquivo.current) campoArquivo.current.value = "";
+  };
   // Trocar de conversa não leva o rascunho junto: o texto de uma pessoa
   // mandado para outra é o pior erro que esta caixa pode cometer.
   useEffect(() => { setRascunho(""); setErroEnvio(""); }, [conversa.id]);
@@ -9973,7 +10019,7 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe }) {
         <div className="min-w-0 flex-1">
           <div className="truncate text-[16px]" style={{ color: WA.texto }}>{waQuem(conversa)}</div>
           <div className="truncate text-[12.5px]" style={{ color: WA.mute }}>
-            {foneBonito(conversa.telefone)}
+            {ehGrupo ? "grupo" : foneBonito(conversa.telefone)}
             {conversa.canal && ` · ${conversa.canal.nome}`}
             {!operacao && <> · <span style={{ color: estagioDe(conversa).cor, fontWeight: 600 }}>{estagioDe(conversa).rot}</span></>}
             {operacao && " · número de operação, fora do funil"}
@@ -9993,10 +10039,12 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe }) {
           )}
           {/* Ligar sai do número em que a conversa chegou: é o que o
               cliente conhece. */}
-          <button onClick={() => setLigandoConv(true)}
-            className="rounded-full px-3.5 py-1.5 text-[13px] font-semibold text-white" style={{ background: WA.verde }}>
-            Ligar
-          </button>
+          {!ehGrupo && (
+            <button onClick={() => setLigandoConv(true)}
+              className="rounded-full px-3.5 py-1.5 text-[13px] font-semibold text-white" style={{ background: WA.verde }}>
+              Ligar
+            </button>
+          )}
         </div>
       </div>
 
@@ -10021,6 +10069,11 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe }) {
       <div className="px-4 py-2.5" style={{ background: WA.barra, borderTop: `1px solid ${WA.linha}` }}>
         {erroEnvio && <div className="mb-1.5 text-[12.5px]" style={{ color: C.laranja }}>{erroEnvio}</div>}
         <div className="flex items-end gap-2">
+          <input ref={campoArquivo} type="file" className="hidden" accept="application/pdf,image/*,audio/*,video/*"
+            onChange={(e) => mandarArquivo(e.target.files && e.target.files[0])} />
+          <button onClick={() => campoArquivo.current && campoArquivo.current.click()} disabled={enviando}
+            title="Mandar arquivo (PDF, foto, áudio ou vídeo, até 10 MB). O texto digitado vai como legenda."
+            className="shrink-0 rounded-full px-2.5 py-2 text-[16px] leading-none" style={{ color: WA.mute, border: `1px solid ${WA.linha}` }}>📎</button>
           <textarea value={rascunho} rows={1} disabled={enviando}
             onChange={(e) => setRascunho(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); enviar(); } }}
@@ -10032,10 +10085,12 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe }) {
             style={{ background: WA.verde, opacity: enviando || !rascunho.trim() ? 0.5 : 1 }}>
             {enviando ? "enviando…" : "Enviar"}
           </button>
-          <a href={zap(conversa.telefone)} target="_blank" rel="noopener noreferrer" title="Abrir no WhatsApp"
-            className="shrink-0 rounded-full px-3 py-2 text-[12.5px] font-semibold" style={{ color: WA.mute, border: `1px solid ${WA.linha}` }}>
-            WhatsApp
-          </a>
+          {!ehGrupo && (
+            <a href={zap(conversa.telefone)} target="_blank" rel="noopener noreferrer" title="Abrir no WhatsApp"
+              className="shrink-0 rounded-full px-3 py-2 text-[12.5px] font-semibold" style={{ color: WA.mute, border: `1px solid ${WA.linha}` }}>
+              WhatsApp
+            </a>
+          )}
         </div>
       </div>
 
@@ -10208,7 +10263,10 @@ function TelaConversas({ alvo, aoConsumirAlvo, operacao }) {
                     <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px]">
                       {/* O estágio vem primeiro: numa fila, o que importa
                           é o que já foi feito, não de onde veio. */}
-                      {!op && (
+                      {c.grupo && (
+                        <span className="rounded px-1.5 py-px font-semibold" style={{ background: "#E7FCE3", color: "#008069" }}>grupo</span>
+                      )}
+                      {!op && !c.grupo && (
                         <span className="rounded px-1.5 py-px font-semibold"
                           style={{ background: estagioDe(c).cor + "18", color: estagioDe(c).cor }}>{estagioDe(c).rot}</span>
                       )}

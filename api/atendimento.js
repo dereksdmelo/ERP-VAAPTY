@@ -2350,6 +2350,18 @@ async function ponte(req, res) {
     const texto = c.tipo === "texto" ? String(c.texto || "")
       : c.tipo === "botao" ? String((c.botao && c.botao.title) || "")
       : c.tipo === "midia" ? String((c.midia && c.midia.legenda) || "") : "";
+    /* MENSAGEM DE GRUPO (0104): só número de operação recebe, e a função
+     * do banco recusa os outros. Não passa pelo funil: grupo não é lead. */
+    if (c.grupo && c.grupo.id) {
+      try {
+        const id = await rpc("wa_receber_grupo", {
+          p_canal: canal, p_grupo: String(c.grupo.id), p_nome: String(c.grupo.nome || ""), p_autor: String(c.autor || ""),
+          p_wa_id: String(c.id || ""), p_eco: !!c.eco, p_tipo: tipo, p_texto: texto, p_anexo: anexo,
+          p_quando: new Date(Number(c.quando) || Date.now()).toISOString(),
+        });
+        return res.status(200).json({ ok: true, novo: !!id });
+      } catch (e) { return res.status(200).json({ ok: false, erro: String(e.message || e).slice(0, 180) }); }
+    }
     try {
       const id = await rpc("wa_receber", {
         p_canal: canal, p_telefone: String(c.fone || ""), p_nome: String(c.nome || ""),
@@ -2402,7 +2414,10 @@ async function ponte(req, res) {
     if (fone && canal) {
       try { await rpc("wa_numero", { p_canal: canal, p_telefone: fone }); } catch (e) {}
     }
-    return res.status(200).json({ ok: true });
+    // A ponte pergunta ao conectar se este número recebe grupo (0104).
+    let grupos = false;
+    try { grupos = !!(await rpc("wa_canal_grupos", { p_canal: canal })); } catch (e) {}
+    return res.status(200).json({ ok: true, grupos });
   }
 
   /* COLETA NÃO GUARDA ARQUIVO, e isso é decisão, não esquecimento.
@@ -2466,8 +2481,10 @@ module.exports = async function handler(req, res) {
     const atras = (n) => new Date(agora - n * 86400000).toISOString();
 
     const [leads, convs] = await Promise.all([
-      banco(`${REST("lead")}?select=${CAMPOS_LEAD}&excluido_em=is.null&limit=1000`, { headers: cabecalhos(tok) }),
-      banco(`${URL_BASE}/rest/v1/wa_conversa?select=telefone,lead_id,ultima_de_fora,respondida_em,ultima_em,wa_canal(slug,nome,comercial)&limit=1000`,
+      // Com ordem e folga (03/11/2026): eram 1.000 sem ordem com 1.486 leads,
+      // e lead recente podia ficar fora de todas as listas.
+      banco(`${REST("lead")}?select=${CAMPOS_LEAD}&excluido_em=is.null&order=atualizado_em.desc&limit=4000`, { headers: cabecalhos(tok) }),
+      banco(`${URL_BASE}/rest/v1/wa_conversa?select=telefone,lead_id,ultima_de_fora,respondida_em,ultima_em,wa_canal(slug,nome,comercial)&order=ultima_em.desc&limit=4000`,
         { headers: cabecalhos(tok) }).catch(() => []),
     ]);
 
@@ -2876,7 +2893,7 @@ module.exports = async function handler(req, res) {
     const soComercial = String(req.query.comercial || "") === "1";
     const emb = canal || soOperacao || soComercial ? "wa_canal!inner(slug,nome,atendente,comercial)" : "wa_canal(slug,nome,atendente,comercial)";
     const partes = [
-      `select=id,telefone,nome,ultima_em,primeira_em,ultima_de_fora,respondida_em,anuncio,atendimento_id,lead_id,${emb}`,
+      `select=id,telefone,nome,grupo,ultima_em,primeira_em,ultima_de_fora,respondida_em,anuncio,atendimento_id,lead_id,${emb}`,
       "order=ultima_em.desc",
       `limit=${Math.min(200, Number(req.query.limite) || 60)}`,
     ];
@@ -2928,9 +2945,18 @@ module.exports = async function handler(req, res) {
     };
     let porId = {};
     try {
-      const leads = await banco(
-        `${URL_BASE}/rest/v1/lead?select=id,nome,telefone,status,agendado_para,atendimento_id&limit=1000`,
-        { headers: cabecalhos(tok) }) || [];
+      /* OS LEADS DA PÁGINA, SEMPRE (03/11/2026). A leitura era `limit=1000`
+       * sem ordem, e com 1.486 leads o recente podia ficar de fora: a
+       * conversa do Kiko, ligada ao lead dele (VALMIR, compareceu), aparecia
+       * "sem contato". Agora vêm os ligados às conversas desta página pelo
+       * id, e os mais recentes para casar pelo telefone. */
+      const SEL = "id,nome,telefone,status,agendado_para,atendimento_id";
+      const idsPag = [...new Set((linhas || []).map((x) => x.lead_id).filter((x) => RX_UUID.test(String(x || ""))))];
+      const [doPag, recentes] = await Promise.all([
+        idsPag.length ? banco(`${URL_BASE}/rest/v1/lead?select=${SEL}&id=in.(${idsPag.join(",")})`, { headers: cabecalhos(tok) }) : [],
+        banco(`${URL_BASE}/rest/v1/lead?select=${SEL}&order=criado_em.desc&limit=3000`, { headers: cabecalhos(tok) }),
+      ]);
+      const leads = (recentes || []).concat(doPag || []);
       const ORDEM = { perdido: 0, novo: 1, em_contato: 2, nao_compareceu: 3, agendado: 4, confirmado: 5, compareceu: 6 };
       leads.forEach((l) => {
         porId[l.id] = l;
