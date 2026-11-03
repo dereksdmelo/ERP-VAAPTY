@@ -930,6 +930,86 @@ function paraLead(c) {
   return l;
 }
 
+/* ------------------ atendimentos repetidos (0099) ------------------
+ *
+ * GET  ?recurso=duplicados                       os pares dos últimos 14 dias
+ * POST ?recurso=duplicados&acao=procurar  {nome, telefone}   os de HOJE desse cliente
+ * POST ?recurso=duplicados&acao=juntar    {fica, sai}
+ *
+ * O Derek, em 03/11/2026: a pré-venda marca "chegou" e o negociador,
+ * com o cliente na frente, abre outro à mão. Juntar (e não excluir) é o
+ * que guarda as duas coisas: o carro que o negociador fotografou e o
+ * lead que faz a visita contar para a pré-venda.
+ *
+ * **Mesmo cliente é o mesmo dia e o mesmo telefone** (DDD + oito
+ * últimos, `chaveFone`). Sem telefone em um dos dois, vale o nome: o
+ * primeiro igual, e o segundo também quando os dois têm. Telefones
+ * diferentes nunca são o mesmo cliente, por mais que o nome bata.
+ */
+const palavrasNome = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  .toLowerCase().replace(/[^a-z ]/g, " ").trim().split(/\s+/).filter(Boolean);
+function mesmoCliente(a, b) {
+  const fa = chaveFone(a.cliente_telefone), fb = chaveFone(b.cliente_telefone);
+  if (fa && fb) return fa === fb;
+  const na = palavrasNome(a.cliente_nome), nb = palavrasNome(b.cliente_nome);
+  if (!na.length || !nb.length || na[0].length < 3 || na[0] !== nb[0]) return false;
+  return !(na[1] && nb[1] && na[1] !== nb[1]);
+}
+const CAMPOS_DUP = "id,data,criado_em,chegada_em,cliente_nome,cliente_telefone,negociador_id,negociador_nome," +
+  "prospec,origem,status,carro_descricao,veiculo(id,placa,marca_modelo,foto(count)),lead(id,agendado_por_nome)";
+// O resumo de cada lado, para a pessoa escolher qual fica sem abrir os dois.
+const resumoDup = (a) => {
+  const v = (a.veiculo || [])[0] || null;
+  const l = (a.lead || [])[0] || null;
+  return {
+    id: a.id, data: a.data, criado_em: a.criado_em, chegada_em: a.chegada_em,
+    cliente_nome: a.cliente_nome, cliente_telefone: a.cliente_telefone,
+    negociador_nome: a.negociador_nome, status: a.status, origem: a.origem, prospec: a.prospec,
+    carro: v ? [v.placa, v.marca_modelo].filter(Boolean).join(" · ") : (a.carro_descricao || ""),
+    tem_veiculo: !!v, fotos: v && v.foto && v.foto[0] ? v.foto[0].count || 0 : 0,
+    do_lead: !!l, agendado_por: l ? l.agendado_por_nome || "" : "",
+  };
+};
+
+async function duplicados(req, res, tok) {
+  const acao = String(req.query.acao || "");
+  if (req.method === "POST" && acao === "juntar") {
+    const c = await lerCorpo(req) || {};
+    if (!RX_UUID.test(String(c.fica || "")) || !RX_UUID.test(String(c.sai || ""))) {
+      return res.status(400).json({ erro: "Escolha os dois atendimentos." });
+    }
+    const r = await banco(`${URL_BASE}/rest/v1/rpc/unificar_atendimentos`, {
+      method: "POST", headers: json(tok), body: JSON.stringify({ p_fica: c.fica, p_sai: c.sai }),
+    });
+    return res.status(200).json(r || { ok: true });
+  }
+  if (req.method === "POST" && acao === "procurar") {
+    const c = await lerCorpo(req) || {};
+    const alvo = { cliente_nome: texto(c.nome), cliente_telefone: texto(c.telefone) };
+    if (!alvo.cliente_nome && !alvo.cliente_telefone) return res.status(200).json({ achados: [] });
+    const hoje = hojeAqui();
+    const lista = await banco(`${REST("atendimento")}?select=${CAMPOS_DUP}&data=eq.${hoje}&limit=200`, { headers: cabecalhos(tok) }) || [];
+    return res.status(200).json({ achados: lista.filter((a) => mesmoCliente(a, alvo)).map(resumoDup) });
+  }
+  if (req.method !== "GET") return res.status(405).json({ erro: "Método não permitido." });
+  const desde = new Date(Date.now() - 14 * 86400000).toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+  const lista = await banco(`${REST("atendimento")}?select=${CAMPOS_DUP}&data=gte.${desde}&order=criado_em.asc&limit=1000`,
+    { headers: cabecalhos(tok) }) || [];
+  const porDia = {};
+  lista.forEach((a) => { (porDia[a.data] = porDia[a.data] || []).push(a); });
+  const pares = [];
+  Object.keys(porDia).forEach((d) => {
+    const doDia = porDia[d];
+    for (let i = 0; i < doDia.length; i++) {
+      for (let j = i + 1; j < doDia.length; j++) {
+        if (mesmoCliente(doDia[i], doDia[j])) pares.push([resumoDup(doDia[i]), resumoDup(doDia[j])]);
+      }
+    }
+  });
+  pares.sort((x, y) => String(y[0].data).localeCompare(String(x[0].data)));
+  return res.status(200).json({ pares });
+}
+
 /* ------------------ a fila da vez (0085, decisão 67) ------------------
  *
  * GET  ?recurso=vez                       a ordem de hoje e de quem é a vez
@@ -2972,6 +3052,11 @@ module.exports = async function handler(req, res) {
   if (String(req.query.recurso || "") === "mensagem") {
     try { return await mensagem(req, res, tok); }
     catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Falhou." }); }
+  }
+
+  if (String(req.query.recurso || "") === "duplicados") {
+    try { return await duplicados(req, res, tok); }
+    catch (e) { return res.status(e.status || 502).json({ erro: limpar(e.message) }); }
   }
 
   if (String(req.query.recurso || "") === "vez") {

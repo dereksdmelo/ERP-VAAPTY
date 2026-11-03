@@ -592,6 +592,28 @@ async function listarAtendimentos(filtros) {
   if (!r.ok) throw new Error(d.erro || "Não consegui carregar os atendimentos.");
   return d.atendimentos || [];
 }
+// Atendimentos repetidos (0099): os pares, a procura antes de abrir, e juntar.
+async function lerDuplicados() {
+  const r = await fetchAut("/api/atendimento?recurso=duplicados");
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui procurar os repetidos.");
+  return d.pares || [];
+}
+async function procurarHoje(nome, telefone) {
+  const r = await fetchAut("/api/atendimento?recurso=duplicados&acao=procurar", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nome, telefone }),
+  });
+  const d = await r.json().catch(() => ({}));
+  return r.ok ? d.achados || [] : [];
+}
+async function juntarAtendimentos(fica, sai) {
+  const r = await fetchAut("/api/atendimento?recurso=duplicados&acao=juntar", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fica, sai }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui juntar.");
+  return d;
+}
 async function lerAtendimento(id) {
   const r = await fetchAut(`/api/atendimento?id=${encodeURIComponent(id)}`);
   const d = await r.json().catch(() => ({}));
@@ -8423,9 +8445,17 @@ function NovoAtendimento({ perfil, aoCriar, aoCancelar }) {
   }, []);
 
   const falta = d.origem === "fluxo_loja" && (!d.como_conheceu || d.como_conheceu === "Outro");
-  const criar = async () => {
+  // JÁ ABERTO HOJE? (0099) A pré-venda marca "chegou" e o negociador,
+  // com o cliente na frente, abria outro. Antes de criar, procura o
+  // mesmo cliente no dia; achando, oferece abrir o que já existe.
+  const [jaExiste, setJaExiste] = useState(null);
+  const criar = async (mesmoAssim) => {
     if (falta) { setErro("Pergunte ao cliente como ele conheceu a Vaapty."); return; }
     setErro(""); setIndo(true);
+    if (mesmoAssim !== true) {
+      const achados = await procurarHoje(d.cliente_nome, d.cliente_telefone);
+      if (achados.length) { setJaExiste(achados); setIndo(false); return; }
+    }
     try {
       // O id é o do negociador ESCOLHIDO no campo, não o de quem está
       // logado. Gravava o de quem abriu a tela, então um atendimento
@@ -8491,10 +8521,28 @@ function NovoAtendimento({ perfil, aoCriar, aoCancelar }) {
           </select>
         </Campo>
         <Campo label="Pretensão do cliente"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={d.pretensao} onChange={(e) => set("pretensao", e.target.value)} /></Campo>
+        {jaExiste && (
+          <div className="rounded-lg p-3" style={{ background: AMARELO.fundo, border: `1px solid ${AMARELO.texto}` }}>
+            <div className="text-[13.5px] font-bold" style={{ color: AMARELO.texto }}>Este cliente já tem atendimento hoje</div>
+            {jaExiste.map((a) => (
+              <div key={a.id} className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[13px]">
+                <span>
+                  <b>{a.cliente_nome || "Sem nome"}</b> · aberto às {horaSP(a.criado_em)}
+                  {a.do_lead ? ` pela pré-venda${a.agendado_por ? ` (${a.agendado_por})` : ""}` : ""}
+                  {a.negociador_nome ? ` · ${a.negociador_nome}` : ""}{a.carro ? ` · ${a.carro}` : ""}
+                </span>
+                <button onClick={() => aoCriar(a)} className="rounded-md px-3 py-1.5 text-[13px] font-semibold text-white" style={{ background: C.roxo }}>Abrir esse</button>
+              </div>
+            ))}
+            <button onClick={() => { setJaExiste(null); criar(true); }} className="mt-2 text-[12.5px] underline" style={{ color: C.mute }}>
+              É outro cliente — abrir um novo
+            </button>
+          </div>
+        )}
         {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
         <div className="flex gap-2">
           <button onClick={aoCancelar} className="rounded-md border px-4 py-2.5 text-[13px]" style={{ borderColor: C.line, color: C.mute }}>Cancelar</button>
-          <button onClick={criar} disabled={indo}
+          <button onClick={() => criar()} disabled={indo}
             className="flex-1 rounded-md py-2.5 text-[13px] font-semibold"
             style={{ background: indo ? C.line : C.roxo, color: "#fff" }}>
             {indo ? "Abrindo…" : "Abrir atendimento"}
@@ -11743,6 +11791,67 @@ function BotaoFinalizar({ a, aoFinalizar, rotulo }) {
   );
 }
 
+/* JUNTAR DOIS ATENDIMENTOS DO MESMO CLIENTE (0099). Um fica, o outro
+ * sai, e o que o que sai tinha passa para o que fica — o lead (a visita
+ * continua contando para a pré-venda), o carro, as fotos, o check list.
+ * O padrão é ficar o que tem o carro: é o que está aberto no celular do
+ * negociador. */
+function JuntarRepetidos({ par, aoFechar, aoFeito }) {
+  const [a, b] = par;
+  const padrao = a.tem_veiculo !== b.tem_veiculo ? (a.tem_veiculo ? a.id : b.id)
+    : a.fotos !== b.fotos ? (a.fotos > b.fotos ? a.id : b.id) : (a.do_lead ? a.id : b.id);
+  const [fica, setFica] = useState(padrao);
+  const [indo, setIndo] = useState(false);
+  const [erro, setErro] = useState("");
+  const sai = fica === a.id ? b : a;
+  const ficaL = fica === a.id ? a : b;
+  const juntar = async () => {
+    setIndo(true); setErro("");
+    try { const r = await juntarAtendimentos(fica, sai.id); aoFeito(r); }
+    catch (e) { setErro(e.message); setIndo(false); }
+  };
+  const lado = (x) => {
+    const on = fica === x.id;
+    return (
+      <button key={x.id} onClick={() => setFica(x.id)} className="flex-1 rounded-xl p-3 text-left"
+        style={{ background: on ? "#F3EEFA" : C.paper, border: `2px solid ${on ? C.roxo : C.line}` }}>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: on ? C.roxo : C.mute }}>{on ? "fica" : "sai"}</span>
+          <span className="text-[11.5px]" style={{ color: C.mute }}>aberto às {horaSP(x.criado_em)}</span>
+        </div>
+        <div className="mt-1 text-[14.5px] font-semibold">{x.cliente_nome || "Sem nome"}</div>
+        <div className="mt-1 space-y-0.5 text-[12.5px]" style={{ color: C.mute }}>
+          <div>{x.do_lead ? <b style={{ color: C.verde }}>pela pré-venda{x.agendado_por ? ` · ${x.agendado_por}` : ""}</b> : "aberto à mão"}</div>
+          <div>{x.negociador_nome || "sem negociador"} · {rotuloStatus(x.status)}</div>
+          <div>{x.tem_veiculo ? <b style={{ color: C.ink }}>{x.carro || "ficha do carro"}</b> : (x.carro || "sem ficha do carro")}{x.fotos ? ` · ${x.fotos} foto${x.fotos > 1 ? "s" : ""}` : ""}</div>
+          <div>{rotulo(ORIGENS, x.origem)}{x.prospec ? ` · ${x.prospec}` : ""}</div>
+        </div>
+      </button>
+    );
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center lg:items-center" style={{ background: "rgba(24,18,33,0.45)" }} onClick={aoFechar}>
+      <div className="w-full max-w-xl rounded-t-2xl p-4 lg:rounded-2xl" style={{ background: C.paper }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-baseline justify-between">
+          <span className="text-[17px] font-bold">Juntar os dois atendimentos</span>
+          <button onClick={aoFechar} className="text-[13px]" style={{ color: C.mute }}>fechar</button>
+        </div>
+        <p className="mt-1 text-[13px]" style={{ color: C.mute }}>Toque no que deve ficar. O outro é apagado, e o que ele tinha passa para este.</p>
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row">{lado(a)}{lado(b)}</div>
+        <ul className="mt-3 list-disc space-y-0.5 pl-5 text-[12.5px]" style={{ color: C.mute }}>
+          {sai.do_lead && <li>O lead passa para o que fica: a visita continua contando para a pré-venda{sai.agendado_por ? ` (${sai.agendado_por})` : ""}.</li>}
+          {sai.do_lead && !ficaL.do_lead && <li>A origem e quem prospectou vêm do lead.</li>}
+          {sai.tem_veiculo && !ficaL.tem_veiculo && <li>A ficha do carro{sai.fotos ? ` e as ${sai.fotos} fotos` : ""} passam para o que fica.</li>}
+          {sai.tem_veiculo && ficaL.tem_veiculo && <li style={{ color: C.laranja }}>Os dois têm ficha do carro: fica a deste; a do outro ({sai.carro || "sem placa"}) sai do atendimento.</li>}
+          <li>Os dados do cliente que faltam neste vêm do outro, e a observação diz que foi juntado.</li>
+        </ul>
+        {erro && <p className="mt-2 text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
+        <BotaoPrimario className="mt-3 w-full" disabled={indo} onClick={juntar}>{indo ? "juntando…" : "Juntar"}</BotaoPrimario>
+      </div>
+    </div>
+  );
+}
+
 function CRM({ perfil, aoAbrir, mes }) {
   const { comp, setComp, MESES } = mes;
   const [lista, setLista] = useState([]);
@@ -11754,6 +11863,21 @@ function CRM({ perfil, aoAbrir, mes }) {
   const [neg, setNeg] = useState("");
   const [equipe, setEquipe] = useState([]);
   useEffect(() => { listarNegociadores().then(setEquipe).catch(() => {}); }, []);
+  // Os repetidos dos últimos 14 dias (0099). "Não é o mesmo cliente"
+  // esconde o par neste aparelho — nome igual nem sempre é a mesma pessoa.
+  const [repetidos, setRepetidos] = useState([]);
+  const [juntando, setJuntando] = useState(null);
+  const [verRep, setVerRep] = useState(false);
+  const [naoDup, setNaoDup] = useState(() => { try { return JSON.parse(localStorage.getItem("vaapty:nao-repetido") || "[]"); } catch (e) { return []; } });
+  const lerRepetidos = () => lerDuplicados().then(setRepetidos).catch(() => {});
+  useEffect(() => { lerRepetidos(); }, []);
+  const chavePar = (p) => [p[0].id, p[1].id].sort().join("|");
+  const paresVivos = repetidos.filter((p) => naoDup.indexOf(chavePar(p)) < 0);
+  const naoEh = (p) => {
+    const n = naoDup.concat(chavePar(p));
+    setNaoDup(n);
+    try { localStorage.setItem("vaapty:nao-repetido", JSON.stringify(n)); } catch (e) {}
+  };
 
   const carregar = async (filtros) => {
     setCarregando(true); setErro("");
@@ -11813,6 +11937,37 @@ function CRM({ perfil, aoAbrir, mes }) {
           <NovoAtendimento perfil={perfil} aoCancelar={() => setNovo(false)}
             aoCriar={async (a) => { setNovo(false); await aoAbrir(a.id); }} />
         </div>
+      )}
+
+      {!!paresVivos.length && (
+        <div className="mb-3 rounded-xl p-3" style={{ background: AMARELO.fundo, border: `1px solid ${AMARELO.texto}` }}>
+          <button onClick={() => setVerRep(!verRep)} className="flex w-full items-center justify-between gap-2 text-left">
+            <span className="text-[13.5px] font-bold" style={{ color: AMARELO.texto }}>
+              {paresVivos.length} cliente{paresVivos.length > 1 ? "s aparecem" : " aparece"} duas vezes no mesmo dia
+            </span>
+            <span className="text-[12.5px] font-semibold" style={{ color: AMARELO.texto }}>{verRep ? "esconder" : "ver e juntar"}</span>
+          </button>
+          {verRep && (
+            <div className="mt-2 space-y-1.5">
+              {paresVivos.map((p) => (
+                <div key={chavePar(p)} className="flex flex-wrap items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-[13px]" style={{ background: C.paper }}>
+                  <span className="min-w-0">
+                    <b>{p[0].cliente_nome || p[1].cliente_nome || "Sem nome"}</b>
+                    <span style={{ color: C.mute }}> · {diaBR(p[0].data).slice(0, 5)} · {horaSP(p[0].criado_em)} {p[0].do_lead ? "(pré-venda)" : `(${p[0].negociador_nome || "à mão"})`} e {horaSP(p[1].criado_em)} {p[1].do_lead ? "(pré-venda)" : `(${p[1].negociador_nome || "à mão"})`}</span>
+                  </span>
+                  <span className="flex gap-2">
+                    <button onClick={() => naoEh(p)} className="text-[12.5px]" style={{ color: C.mute }}>não é o mesmo</button>
+                    <button onClick={() => setJuntando(p)} className="rounded-md px-3 py-1 text-[12.5px] font-semibold text-white" style={{ background: C.roxo }}>Juntar</button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {juntando && (
+        <JuntarRepetidos par={juntando} aoFechar={() => setJuntando(null)}
+          aoFeito={() => { setJuntando(null); lerRepetidos(); carregar(filtrosAtuais({ q: busca })); }} />
       )}
 
       {/* BUSCA E FILTROS NUMA LINHA SÓ (24/10/2026, o Derek: *"diminua e
@@ -13742,6 +13897,12 @@ function Agendador({ lead, equipe, aoFechar, aoAgendar }) {
   const [hora, setHora] = useState(horaBR(lead.agendado_para) || "");
   const [neg, setNeg] = useState(lead.negociador_id || "");
   const [outra, setOutra] = useState("");
+  // O CARRO NA HORA DE AGENDAR (03/11/2026, o Derek: "só dá opção de
+  // agendar o horário e os agendamentos estão ficando sem carro"). É o
+  // momento em que o cliente acabou de dizer; depois ninguém volta para
+  // escrever. Não trava: quem ainda não sabe deixa vazio, e a leitura da
+  // conversa (decisão 65) preenche quando ele disser.
+  const [carro, setCarro] = useState(lead.carro || "");
   const dias = proximosDias(7);
   const cfg = useConfigLoja();
   const horarios = horariosDoDia(cfg, dia);
@@ -13789,6 +13950,11 @@ function Agendador({ lead, equipe, aoFechar, aoAgendar }) {
             className="rounded-lg border px-2 py-1 text-[14px] outline-none" style={inputSty} />
         </div>
 
+        <div className="mt-3 text-[11px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Carro</div>
+        <input className={`${inputCls} mt-1`} style={{ ...inputSty, borderColor: carro.trim() ? C.line : C.laranja }}
+          value={carro} placeholder="modelo e ano (ex.: Onix 2019)" onChange={(e) => setCarro(e.target.value)} />
+        {!carro.trim() && <p className="mt-1 text-[12px]" style={{ color: C.laranja }}>Pergunte o carro: é o que o negociador prepara antes de o cliente chegar.</p>}
+
         <div className="mt-3 text-[11px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Negociador</div>
         <select className={`${inputCls} mt-1`} style={inputSty} value={neg} onChange={(e) => setNeg(e.target.value)}>
           <option value="">A definir</option>
@@ -13798,7 +13964,8 @@ function Agendador({ lead, equipe, aoFechar, aoAgendar }) {
         <BotaoPrimario className="mt-4 w-full" disabled={!pronto}
           onClick={() => {
             const n = (equipe || []).filter((x) => x.id === neg)[0];
-            aoAgendar({ agendado_para: `${dia}T${outra || horaOk}:00`, negociador_id: neg || null, negociador_nome: n ? n.nome : null });
+            aoAgendar({ agendado_para: `${dia}T${outra || horaOk}:00`, negociador_id: neg || null, negociador_nome: n ? n.nome : null,
+              ...(carro.trim() && carro.trim() !== (lead.carro || "") ? { carro: carro.trim() } : {}) });
           }}>
           {lead.agendado_para ? "Remarcar" : "Agendar"} {dia && (horaOk || outra) ? `· ${dias.filter((d) => d.iso === dia)[0] ? dias.filter((d) => d.iso === dia)[0].rot : diaBR(dia)} ${outra || horaOk}` : ""}
         </BotaoPrimario>

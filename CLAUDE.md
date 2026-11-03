@@ -4116,6 +4116,27 @@ confirmado, não veio) do mesmo telefone — chave do funil, DDD + oito
 foram ligados assim no mesmo dia, todos com atendimento aberto no dia
 da hora marcada.
 
+**Dois atendimentos do mesmo cliente se JUNTAM, não se excluem (0099,
+03/11/2026).** A pré-venda marcava "chegou" e o negociador, com o cliente
+na frente, abria outro à mão: em 30 dias foram 24 pares, e em 10 o carro
+e as fotos estavam só no do negociador. Excluir o dele levava o
+trabalho; excluir o da pré-venda soltava o lead e a visita deixava de
+contar. `unificar_atendimentos(fica, sai)` move tudo do que sai para o
+que fica — o lead (é o `lead.atendimento_id` que conta a visita), o
+carro, o check list, documentos, conversa, agenda; o que é um só por
+atendimento passa só se o que fica não tem — e herda origem e PROSPEC
+do lado do lead. O padrão é ficar o que tem o carro, porque é o que
+está aberto no celular do negociador. Só o gerente junta atendimentos
+de donos diferentes. Atendimentos mostra a tarja dos repetidos dos
+últimos 14 dias (mesmo dia e mesmo telefone; sem telefone, o nome), e o
+"Novo atendimento" procura o cliente no dia antes de abrir e oferece
+"Abrir esse".
+
+**O agendador pede o carro** (03/11/2026, o Derek: *"os agendamentos
+estão ficando sem carros"*). É um campo só, no mesmo `Agendador` de
+todas as telas; não trava, e a leitura da conversa (decisão 65) ainda
+preenche o que ficar vazio.
+
 **A tela NÃO pula para o atendimento criado.** Quem marca está
 trabalhando uma fila, e ser jogado para outra tela a cada nome faz
 perder o lugar — a confirmação é uma linha verde dizendo que ele está
