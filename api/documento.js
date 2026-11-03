@@ -125,7 +125,35 @@ async function zapsign(req, res, tok) {
   // Sem isto, a única forma de descobrir que a variável não subiu seria
   // errar na frente do cliente, na hora de mandar o contrato.
   if (req.method === "GET") {
-    return res.status(200).json({ configurado: !!ZAP_TOKEN });
+    /* O DOCUMENTO QUE O ZAPSIGN TEM (03/11/2026). Com `atendimento_id`,
+     * pergunta ao ZapSign pelo documento enviado: o arquivo que ele
+     * guardou (é por ele que se sabe se foi o PDF formatado ou o texto
+     * simples), a situação e o link de cada signatário — que recupera o
+     * link dos envios de antes da 0102 e o grava. O atendimento é lido
+     * com o token de quem pergunta: sem RLS devolvendo, nada sai. */
+    const aidQ = String(req.query.atendimento_id || "");
+    if (!aidQ) return res.status(200).json({ configurado: !!ZAP_TOKEN });
+    if (!RX_UUID.test(aidQ)) return res.status(400).json({ erro: "atendimento_id inválido." });
+    if (!ZAP_TOKEN) return res.status(503).json({ erro: "A chave do ZapSign não está configurada." });
+    const at = (await banco(`${REST("atendimento")}?select=id,contrato_zapsign_token,contrato_zapsign_link&id=eq.${aidQ}&limit=1`, { headers: cabecalhos(tok) }) || [])[0];
+    if (!at) return res.status(404).json({ erro: "Atendimento não encontrado." });
+    if (!at.contrato_zapsign_token) return res.status(404).json({ erro: "Este atendimento não foi enviado ao ZapSign." });
+    let d = null;
+    try {
+      const r = await fetch(`${ZAPSIGN}/docs/${encodeURIComponent(at.contrato_zapsign_token)}/`, { headers: { Authorization: `Bearer ${ZAP_TOKEN}` } });
+      d = await r.json().catch(() => null);
+      if (!r.ok) return res.status(502).json({ erro: String((d && (d.detail || d.message)) || "O ZapSign não devolveu o documento.").slice(0, 200) });
+    } catch (e) { return res.status(502).json({ erro: "Não consegui falar com o ZapSign." }); }
+    const assinantes = (d && Array.isArray(d.signers) ? d.signers : []).map((x) => ({ nome: x.name, link: x.sign_url, situacao: x.status }));
+    if (!at.contrato_zapsign_link && assinantes[0] && assinantes[0].link) {
+      await banco(`${REST("atendimento")}?id=eq.${aidQ}`, { method: "PATCH", headers: json(tok),
+        body: JSON.stringify({ contrato_zapsign_link: assinantes[0].link }) }).catch(() => {});
+    }
+    return res.status(200).json({
+      nome: d && d.name, situacao: d && d.status, criado_em: d && d.created_at,
+      arquivo: d && (d.original_file || null), arquivo_assinado: d && (d.signed_file || null),
+      assinantes,
+    });
   }
 
   if (!ZAP_TOKEN) {
