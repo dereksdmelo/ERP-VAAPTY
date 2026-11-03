@@ -14438,7 +14438,7 @@ function TelaPreVendas({ perfil, aoAbrirAtendimento, aoVerConversa, mes, comp, a
         </div>
       )}
       {aba === "agenda" && <Agendamentos perfil={perfil} equipe={equipe} aoAbrirAtendimento={aoAbrirAtendimento} aoVerConversa={aoVerConversa} />}
-      {aba === "perdidos" && <LeadsPerdidos perfil={perfil} />}
+      {aba === "perdidos" && <LeadsPerdidos perfil={perfil} aoVerConversa={aoVerConversa} />}
       {aba === "canais" && <TelaCanaisPreVenda comp={comp} />}
       {aba === "excluidos" && <LeadsExcluidos />}
       {aba === "acoes" && <TelaAcoes equipe={equipe} aoVerConversa={aoVerConversa} />}
@@ -14471,7 +14471,7 @@ function TelaPreVendas({ perfil, aoAbrirAtendimento, aoVerConversa, mes, comp, a
  * **E daqui ele volta.** Cliente que vendeu fora hoje troca de carro
  * daqui a dois anos; quem some do sistema não é reencontrado.
  */
-function LeadsPerdidos({ perfil }) {
+function LeadsPerdidos({ perfil, aoVerConversa }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
 
@@ -14524,7 +14524,10 @@ function LeadsPerdidos({ perfil }) {
                 style={{ color: C.roxo, fontFamily: F.mono }}>{telBR(l.telefone)}</a>
             )}
             <div className="flex items-center gap-2 text-[12px]">
-              {l.telefone && (
+              {l.telefone && aoVerConversa && (
+                <button onClick={() => aoVerConversa(l.telefone)} style={{ color: C.roxo, fontWeight: 600 }}>conversa</button>
+              )}
+              {l.telefone && !aoVerConversa && (
                 <a href={zap(l.telefone, `Olá ${l.nome}! Aqui é da Vaapty Joinville. Tudo bem?`)}
                   target="_blank" rel="noreferrer" style={{ color: C.verde, fontWeight: 600 }}>zap</a>
               )}
@@ -15580,9 +15583,18 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
                   className="rounded-lg px-3 py-2.5 text-[14px] font-semibold text-white" style={{ background: C.verde }}>
                   Ligar
                 </button>
-                <a href={zap(menu.telefone)} target="_blank" rel="noopener noreferrer"
-                  className="rounded-lg border px-3 py-2.5 text-center text-[14px] font-semibold"
-                  style={{ borderColor: C.line, color: C.ink }}>Mensagem</a>
+                {/* A conversa abre no WhatsApp do sistema (03/11/2026, como na
+                    Agenda): responde pelo número em que o cliente escreveu, e
+                    fica gravado. O wa.me abria o WhatsApp do computador. */}
+                {aoVerConversa ? (
+                  <button onClick={() => aoVerConversa(menu.telefone)}
+                    className="rounded-lg border px-3 py-2.5 text-center text-[14px] font-semibold"
+                    style={{ borderColor: C.verde, color: C.verde }}>Conversa</button>
+                ) : (
+                  <a href={zap(menu.telefone)} target="_blank" rel="noopener noreferrer"
+                    className="rounded-lg border px-3 py-2.5 text-center text-[14px] font-semibold"
+                    style={{ borderColor: C.line, color: C.ink }}>Mensagem</a>
+                )}
               </div>
             )}
 
@@ -15601,7 +15613,7 @@ function QuadroLeads({ perfil, equipe, aoVerConversa, comp }) {
             {menu.telefone && (
               <button onClick={() => setVendoConversa(menu)}
                 className="mt-2 w-full rounded-lg border px-3 py-2.5 text-[13.5px] font-semibold"
-                style={{ borderColor: C.line, color: C.roxo }}>Ver a conversa</button>
+                style={{ borderColor: C.line, color: C.roxo }}>Só ler a conversa aqui, sem sair do quadro</button>
             )}
 
             <Campo label="Observações" nota="Cada anotação entra com a data na frente; nada é sobrescrito.">
@@ -15845,7 +15857,7 @@ function FunilLeads({ perfil, equipe, aoVerConversa }) {
               {l.telefone && aoVerConversa && (
                 <button onClick={() => aoVerConversa(l.telefone)} style={{ color: C.roxo, fontWeight: 600 }}>conversa</button>
               )}
-              {l.telefone && (
+              {l.telefone && !aoVerConversa && (
                 <a href={zap(l.telefone, `Olá ${l.nome}! Aqui é da Vaapty Joinville. Tudo bem?`)}
                   target="_blank" rel="noreferrer" style={{ color: C.verde, fontWeight: 600 }}>zap</a>
               )}
