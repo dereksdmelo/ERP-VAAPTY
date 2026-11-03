@@ -206,6 +206,11 @@ async function zapsign(req, res, tok) {
     ? { base64_pdf: pdf, signers: assinantes.map((x, i) => ({ ...x, signature_placement: `<<signer${i + 1}>>` })) }
     : { markdown_text: markdown, signers: assinantes };
 
+  // Ensaio: diz o que iria ao ZapSign, sem criar documento lá. Foi assim
+  // que se separou "o navegador não mandou o PDF" de "o servidor não o
+  // aceitou" (03/11/2026).
+  if (c.teste === true) return res.status(200).json({ teste: true, formato: comPdf ? "pdf" : "markdown", tamanho_pdf: pdf.length });
+
   let criado;
   try {
     const r = await fetch(`${ZAPSIGN}/docs/`, {
