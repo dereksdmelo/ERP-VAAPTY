@@ -443,6 +443,16 @@ assinado por ele: sair o valor ofertado ali coloca o número errado no
 contrato. A ordem é `rodada.contra` → `valorFechado` → `impresso`, e a
 tela avisa quando cai no último.
 
+**O número entra como a pessoa digitou (03/11/2026).** O Derek: *"preenchi
+o valor que o cliente fechou e ficou em branco quando cliquei pra
+imprimir"*. `brlDoc` usava `Number()`: "45.000,00" e "R$ 45.000" saíam
+em branco, e "45.000" saía **R$ 45,00** — no papel que o cliente assina.
+`numDoc` lê como o `numeroBR` (vírgula é decimal, ponto em grupos de três
+é milhar), e vale para todos os documentos e para o KM. No mesmo dia o
+pré-contrato passou a trazer o valor por extenso (`valorPorExtenso`, o do
+recibo) e a data do dia, que eram linhas para a caneta — o texto da
+cláusula não mudou, só o branco foi preenchido.
+
 **Não se imprime documento com campo vazio.** Nome, CPF, RG e endereço
 do cliente (colunas da 0007) travam os botões enquanto faltarem. Papel
 com lacuna volta para ser preenchido depois, e é assim que contrato

@@ -2660,10 +2660,30 @@ const payloadShinkai = (f, n) => ({
 
 /* ---------------- utilitários ---------------- */
 
-const brlDoc = (n) =>
-  n == null || n === "" || isNaN(n)
+/* O NÚMERO COMO A PESSOA DIGITOU (03/11/2026, o Derek: "preenchi o valor
+ * que o cliente fechou e ficou em branco quando cliquei pra imprimir").
+ * O campo é texto livre, e `Number()` só lê o formato de programa:
+ * "45.000,00" e "R$ 45.000" saíam em branco, e "45.000" saía R$ 45,00 —
+ * no papel que o cliente assina. Aqui vale a mesma leitura do
+ * `numeroBR`: vírgula é decimal, ponto em grupos de três é milhar. */
+const numDoc = (v) => {
+  if (typeof v === "number") return v;
+  let t = String(v == null ? "" : v).replace(/R\$|\s/g, "").trim();
+  if (!t) return NaN;
+  if (t.indexOf(",") >= 0) t = t.replace(/\./g, "").replace(",", ".");
+  else if (/^-?\d{1,3}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, "");
+  return Number(t);
+};
+// O dia do papel é o dia em que ele sai, em Joinville — a linha em
+// branco ficava para a caneta e voltava sem data.
+const diaDoc = () => new Date().toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" }).split("/");
+const MESES_DOC = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+const brlDoc = (n) => {
+  const x = numDoc(n);
+  return n == null || n === "" || !Number.isFinite(x)
     ? "____________"
-    : Number(n).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+    : x.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+};
 
 const dataExtenso = (d = new Date()) =>
   d.toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" });
@@ -2823,7 +2843,7 @@ function blocoVeiculo(f) {
   <tr><td class="r">Placa</td><td>${ou(f.placa, "placa")}</td></tr>
   <tr><td class="r">Chassi</td><td>${ou(f.chassi, "chassi — do CRLV")}</td></tr>
   <tr><td class="r">Cor</td><td>${ou(f.cor, "cor")}</td></tr>
-  <tr><td class="r">Quilometragem</td><td>${f.km ? Number(f.km).toLocaleString("pt-BR") + " km" : vazio("km")}</td></tr>
+  <tr><td class="r">Quilometragem</td><td>${Number.isFinite(numDoc(f.km)) ? numDoc(f.km).toLocaleString("pt-BR") + " km" : vazio("km")}</td></tr>
 </table>`;
 }
 
@@ -3772,7 +3792,7 @@ ${CLAUSULA_ASSINATURA}
 <p style="margin-top:16px">Por estarem justos e contratados, assinam o presente instrumento em
 2 vias de igual teor e forma.</p>
 
-<p>Joinville, ${vazio("dia")} de ${vazio("mês")} de ${new Date().getFullYear()}.</p>
+<p>Joinville, ${diaDoc()[0]} de ${MESES_DOC[Number(diaDoc()[1]) - 1]} de ${diaDoc()[2]}.</p>
 
 ${assinaturas("CONTRATANTE", "VAAPTY INTERMEDIAÇÃO VEICULAR<br>CNPJ: 34.840.903/0001-00")}
 ${DUAS_TESTEMUNHAS}`;
@@ -3846,7 +3866,7 @@ ${blocoVeiculo(f)}
 civil, declara estar plenamente ciente e de acordo com a proposta feita pela VAAPTY para o
 veículo descrito acima, de sua propriedade, dando sua total aceitação e autorização para a venda
 pelo valor ajustado de <strong>${brlDoc(f.valorFechado)}</strong>
-(${vazio("por extenso e composição")}). A VAAPTY declara que, do valor negociado, serão
+(${Number.isFinite(numDoc(f.valorFechado)) && numDoc(f.valorFechado) > 0 ? valorPorExtenso(numDoc(f.valorFechado)) : vazio("por extenso e composição")}). A VAAPTY declara que, do valor negociado, serão
 descontados todos os débitos referentes a multas, quitação de financiamento, transferências,
 comissão, vistoria cautelar e outros pendentes sobre o veículo até a data presente.</p>
 
@@ -3895,7 +3915,7 @@ permanece em relação ao(a) DECLARANTE.</p>
 
 ${CLAUSULA_ASSINATURA}
 
-<p style="margin-top:16px">Joinville, ${vazio("dia")} / ${vazio("mês")} / ${new Date().getFullYear()}.</p>
+<p style="margin-top:16px">Joinville, ${diaDoc()[0]} / ${diaDoc()[1]} / ${diaDoc()[2]}.</p>
 
 ${assinaturas("VAAPTY", "CONTRATANTE")}
 ${DUAS_TESTEMUNHAS}`;
