@@ -124,6 +124,26 @@ async function desvalorizacao(req, res, token) {
   });
 }
 
+/* A CONSULTA GUARDADA NO MÊS (0101). O plano dá 20 consultas por dia e
+ * o valor FIPE muda uma vez por mês: a mesma placa no celular e no
+ * computador, ou consultada de novo depois de recarregar, não pode gastar
+ * outra. Fica no banco, por funções que exigem o IA_SEGREDO — a resposta
+ * traz o chassi, e esta rota não tem login. Falhar aqui não derruba a
+ * consulta: sem cache, consulta como antes. */
+const mesAqui = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }).slice(0, 7);
+async function cacheRpc(nome, corpo) {
+  const URL_BASE = process.env.SUPABASE_URL, ANON = process.env.SUPABASE_ANON_KEY, SEG = process.env.IA_SEGREDO;
+  if (!URL_BASE || !ANON || !SEG) return null;
+  try {
+    const r = await fetch(`${URL_BASE}/rest/v1/rpc/${nome}`, {
+      method: "POST", signal: AbortSignal.timeout(8000),
+      headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ p_segredo: SEG, ...corpo }),
+    });
+    return r.ok ? await r.json() : null;
+  } catch (e) { return null; }
+}
+
 module.exports = async function handler(req, res) {
   const token = process.env.PLACAFIPE_TOKEN;
   if (!token) {
@@ -138,6 +158,9 @@ module.exports = async function handler(req, res) {
   if (!/^[A-Z]{3}\d[A-Z0-9]\d{2}$/.test(placa)) {
     return res.status(400).json({ erro: "Placa fora do formato ABC1234 ou ABC1D23." });
   }
+
+  const guardado = String(req.query.nova || "") === "1" ? null : await cacheRpc("placa_cache_ler", { p_placa: placa, p_mes: mesAqui() });
+  if (guardado && guardado.placa) return res.status(200).json({ ...guardado, guardado: true });
 
   let d;
   try {
@@ -161,10 +184,15 @@ module.exports = async function handler(req, res) {
     // fazer agora, em vez de repassar um recado que não é para ele.
     // Aconteceu em 28/09/2026, com a placa MFW8145 na tela.
     const ASSINATURA = [4862, 7771];
+    // O LIMITE DO DIA (03/11/2026): o recado deles manda escrever para o
+    // suporte, o que não diz ao negociador o que fazer agora. `limite`
+    // deixa a tela mandar para a tabela FIPE oficial, que não tem cota.
+    const limite = /limite/i.test(String(d.msg || ""));
     return res.status(422).json({
-      erro: d.msg || "Veículo não encontrado.",
+      erro: limite ? "Acabaram as consultas de placa de hoje (o plano dá 20 por dia). Voltam amanhã." : (d.msg || "Veículo não encontrado."),
       codigo: d.codigo,
       assinatura: ASSINATURA.indexOf(Number(d.codigo)) >= 0 || undefined,
+      limite: limite || undefined,
     });
   }
 
@@ -210,10 +238,7 @@ module.exports = async function handler(req, res) {
     }))
     .sort((a, b) => b.confianca - a.confianca);
 
-  // Consulta boa por 30 dias no navegador; o valor FIPE só muda uma vez por mês.
-  res.setHeader("Cache-Control", "public, max-age=0, s-maxage=86400");
-
-  return res.status(200).json({
+  const resposta = {
     placa,
     marca: iv.marca,
     modeloAbreviado: iv.modelo,
@@ -229,5 +254,7 @@ module.exports = async function handler(req, res) {
     versoes,
     ambiguo: versoes.length !== 1,
     extras,
-  });
+  };
+  await cacheRpc("placa_cache_gravar", { p_placa: placa, p_mes: mesAqui(), p_dados: resposta });
+  return res.status(200).json(resposta);
 };

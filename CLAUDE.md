@@ -262,6 +262,16 @@ com a data de referência FIPE. Enquanto isso não existe, a proteção real
 da cota é o contador no cabeçalho, que fica laranja com 3 ou menos
 consultas restantes.
 
+**Desde 03/11/2026 a consulta é guardada no mês, no banco (0101).** O
+`s-maxage` era da Vercel; no Cloudflare, em `workers.dev`, nada era
+guardado, e a cota de 20 acabou ao meio-dia com placas repetidas.
+`placa_cache` tem uma linha por placa e mês, lida e gravada só por
+funções que exigem o `IA_SEGREDO` (a resposta traz o chassi e a rota
+não tem login). `?nova=1` força consultar de novo. Quando a cota acaba,
+o servidor devolve `limite: true` e a tela manda para a tabela FIPE
+oficial, que não tem limite, em vez de repassar o "fale com o suporte"
+deles.
+
 `/api/cota` é livre — o endpoint `getquotas` da Placa Fipe não desconta
 consulta, então pode ser chamado no carregamento e depois de cada busca.
 

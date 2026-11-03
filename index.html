@@ -473,6 +473,7 @@ async function consultarPlaca(placa) {
     // e o atendimento não precisa parar por causa dela — ver o aviso
     // ao lado do campo.
     e.assinatura = !!d.assinatura;
+    e.limite = !!d.limite;
     throw e;
   }
   return d;
@@ -4581,7 +4582,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   const buscar = async () => {
     setErroBusca(""); setAchado(null); setBuscando(true); setCambioBusca(f.cambio || "");
     try { setAchado(await consultarPlaca(placaBusca)); setCota(await consultarCota()); }
-    catch (e) { setErroBusca(e.message); setPlacaSemAssinatura(!!e.assinatura); }
+    catch (e) { setErroBusca(e.message); setPlacaSemAssinatura(e.assinatura ? "assinatura" : e.limite ? "limite" : false); }
     setBuscando(false);
   };
   const escolherVersao = (v) => {
@@ -5608,14 +5609,22 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               {placaSemAssinatura && (
                 <div className="mt-2 rounded-md px-3 py-2 text-[12px] leading-relaxed"
                   style={{ background: C.roxoFraco, border: `1px solid ${C.line}`, color: C.ink }}>
-                  <strong>Isso é a assinatura da consulta por placa, não o carro.</strong>{" "}
+                  <strong>{placaSemAssinatura === "limite"
+                    ? "Acabaram as consultas de placa de hoje, não é o carro."
+                    : "Isso é a assinatura da consulta por placa, não o carro."}</strong>{" "}
                   O atendimento segue: preencha marca, modelo, ano e chassi pelo documento
                   do cliente e pegue o valor em <strong>Conferir na tabela FIPE</strong>,
-                  logo abaixo — ela continua no ar e é a fonte melhor, porque devolve o
+                  logo abaixo — ela não tem limite e é a fonte melhor, porque devolve o
                   código de autenticação da FIPE em vez de adivinhar a versão.
-                  <div className="mt-1" style={{ color: C.mute }}>
-                    Avise o Derek para renovar em placafipe.com.br.
-                  </div>
+                  {placaSemAssinatura === "limite" ? (
+                    <div className="mt-1" style={{ color: C.mute }}>
+                      Placa que já foi consultada este mês não gasta consulta de novo. Para aumentar o limite, o Derek muda o plano em placafipe.com.br.
+                    </div>
+                  ) : (
+                    <div className="mt-1" style={{ color: C.mute }}>
+                      Avise o Derek para renovar em placafipe.com.br.
+                    </div>
+                  )}
                 </div>
               )}
 
