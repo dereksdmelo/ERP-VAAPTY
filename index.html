@@ -1005,6 +1005,86 @@ async function waConversas({ canal, busca, operacao, comercial } = {}) {
   if (!r.ok) throw new Error(d.erro || "Não consegui carregar as conversas.");
   return d.conversas || [];
 }
+// Conversa nova (03/11/2026): os números que a equipe pode usar, e a
+// primeira mensagem para um telefone que ainda não está na caixa.
+async function waNumeros() {
+  const r = await fetchAut("/api/atendimento?recurso=conversas&acao=numeros");
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui ler os números.");
+  return d.numeros || [];
+}
+async function waNovaConversa(dados) {
+  const r = await fetchAut("/api/atendimento?recurso=conversas&acao=nova", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui mandar.");
+  return d;
+}
+
+/* A JANELA DA CONVERSA NOVA. No WhatsApp do adm, só os números de
+ * operação; nas Conversas da pré-venda, só os comerciais (0058). O aviso
+ * não é enfeite: mensagem para quem nunca falou com o número é o que o
+ * WhatsApp mais pune num número ligado por QR — a Prospecção caiu assim
+ * em 29/10/2026. */
+function NovaConversa({ operacao, canalAtual, aoFechar, aoEnviada }) {
+  const [numeros, setNumeros] = useState(null);
+  const [canal, setCanal] = useState("");
+  const [telefone, setTelefone] = useState("");
+  const [nome, setNome] = useState("");
+  const [texto, setTexto] = useState("");
+  const [indo, setIndo] = useState(false);
+  const [erro, setErro] = useState("");
+  useEffect(() => {
+    waNumeros().then((ns) => {
+      const meus = ns.filter((n) => (operacao ? n.comercial === false : n.comercial !== false));
+      setNumeros(meus);
+      const pref = meus.filter((n) => n.slug === canalAtual)[0] || meus.filter((n) => /adm/i.test(n.nome + n.slug))[0] || meus[0];
+      if (pref) setCanal(pref.slug);
+    }).catch((e) => { setNumeros([]); setErro(e.message); });
+  }, []);
+  const dig = telefone.replace(/\D/g, "");
+  const pronto = canal && (dig.length === 10 || dig.length === 11 || dig.length === 12 || dig.length === 13) && texto.trim();
+  const mandar = async () => {
+    setIndo(true); setErro("");
+    try { const d = await waNovaConversa({ canal, telefone, nome, texto }); aoEnviada(d); }
+    catch (e) { setErro(e.message); setIndo(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center lg:items-center" style={{ background: "rgba(24,18,33,0.45)" }} onClick={aoFechar}>
+      <div className="w-full max-w-md rounded-t-2xl p-4 lg:rounded-2xl" style={{ background: C.paper }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-baseline justify-between">
+          <span className="text-[17px] font-bold">Nova conversa</span>
+          <button onClick={aoFechar} className="text-[13px]" style={{ color: C.mute }}>fechar</button>
+        </div>
+        <Campo label="Mandar pelo número">
+          <select className={inputCls} style={inputSty} value={canal} onChange={(e) => setCanal(e.target.value)}>
+            {numeros === null && <option value="">carregando…</option>}
+            {(numeros || []).map((n) => <option key={n.slug} value={n.slug}>{n.nome}</option>)}
+          </select>
+        </Campo>
+        <div className="grid grid-cols-2 gap-2">
+          <Campo label="Telefone, com DDD">
+            <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="tel" placeholder="(47) 99999-9999" autoFocus
+              value={telefone} onChange={(e) => setTelefone(e.target.value)} />
+          </Campo>
+          <Campo label="Nome (opcional)">
+            <input className={inputCls} style={inputSty} placeholder="como aparece na lista" value={nome} onChange={(e) => setNome(e.target.value)} />
+          </Campo>
+        </div>
+        <Campo label="Mensagem">
+          <textarea className={inputCls} style={{ ...inputSty, minHeight: 80 }} value={texto} onChange={(e) => setTexto(e.target.value)} />
+        </Campo>
+        <p className="text-[12px]" style={{ color: C.mute }}>
+          Para contato de trabalho, um de cada vez. Mandar para muita gente que nunca falou com o número é o que faz o WhatsApp bloquear o número.
+        </p>
+        {erro && <p className="mt-1 text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
+        <BotaoPrimario className="mt-3 w-full" disabled={!pronto || indo} onClick={mandar}>{indo ? "mandando…" : "Mandar e abrir a conversa"}</BotaoPrimario>
+      </div>
+    </div>
+  );
+}
+
 async function waVirarLead(id, dados) {
   const r = await fetchAut(`/api/atendimento?recurso=conversas&id=${encodeURIComponent(id)}&acao=lead`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados || {}),
@@ -9907,6 +9987,7 @@ function TelaConversas({ alvo, aoConsumirAlvo, operacao }) {
   const [aba, setAba] = useState("esperando");
   const [aberta, setAberta] = useState(null);
   const [abrirPrimeira, setAbrirPrimeira] = useState(false);
+  const [nova, setNova] = useState(false);
 
   // A lista de números vem do mesmo lugar que a tela do gerente, mas
   // aqui ela é só um filtro: quem não é gerente leva 403 e fica sem o
@@ -9996,6 +10077,8 @@ function TelaConversas({ alvo, aoConsumirAlvo, operacao }) {
                   {rot}
                 </button>
               ))}
+              <button onClick={() => setNova(true)} className="rounded-full px-3 py-1 text-[13px] font-semibold"
+                style={{ background: "#008069", color: "#fff" }}>+ Nova conversa</button>
               {!!canais.length && !operacao && (
                 <select className="ml-auto max-w-[170px] rounded-full px-2.5 py-1 text-[12.5px] outline-none"
                   style={{ background: WA.barra, color: WA.texto, border: "none" }} value={canal} onChange={(e) => setCanal(e.target.value)}>
@@ -10076,6 +10159,15 @@ function TelaConversas({ alvo, aoConsumirAlvo, operacao }) {
           )}
         </div>
       </div>
+      {nova && (
+        <NovaConversa operacao={operacao} canalAtual={canal} aoFechar={() => setNova(false)}
+          aoEnviada={(d) => {
+            // Abre a conversa nova pela busca, o mesmo caminho de quem vem do lead.
+            const t = String(d.telefone || "").replace(/\D/g, "");
+            setNova(false); setCanal(""); setAba("todas"); setAberta(null);
+            setDigitado(t.slice(-8)); setBusca(t.slice(-8)); setAbrirPrimeira(true);
+          }} />
+      )}
     </div>
   );
 }

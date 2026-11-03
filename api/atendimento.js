@@ -2651,6 +2651,77 @@ module.exports = async function handler(req, res) {
      * Flávia entender que uma pessoa assumiu e sair da conversa por 12
      * horas (decisão 64). Uma confirmação de horário escrita aqui move o
      * lead como a da ponte, pelo mesmo leitor. */
+    /* CONVERSA NOVA, COM QUEM AINDA NÃO ESTÁ NA CAIXA (03/11/2026, o
+     * Derek: "fui tentar chamar um contato novo pelo WhatsApp do adm e não
+     * consegui, só dá pra conversar com contatos que já estão em
+     * conversa"). A caixa só respondia a quem tinha escrito.
+     *
+     *   GET  ?recurso=conversas&acao=numeros        os números ativos (a equipe lê, 0054)
+     *   POST ?recurso=conversas&acao=nova  {canal, telefone, texto, nome?}
+     *
+     * O número é lido com o token de quem escreve, como no "enviar". A
+     * mensagem sai pela ponte, e a conversa nasce no `wa_receber` (eco),
+     * como as da Flávia: a ponte não ecoa o que ela mesma manda. Mensagem
+     * que sai NÃO cria lead (0059) — escrever para quem nunca falou com a
+     * loja é contato, não lead. */
+    if (req.method === "GET" && String(req.query.acao || "") === "numeros") {
+      const ns = await banco(`${URL_BASE}/rest/v1/wa_canal?select=slug,nome,comercial&ativo=eq.true&order=nome`, { headers: cabecalhos(tok) });
+      return res.status(200).json({ numeros: ns || [] });
+    }
+    if (req.method === "POST" && String(req.query.acao || "") === "nova") {
+      const c = await lerCorpo(req) || {};
+      const texto = String(c.texto || "").replace(/\r/g, "").trim();
+      if (!texto) return res.status(400).json({ erro: "Escreva a mensagem." });
+      if (texto.length > 4000) return res.status(400).json({ erro: "Mensagem longa demais (o limite é 4.000 caracteres)." });
+      let fone = String(c.telefone || "").replace(/\D/g, "");
+      if (fone.length === 10 || fone.length === 11) fone = `55${fone}`;
+      if (!/^55\d{10,11}$/.test(fone)) return res.status(400).json({ erro: "Telefone com DDD, por exemplo (47) 99999-9999." });
+      const slug = String(c.canal || "").trim();
+      const ca = (await banco(`${URL_BASE}/rest/v1/wa_canal?select=slug,nome,ativo&slug=eq.${encodeURIComponent(slug)}`, { headers: cabecalhos(tok) }) || [])[0];
+      if (!ca) return res.status(404).json({ erro: "Escolha o número que vai mandar." });
+      if (ca.ativo === false) return res.status(409).json({ erro: "Este número está desativado." });
+      const segredo = process.env.PONTE_SEGREDO || "";
+      const base = process.env.PONTE_URL || "";
+      if (!segredo || (!req.ponte && !base)) return res.status(503).json({ erro: "A ponte do WhatsApp não está configurada." });
+      let d = {};
+      try {
+        const alvo = `${base || "https://ponte"}/enviar?canal=${encodeURIComponent(ca.slug)}`;
+        const pedido = {
+          method: "POST", signal: AbortSignal.timeout(30000),
+          headers: { "x-ponte-segredo": segredo, "Content-Type": "application/json" },
+          body: JSON.stringify({ para: fone, conteudo: { type: "text", text: { body: texto } } }),
+        };
+        const r = req.ponte ? await req.ponte.fetch(alvo, pedido) : await fetch(alvo, pedido);
+        d = await r.json().catch(() => ({ ok: false, erro: `a ponte respondeu ${r.status}` }));
+      } catch (e) { d = { ok: false, erro: "a ponte não respondeu" }; }
+      if (!d || !d.ok) return res.status(502).json({ erro: `Não foi enviada: ${limpar((d && d.erro) || "a ponte não mandou")}.` });
+      const agora = Date.now();
+      let msgId = null;
+      try {
+        msgId = await banco(`${URL_BASE}/rest/v1/rpc/wa_receber`, {
+          method: "POST", headers: json(tok),
+          body: JSON.stringify({ p_canal: ca.slug, p_telefone: fone, p_nome: "", p_wa_id: String(d.id || `erp-${agora}`),
+            p_eco: true, p_tipo: "texto", p_texto: texto, p_anexo: null, p_quando: new Date(agora).toISOString(), p_anuncio: null }),
+        });
+      } catch (e) {}
+      let conversaId = null;
+      if (msgId) {
+        try {
+          const m = (await banco(`${URL_BASE}/rest/v1/wa_mensagem?select=conversa_id&id=eq.${msgId}`, { headers: cabecalhos(tok) }) || [])[0];
+          conversaId = m ? m.conversa_id : null;
+          // O nome digitado vale só para conversa sem nome: o que o cliente
+          // pôs no perfil chega na primeira resposta dele (0061).
+          const nome = texto && typeof c.nome === "string" ? c.nome.trim().slice(0, 120) : "";
+          if (conversaId && nome) {
+            await banco(`${REST_CV}?id=eq.${conversaId}&or=(nome.is.null,nome.eq.)`, {
+              method: "PATCH", headers: json(tok), body: JSON.stringify({ nome }),
+            }).catch(() => {});
+          }
+        } catch (e) {}
+      }
+      return res.status(200).json({ ok: true, registrada: !!msgId, conversa_id: conversaId, telefone: fone });
+    }
+
     if (RX_UUID.test(id) && req.method === "POST" && String(req.query.acao || "") === "enviar") {
       const c = await lerCorpo(req);
       const texto = String((c && c.texto) || "").replace(/\r/g, "").trim();

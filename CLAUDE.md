@@ -1890,6 +1890,16 @@ pessoa assumiu (decisão 64). Confirmação de horário escrita ali move o
 lead pelo mesmo leitor da ponte. Só texto; arquivo e áudio continuam
 no celular.
 
+**E começa conversa nova (03/11/2026, o Derek: *"só dá pra conversar
+com contatos que já estão em conversa"*).** "+ Nova conversa" escolhe o
+número (no WhatsApp do adm, só os de operação; na pré-venda, só os
+comerciais), o telefone com DDD e a mensagem; sai pela ponte e a
+conversa nasce no `wa_receber` (eco), como as da Flávia. A lista de
+números vem de `?acao=numeros`, que a equipe lê — o `?recurso=wa` é do
+gerente. Mensagem que sai não cria lead (0059). A janela avisa do risco
+de bloqueio: mandar para muita gente que nunca falou com o número é o
+que derrubou a Prospecção em 29/10/2026.
+
 **Mídia aparece como linha explicada, não como imagem quebrada.** O
 arquivo não é guardado, e o balão diz qual era o tipo e que ele ficou
 no WhatsApp. **Isto já doeu na primeira hora de uso:** entrou um
