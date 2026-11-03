@@ -214,7 +214,11 @@ async function lerCorpo(req) {
 // saber, na lista, o que já foi conferido — sem isso seria uma consulta
 // por linha. Vem como objeto porque a 0008 tem unique em
 // atendimento_id; a tela aceita os dois formatos por segurança.
-const EMBUTIDO = "*,veiculo(id,placa,marca_modelo,ano_fabricacao,ano_modelo,km_atual,fipe_valor,valor_por,status),proposta(id,lojista,valor,apresentada),checklist(adm_conferido_em,valor_debitos,valor_quitacao,valor_cautelar,comissao_vaapty,valor_cliente),lead(id,agendado_por_nome)";
+const EMBUTIDO = "*,veiculo(id,placa,marca_modelo,ano_fabricacao,ano_modelo,km_atual,fipe_valor,valor_por,status),proposta(id,lojista,valor,apresentada),checklist(adm_conferido_em,valor_debitos,valor_quitacao,valor_cautelar,comissao_vaapty,valor_cliente),lead(id,agendado_por_nome),negociacao_viva(placa:ficha->>placa,modelo:ficha->>modelo,ano:ficha->>ano,km:ficha->>km,fipe:ficha->>fipe,pretensao:ficha->>pretensao)";
+// O que o negociador já digitou e a ficha ainda não gravou (03/11/2026): a
+// lista mostrava "—" no FIPE e na pretensão do Tiago enquanto a ficha não
+// estava completa. Se o banco recusar esta leitura, cai na de antes.
+const EMBUTIDO_BASE = "*,veiculo(id,placa,marca_modelo,ano_fabricacao,ano_modelo,km_atual,fipe_valor,valor_por,status),proposta(id,lojista,valor,apresentada),checklist(adm_conferido_em,valor_debitos,valor_quitacao,valor_cautelar,comissao_vaapty,valor_cliente),lead(id,agendado_por_nome)";
 
 const STATUS_INDICACAO = ["novo", "em_contato", "agendado", "virou_atendimento", "sem_interesse"];
 
@@ -3251,8 +3255,9 @@ module.exports = async function handler(req, res) {
       const id = String(req.query.id || "");
       if (id) {
         if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido." });
-        const r = await banco(`${REST("atendimento")}?select=${EMBUTIDO}&id=eq.${id}&limit=1`,
-                              { headers: cabecalhos(tok) });
+        let r;
+        try { r = await banco(`${REST("atendimento")}?select=${EMBUTIDO}&id=eq.${id}&limit=1`, { headers: cabecalhos(tok) }); }
+        catch (e) { r = await banco(`${REST("atendimento")}?select=${EMBUTIDO_BASE}&id=eq.${id}&limit=1`, { headers: cabecalhos(tok) }); }
         const linha = Array.isArray(r) ? r[0] : null;
         if (!linha) return res.status(404).json({ erro: "Atendimento não encontrado." });
         return res.status(200).json({ atendimento: comEmLoja(linha) });
@@ -3292,7 +3297,9 @@ module.exports = async function handler(req, res) {
       const url = `${REST("atendimento")}?select=${EMBUTIDO}&order=data.desc,criado_em.desc&limit=${limite}` +
                   (f.length ? `&${f.join("&")}` : "");
 
-      const lista = await banco(url, { headers: cabecalhos(tok) });
+      let lista;
+      try { lista = await banco(url, { headers: cabecalhos(tok) }); }
+      catch (e) { lista = await banco(url.replace(`select=${EMBUTIDO}`, `select=${EMBUTIDO_BASE}`), { headers: cabecalhos(tok) }); }
       return res.status(200).json({ atendimentos: (lista || []).map(comEmLoja) });
     }
 

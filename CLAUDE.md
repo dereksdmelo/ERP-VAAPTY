@@ -707,6 +707,17 @@ era (placa, em_avaliacao); com atendimento, o mesmo carro pode voltar
 no mesmo dia por outro atendimento, e são duas linhas — o que a chave
 antiga impediria.
 
+**E traz o que o negociador já digitou (03/11/2026).** A ficha do carro
+só grava completa (decisão 43), e até lá a lista mostrava "—" no FIPE, na
+placa e no KM — o Tiago preenchia e nada mudava; com placa digitada
+errada ("RMV620") a ficha nunca gravava. Agora o `EMBUTIDO` traz da
+`negociacao_viva` a placa, o modelo, o ano, o KM, o FIPE e a pretensão
+(`veiculoDaLinha`, `pretensaoDaLinha`), usados enquanto não há
+`veiculo`. A RLS da 0033 só deixa o dono e o gerente lerem isso; se o
+banco recusar a leitura, cai na de antes (`EMBUTIDO_BASE`). **A pretensão
+passou a gravar no atendimento**, 2 s depois de digitada: era só da
+ficha, e a lista, o funil e a linha do CRM liam a coluna vazia.
+
 **A lista traz veículo e propostas na mesma consulta**, pelo
 `select=*,veiculo(...),proposta(...)` do PostgREST. Uma ida ao banco em
 vez de três, e o cartão já mostra placa e melhor proposta. Isso depende
