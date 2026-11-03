@@ -1158,6 +1158,15 @@ async function waEnviarArquivo(conversaId, arquivo, legenda) {
   if (!r.ok) throw new Error(d.erro || "Não consegui mandar o arquivo.");
   return d;
 }
+// Lida / não lida (0105): a caixa é da equipe, a marca é da conversa.
+async function waMarcarLida(id, lida) {
+  const r = await fetchAut(`/api/atendimento?recurso=conversas&acao=lida&id=${encodeURIComponent(id)}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lida }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui marcar.");
+  return d;
+}
 async function waCriarCanal(dados) {
   const r = await fetchAut("/api/atendimento?recurso=wa", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
@@ -9918,7 +9927,7 @@ function Balao({ m, primeiro = true }) {
   );
 }
 
-function Conversa({ conversa, aoVoltar, aoVirarLead, equipe }) {
+function Conversa({ conversa, aoVoltar, aoVirarLead, equipe, aoMarcar }) {
   const [msgs, setMsgs] = useState(null);
   const [erro, setErro] = useState("");
   const [virando, setVirando] = useState(false);
@@ -10026,6 +10035,13 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe }) {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
+          {aoMarcar && (
+            <button onClick={() => aoMarcar(conversa.id, !!conversa.esperando)}
+              title={conversa.esperando ? "Tira de Não respondidas até o cliente escrever de novo" : "Põe de volta em Não respondidas para alguém retomar"}
+              className="rounded-full px-3 py-1.5 text-[12.5px] font-semibold" style={{ color: WA.mute, border: `1px solid ${WA.linha}`, background: "#fff" }}>
+              {conversa.esperando ? "✓ Marcar como lida" : "● Marcar como não lida"}
+            </button>
+          )}
           {/* O ELO QUE FALTAVA. Sem ele a conversa morre no WhatsApp e
               o canal não tem o que medir — em 03/10/2026 eram 205
               conversas para seis leads (decisão 27). Número de operação
@@ -10180,6 +10196,15 @@ function TelaConversas({ alvo, aoConsumirAlvo, operacao }) {
   }, [canal, busca]);
 
   const esperando = (lista || []).filter((c) => c.esperando);
+  // Marca na hora e confirma no servidor; se falhar, a lista volta.
+  const marcar = async (id, comoLida) => {
+    setLista((ls) => (ls || []).map((x) => (x.id === id ? { ...x, esperando: !comoLida, nao_lida: !comoLida } : x)));
+    try { await waMarcarLida(id, comoLida); }
+    catch (e) {
+      setErro(e.message);
+      setLista((ls) => (ls || []).map((x) => (x.id === id ? { ...x, esperando: comoLida } : x)));
+    }
+  };
   const mostradas = aba === "esperando" ? esperando : (lista || []);
 
   // A conversa aberta é reencontrada na lista nova a cada volta: sem
@@ -10258,7 +10283,11 @@ function TelaConversas({ alvo, aoConsumirAlvo, operacao }) {
                       </span>
                       {/* "Esperando" é a bolinha verde do não lido: a
                           fila de quem escreveu e ninguém respondeu. */}
-                      {c.esperando && <span className="h-[18px] min-w-[18px] shrink-0 rounded-full" style={{ background: WA.verde }} title="esperando resposta" />}
+                      {c.esperando && (
+                        <span role="button" tabIndex={0} title="Esperando resposta — clique para marcar como lida"
+                          onClick={(e) => { e.stopPropagation(); marcar(c.id, true); }}
+                          className="h-[18px] min-w-[18px] shrink-0 cursor-pointer rounded-full" style={{ background: WA.verde }} />
+                      )}
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px]">
                       {/* O estágio vem primeiro: numa fila, o que importa
@@ -10285,6 +10314,7 @@ function TelaConversas({ alvo, aoConsumirAlvo, operacao }) {
         <div className={`${abertaViva ? "flex" : "hidden lg:flex"} min-w-0 flex-1 flex-col`}>
           {abertaViva ? (
             <Conversa conversa={abertaViva} aoVoltar={() => setAberta(null)} equipe={equipe}
+              aoMarcar={(id, estavaEsperando) => marcar(id, estavaEsperando)}
               aoVirarLead={(id, lead) => setLista((ls) => (ls || []).map((x) =>
                 (x.id === id ? { ...x, lead_id: (lead && lead.id) || x.lead_id, lead: lead || x.lead } : x)))} />
           ) : (

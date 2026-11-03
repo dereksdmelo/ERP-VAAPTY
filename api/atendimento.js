@@ -1074,6 +1074,18 @@ const comEmLoja = (a) => (a ? { ...a, em_loja: emLoja(a) } : a);
 
 const caixaAlta = (s) => String(s || "").trim().toUpperCase();
 
+/* A CONVERSA ESPERA RESPOSTA quando o cliente falou depois da nossa última
+ * mensagem e de quem a deu por lida, ou quando alguém a marcou como não
+ * lida (0105). É a mesma conta na caixa e nas Ações. */
+const conversaEsperando = (c) => {
+  if (!c) return false;
+  if (c.nao_lida) return true;
+  const deles = c.ultima_de_fora || "";
+  if (!deles) return false;
+  const visto = [c.respondida_em || "", c.lida_em || ""].sort().pop();
+  return !visto || visto < deles;
+};
+
 async function vez(req, res, tok) {
   const R = require("../regras/indice-at.js");
   const hoje = hojeAqui();
@@ -2484,7 +2496,7 @@ module.exports = async function handler(req, res) {
       // Com ordem e folga (03/11/2026): eram 1.000 sem ordem com 1.486 leads,
       // e lead recente podia ficar fora de todas as listas.
       banco(`${REST("lead")}?select=${CAMPOS_LEAD}&excluido_em=is.null&order=atualizado_em.desc&limit=4000`, { headers: cabecalhos(tok) }),
-      banco(`${URL_BASE}/rest/v1/wa_conversa?select=telefone,lead_id,ultima_de_fora,respondida_em,ultima_em,wa_canal(slug,nome,comercial)&order=ultima_em.desc&limit=4000`,
+      banco(`${URL_BASE}/rest/v1/wa_conversa?select=telefone,lead_id,ultima_de_fora,respondida_em,lida_em,nao_lida,ultima_em,wa_canal(slug,nome,comercial)&order=ultima_em.desc&limit=4000`,
         { headers: cabecalhos(tok) }).catch(() => []),
     ]);
 
@@ -2507,8 +2519,10 @@ module.exports = async function handler(req, res) {
       if (!ca || ca.comercial === false || !c.lead_id) return;
       const deles = c.ultima_de_fora || "";
       const nossa = c.respondida_em || "";
-      if (deles && (!nossa || nossa < deles)) esperando[c.lead_id] = deles;
-      else if (nossa) semResposta[c.lead_id] = c.ultima_em || nossa;
+      // Dada por lida sem resposta (0105): não está esperando, e também
+      // não é "nós falamos por último" — alguém decidiu que não precisava.
+      if (conversaEsperando(c)) esperando[c.lead_id] = deles || c.ultima_em;
+      else if (nossa && !(c.lida_em && c.lida_em > nossa)) semResposta[c.lead_id] = c.ultima_em || nossa;
     });
 
     const hoje = hojeAqui();
@@ -2770,6 +2784,18 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ ok: true, registrada: !!msgId, conversa_id: conversaId, telefone: fone });
     }
 
+    /* LIDA / NÃO LIDA (0105, o Derek: "opção de marcar como LIDO / não
+     * lido"). Lida tira de "Não respondidas" até o cliente escrever de
+     * novo; não lida põe de volta até alguém responder ou marcar lida. */
+    if (RX_UUID.test(id) && req.method === "POST" && String(req.query.acao || "") === "lida") {
+      const c = await lerCorpo(req) || {};
+      const mud = c.lida === false ? { nao_lida: true, lida_em: null } : { nao_lida: false, lida_em: new Date().toISOString() };
+      const r = await banco(`${REST_CV}?id=eq.${id}`, { method: "PATCH", headers: json(tok, { Prefer: "return=representation" }), body: JSON.stringify(mud) });
+      const linha = (Array.isArray(r) ? r[0] : r) || null;
+      if (!linha) return res.status(403).json({ erro: "Não consegui marcar esta conversa." });
+      return res.status(200).json({ ok: true, esperando: conversaEsperando(linha) });
+    }
+
     if (RX_UUID.test(id) && req.method === "POST" && String(req.query.acao || "") === "enviar") {
       const c = await lerCorpo(req);
       const texto = String((c && c.texto) || "").replace(/\r/g, "").trim();
@@ -2893,7 +2919,7 @@ module.exports = async function handler(req, res) {
     const soComercial = String(req.query.comercial || "") === "1";
     const emb = canal || soOperacao || soComercial ? "wa_canal!inner(slug,nome,atendente,comercial)" : "wa_canal(slug,nome,atendente,comercial)";
     const partes = [
-      `select=id,telefone,nome,grupo,ultima_em,primeira_em,ultima_de_fora,respondida_em,anuncio,atendimento_id,lead_id,${emb}`,
+      `select=id,telefone,nome,grupo,ultima_em,primeira_em,ultima_de_fora,respondida_em,lida_em,nao_lida,anuncio,atendimento_id,lead_id,${emb}`,
       "order=ultima_em.desc",
       `limit=${Math.min(200, Number(req.query.limite) || 60)}`,
     ];
@@ -2978,7 +3004,7 @@ module.exports = async function handler(req, res) {
           lead: lead ? { id: lead.id, status: lead.status, agendado_para: lead.agendado_para, atendimento_id: lead.atendimento_id } : null,
           // "Esperando resposta" é a pergunta de todo dia, e ela é
           // derivada aqui para a tela não repetir a regra.
-          esperando: !!(l.ultima_de_fora && (!l.respondida_em || l.respondida_em < l.ultima_de_fora)),
+          esperando: conversaEsperando(l),
           ultima: previa[l.id] || null,
         };
       }),

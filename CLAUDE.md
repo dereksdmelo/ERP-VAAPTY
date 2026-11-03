@@ -1885,6 +1885,16 @@ e o mesmo raciocínio do "passou e ninguém marcou" da decisão 27.
 Quem responde é `esperando`, derivado no SERVIDOR comparando
 `ultima_de_fora` com `respondida_em`, para a tela não repetir a regra.
 
+**Lida e não lida (0105, 03/11/2026).** "Não respondidas" era só "o
+cliente falou por último": um "ok, obrigado" ficava na fila para sempre.
+"Marcar como lida" (o botão no alto da conversa, ou a bolinha verde da
+lista) grava `lida_em` e tira da fila até o cliente escrever de novo;
+"marcar como não lida" grava `nao_lida` e põe de volta até alguém
+responder — um gatilho em `wa_mensagem` desfaz a marca na primeira
+resposta, de onde ela vier. A conta é uma só (`conversaEsperando`), na
+caixa e na lista "escreveram e ninguém respondeu" das Ações. A marca é
+da conversa, não da pessoa: a caixa é da equipe.
+
 **A prévia de cada conversa vem numa consulta só.** O PostgREST não
 sabe trazer "a última filha de cada mãe", então busca-se as últimas
 mensagens das conversas DAQUELA PÁGINA e fica-se com a primeira de
