@@ -1034,30 +1034,24 @@ async function duplicados(req, res, tok) {
   return res.status(200).json({ pares });
 }
 
-/* ------------------ a fila da vez (0085, decisão 67) ------------------
+/* ------------------ a fila da vez (0085, 0106, decisão 67) ------------------
  *
- * GET  ?recurso=vez                       a ordem de hoje e de quem é a vez
+ * GET  ?recurso=vez                       a roda de hoje: a ordem, a vez, o segundo, as chamadas
  * POST ?recurso=vez&acao=abriu           o sistema foi aberto: entra na fila sozinho (0088)
  * POST ?recurso=vez&acao=presente|saiu    { perfil_id? } — o próprio, ou o gerente por alguém
- * POST ?recurso=vez&acao=terminei         { atendimento_id }
+ * POST ?recurso=vez&acao=terminei         { atendimento_id, status? } — encerrar o atendimento
+ * POST ?recurso=vez&acao=aceitar|passar   { evento_id } — a chamada da vez
+ * POST ?recurso=vez&acao=corrigir         { tipo: vez|devolver|estornar } — o gerente
  *
- * A ordem é o ÍNDICE AT do mês (regras/indice-at.js) entre quem marcou
- * presença hoje. Empate — que é todo mundo nos primeiros dias, com zero
- * vendas — decide pelo índice do mês anterior, e depois por quem chegou
- * primeiro.
- *
- * A VEZ é o primeiro da ordem que não está atendendo. Estando todos,
- * é o que tem MENOS clientes na mesa, e entre esses o primeiro da
- * ordem — o Derek: *"esse tem que atender dois"*.
+ * Desde a 0106 a vez é uma RODA com memória (regras/fila.js): a ordem do
+ * ÍNDICE AT congelada no primeiro cliente do dia, um cliente para cada
+ * um, quem estava atendendo fica devendo a vez, quem não estava na fila
+ * perde a volta. A memória é o registro do dia (`fila_evento`).
  */
 
-// Os status de quem ainda está na mesa. `aguardando` e
-// `aguardando_propostas` entram: o carro foi lançado e o cliente
-// continua sentado esperando a rede responder (a Espera do APONTE).
-const NA_MESA = ["cliente_na_loja", "aberto", "aguardando", "aguardando_propostas",
-                 "em_negociacao", "baixar_expectativa"];
-// Status esquecido não pode pular alguém o dia inteiro.
-const TETO_OCUPADO_MS = 3 * 3600000;
+// Atendimento esquecido aberto não pode pular alguém o dia inteiro.
+// Quatro horas: fechar um carro, com contrato e cautelar, passa de três.
+const TETO_OCUPADO_MS = 4 * 3600000;
 // Abrir o sistema ou responder o lembrete vale trinta minutos de fila
 // (0088). O lembrete pergunta de meia em meia hora, então quem responde
 // fica; quem some, sai — o Derek: "desativa a vez dele dentro de 30
@@ -1066,12 +1060,17 @@ const JANELA_ATIVO_MS = 30 * 60000;
 // Responder "almoço" ou "pausa" não é estar disponível para cliente.
 const TIPOS_FORA = ["almoco", "pausa"];
 
-/* CLIENTE EM LOJA: atendimento de hoje, num status de mesa, que ninguém
- * finalizou, aberto há menos de três horas. É a MESMA regra que diz
- * quem está atendendo na fila da vez — a lista de Atendimentos e a
- * fila não podem discordar sobre quem está na mesa. */
+/* CLIENTE EM LOJA: atendimento de hoje que ninguém ENCERROU, aberto há
+ * menos de quatro horas. É a MESMA regra que diz quem está atendendo na
+ * fila da vez — a lista de Atendimentos e a fila não podem discordar.
+ *
+ * **O status não entra mais (0106).** Até 03/11/2026 "Fechado" ou
+ * "Perdido" liberavam a pessoa; o Derek: um negociador "fechou um carro
+ * … atualizou sozinho o status e encerrou o atendimento dele, mas ele não
+ * pode finalizar enquanto não finalizar o contrato e tudo mais e ficar
+ * livre pra atender". Só o "encerrar atendimento" libera. */
 function emLoja(a, agora) {
-  return !!(a && String(a.data) === hojeAqui() && NA_MESA.indexOf(a.status) >= 0 && !a.atendimento_fim_em &&
+  return !!(a && String(a.data) === hojeAqui() && !a.atendimento_fim_em &&
     (agora || Date.now()) - Date.parse(a.chegada_em || a.criado_em) < TETO_OCUPADO_MS);
 }
 const comEmLoja = (a) => (a ? { ...a, em_loja: emLoja(a) } : a);
@@ -1090,12 +1089,258 @@ const conversaEsperando = (c) => {
   return !visto || visto < deles;
 };
 
-async function vez(req, res, tok) {
+/* A CONTA DO MÊS (fluxo, vendas, score, índice) é a parte pesada da
+ * fila: dois meses de atendimentos. A fila é lida de 20 em 20 segundos
+ * por cada negociador (o pop-up da vez), então ela fica guardada cinco
+ * minutos nesta instância — o índice só muda quando alguém fecha um
+ * carro, e a ORDEM do dia nem muda (0106). O que é por minuto (quem está
+ * na loja, quem está atendendo, os eventos) é lido sempre. Não guarda
+ * nada do usuário: é o mesmo para a equipe inteira, que lê tudo isto. */
+let MES_CACHE = null;
+const MES_TTL_MS = 5 * 60000;
+async function contaDoMes(tok, hoje) {
+  if (MES_CACHE && MES_CACHE.hoje === hoje && Date.now() - MES_CACHE.em < MES_TTL_MS) return MES_CACHE.dados;
+  const comp = `${hoje.slice(0, 8)}01`;
+  const ant = (() => {
+    const [a, m] = [Number(hoje.slice(0, 4)), Number(hoje.slice(5, 7))];
+    const d = new Date(Date.UTC(m === 1 ? a - 1 : a, m === 1 ? 11 : m - 2, 1));
+    return d.toISOString().slice(0, 10);
+  })();
+  const cab = { headers: cabecalhos(tok) };
+  const [logins, metas, desemp, doMes, cfg] = await Promise.all([
+    banco(`${URL_BASE}/rest/v1/rpc/negociadores_com_login`, { method: "POST", headers: json(tok), body: "{}" }),
+    banco(`${REST("negociador")}?select=id,nome,perfil_id&papel=eq.negociador`, cab),
+    banco(`${REST("desempenho")}?select=*&competencia=in.(${comp},${ant})`, cab),
+    banco(`${REST("atendimento")}?select=negociador_id,negociador_nome,status,data` +
+          `&data=gte.${ant}&data=lte.${hoje}&limit=5000`, cab),
+    banco(`${REST("config_loja")}?id=eq.1&select=*`, cab).catch(() => []),
+  ]);
+  const dados = { comp, ant, logins: logins || [], metas: metas || [], desemp: desemp || [], doMes: doMes || [], cfg: (cfg || [])[0] || null };
+  MES_CACHE = { hoje, em: Date.now(), dados };
+  return dados;
+}
+
+/**
+ * O ESTADO DA FILA AGORA (0106): a ordem do dia, quem está na loja,
+ * quem está atendendo, os eventos, e o que a roda diz — quem é a vez e
+ * quem vem depois. É a mesma conta para a tela, para o pop-up e para o
+ * "Chegou": duas contas seriam o cliente chamado para a pessoa errada.
+ *   ignorar: id de atendimento a não contar (o que acabou de nascer, no
+ *            "Chegou" — senão quem o recebeu já pareceria ocupado).
+ */
+async function estadoDaFila(tok, ignorar) {
+  const F = require("../regras/fila.js");
   const R = require("../regras/indice-at.js");
   const hoje = hojeAqui();
+  const cab = { headers: cabecalhos(tok) };
+  const mes = await contaDoMes(tok, hoje);
+  const [presencas, deHoje, sinais, eventos, diaLinha] = await Promise.all([
+    banco(`${REST("presenca")}?select=perfil_id,chegou_em,saiu_em,abriu_em,saida_manual&dia=eq.${hoje}`, cab),
+    banco(`${REST("atendimento")}?select=id,negociador_id,negociador_nome,cliente_nome,carro_descricao,status,` +
+          `chegada_em,criado_em,atendimento_fim_em&data=eq.${hoje}&limit=500`, cab),
+    banco(`${URL_BASE}/rest/v1/rpc/agenda_ultimo_sinal`, { method: "POST", headers: json(tok), body: JSON.stringify({ p_dia: hoje }) })
+      .catch(() => []),
+    banco(`${REST("fila_evento")}?select=*&dia=eq.${hoje}&order=criado_em.asc&limit=1000`, cab).catch(() => []),
+    banco(`${REST("fila_dia")}?select=*&dia=eq.${hoje}`, cab).catch(() => []),
+  ]);
+  const agora = Date.now();
+  const aberto = F.horarioAberto(mes.cfg, agora);
+  const ats = (deHoje || []).filter((a) => a.id !== ignorar);
+
+  const pessoas = mes.logins.map((p) => {
+    // A pessoa é o LOGIN; a meta ligada a ele (decisão 10) dá a
+    // confiabilidade e mais um nome — atendimento importado só tem nome.
+    const meta = mes.metas.find((n) => n.perfil_id === p.id);
+    const nomes = [caixaAlta(p.nome)].concat(meta ? [caixaAlta(meta.nome)] : []);
+    const dele = (a) => a.negociador_id === p.id || nomes.indexOf(caixaAlta(a.negociador_nome)) >= 0;
+    const conta = (de) => {
+      const lista = mes.doMes.filter((a) => dele(a) && String(a.data).slice(0, 7) === de.slice(0, 7));
+      return { fluxo: lista.length, vendas: lista.filter((a) => a.status === "fechado").length };
+    };
+    const scoreDe = (cp) => R.score(meta ? mes.desemp.find((d) => d.negociador_id === meta.id && d.competencia === cp) : null);
+    const doMesAtual = conta(mes.comp), mesAnt = conta(mes.ant);
+    const score = scoreDe(mes.comp);
+    const naMesa = ats.filter((a) => dele(a) && emLoja({ ...a, data: hoje }, agora))
+      .map((a) => ({ id: a.id, status: a.status, cliente: a.cliente_nome || "", carro: a.carro_descricao || "", desde: a.chegada_em || a.criado_em }));
+    // O fim do último atendimento: é dele que contam os dez minutos da
+    // vez devida.
+    const fimUltimo = Math.max(0, ...ats.filter(dele).map((a) => Date.parse(a.atendimento_fim_em) || 0));
+    const pres = (presencas || []).find((x) => x.perfil_id === p.id) || null;
+    /* NA FILA (0088): marcou presença, não apertou "Saí", e está
+     * atendendo OU deu sinal nos últimos trinta minutos — abriu o
+     * sistema, ou respondeu o lembrete. */
+    const sinal = (sinais || []).find((x) => x.perfil_id === p.id) || null;
+    const ultimo = Math.max(pres && pres.abriu_em ? Date.parse(pres.abriu_em) : 0,
+                            pres && pres.chegou_em ? Date.parse(pres.chegou_em) : 0,
+                            sinal && sinal.ultimo ? Date.parse(sinal.ultimo) : 0);
+    const emPausa = !!(sinal && TIPOS_FORA.indexOf(sinal.tipo) >= 0 && Date.parse(sinal.ultimo) >= ultimo);
+    const marcou = !!(pres && !pres.saiu_em);
+    let fora = null;
+    if (pres && pres.saiu_em) fora = "saiu";
+    else if (marcou && !naMesa.length) {
+      if (emPausa) fora = sinal.tipo === "almoco" ? "almoço" : "pausa";
+      else if (agora - ultimo > JANELA_ATIVO_MS) fora = "sem resposta";
+    }
+    return {
+      perfil_id: p.id, nome: (meta && meta.nome) || p.nome,
+      veio_hoje: !!pres,
+      presente: marcou && !fora, fora, ultimo_sinal: ultimo ? new Date(ultimo).toISOString() : null,
+      sinal_tipo: sinal ? sinal.tipo : null,
+      saida_manual: !!(pres && pres.saida_manual),
+      chegou_em: pres ? pres.chegou_em : null, saiu_em: pres ? pres.saiu_em : null,
+      fluxo: doMesAtual.fluxo, vendas: doMesAtual.vendas,
+      conversao: doMesAtual.fluxo ? doMesAtual.vendas / doMesAtual.fluxo : 0,
+      score,
+      indice_at: R.indiceAt({ ...doMesAtual, score }),
+      indice_anterior: R.indiceAt({ ...mesAnt, score: scoreDe(mes.ant) }),
+      sem_meta: !meta,
+      atendendo: naMesa,
+      fim_ultimo: fimUltimo,
+    };
+  });
+
+  // A ORDEM DO DIA: quem passou pela loja hoje. Congelada no primeiro
+  // cliente (fila_dia); quem chega depois vai para o fim.
+  const veio = pessoas.filter((p) => p.veio_hoje);
+  const linhaDia = (diaLinha || [])[0] || null;
+  const congelada = linhaDia ? linhaDia.ordem : null;
+  // O índice da ordem é o do momento em que ela foi congelada: o de agora
+  // muda quando alguém fecha um carro, e a ordem do dia não.
+  if (congelada) veio.forEach((p) => {
+    const c = congelada.find((x) => x.perfil_id === p.perfil_id);
+    if (c && c.indice_at != null) p.indice_ordem = c.indice_at;
+  });
+  const circulo = F.circuloDoDia(veio, congelada);
+  const st = F.estadoDosEventos(eventos || []);
+  const porId = {};
+  pessoas.forEach((p) => { porId[p.perfil_id] = { presente: p.presente, atendendo: p.atendendo.length, fim_ultimo: p.fim_ultimo }; });
+  const est = { circulo, pessoas: porId, ponteiro: st.ponteiro, creditos: st.creditos, aberto, agora };
+  const vez = F.escolher(est);
+  const segundo = vez ? F.escolher(F.aplicar(est, vez)) : null;
+  // De quem é a vez PELA RODA, presente ou não: é quem leva o alerta de
+  // "você é o próximo e não está na fila".
+  const ponteiro = circulo.indexOf(st.ponteiro) >= 0 ? st.ponteiro : circulo[0] || null;
+  return { F, hoje, mes, pessoas, circulo, congelada, est, vez, segundo, ponteiro, eventos: eventos || [], aberto, agora, ats };
+}
+
+/* Os eventos que a roda gera, gravados de uma vez. Pulado por estar
+ * atendendo fica devendo a vez; ausente perde a volta. Fora do horário
+ * não grava nada: ninguém perde depois das 18h. */
+async function gravarEventos(tok, linhas) {
+  if (!linhas.length) return [];
+  // O PostgREST recusa lote com linhas de campos diferentes: completa
+  // cada uma com nulo no que a outra tem (são todos campos opcionais).
+  const chaves = Array.from(new Set([].concat(...linhas.map((l) => Object.keys(l)))));
+  const iguais = linhas.map((l) => { const o = {}; chaves.forEach((k) => { o[k] = l[k] === undefined ? null : l[k]; }); return o; });
+  const r = await banco(REST("fila_evento"), {
+    method: "POST", headers: json(tok, { Prefer: "return=representation" }), body: JSON.stringify(iguais),
+  });
+  return Array.isArray(r) ? r : [];
+}
+function eventosDaEscolha(s, escolha, base) {
+  const nome = (id) => ((s.pessoas.find((p) => p.perfil_id === id) || {}).nome) || null;
+  const linhas = escolha.pulos.filter((x) => x.motivo !== "fora_do_horario").map((x) => ({
+    dia: s.hoje, tipo: x.motivo === "ocupado" ? "pulou" : "perdeu", perfil_id: x.perfil_id, nome: nome(x.perfil_id),
+    atendimento_id: base.atendimento_id || null,
+    motivo: x.motivo === "ocupado" ? "estava atendendo — fica devendo a vez" : "não estava na fila na vez dele",
+  }));
+  linhas.push({ dia: s.hoje, tipo: "vez", perfil_id: escolha.quem, nome: nome(escolha.quem), prox: escolha.prox, via: escolha.via, ...base });
+  return linhas;
+}
+// A ordem é congelada no primeiro cliente do dia.
+async function congelarOrdem(tok, s) {
+  if (s.congelada) return;
+  const ordem = s.circulo.map((id) => {
+    const p = s.pessoas.find((x) => x.perfil_id === id) || {};
+    return { perfil_id: id, nome: p.nome, indice_at: p.indice_at, indice_anterior: p.indice_anterior };
+  });
+  await banco(`${REST("fila_dia")}?on_conflict=dia`, {
+    method: "POST", headers: json(tok, { Prefer: "resolution=ignore-duplicates,return=minimal" }),
+    body: JSON.stringify({ dia: s.hoje, ordem }),
+  }).catch(() => {});
+}
+
+/**
+ * O CLIENTE CHEGOU: registra na roda a quem ele foi (0106). Chamado pelo
+ * "Chegou" da pré-venda e pelo atendimento aberto à mão, depois de o
+ * atendimento existir.
+ *   modo "especifico": o cliente pediu este negociador, ou o agendamento
+ *   já era dele — não conta na roda (o Derek: "não conta").
+ * Se quem recebeu é a vez, grava a vez (e os pulos); se não é, grava
+ * "fora da vez" — a roda não anda, e o gerente vê no registro.
+ * Quem recebeu e não foi quem abriu ganha a CHAMADA: o pop-up de "Vou
+ * atender / Passar", que vence em três minutos.
+ */
+async function registrarNaFila(tok, at, modo) {
+  try {
+    if (!at || String(at.data) !== hojeAqui() || at.atendimento_fim_em) return null;
+    // Registrado depois (a pré-venda anotou às 16h quem chegou às 10h):
+    // a vez daquela hora já não é a de agora, então não mexe na roda.
+    if (!modo && at.chegada_em && Date.now() - Date.parse(at.chegada_em) > 30 * 60000) modo = "ja_atendendo";
+    const s = await estadoDaFila(tok, at.id);
+    const eu = donoDoToken(tok);
+    const nomeDe = (id) => ((s.pessoas.find((p) => p.perfil_id === id) || {}).nome) || at.negociador_nome || null;
+    const base = { dia: s.hoje, atendimento_id: at.id, perfil_id: at.negociador_id || null, nome: nomeDe(at.negociador_id) };
+    if (modo === "especifico" || modo === "ja_atendendo") {
+      await gravarEventos(tok, [{ ...base, tipo: "especifico",
+        motivo: modo === "ja_atendendo" ? "registrou depois um cliente que já estava atendendo"
+          : "o cliente pediu ou já era dele — não conta na fila" }]);
+      return { tipo: "especifico" };
+    }
+    if (s.vez && at.negociador_id && s.vez.quem === at.negociador_id) {
+      await congelarOrdem(tok, s);
+      const resp = eu && eu === at.negociador_id ? { resposta: "aceitou", respondido_em: new Date().toISOString() } : {};
+      const g = await gravarEventos(tok, eventosDaEscolha(s, s.vez, { atendimento_id: at.id, ...resp }));
+      return { tipo: "vez", via: s.vez.via, evento: g[g.length - 1] || null };
+    }
+    const daVez = s.vez ? nomeDe(s.vez.quem) : null;
+    await gravarEventos(tok, [{ ...base, tipo: "fora_da_vez",
+      motivo: daVez ? `a vez era de ${daVez}` : "ninguém estava na fila" }]);
+    return { tipo: "fora_da_vez", vez_era: daVez };
+  } catch (e) {
+    // A fila é consequência do atendimento: falhar aqui não pode
+    // derrubar o "Chegou" com o cliente na frente.
+    return { erro: e.message };
+  }
+}
+
+/**
+ * A CHAMADA TERMINOU MAL: passou ou venceu. Quem era perde o cliente e,
+ * no horário da loja, ganha um "perdeu atendimento" (o Derek: "se a
+ * pessoa não aceitar ou não responder passa a vez e ele perde e ganha
+ * um ponto negativo na confiabilidade"). O cliente vai para o próximo
+ * da roda, que recebe a chamada.
+ */
+async function encerrarChamada(tok, s, ev, resposta) {
+  const r = await banco(`${REST("fila_evento")}?id=eq.${ev.id}&resposta=is.null`, {
+    method: "PATCH", headers: json(tok, { Prefer: "return=representation" }),
+    body: JSON.stringify({ resposta, respondido_em: new Date().toISOString() }),
+  }).catch(() => null);
+  if (!Array.isArray(r) || !r.length) return { ja: true };   // outra tela chegou antes
+  if (resposta === "aceitou") return { ok: true };
+  if (s.aberto) await banco(`${URL_BASE}/rest/v1/rpc/fila_penalizar`, { method: "POST", headers: json(tok), body: JSON.stringify({ p_evento: ev.id }) }).catch(() => {});
+  if (!ev.atendimento_id) return { ok: true };
+  // Quem já passou ESTE cliente não volta para ele.
+  const passaram = s.eventos.filter((x) => x.atendimento_id === ev.atendimento_id && x.tipo === "vez" && x.resposta && x.resposta !== "aceitou")
+    .map((x) => x.perfil_id).concat([ev.perfil_id]);
+  const s2 = await estadoDaFila(tok, ev.atendimento_id);
+  const prox = s2.F.escolher(s2.est, passaram);
+  if (!prox) return { ok: true, sem_proximo: true };
+  const nome = ((s2.pessoas.find((p) => p.perfil_id === prox.quem) || {}).nome) || "";
+  const ok = await banco(`${URL_BASE}/rest/v1/rpc/fila_repassar`, {
+    method: "POST", headers: json(tok), body: JSON.stringify({ p_atendimento: ev.atendimento_id, p_para: prox.quem, p_nome: nome }),
+  }).catch(() => false);
+  if (ok !== true) return { ok: true, sem_repasse: true };
+  await gravarEventos(tok, eventosDaEscolha(s2, prox, { atendimento_id: ev.atendimento_id,
+    motivo: `${resposta === "passou" ? "passou" : "não respondeu"}: ${ev.nome || ""}` }));
+  return { ok: true, para: nome };
+}
+
+async function vez(req, res, tok) {
   const eu = donoDoToken(tok);
   const c = req.method === "POST" ? (await lerCorpo(req)) || {} : {};
   const acao = String(req.query.acao || "");
+  const hoje = hojeAqui();
 
   if (req.method === "POST" && acao === "abriu") {
     // Só quem atende entra na fila: abrir o sistema como pré-venda ou
@@ -1122,7 +1367,7 @@ async function vez(req, res, tok) {
     let d;
     if (acao === "presente") {
       // Upsert sem `chegou_em`: quem volta do almoço mantém a hora em
-      // que chegou de manhã, que é o desempate da fila.
+      // que chegou de manhã, e o lugar na roda.
       d = await banco(`${REST("presenca")}?on_conflict=perfil_id,dia`, {
         method: "POST",
         headers: json(tok, { Prefer: "resolution=merge-duplicates,return=representation" }),
@@ -1148,11 +1393,16 @@ async function vez(req, res, tok) {
   if (req.method === "POST" && acao === "terminei") {
     const id = String(c.atendimento_id || "");
     if (!RX_UUID.test(id)) return res.status(400).json({ erro: "atendimento_id inválido." });
-    /* FINALIZAR PEDE O STATUS (o Derek, 28/10/2026: *"cliente na loja
-     * não pode ser se já finalizou"*). Sem ele, a linha voltaria a dizer
-     * "Cliente na loja" com o cliente já fora da loja — e o funil conta
-     * pelo status. */
-    const st = daLista(c.status, STATUS);
+    /* ENCERRAR O ATENDIMENTO é o que libera para a fila (0106) — mudar o
+     * status não libera: quem fechou o carro ainda está na mesa com o
+     * cliente assinando papel. O status vai junto quando a pessoa escolhe;
+     * sem escolher, vale o que já está, desde que não seja "Cliente na
+     * loja" — o Derek: *"cliente na loja não pode ser se já finalizou"*. */
+    let st = daLista(c.status, STATUS);
+    if (!st) {
+      const atual = ((await banco(`${REST("atendimento")}?select=status&id=eq.${id}`, { headers: cabecalhos(tok) })) || [])[0];
+      if (atual && atual.status !== "cliente_na_loja") st = atual.status;
+    }
     if (!st || st === "cliente_na_loja") return res.status(400).json({ erro: "Escolha como o atendimento ficou." });
     const d = await banco(`${REST("atendimento")}?id=eq.${id}`, {
       method: "PATCH",
@@ -1163,127 +1413,102 @@ async function vez(req, res, tok) {
     return res.status(200).json({ ok: true, atendimento: comEmLoja(d[0]) });
   }
 
+  /* "ESTOU ATENDENDO ESTE" (0106): a pergunta de quem está fora da fila
+   * aponta um atendimento de hoje que foi encerrado cedo demais — ele
+   * volta para a mesa, e a pessoa conta como ocupada. */
+  if (req.method === "POST" && acao === "voltei_mesa") {
+    const id = String(c.atendimento_id || "");
+    if (!RX_UUID.test(id)) return res.status(400).json({ erro: "atendimento_id inválido." });
+    const d = await banco(`${REST("atendimento")}?id=eq.${id}&data=eq.${hoje}`, {
+      method: "PATCH", headers: json(tok, { Prefer: "return=representation" }),
+      body: JSON.stringify({ atendimento_fim_em: null }),
+    });
+    if (!Array.isArray(d) || !d.length) return res.status(403).json({ erro: "Só quem atende (ou o gerente) mexe neste atendimento." });
+    return res.status(200).json({ ok: true });
+  }
+
+  // A CHAMADA: "Vou atender" ou "Passar a vez".
+  if (req.method === "POST" && (acao === "aceitar" || acao === "passar")) {
+    const id = String(c.evento_id || "");
+    if (!RX_UUID.test(id)) return res.status(400).json({ erro: "evento_id inválido." });
+    const s = await estadoDaFila(tok);
+    const ev = s.eventos.find((x) => x.id === id);
+    if (!ev || ev.tipo !== "vez") return res.status(404).json({ erro: "Chamada não encontrada." });
+    if (ev.resposta) return res.status(409).json({ erro: ev.resposta === "aceitou" ? "Já foi aceita." : "Esta chamada já passou para o próximo." });
+    const perfil = await banco(`${URL_BASE}/rest/v1/perfil?select=papel&id=eq.${eu}`, { headers: cabecalhos(tok) });
+    const gerente = !!(perfil && perfil[0] && perfil[0].papel === "gerente");
+    if (ev.perfil_id !== eu && !gerente) return res.status(403).json({ erro: "A chamada é de outra pessoa." });
+    const r = await encerrarChamada(tok, s, ev, acao === "aceitar" ? "aceitou" : "passou");
+    return res.status(200).json({ ok: true, ...r, atendimento_id: ev.atendimento_id });
+  }
+
+  /* A CORREÇÃO DO GERENTE (o Derek: "ele precisa poder corrigir"):
+   *   vez      — a vez passa a ser de alguém (a roda anda daí);
+   *   devolver — devolve uma vez a quem perdeu sem dever;
+   *   estornar — desfaz o "perdeu atendimento" de uma chamada. */
+  if (req.method === "POST" && acao === "corrigir") {
+    const perfil = await banco(`${URL_BASE}/rest/v1/perfil?select=papel&id=eq.${eu}`, { headers: cabecalhos(tok) });
+    if (!(perfil && perfil[0] && perfil[0].papel === "gerente")) return res.status(403).json({ erro: "Só o gerente corrige a fila." });
+    const tipo = String(c.tipo || "");
+    if (tipo === "estornar") {
+      if (!RX_UUID.test(String(c.evento_id || ""))) return res.status(400).json({ erro: "evento_id inválido." });
+      const ok = await banco(`${URL_BASE}/rest/v1/rpc/fila_estornar`, { method: "POST", headers: json(tok), body: JSON.stringify({ p_evento: c.evento_id }) });
+      return res.status(200).json({ ok: ok === true });
+    }
+    const quem = String(c.perfil_id || "");
+    if (!RX_UUID.test(quem)) return res.status(400).json({ erro: "perfil_id inválido." });
+    const s = await estadoDaFila(tok);
+    const p = s.pessoas.find((x) => x.perfil_id === quem);
+    if (!p) return res.status(404).json({ erro: "Essa pessoa não está na lista de quem atende." });
+    if (tipo === "vez") {
+      await congelarOrdem(tok, s);
+      await gravarEventos(tok, [{ dia: s.hoje, tipo: "correcao", perfil_id: quem, nome: p.nome, prox: quem, motivo: texto(c.motivo) || "o gerente pôs a vez aqui" }]);
+    } else if (tipo === "devolver") {
+      await gravarEventos(tok, [{ dia: s.hoje, tipo: "credito", perfil_id: quem, nome: p.nome, motivo: texto(c.motivo) || "o gerente devolveu a vez" }]);
+    } else return res.status(400).json({ erro: "Correção desconhecida." });
+    return res.status(200).json({ ok: true });
+  }
+
   if (req.method !== "GET") {
     res.setHeader("Allow", "GET, POST");
     return res.status(405).json({ erro: "Use GET ou POST." });
   }
 
-  const comp = `${hoje.slice(0, 8)}01`;
-  const ant = (() => {
-    const [a, m] = [Number(hoje.slice(0, 4)), Number(hoje.slice(5, 7))];
-    const d = new Date(Date.UTC(m === 1 ? a - 1 : a, m === 1 ? 11 : m - 2, 1));
-    return d.toISOString().slice(0, 10);
-  })();
-  const cab = { headers: cabecalhos(tok) };
+  let s = await estadoDaFila(tok);
+  // A CHAMADA QUE VENCEU é resolvida por quem ler primeiro — qualquer
+  // tela da equipe. Não há rotina: as telas leem de 20 em 20 segundos.
+  const vencidas = s.eventos.filter((e) => e.tipo === "vez" && !e.resposta && e.atendimento_id &&
+    s.agora - Date.parse(e.criado_em) > s.F.PRAZO_CHAMADA_MS);
+  if (vencidas.length) {
+    for (const ev of vencidas) await encerrarChamada(tok, s, ev, "expirou").catch(() => {});
+    s = await estadoDaFila(tok);
+  }
 
-  const [presencas, logins, metas, desemp, doMes, deHoje, sinais] = await Promise.all([
-    banco(`${REST("presenca")}?select=perfil_id,chegou_em,saiu_em,abriu_em,saida_manual&dia=eq.${hoje}`, cab),
-    banco(`${URL_BASE}/rest/v1/rpc/negociadores_com_login`, { method: "POST", headers: json(tok), body: "{}" }),
-    banco(`${REST("negociador")}?select=id,nome,perfil_id&papel=eq.negociador`, cab),
-    banco(`${REST("desempenho")}?select=*&competencia=in.(${comp},${ant})`, cab),
-    banco(`${REST("atendimento")}?select=negociador_id,negociador_nome,status,data` +
-          `&data=gte.${ant}&data=lte.${hoje}&limit=5000`, cab),
-    banco(`${REST("atendimento")}?select=id,negociador_id,negociador_nome,cliente_nome,carro_descricao,status,` +
-          `chegada_em,criado_em,atendimento_fim_em&data=eq.${hoje}&limit=500`, cab),
-    // A última resposta ao lembrete de cada um, pela função estreita da
-    // 0088: a agenda em si é de quem a escreveu.
-    banco(`${URL_BASE}/rest/v1/rpc/agenda_ultimo_sinal`, { method: "POST", headers: json(tok), body: JSON.stringify({ p_dia: hoje }) })
-      .catch(() => []),
-  ]);
-
-  const agora = Date.now();
-  const pessoas = (logins || []).map((p) => {
-    // A pessoa é o LOGIN; a meta ligada a ele (decisão 10) dá a
-    // confiabilidade e mais um nome. Atendimento importado só tem o
-    // nome, então os dois nomes contam.
-    const meta = (metas || []).find((n) => n.perfil_id === p.id);
-    const nomes = [caixaAlta(p.nome)].concat(meta ? [caixaAlta(meta.nome)] : []);
-    const dele = (a) => a.negociador_id === p.id || nomes.indexOf(caixaAlta(a.negociador_nome)) >= 0;
-    const conta = (de) => {
-      const lista = (doMes || []).filter((a) => dele(a) && String(a.data).slice(0, 7) === de.slice(0, 7));
-      return { fluxo: lista.length, vendas: lista.filter((a) => a.status === "fechado").length };
-    };
-    const scoreDe = (cp) => R.score(meta ? (desemp || []).find((d) => d.negociador_id === meta.id && d.competencia === cp) : null);
-    const mes = conta(comp), mesAnt = conta(ant);
-    const score = scoreDe(comp);
-    // O atendimento mais recente que ele ABRIU hoje: é o que diz se o
-    // anunciado já pegou cliente (0103). Pela abertura, não pela chegada
-    // digitada — um "Chegou" com hora retroativa cairia antes do anúncio.
-    const ultimaChegada = Math.max(0, ...(deHoje || []).filter(dele).map((a) => Date.parse(a.criado_em) || 0));
-    const naMesa = (deHoje || []).filter((a) => dele(a) && emLoja({ ...a, data: hoje }, agora))
-      .map((a) => ({ id: a.id, cliente: a.cliente_nome || "", carro: a.carro_descricao || "", desde: a.chegada_em || a.criado_em }));
-    const pres = (presencas || []).find((x) => x.perfil_id === p.id) || null;
-    /* NA FILA (0088): marcou presença, não apertou "Saí", e está
-     * atendendo OU deu sinal nos últimos trinta minutos — abriu o
-     * sistema, ou respondeu o lembrete. Calculado aqui, a cada leitura:
-     * não há rotina que desative ninguém, e por isso a resposta seguinte
-     * ao lembrete o põe de volta sem botão nenhum. */
-    const sinal = (sinais || []).find((x) => x.perfil_id === p.id) || null;
-    const ultimo = Math.max(pres && pres.abriu_em ? Date.parse(pres.abriu_em) : 0,
-                            pres && pres.chegou_em ? Date.parse(pres.chegou_em) : 0,
-                            sinal && sinal.ultimo ? Date.parse(sinal.ultimo) : 0);
-    // Almoço vale se for a resposta MAIS RECENTE — abrir o sistema
-    // depois de voltar do almoço já o traz de volta.
-    const emPausa = !!(sinal && TIPOS_FORA.indexOf(sinal.tipo) >= 0 && Date.parse(sinal.ultimo) >= ultimo);
-    const marcou = !!(pres && !pres.saiu_em);
-    let fora = null;
-    if (marcou && !naMesa.length) {
-      if (emPausa) fora = sinal.tipo === "almoco" ? "almoço" : "pausa";
-      else if (agora - ultimo > JANELA_ATIVO_MS) fora = "sem resposta";
-    }
-    return {
-      perfil_id: p.id, nome: (meta && meta.nome) || p.nome,
-      presente: marcou && !fora, fora, ultimo_sinal: ultimo ? new Date(ultimo).toISOString() : null,
-      saida_manual: !!(pres && pres.saida_manual),
-      chegou_em: pres ? pres.chegou_em : null, saiu_em: pres ? pres.saiu_em : null,
-      fluxo: mes.fluxo, vendas: mes.vendas, score,
-      indice_at: R.indiceAt({ ...mes, score }),
-      indice_anterior: R.indiceAt({ ...mesAnt, score: scoreDe(ant) }),
-      sem_meta: !meta,
-      atendendo: naMesa,
-      ultima_chegada: ultimaChegada,
-    };
+  const nomeDe = (id) => ((s.pessoas.find((p) => p.perfil_id === id) || {}).nome) || "";
+  const deve = (id) => (s.est.creditos[id] || []).length;
+  const pessoa = (p) => ({
+    ...p, deve_vez: deve(p.perfil_id),
+    vez_devida_em: deve(p.perfil_id) && p.fim_ultimo ? new Date(p.fim_ultimo + s.F.ESPERA_CREDITO_MS).toISOString() : null,
+  });
+  const ordem = s.circulo.map((id) => pessoa(s.pessoas.find((p) => p.perfil_id === id)));
+  const chamadas = s.eventos.filter((e) => e.tipo === "vez" && !e.resposta && e.atendimento_id).map((e) => {
+    const a = s.ats.find((x) => x.id === e.atendimento_id) || {};
+    return { id: e.id, perfil_id: e.perfil_id, nome: e.nome, desde: e.criado_em, atendimento_id: e.atendimento_id,
+      cliente: a.cliente_nome || "", carro: a.carro_descricao || "",
+      vence_em: new Date(Date.parse(e.criado_em) + s.F.PRAZO_CHAMADA_MS).toISOString() };
   });
 
-  const ordem = pessoas.filter((p) => p.presente).sort((a, b) =>
-    (b.indice_at - a.indice_at) || (b.indice_anterior - a.indice_anterior) ||
-    (Date.parse(a.chegou_em) - Date.parse(b.chegou_em)));
-  let vezDe = null;
-  if (ordem.length) {
-    const menos = Math.min.apply(null, ordem.map((p) => p.atendendo.length));
-    vezDe = ordem.find((p) => p.atendendo.length === menos).perfil_id;
-  }
-
-  /* QUEM FOI ANUNCIADO SEGURA A VEZ (0103, o Derek: "todos estavam
-   * atendendo e o Carlos seria o próximo… o Dimas terminou de atender, aí
-   * de repente começou a ser a vez do Dimas"). Com todos ocupados, o
-   * próximo da conta acima fica GRAVADO como anunciado, e a vez continua
-   * dele mesmo que outro libere — até ele abrir atendimento novo, sair da
-   * fila, ou o dia virar. Só então a conta volta a valer. */
-  let anuncio = null;
-  try { anuncio = ((await banco(`${REST("fila_anuncio")}?select=*&dia=eq.${hoje}`, cab)) || [])[0] || null; } catch (e) {}
-  const anunciado = anuncio && ordem.find((p) => p.perfil_id === anuncio.perfil_id);
-  const valeAnuncio = !!(anunciado && anunciado.ultima_chegada < Date.parse(anuncio.desde));
-  if (valeAnuncio) {
-    vezDe = anunciado.perfil_id;
-  } else {
-    if (anuncio) await banco(`${REST("fila_anuncio")}?dia=eq.${hoje}`, { method: "DELETE", headers: cabecalhos(tok) }).catch(() => {});
-    anuncio = null;
-    const todosOcupados = ordem.length > 0 && ordem.every((p) => p.atendendo.length > 0);
-    if (todosOcupados && vezDe) {
-      const novo = { dia: hoje, perfil_id: vezDe, desde: new Date(agora).toISOString() };
-      const r = await banco(`${REST("fila_anuncio")}?on_conflict=dia`, {
-        method: "POST", headers: json(tok, { Prefer: "resolution=merge-duplicates,return=representation" }), body: JSON.stringify(novo),
-      }).catch(() => null);
-      anuncio = (Array.isArray(r) && r[0]) || novo;
-    }
-  }
-
   return res.status(200).json({
-    dia: hoje, competencia: comp,
-    ordem, vez: vezDe,
-    anunciado_em: anuncio && anuncio.perfil_id === vezDe ? anuncio.desde : null,
-    ausentes: pessoas.filter((p) => !p.presente).sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR")),
+    dia: s.hoje, competencia: s.mes.comp, aberto: s.aberto,
+    congelada_em: s.congelada ? true : false,
+    ordem,
+    vez: s.vez ? s.vez.quem : null, vez_via: s.vez ? s.vez.via : null,
+    segundo: s.segundo ? s.segundo.quem : null,
+    ponteiro: s.ponteiro, ponteiro_nome: nomeDe(s.ponteiro),
+    chamadas,
+    eventos: s.eventos.slice(-80).reverse(),
+    // Quem atende e não passou pela loja hoje (ou não está na fila).
+    ausentes: s.pessoas.filter((p) => !p.presente).map(pessoa).sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR")),
     eu,
   });
 }
@@ -1488,7 +1713,9 @@ async function leads(req, res, tok) {
       body: JSON.stringify({ status: "compareceu", atendimento_id: at.id, nome, carro, origem: novoAt.origem }),
     });
     const aviso = await avisoDeChegada(req, tok, at);
-    return res.status(201).json({ ok: true, atendimento: at, atendimento_id: at.id, aviso });
+    // A roda da fila (0106): a quem o cliente foi, e a chamada dele.
+    const fila = await registrarNaFila(tok, at, corpo.fila);
+    return res.status(201).json({ ok: true, atendimento: at, atendimento_id: at.id, aviso, fila });
   }
 
   if (req.method === "POST") {
@@ -3322,7 +3549,10 @@ module.exports = async function handler(req, res) {
       const lead = salvo ? await leadQueVeio(tok, salvo) : null;
       // O cliente de fluxo (decisão 63) avisa o grupo como o "Chegou".
       const aviso = salvo && corpo.avisar_grupo === true ? await avisoDeChegada(req, tok, salvo) : undefined;
-      return res.status(201).json({ ok: true, atendimento: salvo, lead_ligado: lead, aviso });
+      // Cliente de hoje entra na roda da fila (0106) — pelo "Chegou" do
+      // fluxo ou aberto à mão. Sem negociador é só registro.
+      const fila = salvo && corpo.fila !== "nao" ? await registrarNaFila(tok, salvo, corpo.fila) : undefined;
+      return res.status(201).json({ ok: true, atendimento: salvo, lead_ligado: lead, aviso, fila });
     }
 
     if (req.method === "PATCH") {

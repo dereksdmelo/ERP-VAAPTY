@@ -463,6 +463,11 @@ pré-contrato passou a trazer o valor por extenso (`valorPorExtenso`, o do
 recibo) e a data do dia, que eram linhas para a caneta — o texto da
 cláusula não mudou, só o branco foi preenchido.
 
+**O extrato nunca coube no registro (0107).** O enum `tipo_documento`
+da 0003 não tinha `extrato_ofertas`, `extrato_revisao` nem
+`contrato_final`: todo extrato ficava "fora do banco", e só apareceu em
+03/11/2026, quando a tela passou a mostrar o erro.
+
 **Não se imprime documento com campo vazio.** Nome, CPF, RG e endereço
 do cliente (colunas da 0007) travam os botões enquanto faltarem. Papel
 com lacuna volta para ser preenchido depois, e é assim que contrato
@@ -3683,6 +3688,55 @@ a vez continua dele mesmo que outro libere — até ele abrir atendimento
 novo (pela hora em que o atendimento foi criado, não pela chegada
 digitada), sair da fila, ou o dia virar. A tela diz "anunciado às…".
 
+**A FILA VIROU RODA, COM REGISTRO (0106, 03/11/2026).** O Derek deu as
+regras inteiras, e cada uma mora em `regras/fila.js` (testada em
+`ferramentas-fila.js`): a ordem do índice AT é **congelada no primeiro
+cliente do dia** (`fila_dia`), e quem chega depois entra no fim; a vez
+anda em roda, um cliente para cada um; quem está **atendendo** na vez
+dele é pulado (se houver alguém livre) e fica **devendo a vez** — dez
+minutos depois de encerrar, é o próximo, e a vez normal continua lá;
+quem está **fora da fila** na vez dele (almoço, pausa, 30 min sem
+responder) perde aquela volta; com **todos atendendo**, a roda segue e
+cada um pega mais um; **depois do horário** (`config_loja`, o último
+agendamento do dia) só quem está lá, e ninguém perde. A memória da roda
+é o registro do dia (`fila_evento`): cada evento diz quem, por quê e para
+onde o ponteiro foi, e o estado é a soma deles — não há coluna
+"ponteiro" para alguém esquecer. O anúncio da 0103 saiu: a vez devida
+resolve o mesmo caso (o Carlos pulado porque estava ocupado recebe a
+dele de volta).
+
+**O "Chegou" já vem com a vez escolhida**, e o "Novo atendimento" diz
+de quem era. Escolher outro pergunta se o cliente pediu (não conta na
+roda) — sem marcar, fica no registro como "fora da vez", para o gerente
+ver. Registrado com a chegada há mais de 30 minutos também não mexe na
+roda. **Quem recebe pela roda e não foi quem abriu ganha a CHAMADA**: o
+pop-up "Vou atender / Passar a vez" (`AvisosDaFila`, em qualquer tela,
+inclusive com um atendimento aberto). Passar, ou deixar os três minutos
+vencerem, leva o cliente ao próximo (`fila_repassar`, estreita: só para
+chamada que terminou mal) e soma um "perdeu atendimento" na
+confiabilidade (`fila_penalizar`), no horário da loja. Quem nota que a
+chamada venceu é a primeira tela da equipe que ler a fila — não há
+rotina. O da vez e o seguinte veem uma faixa; **quem passou pela loja e
+está fora da fila é perguntado o que está fazendo** ("VOCÊ NÃO ESTÁ NA
+FILA DE ATENDIMENTO", de três em três minutos; o da vez pela roda, de
+minuto em minuto, com "vai perder a vez"): livre, atendendo (qual
+cliente — reabre o de hoje ou registra um sem mexer na roda), almoço,
+pausa ou saí. **O gerente corrige**: põe a vez em alguém, devolve uma
+vez, desfaz o ponto de uma chamada (`fila_estornar`).
+
+**O que libera é "encerrar atendimento", não o status (0106).** O
+Derek: o negociador fechou o carro, mudou o status sozinho e ficou livre
+na fila com o cliente ainda assinando papel. `emLoja` deixou de olhar o
+status: só `atendimento_fim_em` encerra (ou as quatro horas). O botão
+está na lista, na fila e no cabeçalho do atendimento, e com status de
+fim já escolhido é um toque ("Encerrar como Fechado").
+
+**A conta do mês da fila fica cinco minutos na instância** (`contaDoMes`):
+cada negociador lê a fila de 20 em 20 s por causa do pop-up, e dois
+meses de atendimentos a cada leitura pesariam no plano gratuito do
+Supabase. O que é por minuto (presença, quem atende, eventos) é lido
+sempre.
+
 **"Cliente em loja" é uma regra só** (`emLoja`, no `api/atendimento.js`):
 a lista de Atendimentos mostra a marca e o "finalizar", e a fila usa a
 mesma conta para saber quem está atendendo. **Finalizar pergunta como
@@ -4514,6 +4568,18 @@ RLS da `aprovacao_negocio` passou de `e_gerente()` para `e_financeiro()`
 (que inclui o gerente), o destino Aprovações aparece para os dois, e a
 tela diz "revisores" onde dizia "gerentes". A regra que importa não
 mudou: cada um grava só a própria decisão, e são duas pessoas.
+
+**A CNH do contratante e a do proprietário (03/11/2026, a Schell).** O
+bloco de documentos do atendimento anexa as duas, com "o proprietário é
+o próprio cliente" para anexar uma só — `ANEXO_DE_ITEM` aceita lista, e
+a "CNH (contratante e proprietário)" vale pelos dois itens. O dossiê do
+Detran também se anexa ali e no fechamento. E a via assinada do ZapSign
+vai sozinha para os anexos quando alguém abre o atendimento assinado (a
+mesma chamada idempotente do botão).
+
+**Os revisores são lembrados das aprovações de dez em dez minutos**
+(`AvisoAprovacoes`, `?recurso=esteira&resumo=1`): só o que espera a
+aprovação DELE, sem dado bancário.
 
 **"Visto e sem anexo" é um aviso no topo.** O administrativo anexa
 antes; a conferência olha o que está lá. Sem esse aviso, "sim" vira

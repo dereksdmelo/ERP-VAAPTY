@@ -57,6 +57,7 @@ jobs:
           node ferramentas-sincronizacao.js
           node ferramentas-shinkai.js
           node ferramentas-agendamento.js
+          node ferramentas-fila.js
 
       - name: A versão que vai ao ar
         # A página fica aberta o dia inteiro e roda o código de quando foi

@@ -2309,6 +2309,8 @@ function comprimir(file, max = 1280, q = 0.72) {
 
 /* ===================== estado ===================== */
 const VAZIO = {
+  // O dono do carro é o próprio cliente: uma CNH vale pelas duas.
+  proprietarioMesmo: false,
   // veículo
   modelo: "", ano: "", cambio: "", km: "", kmEntrada: "", placa: "",
   fipe: "", fipeCodigo: "", fipeDesval: "", pedida: "", por: "", gastos: "",
@@ -4609,6 +4611,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   const [checklist, setChecklist] = useState(null);
   const [statusAtual, setStatusAtual] = useState((atendimento && atendimento.status) || "aberto");
   const [erroStatus, setErroStatus] = useState("");
+  const [encerradoAqui, setEncerradoAqui] = useState(false);
   const [salvandoCliente, setSalvandoCliente] = useState(false);
   const [enviandoZap, setEnviandoZap] = useState(false);
   const [envioZap, setEnvioZap] = useState("");
@@ -4619,6 +4622,19 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   // Muda a chave do bloco de anexos para ele recarregar depois que a
   // via assinada entra — senão a lista mostraria o estado de antes.
   const [guardados, setGuardados] = useState(0);
+  /* A VIA ASSINADA VAI SOZINHA PARA OS ANEXOS (03/11/2026, a Schell:
+   * "automatizar o anexo do contrato nos documentos"). Assinado no
+   * ZapSign, quem abrir o atendimento traz o PDF para o bucket — a mesma
+   * chamada do botão, que é idempotente: já guardado, não guarda de novo.
+   * O webhook não pode fazer isto: chega sem login (decisão 21). */
+  const viaPedida = useRef(false);
+  useEffect(() => {
+    if (!atendimento || !atendimento.contrato_assinado_em || viaPedida.current) return;
+    viaPedida.current = true;
+    guardarContratoAssinado(atendimento.id)
+      .then((d) => { if (!d.ja_guardado) { setErroVia("A via assinada foi guardada nos anexos do fechamento."); setGuardados((n) => n + 1); } })
+      .catch(() => { viaPedida.current = false; });
+  }, [atendimento && atendimento.contrato_assinado_em]);
 
   useEffect(() => {
     zapsignConfigurado().then(setZapOk).catch(() => setZapOk(null));
@@ -5783,6 +5799,17 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
             {STATUS_AT.map(([val, rot]) => <option key={val} value={val} style={{ color: C.ink, background: "#fff" }}>{rot}</option>)}
           </select>
         )}
+        {/* ENCERRAR É O QUE LIBERA PARA A FILA (0106): mudar o status
+            para Fechado não libera — o cliente ainda está na mesa. */}
+        {atendimento && !encerradoAqui && !atendimento.atendimento_fim_em && String(atendimento.data) === hojeEmSP() && (
+          <span className="shrink-0 rounded-full bg-white px-1 py-0.5">
+            <BotaoFinalizar a={{ ...atendimento, status: statusAtual }} aoFinalizar={(id, st) => {
+              setEncerradoAqui(true);
+              if (st) setStatusAtual(st);
+            }} />
+          </span>
+        )}
+        {encerradoAqui && <span className="shrink-0 text-[11px] font-semibold" style={{ color: "#fff", opacity: 0.85 }}>✓ encerrado — você voltou para a fila</span>}
 
         <nav className="flex items-center gap-1 lg:ml-auto" aria-label="Etapas do APONTE">
           {ETAPAS.map((e) => {
@@ -6161,8 +6188,19 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
 
             <Bloco titulo="Documentos do carro e do cliente"
               sub="O CRLV e a CNH em foto ou PDF. É de onde saem os dados — anexando, você para de perguntar.">
-              <Anexos atendimentoId={atendimento ? atendimento.id : null}
-                rotulos={["CRLV", "CNH", "Identidade"]} />
+              {/* A CNH DE QUEM ASSINA E A DE QUEM É DONO (03/11/2026, a
+                  Schell): o contratante nem sempre é o proprietário do
+                  carro. Sendo a mesma pessoa, uma CNH só, que vale pelos
+                  dois itens do check list de documentações. */}
+              <label className="mb-2 flex items-center gap-2 text-[13px]">
+                <input type="checkbox" checked={!!f.proprietarioMesmo} onChange={(e) => set("proprietarioMesmo", e.target.checked)} />
+                O proprietário do carro é o próprio cliente (uma CNH só)
+              </label>
+              <Anexos atendimentoId={atendimento ? atendimento.id : null} key={f.proprietarioMesmo ? "mesmo" : "dois"}
+                rotulos={f.proprietarioMesmo
+                  ? ["CRLV", "CNH (contratante e proprietário)", "Identidade", "Dossiê do Detran"]
+                  : ["CRLV", "CNH do contratante", "CNH do proprietário", "Identidade", "Dossiê do Detran"]}
+                legados={["CNH", "CNH do contratante", "CNH do proprietário", "CNH (contratante e proprietário)"]} />
             </Bloco>
           </>
         )}
@@ -7078,9 +7116,9 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
             )}
 
             <Bloco titulo="Anexos do fechamento"
-              sub="Comprovante de residência, laudo da cautelar e comprovante de pagamento.">
+              sub="Comprovante de residência, laudo da cautelar, dossiê do Detran e comprovante de pagamento.">
               <Anexos atendimentoId={atendimento ? atendimento.id : null}
-                rotulos={["Comprovante de residência", "Laudo cautelar", "Comprovante de pagamento", "Contrato assinado", "Outro"]}
+                rotulos={["Comprovante de residência", "Laudo cautelar", "Dossiê do Detran", "Comprovante de pagamento", "Contrato assinado", "Outro"]}
                 key={guardados} />
             </Bloco>
 
@@ -8862,6 +8900,11 @@ function NovoAtendimento({ perfil, aoCriar, aoCancelar }) {
       .catch(() => {});
   }, []);
 
+  // A vez da fila (0106): quem abre à mão vê de quem era, e diz se o
+  // cliente pediu este negociador.
+  const vez = useVezAgora();
+  const [especifico, setEspecifico] = useState(false);
+  const escolhidoId = (quemAtende(equipe).filter((n) => n.nome === d.negociador_nome)[0] || {}).id || "";
   const falta = d.origem === "fluxo_loja" && (!d.como_conheceu || d.como_conheceu === "Outro");
   // JÁ ABERTO HOJE? (0099) A pré-venda marca "chegou" e o negociador,
   // com o cliente na frente, abria outro. Antes de criar, procura o
@@ -8897,9 +8940,12 @@ function NovoAtendimento({ perfil, aoCriar, aoCancelar }) {
       const novo = await criarAtendimento({
         ...d,
         status: "cliente_na_loja",
-        negociador_id: !d.negociador_nome || eleMesmo ? (perfil ? perfil.id : null) : null,
+        // A lista de quem atende (0080) já traz o id do LOGIN — esse
+        // serve. O servidor confere (`idDePerfil`).
+        negociador_id: !d.negociador_nome || eleMesmo ? (perfil ? perfil.id : null) : (escolhidoId || null),
         negociador_nome: d.negociador_nome || (perfil ? perfil.nome : null),
-        data: new Date().toISOString().slice(0, 10),
+        data: hojeEmSP(),
+        fila: vez && vez.vez && escolhidoId && escolhidoId !== vez.vez && especifico ? "especifico" : undefined,
       });
       await aoCriar(novo);
     } catch (e) { setErro(e.message); setIndo(false); }
@@ -8924,11 +8970,12 @@ function NovoAtendimento({ perfil, aoCriar, aoCancelar }) {
               onChange={(e) => set("negociador_nome", e.target.value)}>
               <option value="">escolha</option>
               {quemAtende(equipe).map((n) => (
-                <option key={n.id} value={n.nome}>{n.nome}</option>
+                <option key={n.id} value={n.nome}>{n.nome}{vez && n.id === vez.vez ? " — a vez" : ""}</option>
               ))}
             </select>
           </Campo>
         </div>
+        <NotaDaVez vez={vez} escolhido={escolhidoId} especifico={especifico} setEspecifico={setEspecifico} />
         {d.origem === "fluxo_loja" && <ComoConheceu valor={d.como_conheceu} aoMudar={(v) => set("como_conheceu", v)} />}
         <Campo label="Quem prospectou">
           <select className={inputCls} style={inputSty} value={d.prospec} onChange={(e) => set("prospec", e.target.value)}>
@@ -11067,7 +11114,7 @@ const PL = {
  * vence em uma hora; a regra de retenção ainda é conversa com o
  * jurídico, e está anotada em PENDENCIAS.md.
  */
-function Anexos({ atendimentoId, rotulos, aoMudar }) {
+function Anexos({ atendimentoId, rotulos, aoMudar, legados }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
   const [indo, setIndo] = useState("");
@@ -11079,7 +11126,9 @@ function Anexos({ atendimentoId, rotulos, aoMudar }) {
     listarAnexos(atendimentoId).then(setLista).catch((e) => { setErro(e.message); setLista([]); });
   }, [atendimentoId]);
 
-  const daTela = (lista || []).filter((a) => rotulos.indexOf(a.rotulo) >= 0);
+  // `legados`: rótulos de antes que continuam aparecendo aqui (a "CNH"
+  // de quando havia uma só), mas não se escolhem mais.
+  const daTela = (lista || []).filter((a) => rotulos.indexOf(a.rotulo) >= 0 || (legados || []).indexOf(a.rotulo) >= 0);
 
   const escolher = async (ev) => {
     const arq = ev.target.files && ev.target.files[0];
@@ -12248,7 +12297,7 @@ function BotaoFinalizar({ a, aoFinalizar, rotulo }) {
       <button onClick={(ev) => { ev.stopPropagation(); setAberto(true); }}
         className="whitespace-nowrap rounded border px-1.5 py-0.5 text-[11px] font-semibold"
         style={{ borderColor: C.line, background: C.paper, color: C.roxo }}>
-        {rotulo || "finalizar"}
+        {rotulo || "encerrar atendimento"}
       </button>
       {aberto && (
         // O clique fica aqui dentro: a linha da lista abre o atendimento.
@@ -12256,10 +12305,19 @@ function BotaoFinalizar({ a, aoFinalizar, rotulo }) {
           onClick={(ev) => { ev.stopPropagation(); if (!indo) setAberto(false); }}>
           <div className="w-full max-w-[420px] rounded-xl p-5 text-left" style={{ background: C.paper, whiteSpace: "normal" }}
             onClick={(ev) => ev.stopPropagation()}>
-            <div className="text-[17px] font-bold">Finalizar o atendimento</div>
+            <div className="text-[17px] font-bold">Encerrar o atendimento</div>
             <div className="mt-0.5 text-[13px]" style={{ color: C.mute }}>
-              {[a.cliente_nome || a.cliente, a.carro_descricao || a.carro].filter(Boolean).join(" · ") || "cliente"} — como ficou?
+              {[a.cliente_nome || a.cliente, a.carro_descricao || a.carro].filter(Boolean).join(" · ") || "cliente"} — o cliente foi embora e
+              você volta para a fila da vez. Como ficou?
             </div>
+            {/* Já tem status de fim (fechou, perdeu): um toque só. É o
+                caso do carro fechado — o status mudou na mesa, e o
+                atendimento acaba quando o papel termina (0106). */}
+            {a.status && a.status !== "cliente_na_loja" && (
+              <BotaoPrimario className="mt-3 w-full" disabled={!!indo} onClick={() => escolher(a.status)}>
+                {indo === a.status ? "Encerrando…" : `Encerrar como ${rotuloStatus(a.status)}`}
+              </BotaoPrimario>
+            )}
             <div className="mt-3 grid grid-cols-2 gap-1.5">
               {STATUS_AT.filter(([v]) => v !== "cliente_na_loja").map(([v, r, cor]) => (
                 <button key={v} onClick={() => escolher(v)} disabled={!!indo}
@@ -14354,6 +14412,16 @@ function JanelaChegou({ lead, equipe, aoFechar, aoPronto, fluxo }) {
   const doLead = (equipe || []).filter((x) => x.id === lead.negociador_id)[0];
   const pre = negs.filter((n) => n.id === lead.negociador_id || (doLead && (n.id === doLead.perfil_id || n.nome === doLead.nome)))[0];
   const [neg, setNeg] = useState(pre ? pre.id : "");
+  /* A VEZ VEM ESCOLHIDA (0106, o Derek: "a pessoa da vez deve aparecer
+   * automaticamente quando a pré-vendas anota que um cliente chegou").
+   * Agendamento que já tinha negociador fica com ele, e conta como
+   * pedido — não mexe na roda. */
+  const vez = useVezAgora();
+  const [especifico, setEspecifico] = useState(!!pre);
+  useEffect(() => {
+    if (!vez || !vez.vez || neg) return;
+    if (negs.some((x) => x.id === vez.vez)) setNeg(vez.vez);
+  }, [vez]);
   const [nome, setNome] = useState(lead.nome || "");
   const [telefone, setTelefone] = useState(lead.telefone || "");
   const [carro, setCarro] = useState(lead.carro || "");
@@ -14382,6 +14450,7 @@ function JanelaChegou({ lead, equipe, aoFechar, aoPronto, fluxo }) {
             prospec: como === "Recuperação" ? "RECUPERAÇÃO" : "FLUXO", como_conheceu: como,
             negociador_id: n.id, negociador_nome: n.nome,
             data: dia, chegada_em: `${dia}T${hora}:00-03:00`, avisar_grupo: true,
+            fila: vez && vez.vez && n.id !== vez.vez && especifico ? "especifico" : undefined,
           }),
         });
         const x = await r.json().catch(() => ({}));
@@ -14392,6 +14461,7 @@ function JanelaChegou({ lead, equipe, aoFechar, aoPronto, fluxo }) {
           negociador_id: n.id, negociador_nome: n.nome,
           cliente_nome: nome.trim(), carro: carro.trim(), chegada: `${dia}T${hora}`,
           origem: origem || undefined,
+          fila: vez && vez.vez && n.id !== vez.vez && especifico ? "especifico" : undefined,
         });
       }
       const av = d.aviso || {};
@@ -14429,8 +14499,9 @@ function JanelaChegou({ lead, equipe, aoFechar, aoPronto, fluxo }) {
             <Campo label="Quem vai atender">
               <select className={inputCls} style={{ ...inputSty, borderColor: neg ? C.line : C.laranja }} value={neg} onChange={(e) => setNeg(e.target.value)} autoFocus>
                 <option value="">Escolha o negociador</option>
-                {negs.map((x) => <option key={x.id} value={x.id}>{x.nome}</option>)}
+                {negs.map((x) => <option key={x.id} value={x.id}>{x.nome}{vez && x.id === vez.vez ? " — a vez" : ""}</option>)}
               </select>
+              <div className="mt-1"><NotaDaVez vez={vez} escolhido={neg} especifico={especifico} setEspecifico={setEspecifico} /></div>
             </Campo>
             <Campo label="Nome do cliente">
               <input className={inputCls} style={inputSty} value={nome} onChange={(e) => setNome(e.target.value)} />
@@ -20347,7 +20418,15 @@ async function removerItemDoc(atendimentoId, item) {
  * aqui e o administrativo pedia de novo o que já estava no sistema.
  */
 const ANEXO_DE_ITEM = {
+  // "CNH" sozinha é a de antes de 03/11/2026, quando só havia uma.
   "CNH": "cnh_contratante",
+  "CNH do contratante": "cnh_contratante",
+  "CNH do proprietário": "cnh_proprietario",
+  // Quando o dono do carro é o próprio cliente, uma CNH vale pelos dois
+  // itens do check list (a Schell: "às vezes é a mesma, aí não precisa
+  // anexar dois documentos").
+  "CNH (contratante e proprietário)": ["cnh_contratante", "cnh_proprietario"],
+  "Dossiê do Detran": "dossie_detran",
   "Comprovante de residência": "comprovante_residencia",
   "Laudo cautelar": "cautelar",
   "Contrato assinado": "contrato",
@@ -21155,7 +21234,7 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
   // Os anexos do item vivem na tabela `anexo` que já existe, com o
   // rótulo "doc:<código>". Bucket novo significaria política nova de
   // Storage e mais um lugar para o arquivo se perder.
-  const doItem = (cod) => anexos.filter((a) => a.rotulo === `doc:${cod}` || ANEXO_DE_ITEM[a.rotulo] === cod);
+  const doItem = (cod) => anexos.filter((a) => a.rotulo === `doc:${cod}` || [].concat(ANEXO_DE_ITEM[a.rotulo] || []).indexOf(cod) >= 0);
   const geradosDoItem = (cod) => docs.filter((x) => DOC_DE_ITEM[x.tipo] === cod);
   // Para o contador de papéis, documento gerado vale como papel: o
   // contrato existe, ele só não foi anexado como arquivo.
@@ -23533,55 +23612,258 @@ async function mexerNaVez(acao, corpo) {
 const horaSP = (iso) => (iso ? new Date(iso).toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" }) : "");
 const indiceFmt = (n) => (Number(n) || 0).toFixed(2).replace(".", ",");
 
-/**
- * O aviso de manhã: negociador que não marcou presença não entra na
- * fila, e ninguém lembra de marcar. Aparece sobre qualquer tela, como o
- * lembrete do "Meu dia", e some quando ele marca. Fechar vale só até
- * recarregar — esquecer de vez é sair da fila sem saber.
- */
-function AvisoPresenca({ perfil, aoIrParaFila }) {
-  const [estado, setEstado] = useState(null);
-  const [fechado, setFechado] = useState(false);
+const pctFmt = (n) => `${Math.round((Number(n) || 0) * 100)}%`;
+const TIPO_EVENTO = {
+  vez: "pegou a vez", pulou: "pulado — estava atendendo", perdeu: "perdeu a vez",
+  especifico: "atendeu a pedido (não conta)", fora_da_vez: "atendeu fora da vez",
+  correcao: "o gerente pôs a vez", credito: "o gerente devolveu a vez",
+};
+const VIA_VEZ = { roda: "", credito: "a vez que devia", todos_ocupados: "todos ocupados", repasse: "repasse" };
+const RESPOSTA = { aceitou: "aceitou", passou: "passou a vez", expirou: "não respondeu em 3 min" };
+
+/* AS APROVAÇÕES QUE ESPERAM (03/11/2026, o Derek: "deve aparecer
+ * notificação a cada 10 minutos para o gerente quando tiver alguma
+ * aprovação de processo de documentação pra pagamento pra fazer"). Para
+ * os revisores — gerente e financeiro (0095) —, só o que espera a
+ * aprovação DELE: quem já aprovou não é cobrado pelo segundo. */
+function AvisoAprovacoes({ aoAbrir }) {
+  const [lista, setLista] = useState([]);
+  const [visivel, setVisivel] = useState(false);
+  useEffect(() => {
+    const ler = () => fetchAut("/api/checklist?recurso=esteira&resumo=1")
+      .then((r) => r.json()).then((d) => { const l = (d && d.aprovar) || []; setLista(l); if (l.length) setVisivel(true); })
+      .catch(() => {});
+    const t0 = setTimeout(ler, 8000);
+    const t = setInterval(() => { if (!document.hidden) ler(); }, 10 * 60000);
+    return () => { clearTimeout(t0); clearInterval(t); };
+  }, []);
+  if (!visivel || !lista.length) return null;
+  return (
+    <div className="fixed bottom-20 right-3 z-50 w-[340px] max-w-[calc(100vw-24px)] rounded-xl border p-3 shadow-xl lg:bottom-4"
+      style={{ background: C.paper, borderColor: C.roxo }}>
+      <div className="text-[14px] font-bold" style={{ color: C.roxo }}>
+        {lista.length === 1 ? "1 negócio espera a sua aprovação" : `${lista.length} negócios esperam a sua aprovação`}
+      </div>
+      <div className="mt-0.5 text-[12px]" style={{ color: C.mute }}>Documentação revisada pelo adm — falta aprovar para pagar o cliente.</div>
+      <ul className="mt-1.5 space-y-0.5 text-[12.5px]">
+        {lista.slice(0, 4).map((a) => <li key={a.id}><b>{a.cliente || "cliente"}</b>{a.carro ? ` · ${a.carro}` : ""}{a.negociador ? ` · ${a.negociador}` : ""}</li>)}
+        {lista.length > 4 && <li style={{ color: C.mute }}>e mais {lista.length - 4}</li>}
+      </ul>
+      <div className="mt-2 flex gap-2">
+        <BotaoPrimario className="flex-1" onClick={() => { setVisivel(false); aoAbrir(); }}>Abrir Aprovações</BotaoPrimario>
+        <button onClick={() => setVisivel(false)} className="rounded-lg border px-3 text-[12.5px]" style={{ borderColor: C.line, color: C.mute }}>daqui a 10 min</button>
+      </div>
+    </div>
+  );
+}
+
+/* O QUE O NEGOCIADOR ESTÁ FAZENDO, quando a fila não o vê (0106). O
+ * Derek: "deve vir alguma notificação para os que não estão na fila
+ * 'VOCÊ NÃO ESTÁ NA FILA DE ATENDIMENTO' repetidamente até ele entrar
+ * de volta… e se ele estiver em atendimento marca que carro está
+ * atendendo". Cada resposta é um gesto que o servidor já entende: livre
+ * é presença, almoço e pausa vão para a agenda (0088), e "atendendo" é
+ * o atendimento dele — reaberto, ou criado agora sem mexer na roda. */
+function PerguntaForaDaFila({ eu, d, aoFeito, aoAgoraNao, proximo }) {
+  const [modo, setModo] = useState("");
+  const [nome, setNome] = useState("");
+  const [carro, setCarro] = useState("");
   const [indo, setIndo] = useState(false);
   const [erro, setErro] = useState("");
-  // Relê de dois em dois minutos: é assim que o aviso aparece quando os
-  // trinta minutos de silêncio vencem, e some quando ele responde. A
-  // primeira leitura espera o `SinalAbriu` chegar ao servidor — antes
-  // disso, todo mundo pareceria fora da fila.
+  const [meus, setMeus] = useState(null);
   useEffect(() => {
-    let vivo = true;
-    const ler = () => lerVez().then((d) => {
-      if (!vivo) return;
-      const eu = (d.ordem || []).concat(d.ausentes || []).find((p) => p.perfil_id === d.eu);
-      setEstado(eu || null);
-    }).catch(() => {});
-    const t0 = setTimeout(ler, 3000);
-    const t = setInterval(() => { if (!document.hidden) ler(); }, 120000);
-    return () => { vivo = false; clearTimeout(t0); clearInterval(t); };
-  }, []);
-  // Só quem está na lista de quem atende (login de negociador) é cobrado.
-  if (!estado || estado.presente || fechado) return null;
-  const marcar = async () => {
+    if (modo !== "atendendo" || meus) return;
+    listarAtendimentos({ de: diaHoje(), ate: diaHoje(), limite: 100 })
+      .then((l) => setMeus((Array.isArray(l) ? l : []).filter((a) => a.negociador_id === eu.perfil_id ||
+        nomeChave(a.negociador_nome) === nomeChave(eu.nome))))
+      .catch(() => setMeus([]));
+  }, [modo]);
+  const fazer = async (fn) => {
     setIndo(true); setErro("");
-    try { await mexerNaVez("presente"); setEstado({ ...estado, presente: true }); }
-    catch (e) { setErro(e.message); }
+    try { await fn(); aoFeito(); } catch (e) { setErro(e.message); }
     setIndo(false);
   };
+  const agenda = (tipo, titulo) => fazer(() => criarAcao({ dia: diaHoje(), hora: horaAgora(), tipo, titulo, feito: true }));
+  const op = (rot, sub, fn, cor) => (
+    <button disabled={indo} onClick={fn} className="rounded-xl border px-3 py-2.5 text-left"
+      style={{ borderColor: cor || C.line, background: "#fff" }}>
+      <div className="text-[14.5px] font-bold" style={{ color: cor || C.ink }}>{rot}</div>
+      {sub && <div className="text-[12px]" style={{ color: C.mute }}>{sub}</div>}
+    </button>
+  );
   return (
-    <div className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border px-4 py-3"
-      style={{ background: C.roxoFraco, borderColor: "#DCC8EA" }}>
-      <div className="min-w-0 flex-1 text-[14px]">
-        <b>{estado.saida_manual ? "Você marcou que saiu."
-          : estado.fora === "sem resposta" ? "Você saiu da fila da vez: 30 minutos sem responder o que está fazendo."
-          : estado.fora ? `Você está fora da fila (${estado.fora}).`
-          : "Você ainda não está na loja para o sistema."}</b>{" "}
-        <span style={{ color: C.mute }}>Responder o lembrete ou apertar o botão te põe de volta.</span>
-        {erro && <div className="text-[12.5px]" style={{ color: C.laranja }}>{erro}</div>}
+    <div className="fixed inset-0 z-[60] flex items-end justify-center p-3 sm:items-center" style={{ background: "rgba(24,20,32,0.55)" }}>
+      <div className="w-full max-w-[460px] rounded-2xl p-4" style={{ background: C.paper, boxShadow: "0 18px 50px rgba(24,20,32,0.35)" }}>
+        <div className="rounded-lg px-3 py-2.5" style={{ background: proximo ? C.laranja : C.roxo, color: "#fff" }}>
+          <div className="text-[16px]" style={{ fontFamily: F.disp, fontWeight: 800 }}>
+            {proximo ? "VOCÊ É O PRÓXIMO DA VEZ E NÃO ESTÁ NA FILA" : "VOCÊ NÃO ESTÁ NA FILA DE ATENDIMENTO"}
+          </div>
+          <div className="mt-0.5 text-[12.5px]" style={{ opacity: 0.92 }}>
+            {proximo ? "Se chegar cliente agora, você perde a vez. " : ""}
+            {eu.fora === "sem resposta" ? `Sem resposta desde ${horaSP(eu.ultimo_sinal)}.`
+              : eu.fora ? `Você está em ${eu.fora}.` : ""} O que você está fazendo agora?
+          </div>
+        </div>
+
+        {!modo && (
+          <div className="mt-3 grid gap-2">
+            {op("Estou livre na loja", "Entro na fila agora.", () => fazer(() => mexerNaVez("presente")), C.verde)}
+            {op("Estou atendendo um cliente", "Diga qual — você fica na fila como ocupado.", () => setModo("atendendo"), C.roxo)}
+            <div className="grid grid-cols-2 gap-2">
+              {op("Almoço", null, () => agenda("almoco", "Almoço"))}
+              {op("Pausa / assunto pessoal", null, () => agenda("pausa", "Pausa"))}
+            </div>
+            {op("Saí da loja", "Não recebo cliente até voltar.", () => fazer(() => mexerNaVez("saiu")))}
+          </div>
+        )}
+
+        {modo === "atendendo" && (
+          <div className="mt-3">
+            <div className="text-[12px] uppercase tracking-wide" style={{ color: C.mute }}>qual cliente?</div>
+            <div className="mt-1.5 grid gap-1.5">
+              {meus === null && <span className="text-[13px]" style={{ color: C.mute }}>Carregando…</span>}
+              {(meus || []).map((a) => (
+                <button key={a.id} disabled={indo} onClick={() => fazer(async () => {
+                  await mexerNaVez("voltei_mesa", { atendimento_id: a.id });
+                  await mexerNaVez("presente").catch(() => {});
+                })} className="rounded-lg border px-3 py-2 text-left text-[13.5px]" style={{ borderColor: C.line }}>
+                  <b>{a.cliente_nome || "sem nome"}</b> · {a.carro_descricao || (a.veiculo && a.veiculo.marca_modelo) || "carro?"}
+                  <span className="ml-1 text-[12px]" style={{ color: C.mute }}>aberto às {horaSP(a.chegada_em || a.criado_em)}</span>
+                </button>
+              ))}
+            </div>
+            <div className="mt-3 text-[12px] uppercase tracking-wide" style={{ color: C.mute }}>ou um cliente que ainda não está no sistema</div>
+            <div className="mt-1.5 grid grid-cols-2 gap-2">
+              <input className={inputCls} style={inputSty} placeholder="nome do cliente" value={nome} onChange={(e) => setNome(e.target.value)} />
+              <input className={inputCls} style={inputSty} placeholder="carro" value={carro} onChange={(e) => setCarro(e.target.value)} />
+            </div>
+            <BotaoPrimario className="mt-2 w-full" disabled={indo || !nome.trim() || !carro.trim()} onClick={() => fazer(async () => {
+              await criarAtendimento({ cliente_nome: nome.trim(), carro_descricao: carro.trim(), status: "cliente_na_loja",
+                origem: "fluxo_loja", como_conheceu: "Outro: registrado depois", negociador_id: eu.perfil_id, negociador_nome: eu.nome,
+                data: diaHoje(), fila: "ja_atendendo" });
+              await mexerNaVez("presente").catch(() => {});
+            })}>{indo ? "Gravando…" : "Registrar este atendimento"}</BotaoPrimario>
+            <button onClick={() => setModo("")} className="mt-2 text-[13px]" style={{ color: C.mute }}>voltar</button>
+          </div>
+        )}
+
+        {erro && <p className="mt-2 text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
+        <button onClick={aoAgoraNao} className="mt-3 w-full text-center text-[12.5px]" style={{ color: C.mute }}>
+          agora não (pergunto de novo em {proximo ? "1" : "3"} min)
+        </button>
       </div>
-      <BotaoPrimario onClick={marcar} disabled={indo}>{indo ? "Marcando…" : "Estou na loja"}</BotaoPrimario>
-      <button onClick={aoIrParaFila} className="text-[13px] underline" style={{ color: C.roxo }}>ver a fila</button>
-      <button onClick={() => setFechado(true)} className="text-[13px]" style={{ color: C.mute }}>agora não</button>
     </div>
+  );
+}
+
+/* A CHAMADA DA VEZ (0106). O Derek: "a pessoa da vez deve aparecer
+ * automaticamente quando a pré-vendas anota que um cliente chegou… e o
+ * negociador da vez e o segundo da vez devem receber notificação na
+ * tela como POP UP". Três minutos para "Vou atender"; passar ou deixar
+ * vencer leva o cliente para o próximo e conta um "perdeu atendimento"
+ * (no horário da loja). */
+function ChamadaDaVez({ ch, aoResponder, aoAbrir }) {
+  const [agora, setAgora] = useState(Date.now());
+  const [indo, setIndo] = useState("");
+  const [erro, setErro] = useState("");
+  useEffect(() => { const t = setInterval(() => setAgora(Date.now()), 1000); return () => clearInterval(t); }, []);
+  const resta = Math.max(0, Date.parse(ch.vence_em) - agora);
+  const mm = Math.floor(resta / 60000), ss = Math.floor((resta % 60000) / 1000);
+  const responder = async (acao) => {
+    setIndo(acao); setErro("");
+    try {
+      await mexerNaVez(acao, { evento_id: ch.id });
+      aoResponder(ch.id);
+      if (acao === "aceitar" && aoAbrir) aoAbrir(ch.atendimento_id);
+    } catch (e) { setErro(e.message); aoResponder(ch.id); }
+    setIndo("");
+  };
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-3" style={{ background: "rgba(24,20,32,0.6)" }}>
+      <div className="w-full max-w-[440px] overflow-hidden rounded-2xl" style={{ background: C.paper, boxShadow: "0 20px 60px rgba(24,20,32,0.4)" }}>
+        <div className="px-5 py-4" style={{ background: C.roxo, color: "#fff" }}>
+          <div className="text-[12px] uppercase tracking-wide" style={{ opacity: 0.85 }}>cliente na loja · é a sua vez</div>
+          <div className="mt-0.5 text-[24px] leading-tight" style={{ fontFamily: F.disp, fontWeight: 800 }}>{ch.cliente || "Cliente"}</div>
+          {ch.carro && <div className="text-[15px]" style={{ opacity: 0.95 }}>{ch.carro}</div>}
+        </div>
+        <div className="p-4">
+          <div className="text-center text-[13px]" style={{ color: resta < 60000 ? C.laranja : C.mute }}>
+            {resta ? `Responda em ${mm}:${String(ss).padStart(2, "0")} — depois disso a vez passa para o próximo e conta como "perdeu atendimento".`
+              : "O tempo acabou: a vez está passando para o próximo."}
+          </div>
+          <BotaoPrimario className="mt-3 w-full" disabled={!!indo || !resta} onClick={() => responder("aceitar")}>
+            {indo === "aceitar" ? "Abrindo…" : "Vou atender"}
+          </BotaoPrimario>
+          <button disabled={!!indo || !resta} onClick={() => { if (confirm("Passar a vez? O cliente vai para o próximo, e conta um \"perdeu atendimento\" para você.")) responder("passar"); }}
+            className="mt-2 w-full rounded-lg border py-2.5 text-[14px] font-semibold" style={{ borderColor: C.line, color: C.laranja }}>
+            {indo === "passar" ? "Passando…" : "Passar a vez"}
+          </button>
+          {erro && <p className="mt-2 text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * OS AVISOS DA FILA, sobre qualquer tela do negociador (0106): a
+ * chamada, "você é o próximo", e "você não está na fila". Lê a fila de
+ * 20 em 20 segundos com a aba à vista — é o que faz o pop-up aparecer
+ * quando a pré-venda marca "Chegou".
+ */
+function AvisosDaFila({ perfil, aoAbrir, aoIrParaFila }) {
+  const [d, setD] = useState(null);
+  const [respondidas, setRespondidas] = useState({});
+  const [calarAte, setCalarAte] = useState(0);
+  // Re-renderiza de 30 em 30 s: é o que faz o "agora não" vencer sozinho.
+  const [tique, setTique] = useState(0);
+  const ler = () => lerVez().then(setD).catch(() => {});
+  useEffect(() => {
+    // A primeira leitura espera o `SinalAbriu` chegar ao servidor —
+    // antes disso, todo mundo pareceria fora da fila.
+    const t0 = setTimeout(ler, 3000);
+    const t = setInterval(() => { if (!document.hidden) ler(); }, 20000);
+    const vis = () => { if (!document.hidden) ler(); };
+    document.addEventListener("visibilitychange", vis);
+    const tq = setInterval(() => setTique((n) => n + 1), 30000);
+    return () => { clearTimeout(t0); clearInterval(t); clearInterval(tq); document.removeEventListener("visibilitychange", vis); };
+  }, []);
+  if (!d || !d.eu) return null;
+  const todos = (d.ordem || []).concat(d.ausentes || []);
+  const eu = todos.find((p) => p.perfil_id === d.eu);
+  if (!eu) return null;   // quem não atende não recebe nada daqui
+
+  const minha = (d.chamadas || []).find((c) => c.perfil_id === d.eu && !respondidas[c.id]);
+  if (minha) return <ChamadaDaVez ch={minha} aoAbrir={aoAbrir}
+    aoResponder={(id) => { setRespondidas((r) => ({ ...r, [id]: true })); ler(); }} />;
+
+  // Fora da fila, no horário da loja, quem passou pela loja hoje e não
+  // apertou "Saí". O da vez pela roda leva o aviso forte, de minuto em
+  // minuto; o resto, de três em três.
+  const pertoDaVez = d.ponteiro === d.eu;
+  // Quem respondeu "almoço" ou "pausa" é perguntado de novo depois de
+  // quinze minutos ("voltou?"), não a cada leitura.
+  const emPausa = eu.fora === "almoço" || eu.fora === "pausa";
+  const pausaVelha = !emPausa || Date.now() - Date.parse(eu.ultimo_sinal || 0) > 15 * 60000;
+  const nag = d.aberto && eu.veio_hoje && !eu.presente && !eu.saida_manual && pausaVelha && Date.now() >= calarAte;
+  if (nag) {
+    return <PerguntaForaDaFila eu={eu} d={d} proximo={pertoDaVez}
+      aoFeito={() => { setCalarAte(Date.now() + 15000); ler(); }}
+      aoAgoraNao={() => setCalarAte(Date.now() + (pertoDaVez ? 60000 : 180000))} />;
+  }
+
+  // O segundo da vez, e o da vez, sabem — uma faixa, não uma janela.
+  const souVez = d.vez === d.eu, souSegundo = d.segundo === d.eu;
+  const chamandoOutro = (d.chamadas || []).find((c) => c.perfil_id !== d.eu);
+  if (!eu.presente || !(souVez || souSegundo)) return null;
+  return (
+    <button onClick={aoIrParaFila} className="fixed bottom-20 right-3 z-40 rounded-xl px-4 py-2.5 text-left shadow-lg lg:bottom-4"
+      style={{ background: souVez ? C.roxo : C.paper, color: souVez ? "#fff" : C.ink, border: souVez ? "none" : `2px solid ${C.roxo}` }}>
+      <div className="text-[14px] font-bold">{souVez ? "Você é a vez" : "Você é o próximo depois da vez"}</div>
+      <div className="text-[12px]" style={{ opacity: 0.85 }}>
+        {chamandoOutro && souSegundo ? `${chamandoOutro.nome} está sendo chamado — se passar, é você.` : "Fique perto: o próximo cliente é seu."}
+      </div>
+    </button>
   );
 }
 
@@ -23609,15 +23891,44 @@ function SinalAbriu() {
   return null;
 }
 
-function TelaFilaDaVez({ perfil }) {
+/* O "A VEZ É DE…" nas duas portas de entrada do cliente — o "Chegou" da
+ * pré-venda e o "Novo atendimento". Escolher outra pessoa pergunta por
+ * quê: o cliente pediu (não conta na roda, o Derek: "não conta") ou
+ * não (fica no registro como "fora da vez", para o gerente ver). */
+function useVezAgora() {
+  const [v, setV] = useState(null);
+  useEffect(() => { lerVez().then(setV).catch(() => setV({})); }, []);
+  if (!v || !v.ordem) return v;
+  const nome = (id) => ((v.ordem.concat(v.ausentes || []).find((p) => p.perfil_id === id)) || {}).nome || "";
+  return { ...v, vez_nome: nome(v.vez), segundo_nome: nome(v.segundo) };
+}
+function NotaDaVez({ vez, escolhido, especifico, setEspecifico }) {
+  if (!vez) return <p className="text-[12px]" style={{ color: C.mute }}>Lendo a fila da vez…</p>;
+  if (!vez.vez) return <p className="text-[12px]" style={{ color: C.mute }}>Ninguém está na fila da vez agora.</p>;
+  const outro = escolhido && escolhido !== vez.vez;
+  return (
+    <div className="text-[12.5px]">
+      <span style={{ color: C.mute }}>A vez é de </span><b style={{ color: C.roxo }}>{vez.vez_nome}</b>
+      {vez.segundo_nome && <span style={{ color: C.mute }}> · depois, {vez.segundo_nome}</span>}
+      {outro && (
+        <label className="mt-1 flex items-start gap-2 rounded-lg p-2" style={{ background: "#FFF6EC" }}>
+          <input type="checkbox" checked={!!especifico} onChange={(e) => setEspecifico(e.target.checked)} className="mt-0.5" />
+          <span>O cliente pediu este negociador, ou o agendamento já era dele — <b>não conta na fila</b>.
+            {!especifico && <span style={{ color: C.laranja }}> Sem marcar, fica registrado como atendimento fora da vez.</span>}</span>
+        </label>
+      )}
+    </div>
+  );
+}
+
+function TelaFilaDaVez({ perfil, aoAbrir }) {
   const [d, setD] = useState(null);
   const [erro, setErro] = useState("");
   const [indo, setIndo] = useState("");
+  const [corrigir, setCorrigir] = useState(false);
   const gerente = !!(perfil && perfil.papel === "gerente");
 
   const carregar = () => lerVez().then((x) => { setD(x); setErro(""); }).catch((e) => setErro(e.message));
-  // A fila muda quando alguém chega, sai ou termina: relê a cada 20 s
-  // com a aba à vista, que é o ritmo da lista do painel (decisão 45).
   useEffect(() => {
     carregar();
     const t = setInterval(() => { if (!document.hidden) carregar(); }, 20000);
@@ -23638,15 +23949,23 @@ function TelaFilaDaVez({ perfil }) {
     </div>
   );
 
-  const todos = (d.ordem || []).concat(d.ausentes || []);
+  const todos = (d.ordem || []).concat((d.ausentes || []).filter((p) => !(d.ordem || []).some((o) => o.perfil_id === p.perfil_id)));
+  const nomeDe = (id) => (todos.find((p) => p.perfil_id === id) || {}).nome || "";
   const eu = todos.find((p) => p.perfil_id === d.eu);
-  const daVez = (d.ordem || []).find((p) => p.perfil_id === d.vez);
-  const todosAtendendo = (d.ordem || []).length > 0 && (d.ordem || []).every((p) => p.atendendo.length > 0);
+  const daVez = todos.find((p) => p.perfil_id === d.vez);
+  const naoVieram = (d.ausentes || []).filter((p) => !p.veio_hoje);
+  const estado = (p) => {
+    if (p.atendendo.length) return null;
+    if (p.presente) return <span style={{ color: C.verde }}>livre</span>;
+    if (p.fora === "saiu") return <span style={{ color: C.mute }}>saiu {horaSP(p.saiu_em)}</span>;
+    if (p.fora === "sem resposta") return <span style={{ color: C.laranja }}>fora da fila — sem resposta desde {horaSP(p.ultimo_sinal)}</span>;
+    return <span style={{ color: C.mute }}>fora da fila — {p.fora || "não marcou"}</span>;
+  };
 
   return (
     <div>
       <Cabecalho titulo="Fila da vez"
-        sub={`Pelo índice AT de ${rotuloMes(d.competencia)}, entre quem está na loja hoje.`}
+        sub={`${d.congelada_em ? "Ordem do dia congelada no primeiro cliente" : "Ordem pelo índice AT de " + rotuloMes(d.competencia)}${d.aberto ? "" : " · fora do horário da loja: só quem está aqui, sem perder a vez"}`}
         acao={eu && (eu.presente
           ? <button onClick={() => fazer("eu", "saiu")} disabled={!!indo}
               className="rounded-lg border px-3 py-2 text-[13.5px] font-semibold" style={{ borderColor: C.line, color: C.ink }}>
@@ -23658,98 +23977,127 @@ function TelaFilaDaVez({ perfil }) {
 
       {erro && <p className="mb-3 text-[13.5px]" style={{ color: C.laranja }}>{erro}</p>}
 
-      {/* A resposta da tela inteira, em cima: de quem é o próximo. */}
-      <div className="mb-4 rounded-xl px-5 py-4" style={{ background: daVez ? C.roxo : C.paper, color: daVez ? "#fff" : C.ink, border: daVez ? "none" : `1px solid ${C.line}` }}>
-        {daVez ? (
-          <>
-            <div className="text-[12px] uppercase tracking-wide" style={{ opacity: 0.8 }}>o próximo cliente é de</div>
-            <div className="text-[26px] leading-tight" style={{ fontFamily: F.disp, fontWeight: 800 }}>{daVez.nome}</div>
-            {d.anunciado_em ? (
+      <div className="mb-4 grid gap-3 md:grid-cols-[2fr_1fr]">
+        <div className="rounded-xl px-5 py-4" style={{ background: daVez ? C.roxo : C.paper, color: daVez ? "#fff" : C.ink, border: daVez ? "none" : `1px solid ${C.line}` }}>
+          {daVez ? (
+            <>
+              <div className="text-[12px] uppercase tracking-wide" style={{ opacity: 0.8 }}>o próximo cliente é de</div>
+              <div className="text-[28px] leading-tight" style={{ fontFamily: F.disp, fontWeight: 800 }}>{daVez.nome}</div>
               <div className="mt-1 text-[13px]" style={{ opacity: 0.9 }}>
-                Anunciado às {horaSP(d.anunciado_em)}, quando estavam todos atendendo — segura a vez até pegar um cliente, mesmo que outro libere antes.
+                {d.vez_via === "credito" ? "É a vez que ele ficou devendo — estava atendendo quando chegou a dele."
+                  : d.vez_via === "todos_ocupados" ? `Estão todos atendendo — ${daVez.nome} pega mais um.` : "Pela roda."}
+                {d.segundo && ` Depois: ${nomeDe(d.segundo)}.`}
               </div>
-            ) : todosAtendendo && (
-              <div className="mt-1 text-[13px]" style={{ opacity: 0.9 }}>
-                Estão todos atendendo — {daVez.nome} pega {daVez.atendendo.length === 1 ? "o segundo cliente" : `o ${daVez.atendendo.length + 1}º cliente`}.
-              </div>
-            )}
-          </>
-        ) : (
-          <div className="text-[15px]">Ninguém marcou que está na loja hoje.</div>
-        )}
-      </div>
-
-      <div className="overflow-hidden rounded-xl border" style={{ borderColor: C.line, background: C.paper }}>
-        <div className="grid grid-cols-[28px_1fr_70px_70px_70px_80px] gap-2 border-b px-3 py-2 text-[11px] uppercase tracking-wide"
-          style={{ borderColor: C.line, color: C.mute }}>
-          <span>#</span><span>na loja</span>
-          <span className="text-right">fluxo</span><span className="text-right">vendas</span>
-          <span className="text-right">score</span><span className="text-right">índice AT</span>
+            </>
+          ) : <div className="text-[15px]">Ninguém está na fila agora.</div>}
         </div>
-        {(d.ordem || []).map((p, i) => (
-          <div key={p.perfil_id} className="border-b px-3 py-2.5 last:border-b-0" style={{ borderColor: C.line, background: p.perfil_id === d.vez ? C.roxoFraco : "transparent" }}>
-            <div className="grid grid-cols-[28px_1fr_70px_70px_70px_80px] items-baseline gap-2 text-[14px]">
-              <span style={{ fontFamily: F.mono, color: C.mute }}>{i + 1}</span>
-              <span className="min-w-0">
-                <b>{p.nome}</b>
-                <span className="ml-2 text-[12px]" style={{ color: C.mute }}>desde {horaSP(p.chegou_em)}</span>
-                {p.perfil_id === d.vez && <span className="ml-2 rounded px-1.5 py-0.5 text-[11px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>a vez</span>}
-              </span>
-              <span className="text-right" style={{ fontFamily: F.mono }}>{p.fluxo}</span>
-              <span className="text-right" style={{ fontFamily: F.mono }}>{p.vendas}</span>
-              <span className="text-right" style={{ fontFamily: F.mono }}>{indiceFmt(p.score * 100)}%</span>
-              <span className="text-right" style={{ fontFamily: F.mono, fontWeight: 700 }}>{indiceFmt(p.indice_at)}</span>
+        <div className="rounded-xl border px-4 py-3" style={{ borderColor: C.line, background: C.paper }}>
+          <div className="text-[11px] uppercase tracking-wide" style={{ color: C.mute }}>chamando agora</div>
+          {(d.chamadas || []).length ? d.chamadas.map((c) => (
+            <div key={c.id} className="mt-1 text-[13.5px]">
+              <b>{c.nome}</b> · {c.cliente || "cliente"}{c.carro ? ` · ${c.carro}` : ""}
+              <div className="text-[12px]" style={{ color: C.laranja }}>responde até {horaSP(c.vence_em)}</div>
             </div>
-            <div className="ml-[36px] mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px]" style={{ color: C.mute }}>
-              {p.atendendo.length === 0 ? <span style={{ color: C.verde }}>livre</span> : p.atendendo.map((a) => (
-                <span key={a.id} className="inline-flex items-center gap-1.5">
-                  <span style={{ color: C.laranja }}>atendendo {a.cliente || "cliente"}{a.carro ? ` · ${a.carro}` : ""} desde {horaSP(a.desde)}</span>
-                  {(p.perfil_id === d.eu || gerente) && <BotaoFinalizar a={a} aoFinalizar={() => carregar()} />}
-                </span>
-              ))}
-              {/* Empate no índice (todo mundo zerado no começo do mês) é
-                  decidido pelo mês anterior — e a tela diz isso, senão a
-                  ordem parece aleatória. */}
-              {p.indice_at === 0 && <span>mês anterior {indiceFmt(p.indice_anterior)}</span>}
-              {p.sem_meta && <span>sem meta ligada — score 100%</span>}
-              {gerente && p.perfil_id !== d.eu && (
-                <button onClick={() => fazer(p.perfil_id, "saiu", { perfil_id: p.perfil_id })} disabled={!!indo}
-                  className="underline" style={{ color: C.mute }}>{indo === p.perfil_id ? "…" : "marcar saída"}</button>
-              )}
-            </div>
-          </div>
-        ))}
-        {!(d.ordem || []).length && <div className="px-3 py-4 text-[14px]" style={{ color: C.mute }}>Ninguém na loja ainda.</div>}
+          )) : <div className="mt-1 text-[13px]" style={{ color: C.mute }}>Ninguém.</div>}
+        </div>
       </div>
 
-      {(d.ausentes || []).length > 0 && (
-        <div className="mt-4">
-          <div className="mb-1.5 text-[12px] uppercase tracking-wide" style={{ color: C.mute }}>fora da fila hoje</div>
-          <div className="flex flex-wrap gap-2">
-            {d.ausentes.map((p) => (
-              <span key={p.perfil_id} className="inline-flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[13px]" style={{ borderColor: C.line, background: C.paper }}>
-                {p.nome}
-                {p.saida_manual && p.saiu_em && <span style={{ color: C.mute }}>saiu {horaSP(p.saiu_em)}</span>}
-                {/* Fora por silêncio (0088): diz desde quando, para a
-                    pessoa saber que é o lembrete que a põe de volta. */}
-                {p.fora === "sem resposta" && <span style={{ color: C.laranja }}>sem resposta desde {horaSP(p.ultimo_sinal)}</span>}
-                {p.fora && p.fora !== "sem resposta" && <span style={{ color: C.mute }}>{p.fora}</span>}
-                {/* O gerente marca por quem esqueceu e já está atendendo. */}
-                {(gerente || p.perfil_id === d.eu) && (
-                  <button onClick={() => fazer(p.perfil_id, "presente", { perfil_id: p.perfil_id })} disabled={!!indo}
-                    className="font-semibold" style={{ color: C.roxo }}>{indo === p.perfil_id ? "…" : "está na loja"}</button>
-                )}
-              </span>
-            ))}
+      <div className="overflow-x-auto rounded-xl border" style={{ borderColor: C.line, background: C.paper }}>
+        <div className="min-w-[720px]">
+          <div className="grid grid-cols-[28px_1fr_60px_60px_80px_80px_80px] gap-2 border-b px-3 py-2 text-[11px] uppercase tracking-wide"
+            style={{ borderColor: C.line, color: C.mute }}>
+            <span>#</span><span>a roda de hoje</span>
+            <span className="text-right">fluxo</span><span className="text-right">fech.</span>
+            <span className="text-right">conversão</span><span className="text-right">confiab.</span><span className="text-right">índice AT</span>
           </div>
+          {(d.ordem || []).map((p, i) => (
+            <div key={p.perfil_id} className="border-b px-3 py-2.5 last:border-b-0"
+              style={{ borderColor: C.line, background: p.perfil_id === d.vez ? C.roxoFraco : "transparent", opacity: p.presente || p.atendendo.length ? 1 : 0.7 }}>
+              <div className="grid grid-cols-[28px_1fr_60px_60px_80px_80px_80px] items-baseline gap-2 text-[14px]">
+                <span style={{ fontFamily: F.mono, color: C.mute }}>{i + 1}</span>
+                <span className="min-w-0">
+                  <b>{p.nome}</b>
+                  <span className="ml-2 text-[12px]" style={{ color: C.mute }}>chegou {horaSP(p.chegou_em)}</span>
+                  {p.perfil_id === d.vez && <span className="ml-2 rounded px-1.5 py-0.5 text-[11px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>a vez</span>}
+                  {p.perfil_id === d.segundo && <span className="ml-2 rounded border px-1.5 py-0.5 text-[11px] font-semibold" style={{ borderColor: C.roxo, color: C.roxo }}>depois</span>}
+                  {p.perfil_id === d.ponteiro && p.perfil_id !== d.vez && <span className="ml-2 text-[11px]" style={{ color: C.laranja }}>a roda está aqui</span>}
+                </span>
+                <span className="text-right" style={{ fontFamily: F.mono }}>{p.fluxo}</span>
+                <span className="text-right" style={{ fontFamily: F.mono }}>{p.vendas}</span>
+                <span className="text-right" style={{ fontFamily: F.mono }}>{pctFmt(p.conversao)}</span>
+                <span className="text-right" style={{ fontFamily: F.mono }}>{pctFmt(p.score)}</span>
+                <span className="text-right" style={{ fontFamily: F.mono, fontWeight: 700 }}>{indiceFmt(p.indice_ordem != null ? p.indice_ordem : p.indice_at)}</span>
+              </div>
+              <div className="ml-[36px] mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px]" style={{ color: C.mute }}>
+                {estado(p)}
+                {p.atendendo.map((a) => (
+                  <span key={a.id} className="inline-flex items-center gap-1.5">
+                    <span style={{ color: C.laranja }}>atendendo {a.cliente || "cliente"}{a.carro ? ` · ${a.carro}` : ""} desde {horaSP(a.desde)}</span>
+                    {(p.perfil_id === d.eu || gerente) && <BotaoFinalizar a={a} aoFinalizar={() => carregar()} />}
+                  </span>
+                ))}
+                {p.deve_vez > 0 && <span style={{ color: C.roxo, fontWeight: 600 }}>
+                  deve {p.deve_vez > 1 ? `${p.deve_vez} vezes` : "a vez"}{p.vez_devida_em ? ` · volta às ${horaSP(p.vez_devida_em)}` : " · volta 10 min depois de encerrar"}
+                </span>}
+                {p.sem_meta && <span>sem meta ligada — confiabilidade 100%</span>}
+                {gerente && corrigir && (
+                  <>
+                    <button onClick={() => fazer(p.perfil_id, "corrigir", { tipo: "vez", perfil_id: p.perfil_id })} disabled={!!indo}
+                      className="font-semibold underline" style={{ color: C.roxo }}>pôr a vez aqui</button>
+                    <button onClick={() => fazer(p.perfil_id, "corrigir", { tipo: "devolver", perfil_id: p.perfil_id })} disabled={!!indo}
+                      className="font-semibold underline" style={{ color: C.roxo }}>devolver uma vez</button>
+                  </>
+                )}
+                {gerente && p.perfil_id !== d.eu && (p.presente
+                  ? <button onClick={() => fazer(p.perfil_id, "saiu", { perfil_id: p.perfil_id })} disabled={!!indo} className="underline">marcar saída</button>
+                  : <button onClick={() => fazer(p.perfil_id, "presente", { perfil_id: p.perfil_id })} disabled={!!indo} className="font-semibold" style={{ color: C.roxo }}>está na loja</button>)}
+              </div>
+            </div>
+          ))}
+          {!(d.ordem || []).length && <div className="px-3 py-4 text-[14px]" style={{ color: C.mute }}>Ninguém passou pela loja hoje ainda.</div>}
+        </div>
+      </div>
+
+      {naoVieram.length > 0 && (
+        <div className="mt-3 text-[13px]" style={{ color: C.mute }}>
+          Ainda não abriram o sistema hoje: {naoVieram.map((p) => p.nome).join(", ")}.
+          {gerente && <> Quem já está na loja: {naoVieram.map((p) => (
+            <button key={p.perfil_id} onClick={() => fazer(p.perfil_id, "presente", { perfil_id: p.perfil_id })} disabled={!!indo}
+              className="ml-2 font-semibold" style={{ color: C.roxo }}>{p.nome}</button>
+          ))}</>}
         </div>
       )}
 
+      <div className="mt-5 flex items-baseline justify-between">
+        <div className="text-[12px] uppercase tracking-wide" style={{ color: C.mute }}>registro de hoje</div>
+        {gerente && <button onClick={() => setCorrigir(!corrigir)} className="text-[13px] font-semibold" style={{ color: C.roxo }}>
+          {corrigir ? "terminar correção" : "corrigir a fila"}</button>}
+      </div>
+      <div className="mt-1.5 rounded-xl border" style={{ borderColor: C.line, background: C.paper }}>
+        {(d.eventos || []).map((e) => (
+          <div key={e.id} className="flex flex-wrap items-baseline gap-x-2 border-b px-3 py-1.5 text-[13px] last:border-b-0" style={{ borderColor: C.line }}>
+            <span style={{ fontFamily: F.mono, color: C.mute }}>{horaSP(e.criado_em)}</span>
+            <b>{e.nome || "—"}</b>
+            <span>{TIPO_EVENTO[e.tipo] || e.tipo}{e.tipo === "vez" && VIA_VEZ[e.via] ? ` (${VIA_VEZ[e.via]})` : ""}</span>
+            {e.resposta && <span style={{ color: e.resposta === "aceitou" ? C.verde : C.laranja }}>· {RESPOSTA[e.resposta]}</span>}
+            {e.penalizado && <span style={{ color: e.estornado_em ? C.mute : C.laranja, textDecoration: e.estornado_em ? "line-through" : "none" }}>· perdeu atendimento</span>}
+            {e.motivo && <span style={{ color: C.mute }}>· {e.motivo}</span>}
+            {e.atendimento_id && aoAbrir && <button onClick={() => aoAbrir(e.atendimento_id)} className="underline" style={{ color: C.mute }}>abrir</button>}
+            {gerente && corrigir && e.penalizado && !e.estornado_em && (
+              <button onClick={() => fazer(e.id, "corrigir", { tipo: "estornar", evento_id: e.id })} disabled={!!indo}
+                className="font-semibold underline" style={{ color: C.roxo }}>desfazer o ponto</button>
+            )}
+          </div>
+        ))}
+        {!(d.eventos || []).length && <div className="px-3 py-3 text-[13px]" style={{ color: C.mute }}>Nenhum cliente pela fila hoje ainda.</div>}
+      </div>
+
       <p className="mt-4 text-[12.5px] leading-relaxed" style={{ color: C.mute }}>
-        Índice AT = conversão × score × vendas × 10, a conta da planilha. Empate decide pelo mês anterior, e depois por quem chegou primeiro.
-        Abrir o sistema põe a pessoa na fila; 30 minutos sem responder o lembrete e sem atendimento a tiram, e a próxima resposta a traz de volta. Responder "almoço" tira até a resposta seguinte.
-        "Atendendo" é o cliente em loja da lista de Atendimentos; sai com "finalizar" (aqui ou lá), quando o status muda para um de fim, ou sozinho depois de três horas.
-        Quando estão todos atendendo, o próximo é anunciado e segura a vez até abrir um atendimento novo, mesmo que outro libere antes.
+        A ordem é a do índice AT (conversão × confiabilidade × fechamentos × 10) e fica congelada no primeiro cliente do dia; quem chega depois entra no fim.
+        A vez anda em roda, um cliente para cada um. Quem está atendendo na vez dele é pulado e fica devendo a vez: dez minutos depois de encerrar o atendimento, é o próximo.
+        Quem está fora da fila na vez dele (almoço, pausa, 30 minutos sem responder) perde aquela volta. Estando todos atendendo, a roda segue e cada um pega mais um.
+        A chamada dura três minutos: passar ou não responder leva o cliente ao próximo e conta um "perdeu atendimento". Cliente que pediu um negociador não conta.
+        Depois do horário da loja, só quem está aqui, sem ponto negativo. O que libera para a fila é "encerrar atendimento" — mudar o status não libera.
       </p>
     </div>
   );
@@ -26926,18 +27274,29 @@ function App() {
     </Aviso>
   );
 
-  if (aberto) {
-    return (
-      <RedeDeErro onde={`atendimento ${aberto.id}`} chave={aberto.id}>
-        <VaaptyAponte perfil={perfil} atendimento={aberto}
-          aoVoltar={() => setAberto(null)}
-          aoRecarregar={async () => { try { setAberto(await lerAtendimento(aberto.id)); } catch (e) {} }} />
-      </RedeDeErro>
-    );
-  }
   const abrir = async (id) => {
     try { setAberto(await lerAtendimento(id)); } catch (e) { alert(e.message); }
   };
+  // Os avisos da fila (0106) valem em qualquer tela — também com um
+  // atendimento aberto, que é onde o negociador passa o dia.
+  const avisosFila = perfil && perfil.papel === "negociador" && (
+    <RedeDeErro onde="fila"><AvisosDaFila perfil={perfil} aoAbrir={abrir} aoIrParaFila={() => { setAberto(null); setTela("vez"); }} /></RedeDeErro>
+  );
+  if (aberto) {
+    return (
+      <>
+        <RedeDeErro onde={`atendimento ${aberto.id}`} chave={aberto.id}>
+          <VaaptyAponte perfil={perfil} atendimento={aberto}
+            aoVoltar={() => setAberto(null)}
+            aoRecarregar={async () => { try { setAberto(await lerAtendimento(aberto.id)); } catch (e) {} }} />
+        </RedeDeErro>
+        {avisosFila}
+      {perfil && (perfil.papel === "gerente" || perfil.financeiro) && (
+        <RedeDeErro onde="aprovações"><AvisoAprovacoes aoAbrir={() => setTela("adm_aprovacoes")} /></RedeDeErro>
+      )}
+      </>
+    );
+  }
   const mes = { comp, setComp, MESES };
   const compOuAtual = comp || competenciaDe(hojeEmSP());
   const podeGestao = !!(perfil && (perfil.administrativo || perfil.papel === "gerente"));
@@ -26953,10 +27312,9 @@ function App() {
           aparece onde a pessoa estiver, e não só no "Meu dia". */}
       {pedeLembrete && <RedeDeErro onde="lembrete"><LembreteDoDia perfil={perfil} /></RedeDeErro>}
       {perfil && perfil.papel === "negociador" && <SinalAbriu />}
-      {/* Quem não marcou presença não entra na fila da vez (0085). */}
-      {perfil && perfil.papel === "negociador" && tela !== "vez" && (
-        <RedeDeErro onde="presença"><AvisoPresenca perfil={perfil} aoIrParaFila={() => setTela("vez")} /></RedeDeErro>
-      )}
+      {/* A chamada da vez, o "você é o próximo" e o "você não está na
+          fila" (0106) — sobre qualquer destino. */}
+      {avisosFila}
       <RedeDeErro onde={`tela ${tela}`} chave={tela}>
       {tela === "meudia" && <TelaMeuDia perfil={perfil} />}
       {/* As seis seções da pré-venda são destinos do menu; a tela é a
@@ -26964,7 +27322,7 @@ function App() {
       {ABA_PV[tela] && <TelaPreVendas perfil={perfil} aoAbrirAtendimento={abrir} aba={ABA_PV[tela]}
         aoVerConversa={verConversa} mes={mes} comp={compOuAtual} />}
       {tela === "atendimentos" && <CRM perfil={perfil} aoAbrir={abrir} mes={{ ...mes, todos: true }} />}
-      {tela === "vez" && <TelaFilaDaVez perfil={perfil} />}
+      {tela === "vez" && <TelaFilaDaVez perfil={perfil} aoAbrir={abrir} />}
       {tela === "estoque" && <TelaEstoque perfil={perfil} comp={compOuAtual} mes={mes} />}
       {/* A rota confere de novo: esconder o item do menu é conveniência,
           não controle. Quem chegar aqui por outro caminho não passa. */}

@@ -173,6 +173,28 @@ async function esteira(req, res, tok) {
   if (!eu) return res.status(403).json({ erro: "Sem perfil." });
   const RA = `${URL_BASE}/rest/v1/aprovacao_negocio`;
 
+  /* O LEMBRETE DOS REVISORES (03/11/2026, o Derek: "deve aparecer
+   * notificação a cada 10 minutos para o gerente quando tiver alguma
+   * aprovação de processo de documentação pra pagamento pra fazer"). A
+   * tela pergunta de dez em dez minutos; a resposta é só o que espera a
+   * aprovação DESTA pessoa — sem dado bancário, sem valor. */
+  if (req.method === "GET" && req.query.resumo) {
+    if (!eu.fin) return res.status(200).json({ aprovar: [] });
+    const de = new Date(Date.now() - 120 * 86400000).toISOString().slice(0, 10);
+    const ats = await banco(`${URL_BASE}/rest/v1/atendimento?select=id,cliente_nome,carro_descricao,negociador_nome,` +
+      `checklist(revisado_em,pago_em,arquivado_em)&status=eq.fechado&data=gte.${de}&limit=300`, { headers: cabecalhos(tok) }) || [];
+    const revisados = ats.filter((a) => { const cl = umaLinha(a.checklist); return cl && cl.revisado_em && !cl.pago_em && !cl.arquivado_em; });
+    const ids = revisados.map((a) => a.id);
+    const aprov = ids.length ? await banco(`${RA}?select=atendimento_id,perfil_id,decisao,criado_em&atendimento_id=in.(${ids.join(",")})`, { headers: cabecalhos(tok) }) || [] : [];
+    const aprovar = revisados.filter((a) => {
+      const cl = umaLinha(a.checklist);
+      const ap = aprov.filter((x) => x.atendimento_id === a.id);
+      if (etapaDe(cl, ap) !== "aprovar") return false;
+      return !ap.some((x) => x.perfil_id === eu.id && x.decisao === "aprovado" && String(x.criado_em) >= String(cl.revisado_em));
+    }).map((a) => ({ id: a.id, cliente: a.cliente_nome || "", carro: a.carro_descricao || "", negociador: a.negociador_nome || "" }));
+    return res.status(200).json({ aprovar });
+  }
+
   if (req.method === "GET") {
     // Fechados dos últimos 120 dias, ou do mês pedido. Mais velho que
     // isso é a planilha importada, que ninguém vai revisar.
