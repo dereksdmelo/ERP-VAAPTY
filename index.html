@@ -23494,7 +23494,11 @@ function TelaFilaDaVez({ perfil }) {
           <>
             <div className="text-[12px] uppercase tracking-wide" style={{ opacity: 0.8 }}>o próximo cliente é de</div>
             <div className="text-[26px] leading-tight" style={{ fontFamily: F.disp, fontWeight: 800 }}>{daVez.nome}</div>
-            {todosAtendendo && (
+            {d.anunciado_em ? (
+              <div className="mt-1 text-[13px]" style={{ opacity: 0.9 }}>
+                Anunciado às {horaSP(d.anunciado_em)}, quando estavam todos atendendo — segura a vez até pegar um cliente, mesmo que outro libere antes.
+              </div>
+            ) : todosAtendendo && (
               <div className="mt-1 text-[13px]" style={{ opacity: 0.9 }}>
                 Estão todos atendendo — {daVez.nome} pega {daVez.atendendo.length === 1 ? "o segundo cliente" : `o ${daVez.atendendo.length + 1}º cliente`}.
               </div>
@@ -23575,6 +23579,7 @@ function TelaFilaDaVez({ perfil }) {
         Índice AT = conversão × score × vendas × 10, a conta da planilha. Empate decide pelo mês anterior, e depois por quem chegou primeiro.
         Abrir o sistema põe a pessoa na fila; 30 minutos sem responder o lembrete e sem atendimento a tiram, e a próxima resposta a traz de volta. Responder "almoço" tira até a resposta seguinte.
         "Atendendo" é o cliente em loja da lista de Atendimentos; sai com "finalizar" (aqui ou lá), quando o status muda para um de fim, ou sozinho depois de três horas.
+        Quando estão todos atendendo, o próximo é anunciado e segura a vez até abrir um atendimento novo, mesmo que outro libere antes.
       </p>
     </div>
   );

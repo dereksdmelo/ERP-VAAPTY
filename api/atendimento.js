@@ -1190,6 +1190,10 @@ async function vez(req, res, tok) {
     const scoreDe = (cp) => R.score(meta ? (desemp || []).find((d) => d.negociador_id === meta.id && d.competencia === cp) : null);
     const mes = conta(comp), mesAnt = conta(ant);
     const score = scoreDe(comp);
+    // O atendimento mais recente que ele ABRIU hoje: é o que diz se o
+    // anunciado já pegou cliente (0103). Pela abertura, não pela chegada
+    // digitada — um "Chegou" com hora retroativa cairia antes do anúncio.
+    const ultimaChegada = Math.max(0, ...(deHoje || []).filter(dele).map((a) => Date.parse(a.criado_em) || 0));
     const naMesa = (deHoje || []).filter((a) => dele(a) && emLoja({ ...a, data: hoje }, agora))
       .map((a) => ({ id: a.id, cliente: a.cliente_nome || "", carro: a.carro_descricao || "", desde: a.chegada_em || a.criado_em }));
     const pres = (presencas || []).find((x) => x.perfil_id === p.id) || null;
@@ -1221,6 +1225,7 @@ async function vez(req, res, tok) {
       indice_anterior: R.indiceAt({ ...mesAnt, score: scoreDe(ant) }),
       sem_meta: !meta,
       atendendo: naMesa,
+      ultima_chegada: ultimaChegada,
     };
   });
 
@@ -1233,9 +1238,35 @@ async function vez(req, res, tok) {
     vezDe = ordem.find((p) => p.atendendo.length === menos).perfil_id;
   }
 
+  /* QUEM FOI ANUNCIADO SEGURA A VEZ (0103, o Derek: "todos estavam
+   * atendendo e o Carlos seria o próximo… o Dimas terminou de atender, aí
+   * de repente começou a ser a vez do Dimas"). Com todos ocupados, o
+   * próximo da conta acima fica GRAVADO como anunciado, e a vez continua
+   * dele mesmo que outro libere — até ele abrir atendimento novo, sair da
+   * fila, ou o dia virar. Só então a conta volta a valer. */
+  let anuncio = null;
+  try { anuncio = ((await banco(`${REST("fila_anuncio")}?select=*&dia=eq.${hoje}`, cab)) || [])[0] || null; } catch (e) {}
+  const anunciado = anuncio && ordem.find((p) => p.perfil_id === anuncio.perfil_id);
+  const valeAnuncio = !!(anunciado && anunciado.ultima_chegada < Date.parse(anuncio.desde));
+  if (valeAnuncio) {
+    vezDe = anunciado.perfil_id;
+  } else {
+    if (anuncio) await banco(`${REST("fila_anuncio")}?dia=eq.${hoje}`, { method: "DELETE", headers: cabecalhos(tok) }).catch(() => {});
+    anuncio = null;
+    const todosOcupados = ordem.length > 0 && ordem.every((p) => p.atendendo.length > 0);
+    if (todosOcupados && vezDe) {
+      const novo = { dia: hoje, perfil_id: vezDe, desde: new Date(agora).toISOString() };
+      const r = await banco(`${REST("fila_anuncio")}?on_conflict=dia`, {
+        method: "POST", headers: json(tok, { Prefer: "resolution=merge-duplicates,return=representation" }), body: JSON.stringify(novo),
+      }).catch(() => null);
+      anuncio = (Array.isArray(r) && r[0]) || novo;
+    }
+  }
+
   return res.status(200).json({
     dia: hoje, competencia: comp,
     ordem, vez: vezDe,
+    anunciado_em: anuncio && anuncio.perfil_id === vezDe ? anuncio.desde : null,
     ausentes: pessoas.filter((p) => !p.presente).sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR")),
     eu,
   });

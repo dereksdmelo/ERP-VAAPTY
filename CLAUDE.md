@@ -3620,6 +3620,15 @@ sistema em casa à noite não pode pôr ninguém na fila. Responder
 última resposta de cada um vem por `agenda_ultimo_sinal()`, que devolve
 a hora e o tipo — nunca o texto.
 
+**Quem foi anunciado segura a vez (0103, 03/11/2026).** O Derek: *"todos
+estavam atendendo e o Carlos seria o próximo… o Dimas terminou de
+atender, aí de repente começou a ser a vez do Dimas"*. A regra acima põe
+o livre na frente de quem tem cliente; ele escolheu outra: com todos
+ocupados, o próximo da conta fica GRAVADO (`fila_anuncio`, um por dia) e
+a vez continua dele mesmo que outro libere — até ele abrir atendimento
+novo (pela hora em que o atendimento foi criado, não pela chegada
+digitada), sair da fila, ou o dia virar. A tela diz "anunciado às…".
+
 **"Cliente em loja" é uma regra só** (`emLoja`, no `api/atendimento.js`):
 a lista de Atendimentos mostra a marca e o "finalizar", e a fila usa a
 mesma conta para saber quem está atendendo. **Finalizar pergunta como
