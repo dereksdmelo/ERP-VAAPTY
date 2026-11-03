@@ -11846,7 +11846,7 @@ function JuntarRepetidos({ par, aoFechar, aoFeito }) {
         <div className="mt-3 flex flex-col gap-2 sm:flex-row">{lado(a)}{lado(b)}</div>
         <ul className="mt-3 list-disc space-y-0.5 pl-5 text-[12.5px]" style={{ color: C.mute }}>
           {sai.do_lead && <li>O lead passa para o que fica: a visita continua contando para a pré-venda{sai.agendado_por ? ` (${sai.agendado_por})` : ""}.</li>}
-          {sai.do_lead && !ficaL.do_lead && <li>A origem e quem prospectou vêm do lead.</li>}
+          {(sai.do_lead || ficaL.do_lead) && <li>A origem e quem prospectou vêm do lead; "Fluxo" só fica se ninguém souber mais.</li>}
           {sai.tem_veiculo && !ficaL.tem_veiculo && <li>A ficha do carro{sai.fotos ? ` e as ${sai.fotos} fotos` : ""} passam para o que fica.</li>}
           {sai.tem_veiculo && ficaL.tem_veiculo && <li style={{ color: C.laranja }}>Os dois têm ficha do carro: fica a deste; a do outro ({sai.carro || "sem placa"}) sai do atendimento.</li>}
           <li>Os dados do cliente que faltam neste vêm do outro, e a observação diz que foi juntado.</li>

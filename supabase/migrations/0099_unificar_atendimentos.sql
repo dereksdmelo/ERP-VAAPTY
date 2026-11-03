@@ -14,6 +14,9 @@
 -- (é o `lead.atendimento_id` que faz a visita contar para a pré-venda),
 -- o carro, o check list, os documentos, a conversa, a agenda.
 --
+-- **A origem e o PROSPEC vêm do lead**, quando há um, e "Fluxo" só vale
+-- quando nenhum dos dois lados sabe mais.
+--
 -- **O que fica é escolhido na tela**, e o padrão é o que tem o carro:
 -- é o que está aberto no celular do negociador, e mudar o id debaixo
 -- dele faria a tela dele perder a ficha.
@@ -29,8 +32,8 @@ language plpgsql security definer set search_path = public as $$
 declare
   f atendimento%rowtype;
   s atendimento%rowtype;
-  s_lead boolean;
-  f_lead boolean;
+  l_origem origem_atendimento;
+  l_prospec text;
   v_solto int := 0;
 begin
   if p_fica is null or p_sai is null or p_fica = p_sai then
@@ -46,8 +49,14 @@ begin
     raise exception 'Só o gerente junta atendimentos de negociadores diferentes.';
   end if;
 
-  s_lead := exists (select 1 from lead where atendimento_id = s.id);
-  f_lead := exists (select 1 from lead where atendimento_id = f.id);
+  -- A origem e quem trouxe vêm do LEAD, não do atendimento da pré-venda:
+  -- o primeiro Carlos (03/11) foi aberto como "cliente de fluxo" e só
+  -- depois ligado ao lead da IA pelo telefone — a origem dele dizia Fluxo
+  -- e a do negociador, Facebook. "Fluxo" só vale quando ninguém sabe mais.
+  select origem, coalesce(nullif(btrim(prospector_nome), ''), nullif(btrim(agendado_por_nome), ''))
+    into l_origem, l_prospec
+    from lead where atendimento_id in (f.id, s.id)
+   order by (atendimento_id = s.id) desc limit 1;
 
   -- Os dados do cliente: o que fica preenchido não muda; o vazio herda.
   -- A ORIGEM e o PROSPEC vêm de quem veio pelo lead: o negociador que
@@ -62,9 +71,14 @@ begin
     como_conheceu    = coalesce(f.como_conheceu, s.como_conheceu),
     negociador_id    = coalesce(f.negociador_id, s.negociador_id),
     negociador_nome  = coalesce(nullif(btrim(f.negociador_nome), ''), s.negociador_nome),
-    origem           = case when s_lead and not f_lead then s.origem else coalesce(f.origem, s.origem) end,
-    prospec          = case when s_lead and not f_lead and nullif(btrim(s.prospec), '') is not null then s.prospec
-                            else coalesce(nullif(btrim(f.prospec), ''), s.prospec) end,
+    origem           = coalesce(case when l_origem::text <> 'outro' then l_origem end,
+                                case when f.origem::text <> 'fluxo_loja' then f.origem end,
+                                case when s.origem::text <> 'fluxo_loja' then s.origem end,
+                                f.origem, s.origem),
+    prospec          = coalesce(l_prospec,
+                                case when upper(btrim(coalesce(f.prospec, ''))) not in ('', 'FLUXO') then f.prospec end,
+                                case when upper(btrim(coalesce(s.prospec, ''))) not in ('', 'FLUXO') then s.prospec end,
+                                nullif(btrim(f.prospec), ''), s.prospec),
     chegada_em       = least(coalesce(f.chegada_em, s.chegada_em), coalesce(s.chegada_em, f.chegada_em)),
     observacoes      = nullif(concat_ws(E'\n', nullif(btrim(f.observacoes), ''),
                          nullif(btrim(s.observacoes), ''),
