@@ -2233,6 +2233,11 @@ lojista (consulta e mensagem); a interna não entra em `dut_estado()`
 nem em mensagem nenhuma — para "segurar o preenchimento" sem contar ao
 cliente por quê. Mesma separação do `internas` da ficha (decisão 2).
 
+**A forma da entrega é escolhida ao entregar (03/11/2026, o Derek).**
+"Marcar como entregue" pergunta: Digital (WhatsApp), Envio (Correios) ou
+Retirada na loja — e Correios só fecha com o código de rastreio, conferido
+também no servidor (400 sem ele). A coluna Entregues separa as três.
+
 **E o WhatsApp do adm mora no Administrativo** (`adm_whats`): a mesma
 caixa de Conversas, com `operacao` — só os números fora do funil, pelo
 filtro do servidor, porque a pessoa do adm não é gerente e não lê a

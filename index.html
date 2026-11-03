@@ -21709,7 +21709,7 @@ const proximoPasso = (p) => {
   }
   if (p.situacao === "preenchido") return { para: "no_cartorio", rot: "Levei ao cartório" };
   if (p.situacao === "no_cartorio") return { para: "reconhecido", rot: "Voltou do cartório" };
-  if (p.situacao === "reconhecido") return { para: "entregue", rot: p.entrega === "envio" ? "Enviei pelo correio" : p.entrega === "whatsapp" ? "Mandei pelo WhatsApp" : "Lojista retirou" };
+  if (p.situacao === "reconhecido") return { para: "entregue", rot: "Marcar como entregue" };
   return null;
 };
 
@@ -21750,10 +21750,13 @@ function TrilhaDut({ p }) {
  * que foi enviado por correio, o que foi enviado pelo whats e o que vai
  * ser retirado em loja… fica tudo misturado"). `envio` é o correio, que
  * é o que o formulário do lojista oferece; o WhatsApp o adm escolhe. */
+/* Os nomes são os do Derek (03/11/2026): "Digital (WhatsApp), Envio
+ * (Correios) — precisa ter código de rastreio — e Retirada física na
+ * loja". A forma é escolhida ao marcar como entregue. */
 const ENTREGA_DUT = [
-  ["retirada", "Retira na loja", "#5B4B8A"],
-  ["envio", "Correio", "#B4610E"],
-  ["whatsapp", "WhatsApp", "#1D7F58"],
+  ["retirada", "Retirada na loja", "#5B4B8A"],
+  ["envio", "Envio (Correios)", "#B4610E"],
+  ["whatsapp", "Digital (WhatsApp)", "#1D7F58"],
 ];
 const entregaDut = (v) => ENTREGA_DUT.filter((x) => x[0] === v)[0] || ENTREGA_DUT[0];
 
@@ -21765,6 +21768,12 @@ function CartaoDut({ p, aoMudar }) {
   const [rast, setRast] = useState(p.rastreio || "");
   const [obsInt, setObsInt] = useState(p.obs_interna || "");
   const ent = entregaDut(p.entrega);
+  /* COMO FOI ENTREGUE é perguntado na hora de entregar, e Correios só
+   * fecha com o código de rastreio — sem ele, "enviado" não se confere. */
+  const [entregando, setEntregando] = useState(false);
+  const [forma, setForma] = useState(p.entrega || "retirada");
+  const [rastreioEnt, setRastreioEnt] = useState(p.rastreio || "");
+  const podeEntregar = forma !== "envio" || rastreioEnt.trim().length >= 8;
 
   const info = DUT_SITUACAO[p.situacao] || DUT_SITUACAO.recebido;
   const passo = proximoPasso(p);
@@ -21829,8 +21838,8 @@ function CartaoDut({ p, aoMudar }) {
       )}
 
       <div className="mt-3 flex flex-wrap gap-2">
-        {passo && (
-          <button onClick={() => agir({ situacao: passo.para })} disabled={ocupado}
+        {passo && !entregando && (
+          <button onClick={() => (passo.para === "entregue" ? setEntregando(true) : agir({ situacao: passo.para }))} disabled={ocupado}
             className="rounded-lg px-3 py-2 text-[13.5px] font-semibold text-white"
             style={{ background: C.roxo, opacity: ocupado ? 0.5 : 1 }}>{passo.rot}</button>
         )}
@@ -21839,6 +21848,33 @@ function CartaoDut({ p, aoMudar }) {
           style={{ borderColor: C.line, color: C.ink }}>{aberto ? "Fechar" : "Abrir"}</button>
       </div>
 
+      {entregando && (
+        <div className="mt-3 rounded-lg p-3" style={{ background: C.bg }}>
+          <div className="text-[12px] font-semibold uppercase tracking-[0.06em]" style={{ color: C.mute }}>Como foi entregue?</div>
+          <div className="mt-1.5 grid gap-1.5">
+            {ENTREGA_DUT.map(([v, r, cor]) => (
+              <button key={v} onClick={() => setForma(v)} className="rounded-lg border px-3 py-2 text-left text-[13.5px] font-semibold"
+                style={forma === v ? { background: cor, borderColor: cor, color: "#fff" } : { borderColor: C.line, color: C.ink, background: C.paper }}>{r}</button>
+            ))}
+          </div>
+          {forma === "envio" && (
+            <input className={`${inputCls} mt-2`} style={{ ...inputSty, fontFamily: F.mono }} autoFocus placeholder="código de rastreio (ex.: AB123456789BR)"
+              value={rastreioEnt} onChange={(e) => setRastreioEnt(e.target.value.toUpperCase())} />
+          )}
+          {forma === "envio" && !podeEntregar && <p className="mt-1 text-[12px]" style={{ color: C.laranja }}>Envio pelos Correios precisa do código de rastreio.</p>}
+          <div className="mt-2 flex gap-2">
+            <button onClick={() => setEntregando(false)} className="rounded-lg border px-3 py-2 text-[13px]" style={{ borderColor: C.line }}>voltar</button>
+            <button disabled={!podeEntregar || ocupado}
+              onClick={async () => { await agir({ situacao: "entregue", entrega: forma, rastreio: forma === "envio" ? rastreioEnt.trim() : undefined }); setEntregando(false); }}
+              className="flex-1 rounded-lg px-3 py-2 text-[13.5px] font-semibold text-white" style={{ background: C.roxo, opacity: !podeEntregar || ocupado ? 0.5 : 1 }}>
+              Confirmar entrega
+            </button>
+          </div>
+        </div>
+      )}
+      {p.situacao === "entregue" && p.entrega === "envio" && p.rastreio && (
+        <p className="mt-2 text-[12.5px]" style={{ color: C.mute }}>Rastreio: <span style={{ fontFamily: F.mono, color: C.ink }}>{p.rastreio}</span></p>
+      )}
       {erro && <p className="mt-2 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
       {aviso && (aviso.enviado
         ? <p className="mt-2 text-[12.5px]" style={{ color: C.verde }}>Lojista avisado pelo {aviso.canal || "WhatsApp do adm"}.</p>
@@ -22009,7 +22045,18 @@ function FilaDut() {
                     <div className="text-[11.5px]" style={{ color: C.mute }}>{col.nota}</div>
                   </div>
                   <div className="space-y-2">
-                    {doCol.map((p) => <CartaoDut key={p.id} p={p} aoMudar={mudar} />)}
+                    {col.id !== "entregue" && doCol.map((p) => <CartaoDut key={p.id} p={p} aoMudar={mudar} />)}
+                    {/* ENTREGUES SEPARADOS PELA FORMA (03/11/2026, o Derek). */}
+                    {col.id === "entregue" && ENTREGA_DUT.map(([v, r, cor]) => {
+                      const doGrupo = doCol.filter((x) => (x.entrega || "retirada") === v);
+                      if (!doGrupo.length) return null;
+                      return (
+                        <div key={v} className="space-y-2">
+                          <div className="px-1 pt-1 text-[11.5px] font-bold uppercase tracking-[0.05em]" style={{ color: cor }}>{r} · {doGrupo.length}</div>
+                          {doGrupo.map((p) => <CartaoDut key={p.id} p={p} aoMudar={mudar} />)}
+                        </div>
+                      );
+                    })}
                     {!doCol.length && <div className="py-3 text-center text-[12px]" style={{ color: C.mute }}>vazio</div>}
                   </div>
                 </div>

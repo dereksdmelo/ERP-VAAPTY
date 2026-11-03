@@ -911,7 +911,7 @@ async function dutFila(req, res, tok) {
     // Como estava antes: o aviso ao lojista só sai quando a etapa MUDA,
     // não a cada "Salvar" do mesmo pedido.
     let antes = {};
-    try { antes = ((await (await fetch(`${REST_DUT}?select=situacao,pendencia&id=eq.${id}`, { headers: cabecalhos(tok) })).json()) || [])[0] || {}; } catch (e) {}
+    try { antes = ((await (await fetch(`${REST_DUT}?select=situacao,pendencia,entrega,rastreio&id=eq.${id}`, { headers: cabecalhos(tok) })).json()) || [])[0] || {}; } catch (e) {}
     const eu = donoDoToken(tok);
 
     /* O CARIMBO É DO SERVIDOR, não da tela. "Preenchido por quem" é a
@@ -941,6 +941,13 @@ async function dutFila(req, res, tok) {
     // A observação que o lojista não vê (0100): fica fora do `dut_estado`
     // e de toda mensagem — o "falta algo" é o que ele lê.
     if (typeof c.obs_interna === "string") mud.obs_interna = texto(c.obs_interna);
+    // Envio pelos Correios só fecha com o código de rastreio (03/11/2026,
+    // o Derek): "enviado" sem código não se confere depois.
+    if (mud.situacao === "entregue") {
+      const ent = mud.entrega || antes.entrega;
+      const rast = mud.rastreio !== undefined ? mud.rastreio : antes.rastreio;
+      if (ent === "envio" && !String(rast || "").trim()) return res.status(400).json({ erro: "Envio pelos Correios precisa do código de rastreio." });
+    }
 
     const r = await fetch(`${REST_DUT}?id=eq.${id}`, {
       method: "PATCH", headers: json(tok, { Prefer: "return=representation" }), body: JSON.stringify(mud),
