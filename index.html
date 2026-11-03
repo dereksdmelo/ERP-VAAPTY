@@ -1363,14 +1363,15 @@ async function contratoEmPdf(html) {
   });
 }
 async function enviarParaAssinatura(atendimentoId, dados) {
-  let pdf_base64 = null;
-  try { pdf_base64 = await contratoEmPdf(dados.conteudo); } catch (e) {}
+  let pdf_base64 = null, erroPdf = "";
+  try { pdf_base64 = await contratoEmPdf(dados.conteudo); } catch (e) { erroPdf = String((e && e.message) || e || "erro desconhecido"); }
   const r = await fetchAut("/api/documento?recurso=zapsign", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ atendimento_id: atendimentoId, ...dados, pdf_base64 }),
   });
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.erro || "Não consegui enviar para assinatura.");
+  if (erroPdf) d.erro_pdf = erroPdf;
   return d;
 }
 
@@ -7195,7 +7196,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                               setEnvioZap((r.assinantes && r.assinantes.length
                                 ? `Enviado. Link para ${r.assinantes[0].nome}: ${r.assinantes[0].link}`
                                 : "Enviado ao ZapSign.")
-                                + (r.formato === "markdown" ? " Atenção: o PDF não foi montado neste aparelho, e o contrato foi como texto simples (sem a formatação e com a assinatura no fim)." : ""));
+                                + (r.formato === "markdown" ? ` Atenção: o PDF não foi montado neste aparelho${r.erro_pdf ? ` (${r.erro_pdf})` : ""}, e o contrato foi como texto simples (sem a formatação e com a assinatura no fim). Recarregue a página e mande de novo.` : ""));
                               setZapEnvio({ token: r.token, em: new Date().toISOString(), link: (r.assinantes && r.assinantes[0] && r.assinantes[0].link) || "", formato: r.formato || "" });
                             } catch (e) { setEnvioZap(e.message); }
                             setEnviandoZap(false);
@@ -20630,7 +20631,7 @@ function ContratoDoNegocio({ atendimento, checklist, perfil, aoSalvarChecklist }
       setAviso((r.assinantes && r.assinantes.length
         ? `Enviado. Link para ${r.assinantes[0].nome}: ${r.assinantes[0].link}`
         : "Enviado ao ZapSign.")
-        + (r.formato === "markdown" ? " Atenção: o PDF não foi montado neste aparelho, e o contrato foi como texto simples (sem a formatação e com a assinatura no fim)." : ""));
+        + (r.formato === "markdown" ? ` Atenção: o PDF não foi montado neste aparelho${r.erro_pdf ? ` (${r.erro_pdf})` : ""}, e o contrato foi como texto simples (sem a formatação e com a assinatura no fim). Recarregue a página e mande de novo.` : ""));
     } catch (e) { setErro(e.message); }
     setIndo("");
   };
