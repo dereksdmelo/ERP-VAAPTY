@@ -14437,7 +14437,7 @@ function TelaPreVendas({ perfil, aoAbrirAtendimento, aoVerConversa, mes, comp, a
             : <FunilLeads perfil={perfil} equipe={equipe} aoVerConversa={aoVerConversa} />}
         </div>
       )}
-      {aba === "agenda" && <Agendamentos perfil={perfil} equipe={equipe} aoAbrirAtendimento={aoAbrirAtendimento} />}
+      {aba === "agenda" && <Agendamentos perfil={perfil} equipe={equipe} aoAbrirAtendimento={aoAbrirAtendimento} aoVerConversa={aoVerConversa} />}
       {aba === "perdidos" && <LeadsPerdidos perfil={perfil} />}
       {aba === "canais" && <TelaCanaisPreVenda comp={comp} />}
       {aba === "excluidos" && <LeadsExcluidos />}
@@ -15985,7 +15985,14 @@ const ESTADO_AGENDA = {
   remarcou:   { rot: "remarcou",        fundo: C.bg,      borda: C.line,    hora: C.mute },
 };
 
-function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
+/* A CONVERSA ABRE NO WHATSAPP DO SISTEMA (03/11/2026, o Derek: "ao
+ * invés de abrir o link do whats, abrir a conversa direto dentro do
+ * whats do sistema"). É a tela Conversas, já na conversa do telefone —
+ * a mesma de quem vem do quadro (`aoVerConversa`). Lá se lê o histórico
+ * e se responde pelo número em que o cliente escreveu, e a mensagem
+ * fica gravada; o wa.me abria o WhatsApp do computador, em outro número
+ * e sem registro. */
+function Agendamentos({ perfil, equipe, aoAbrirAtendimento, aoVerConversa }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
   const [ligando, setLigando] = useState(null);
@@ -16288,11 +16295,15 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
                                     style={{ borderColor: C.laranja, color: C.laranja }}>não veio</button>
                                 </div>
                                 <div className="grid grid-cols-2 gap-1">
+                                  {l.telefone && aoVerConversa && (
+                                    <button onClick={() => aoVerConversa(l.telefone)} className="rounded border px-1 py-1 text-[11px] font-semibold"
+                                      style={{ borderColor: C.verde, color: C.verde }}>conversa</button>
+                                  )}
                                   {l.telefone && (
                                     <button onClick={() => setLigando(l)} className="rounded border px-1 py-1 text-[11px] font-semibold"
                                       style={{ borderColor: C.line, color: C.verde }}>ligar</button>
                                   )}
-                                  <button onClick={() => setAgendando(l)} className="rounded border px-1 py-1 text-[11px] font-semibold"
+                                  <button onClick={() => setAgendando(l)} className="col-span-2 rounded border px-1 py-1 text-[11px] font-semibold"
                                     style={{ borderColor: C.line, color: C.roxo }}>remarcar</button>
                                 </div>
                               </div>
@@ -16371,12 +16382,16 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento }) {
                       ) : (
                         <button onClick={() => mexer(l, { confirmado: false })} className="rounded-lg px-3 py-2" style={{ color: C.mute, border: `1px solid ${C.line}` }}>desfazer</button>
                       )}
-                      {l.telefone && (
+                      {l.telefone && (aoVerConversa ? (
+                        <button onClick={() => aoVerConversa(l.telefone)} className="rounded-lg px-3 py-2 font-semibold" style={{ border: `1px solid ${C.verde}`, color: C.verde }}>
+                          Conversa
+                        </button>
+                      ) : (
                         <a href={zap(l.telefone, `Olá ${l.nome}! Confirmando sua avaliação na Vaapty Joinville ${rotuloDia(d).toLowerCase()} às ${horaBR(l.agendado_para)}. Podemos contar com você?`)}
                           target="_blank" rel="noreferrer" className="rounded-lg px-3 py-2 font-semibold" style={{ border: `1px solid ${C.verde}`, color: C.verde }}>
                           WhatsApp
                         </a>
-                      )}
+                      ))}
                       {l.telefone && (
                         <button onClick={() => setLigando(l)} className="rounded-lg px-3 py-2 font-semibold text-white"
                           style={{ background: C.verde }}>Ligar</button>
