@@ -105,7 +105,10 @@ const ORIGENS = [
  * viu na TV? viu na fachada? ouviu na rádio? viu no Facebook e veio
  * direto? pesquisou no Google? foi indicação?". A origem continua
  * "Fluxo de loja" — ele entrou pela porta —; isto é o porquê. */
-const COMO_CONHECEU = ["TV", "Fachada da loja", "Rádio", "Facebook / Instagram", "Google", "Indicação", "Já é cliente", "Outdoor", "Outro"];
+// "Recuperação" (03/11/2026, a Schell: "precisava acrescentar quando é
+// de recuperação"): o cliente que a equipe foi buscar de volta. Ele não
+// entrou pela porta por acaso, então muda a ORIGEM também.
+const COMO_CONHECEU = ["TV", "Fachada da loja", "Rádio", "Facebook / Instagram", "Google", "Indicação", "Recuperação", "Já é cliente", "Outdoor", "Outro"];
 // Quem agendou (0098): o carimbo do banco; sem ele, o nome digitado de
 // quem prospectou. Agendamento de antes do carimbo que a conversa não
 // explicou fica "não registrado", em vez de um palpite.
@@ -13878,7 +13881,8 @@ function JanelaChegou({ lead, equipe, aoFechar, aoPronto, fluxo }) {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             cliente_nome: nome.trim(), cliente_telefone: telefone.trim() || null, carro_descricao: carro.trim() || null,
-            origem: "fluxo_loja", status: "cliente_na_loja", prospec: "FLUXO", como_conheceu: como,
+            origem: como === "Recuperação" ? "recuperacao" : "fluxo_loja", status: "cliente_na_loja",
+            prospec: como === "Recuperação" ? "RECUPERAÇÃO" : "FLUXO", como_conheceu: como,
             negociador_id: n.id, negociador_nome: n.nome,
             data: dia, chegada_em: `${dia}T${hora}:00-03:00`, avisar_grupo: true,
           }),
@@ -21195,7 +21199,7 @@ const proximoPasso = (p) => {
   }
   if (p.situacao === "preenchido") return { para: "no_cartorio", rot: "Levei ao cartório" };
   if (p.situacao === "no_cartorio") return { para: "reconhecido", rot: "Voltou do cartório" };
-  if (p.situacao === "reconhecido") return { para: "entregue", rot: p.entrega === "envio" ? "Enviei" : "Entreguei" };
+  if (p.situacao === "reconhecido") return { para: "entregue", rot: p.entrega === "envio" ? "Enviei pelo correio" : p.entrega === "whatsapp" ? "Mandei pelo WhatsApp" : "Lojista retirou" };
   return null;
 };
 
@@ -21232,12 +21236,25 @@ function TrilhaDut({ p }) {
   );
 }
 
+/* COMO O DUT CHEGA AO LOJISTA (0100, a Schell, 03/11/2026: "separar o
+ * que foi enviado por correio, o que foi enviado pelo whats e o que vai
+ * ser retirado em loja… fica tudo misturado"). `envio` é o correio, que
+ * é o que o formulário do lojista oferece; o WhatsApp o adm escolhe. */
+const ENTREGA_DUT = [
+  ["retirada", "Retira na loja", "#5B4B8A"],
+  ["envio", "Correio", "#B4610E"],
+  ["whatsapp", "WhatsApp", "#1D7F58"],
+];
+const entregaDut = (v) => ENTREGA_DUT.filter((x) => x[0] === v)[0] || ENTREGA_DUT[0];
+
 function CartaoDut({ p, aoMudar }) {
   const [aberto, setAberto] = useState(false);
   const [ocupado, setOcupado] = useState(false);
   const [erro, setErro] = useState("");
   const [pend, setPend] = useState(p.pendencia || "");
   const [rast, setRast] = useState(p.rastreio || "");
+  const [obsInt, setObsInt] = useState(p.obs_interna || "");
+  const ent = entregaDut(p.entrega);
 
   const info = DUT_SITUACAO[p.situacao] || DUT_SITUACAO.recebido;
   const passo = proximoPasso(p);
@@ -21265,6 +21282,8 @@ function CartaoDut({ p, aoMudar }) {
               <span className="rounded-full px-2 py-0.5 text-[11.5px]"
                 style={{ background: C.bg, color: C.mute }}>só reconhecer</span>
             )}
+            <span className="rounded-full px-2 py-0.5 text-[11.5px] font-semibold"
+              style={{ background: ent[2] + "18", color: ent[2] }}>{ent[1]}</span>
           </div>
           <p className="mt-0.5 text-[12.5px]" style={{ color: C.mute }}>
             <span style={{ fontFamily: F.mono }}>{p.protocolo}</span>
@@ -21293,6 +21312,11 @@ function CartaoDut({ p, aoMudar }) {
           Falta: {p.pendencia}
         </p>
       )}
+      {p.obs_interna && (
+        <p className="mt-2 rounded-lg px-3 py-2 text-[12.5px]" style={{ background: "#FBF7FD", color: C.roxo }}>
+          <b>Interno:</b> {p.obs_interna}
+        </p>
+      )}
 
       <div className="mt-3 flex flex-wrap gap-2">
         {passo && (
@@ -21318,7 +21342,7 @@ function CartaoDut({ p, aoMudar }) {
               ["Endereço", p.comprador_endereco],
               ["Valor da venda", p.valor_venda != null ? brl(p.valor_venda) : null],
               ["KM", p.km], ["Data da venda", p.data_venda ? diaBR(p.data_venda) : null],
-              ["Entrega", p.entrega === "envio" ? "enviar" : "retira na loja"],
+              ["Entrega", ent[1]],
               ["Endereço de envio", p.endereco_envio]].filter(([, v]) => v).map(([r, v]) => (
               <div key={r}>
                 <div className="text-[10px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>{r}</div>
@@ -21348,8 +21372,23 @@ function CartaoDut({ p, aoMudar }) {
             )}
           </div>
 
-          <Campo label="O que falta" nota="Escrito aqui, aparece para o lojista na consulta do protocolo.">
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>Como vai ser entregue</div>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {ENTREGA_DUT.map(([v, r, cor]) => (
+                <button key={v} onClick={() => p.entrega !== v && agir({ entrega: v })} disabled={ocupado}
+                  className="rounded-full border px-3 py-1 text-[12.5px] font-semibold"
+                  style={p.entrega === v || (!p.entrega && v === "retirada")
+                    ? { background: cor, borderColor: cor, color: "#fff" } : { borderColor: C.line, color: C.ink }}>{r}</button>
+              ))}
+            </div>
+          </div>
+
+          <Campo label="O que falta" nota="Escrito aqui, aparece para o lojista na consulta do protocolo e vai na mensagem.">
             <input className={inputCls} style={inputSty} value={pend} onChange={(e) => setPend(e.target.value)} />
+          </Campo>
+          <Campo label="Observação interna — só a equipe vê" nota="Não aparece para o lojista nem vai em mensagem. Ex.: segurar o preenchimento até o pagamento cair.">
+            <textarea className={inputCls} style={{ ...inputSty, background: "#FBF7FD", minHeight: 56 }} value={obsInt} onChange={(e) => setObsInt(e.target.value)} />
           </Campo>
           {p.entrega === "envio" && (
             <Campo label="Rastreio">
@@ -21357,7 +21396,7 @@ function CartaoDut({ p, aoMudar }) {
             </Campo>
           )}
           <div className="flex flex-wrap gap-2">
-            <button onClick={() => agir({ pendencia: pend, rastreio: rast, situacao: pend ? "pendente" : undefined })}
+            <button onClick={() => agir({ pendencia: pend, rastreio: rast, obs_interna: obsInt, situacao: pend ? "pendente" : undefined })}
               disabled={ocupado} className="rounded-lg border px-3 py-2 text-[13.5px] font-semibold"
               style={{ borderColor: C.line, color: C.ink }}>Salvar</button>
             {p.situacao !== "recebido" && (
@@ -21394,6 +21433,10 @@ function FilaDut() {
   const [busca, setBusca] = useState("");
   const [vista, setVista] = useState(() => { try { return localStorage.getItem("vaapty:dut-vista") || "quadro"; } catch (e) { return "quadro"; } });
   const trocarVista = (v) => { setVista(v); try { localStorage.setItem("vaapty:dut-vista", v); } catch (e) {} };
+  // Por onde vai (0100): separa correio, WhatsApp e retirada, que se
+  // misturavam em "Entregues".
+  const [porEntrega, setPorEntrega] = useState("");
+  const daEntrega = (x) => !porEntrega || (x.entrega || "retirada") === porEntrega;
 
   // No quadro vêm os abertos e os entregues juntos — a última coluna é a
   // prova de que a fila anda. Entregue mais velho fica na lista.
@@ -21426,6 +21469,16 @@ function FilaDut() {
           <button key={v} onClick={() => trocarVista(v)} className="rounded-lg px-3 py-1.5 text-[13px] font-semibold"
             style={vista === v ? { background: C.ink, color: "#fff" } : { background: C.paper, color: C.mute, border: `1px solid ${C.line}` }}>{r}</button>
         ))}
+        <span className="mx-1 h-5 w-px" style={{ background: C.line }} />
+        {[["", "Todas as entregas"]].concat(ENTREGA_DUT.map(([v, r]) => [v, r])).map(([v, r]) => {
+          const n = (lista || []).filter((x) => !v || (x.entrega || "retirada") === v).length;
+          return (
+            <button key={v || "todas"} onClick={() => setPorEntrega(v)} className="rounded-full px-3 py-1.5 text-[12.5px] font-semibold"
+              style={porEntrega === v ? { background: C.roxo, color: "#fff" } : { background: C.paper, color: C.mute, border: `1px solid ${C.line}` }}>
+              {r}{lista ? ` · ${n}` : ""}
+            </button>
+          );
+        })}
       </div>
 
       {vista === "quadro" && erro && <p className="mb-3 text-[14px]" style={{ color: C.laranja }}>{erro}</p>}
@@ -21434,7 +21487,7 @@ function FilaDut() {
         <div className="rolar overflow-x-auto pb-2">
           <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${COLUNAS_DUT.length}, minmax(190px, 1fr))` }}>
             {COLUNAS_DUT.map((col) => {
-              const doCol = lista.filter((x) => x.situacao === col.id);
+              const doCol = lista.filter((x) => x.situacao === col.id && daEntrega(x));
               const info = DUT_SITUACAO[col.id] || {};
               return (
                 <div key={col.id} className="min-w-0 rounded-xl p-2" style={{ background: C.bg }}>
@@ -21489,7 +21542,7 @@ function FilaDut() {
       )}
 
       <div className="grid gap-3 lg:grid-cols-2">
-        {(lista || []).map((p) => <CartaoDut key={p.id} p={p} aoMudar={mudar} />)}
+        {(lista || []).filter(daEntrega).map((p) => <CartaoDut key={p.id} p={p} aoMudar={mudar} />)}
       </div>
       </>}
 

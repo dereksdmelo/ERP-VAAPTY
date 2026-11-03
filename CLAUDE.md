@@ -2094,6 +2094,17 @@ e o link da consulta do protocolo. **Só na mudança**: salvar o mesmo
 pedido de novo não manda de novo. **Nunca derruba a etapa**: se falhar,
 o cartão diz por quê e o botão WhatsApp continua ali.
 
+**Por onde o DUT sai, e a observação que o lojista não vê (0100, a
+Schell, 03/11/2026).** Correio, WhatsApp e retirada se misturavam em
+"Entregues". A entrega ganhou o terceiro valor (`whatsapp`; `envio`
+continua sendo o correio do formulário), o cartão mostra o selo e
+deixa trocar, o botão final diz o que aconteceu ("Enviei pelo correio",
+"Mandei pelo WhatsApp", "Lojista retirou"), e o quadro e a lista filtram
+por entrega. **`obs_interna` é da equipe**: o "falta algo" vai ao
+lojista (consulta e mensagem); a interna não entra em `dut_estado()`
+nem em mensagem nenhuma — para "segurar o preenchimento" sem contar ao
+cliente por quê. Mesma separação do `internas` da ficha (decisão 2).
+
 **E o WhatsApp do adm mora no Administrativo** (`adm_whats`): a mesma
 caixa de Conversas, com `operacao` — só os números fora do funil, pelo
 filtro do servidor, porque a pessoa do adm não é gerente e não lê a
@@ -2394,6 +2405,10 @@ estavam agendados foram preenchidos pela última mensagem da loja que
 cita a hora marcada: 320 achados, 19 ficam "não registrado" — palpite
 seria pior. No "Chegou", quem agendou vira o PROSPEC do atendimento
 quando ninguém digitou o prospector.
+
+**"Recuperação" muda a origem** (a Schell, 03/11/2026): é o cliente que a
+equipe foi buscar de volta, então o atendimento nasce `recuperacao`, com
+PROSPEC "RECUPERAÇÃO", e não `fluxo_loja`.
 
 **O cliente de fluxo responde como conheceu a loja** (`como_conheceu`,
 0098, chips em `ComoConheceu`): TV, fachada, rádio, Facebook/Instagram,

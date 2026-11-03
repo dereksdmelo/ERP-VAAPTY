@@ -656,7 +656,9 @@ function textoAoLojista(p, tipo, site) {
   const qual = `o DUT da placa ${p.placa} (protocolo ${p.protocolo})`;
   const corpo = tipo === "pronto"
     ? (p.entrega === "envio"
-      ? `${ola} ${qual[0].toUpperCase()}${qual.slice(1)} já foi reconhecido em cartório e vai ser enviado. Assim que sair, mandamos o rastreio.`
+      ? `${ola} ${qual[0].toUpperCase()}${qual.slice(1)} já foi reconhecido em cartório e vai ser enviado pelo correio. Assim que sair, mandamos o rastreio.`
+      : p.entrega === "whatsapp"
+      ? `${ola} ${qual[0].toUpperCase()}${qual.slice(1)} já foi reconhecido em cartório. Vamos te mandar por aqui, pelo WhatsApp.`
       : `${ola} ${qual[0].toUpperCase()}${qual.slice(1)} já foi reconhecido em cartório e está pronto para retirada aqui na Vaapty.`)
     : `${ola} Sobre ${qual}, está faltando:\n\n${String(p.pendencia || "").trim()}\n\nAssim que estiver resolvido, a gente segue com o pedido.`;
   return site ? `${corpo}\n\nVocê acompanha pelo protocolo em ${site}/dut.html` : corpo;
@@ -935,7 +937,10 @@ async function dutFila(req, res, tok) {
     if (typeof c.pendencia === "string") mud.pendencia = texto(c.pendencia);
     if (typeof c.observacoes === "string") mud.observacoes = texto(c.observacoes);
     if (typeof c.rastreio === "string") mud.rastreio = texto(c.rastreio);
-    if (c.entrega === "envio" || c.entrega === "retirada") mud.entrega = c.entrega;
+    if (c.entrega === "envio" || c.entrega === "retirada" || c.entrega === "whatsapp") mud.entrega = c.entrega;
+    // A observação que o lojista não vê (0100): fica fora do `dut_estado`
+    // e de toda mensagem — o "falta algo" é o que ele lê.
+    if (typeof c.obs_interna === "string") mud.obs_interna = texto(c.obs_interna);
 
     const r = await fetch(`${REST_DUT}?id=eq.${id}`, {
       method: "PATCH", headers: json(tok, { Prefer: "return=representation" }), body: JSON.stringify(mud),
