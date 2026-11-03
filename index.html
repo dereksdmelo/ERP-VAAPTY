@@ -12196,12 +12196,12 @@ function CRM({ perfil, aoAbrir, mes }) {
                 Cortar coluna por coluna dependia da janela de quem olha. */}
             <table className="w-full" style={{ borderCollapse: "collapse", tableLayout: "fixed" }}>
               <colgroup>
-                {[5, 9, 5, 11, 6.5, 4.5, 5.5, 9, 8, 6, 16, 7.5, 7].map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}
+                {[5, 9, 5, 11, 6.5, 4.5, 5.5, 9, 8, 6, 14.5, 7.5, 6, 2.5].map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}
               </colgroup>
               <thead>
                 <tr style={{ background: "#F6F4F8" }}>
                   {["Data", "Negociador", "Prospec", "Carro", "Placa", "Ano", "KM",
-                    "Cliente", "Telefone", "Origem", "Status", "FIPE", "Pretensão"].map((h, i) => (
+                    "Cliente", "Telefone", "Origem", "Status", "FIPE", "Pretensão", ""].map((h, i) => (
                     <th key={h} className="overflow-hidden text-ellipsis whitespace-nowrap px-1.5 py-2 text-left text-[9px] uppercase tracking-[0.1em]"
                       style={{ color: C.mute, borderBottom: `1px solid ${C.line}`, textAlign: i >= 11 ? "right" : "left" }}>
                       {h}
@@ -12238,15 +12238,13 @@ function CRM({ perfil, aoAbrir, mes }) {
                       <td className={td} title={a.cliente_nome || ""}>{a.cliente_nome || "—"}</td>
                       <td className={td} style={{ fontFamily: F.mono, color: C.mute }} title={a.cliente_telefone || ""}>{a.cliente_telefone || "—"}</td>
                       <td className={td} style={{ color: C.mute }} title={rotulo(ORIGENS, a.origem)}>{ORIGEM_CURTA[a.origem] || rotulo(ORIGENS, a.origem)}</td>
-                      <td className={td}>
-                        <span className="flex items-center justify-between gap-1">
-                          {a.em_loja ? <EmLoja a={a} aoFinalizar={finalizado} /> : <StatusDaLinha a={a} aoFinalizar={finalizado} />}
-                          <button title="Juntar ou excluir" onClick={(e) => { e.stopPropagation(); setAcoes(a); }}
-                            className="shrink-0 rounded px-1 text-[16px] leading-none" style={{ color: C.mute }}>⋯</button>
-                        </span>
-                      </td>
+                      <td className={td}>{a.em_loja ? <EmLoja a={a} aoFinalizar={finalizado} /> : <StatusDaLinha a={a} aoFinalizar={finalizado} />}</td>
                       <td className={td} style={num}>{v.fipe_valor ? brl(v.fipe_valor) : "—"}</td>
                       <td className={td} style={num}>{a.pretensao ? brl(a.pretensao) : "—"}</td>
+                      <td className="px-0.5 py-2 text-center">
+                        <button title="Juntar ou excluir" onClick={(e) => { e.stopPropagation(); setAcoes(a); }}
+                          className="rounded px-1 text-[17px] font-bold leading-none" style={{ color: C.roxo }}>⋯</button>
+                      </td>
                     </tr>
                   );
                 })}
