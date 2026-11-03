@@ -167,6 +167,17 @@ async function zapsign(req, res, tok) {
   const achado = await banco(`${REST("atendimento")}?select=id&id=eq.${aid}&limit=1`, { headers: cabecalhos(tok) });
   if (!Array.isArray(achado) || !achado[0]) return res.status(404).json({ erro: "Atendimento não encontrado." });
 
+  /* PDF com âncora, quando a tela conseguiu montar (03/11/2026). O
+   * Markdown perdia tabela, sublinhado e o lugar das assinaturas; o PDF
+   * é o mesmo HTML impresso, e `<<signerN>>` (em branco no papel) é onde
+   * o ZapSign põe a assinatura do N-ésimo signatário. Sem PDF, vai o
+   * Markdown de antes — mandar torto é melhor que não mandar. */
+  const pdf = typeof c.pdf_base64 === "string" ? c.pdf_base64.replace(/^data:[^,]*,/, "") : "";
+  const comPdf = pdf.length > 1000 && pdf.length < 14000000 && /^[A-Za-z0-9+/=\s]+$/.test(pdf.slice(0, 2000));
+  const docBody = comPdf
+    ? { base64_pdf: pdf, signers: assinantes.map((x, i) => ({ ...x, signature_placement: `<<signer${i + 1}>>` })) }
+    : { markdown_text: markdown, signers: assinantes };
+
   let criado;
   try {
     const r = await fetch(`${ZAPSIGN}/docs/`, {
@@ -174,8 +185,7 @@ async function zapsign(req, res, tok) {
       headers: { Authorization: `Bearer ${ZAP_TOKEN}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         name: String(c.nome || "Contrato de compra e venda").slice(0, 255),
-        markdown_text: markdown,
-        signers: assinantes,
+        ...docBody,
         lang: "pt-br",
       }),
     });
@@ -207,7 +217,7 @@ async function zapsign(req, res, tok) {
     .map((x) => ({ nome: x.name, link: x.sign_url }))
     .filter((x) => x.link);
 
-  return res.status(201).json({ ok: true, token: zapToken || null, assinantes: links });
+  return res.status(201).json({ ok: true, token: zapToken || null, assinantes: links, formato: comPdf ? "pdf" : "markdown" });
 }
 
 /**

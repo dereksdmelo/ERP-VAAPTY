@@ -1192,10 +1192,83 @@ async function zapsignConfigurado() {
   const d = await r.json().catch(() => ({}));
   return !!d.configurado;
 }
+/* O CONTRATO VAI AO ZAPSIGN COMO PDF (03/11/2026, o Derek: "está
+ * perdendo a formatação e não está indo com as assinaturas
+ * localizadas"). Ia como Markdown: as tabelas viravam "rótulo: valor",
+ * sumiam sublinhado, alinhamento e o bloco de assinaturas, e o ZapSign
+ * punha a assinatura numa folha no fim. Agora o MESMO HTML que se
+ * imprime (uma fonte só, decisão 21) vira PDF aqui no navegador, com
+ * texto de verdade, e cada lugar de assinatura leva uma âncora invisível
+ * (`<<signer1>>`, em branco) que o ZapSign usa para pôr a assinatura
+ * exatamente ali (`signature_placement`). As bibliotecas vêm do CDN só
+ * na hora do envio — 2 MB que ninguém baixa para abrir a tela. Se o PDF
+ * falhar, vai o Markdown de antes, e a tela diz. */
+let pdfLibs = null;
+const carregarScript = (src) => new Promise((ok, falha) => {
+  const el = document.createElement("script");
+  el.src = src; el.onload = ok;
+  el.onerror = () => falha(new Error("Não consegui carregar o gerador de PDF."));
+  document.head.appendChild(el);
+});
+function carregarPdfmake() {
+  if (!pdfLibs) {
+    pdfLibs = (async () => {
+      await carregarScript("https://cdn.jsdelivr.net/npm/pdfmake@0.2.10/build/pdfmake.min.js");
+      await carregarScript("https://cdn.jsdelivr.net/npm/pdfmake@0.2.10/build/vfs_fonts.js");
+      await carregarScript("https://cdn.jsdelivr.net/npm/html-to-pdfmake@2.5.13/browser.js");
+    })().catch((e) => { pdfLibs = null; throw e; });
+  }
+  return pdfLibs;
+}
+async function contratoEmPdf(html) {
+  await carregarPdfmake();
+  const doc = new DOMParser().parseFromString(String(html || ""), "text/html");
+  doc.querySelectorAll("style, script, title, img").forEach((n) => n.remove());
+  // A linha de assinatura é borda no CSS da impressão; no PDF vira traço,
+  // e a âncora vai logo acima dele, que é onde a assinatura deve ficar.
+  doc.querySelectorAll(".linha").forEach((el) => {
+    const anc = el.querySelector("[data-ancora]");
+    let topo = "";
+    if (anc) { topo = `<span class="ancora">&lt;&lt;${anc.getAttribute("data-ancora")}&gt;&gt;</span><br>`; anc.remove(); }
+    const p = doc.createElement("p");
+    p.className = "linha";
+    p.innerHTML = `${topo}______________________________________________________<br>${el.innerHTML}`;
+    el.replaceWith(p);
+  });
+  doc.querySelectorAll("[data-ancora]").forEach((el) => {
+    el.className = "ancora"; el.textContent = `<<${el.getAttribute("data-ancora")}>>`;
+  });
+  const conteudo = window.htmlToPdfmake(doc.body.innerHTML, {
+    window, tableAutoSize: true,
+    defaultStyles: {
+      h1: { fontSize: 12, bold: true, alignment: "center", margin: [0, 8, 0, 12] },
+      p: { margin: [0, 2, 0, 6] },
+      td: { fontSize: 9.5 },
+    },
+  });
+  const def = {
+    pageSize: "A4", pageMargins: [48, 48, 48, 48], content: conteudo,
+    defaultStyle: { fontSize: 10.5, lineHeight: 1.2 },
+    styles: {
+      r: { fillColor: "#F6F4F8", fontSize: 8, color: "#6B6478" },
+      falta: { color: "#EA5423" },
+      marca: { bold: true, fontSize: 14, color: "#6D1B9E" },
+      sub: { fontSize: 7.5, color: "#6B6478" },
+      rodape: { fontSize: 7.5, color: "#6B6478", margin: [0, 16, 0, 0] },
+      linha: { margin: [0, 22, 0, 0], fontSize: 9.5 },
+      ancora: { color: "#FFFFFF", fontSize: 8 },
+    },
+  };
+  return new Promise((ok, falha) => {
+    try { window.pdfMake.createPdf(def).getBase64(ok); } catch (e) { falha(e); }
+  });
+}
 async function enviarParaAssinatura(atendimentoId, dados) {
+  let pdf_base64 = null;
+  try { pdf_base64 = await contratoEmPdf(dados.conteudo); } catch (e) {}
   const r = await fetchAut("/api/documento?recurso=zapsign", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ atendimento_id: atendimentoId, ...dados }),
+    body: JSON.stringify({ atendimento_id: atendimentoId, ...dados, pdf_base64 }),
   });
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.erro || "Não consegui enviar para assinatura.");
@@ -3386,7 +3459,7 @@ qualquer outro, por mais privilegiado que seja.</p>
 
 <div class="assinatura">
   <div class="linha">VAAPTY INTERMEDIACAO VEICULAR LTDA – VAAPTY JOINVILLE</div>
-  <div class="linha">${ou(f.cliente_nome, "nome do contratante")} — reconhecimento por autenticidade</div>
+  <div class="linha"><span data-ancora="signer1"></span>${ou(f.cliente_nome, "nome do contratante")} — reconhecimento por autenticidade</div>
   <div class="linha">Testemunha 1 — Nome: ${vazio("nome")} · CPF: ${vazio("CPF")}</div>
   <div class="linha">Testemunha 2 — Nome: ${vazio("nome")} · CPF: ${vazio("CPF")}</div>
 </div>`;
@@ -6977,9 +7050,10 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                                   telefone: cliente.cliente_telefone,
                                 }],
                               });
-                              setEnvioZap(r.assinantes && r.assinantes.length
+                              setEnvioZap((r.assinantes && r.assinantes.length
                                 ? `Enviado. Link para ${r.assinantes[0].nome}: ${r.assinantes[0].link}`
-                                : "Enviado ao ZapSign.");
+                                : "Enviado ao ZapSign.")
+                                + (r.formato === "markdown" ? " Atenção: o PDF não foi montado neste aparelho, e o contrato foi como texto simples (sem a formatação e com a assinatura no fim)." : ""));
                             } catch (e) { setEnvioZap(e.message); }
                             setEnviandoZap(false);
                           }}
@@ -20391,9 +20465,10 @@ function ContratoDoNegocio({ atendimento, checklist, perfil, aoSalvarChecklist }
         conteudo: aceiteProposta(ficha, cl),
         signatarios: [{ nome: cli.cliente_nome, email: cli.cliente_email, telefone: cli.cliente_telefone }],
       });
-      setAviso(r.assinantes && r.assinantes.length
+      setAviso((r.assinantes && r.assinantes.length
         ? `Enviado. Link para ${r.assinantes[0].nome}: ${r.assinantes[0].link}`
-        : "Enviado ao ZapSign.");
+        : "Enviado ao ZapSign.")
+        + (r.formato === "markdown" ? " Atenção: o PDF não foi montado neste aparelho, e o contrato foi como texto simples (sem a formatação e com a assinatura no fim)." : ""));
     } catch (e) { setErro(e.message); }
     setIndo("");
   };
