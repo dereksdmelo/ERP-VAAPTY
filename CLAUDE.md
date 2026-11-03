@@ -1496,6 +1496,19 @@ digitou, e o servidor fica com a última que mandar. Resolver isso
 pediria marca de tempo por campo, com dois relógios que não conversam
 — e o caso real é a pessoa digitando de um lado de cada vez.
 
+**Os dados do cliente se perdiam, e era o mesmo erro (03/11/2026).** A
+Schell: *"eu coloquei e salvei, o Marcos colocou e salvou e aí agora se
+perdeu de novo"*. O bloco do cliente ficou de fora desta decisão: era
+lido uma vez, ao abrir, e o "Salvar" mandava todos os campos — a tela
+do Marcos, aberta antes, gravou nome e CPF vazios por cima. Agora tem a
+mesma base de três pontas: só sobe o campo que a tela mudou (sozinho,
+1,5 s depois de parar de digitar), e de 20 em 20 s o banco é relido
+para os outros campos. Vazio do banco não apaga o que está escrito na
+tela. **E e-mail, cidade, UF, bairro, CEP e o comprador nunca tinham
+sido gravados**: `somenteEnviadas` só aceitava coluna com entrada no
+`FONTE`, e eles não tinham — o servidor respondia ok e descartava.
+Agora coluna sem entrada vale pelo próprio nome.
+
 **`ferramentas-sincronizacao.js` guarda a regra**, com dezoito casos
 lidos do próprio `index.html` — cópia de código de teste envelhece
 calada, e aí o teste passa enquanto a tela erra.
@@ -3617,10 +3630,10 @@ lista que acumula item resolvido para de ser lida. Os principais:
 - **O login existe, o CRM ainda não.** Nome e telefone de cliente já
   têm coluna (0004) mas ainda não têm tela. Enquanto a etapa 3 não
   chega, o sistema segue sem dado pessoal dentro.
-- **O bloco do cliente ainda depende do botão.** Nome, CPF, RG e
-  endereço gravam no `atendimento` quando alguém aperta salvar; até
-  lá são daquele aparelho. Todo o resto do atendimento saiu dessa
-  lista — ver decisões 43 e 44.
+- **O bloco do cliente salva sozinho desde 03/11/2026**, só o campo
+  que a tela mudou, e relê o banco de 20 em 20 s (ver "os dados do
+  cliente se perdiam", na decisão 44). Os dois aparelhos digitando o
+  MESMO campo ao mesmo tempo continua sendo o caso que perde.
 - **Link de foto vence em 1 h.** As miniaturas usam URL assinada. A
   lista é relida quando a aba volta ao foco (decisão 44), o que cobre
   o caso comum; quem fica uma hora na mesma aba sem sair dela ainda vê

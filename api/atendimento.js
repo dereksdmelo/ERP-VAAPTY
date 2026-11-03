@@ -164,7 +164,11 @@ function paraColunas(c) {
 const somenteEnviadas = (linha, corpo) => {
   const r = {};
   Object.keys(linha).forEach((col) => {
-    if (corpo[FONTE[col]] !== undefined) r[col] = linha[col];
+    // Sem entrada no FONTE, o campo da tela tem o nome da coluna. Antes
+    // isso descartava calado e-mail, cidade, UF, bairro, CEP e o comprador
+    // inteiro: o "Salvar dados do cliente" respondia ok e não gravava
+    // (achado em 03/11/2026).
+    if (corpo[FONTE[col] || col] !== undefined) r[col] = linha[col];
   });
   return r;
 };

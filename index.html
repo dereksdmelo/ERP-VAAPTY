@@ -4796,13 +4796,70 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     });
   }, [f, fotos, atendimento]);
 
+  /* OS DADOS DO CLIENTE SE PERDIAM (03/11/2026, a Schell: "foi colocado
+   * várias vezes nome e CPF do cliente e salvo, eu coloquei e salvei, o
+   * Marcos colocou e salvou e aí agora se perdeu de novo"). O bloco era
+   * lido do banco uma vez, ao abrir, e o "Salvar" mandava TODOS os
+   * campos: a tela do Marcos, aberta antes, ainda tinha nome e CPF
+   * vazios, e o salvar dele gravou o vazio por cima do dela.
+   *
+   * Agora é o desenho da ficha (decisão 44): `clienteBase` é o que o
+   * banco tinha da última vez que se falaram; só sobe o campo que ESTA
+   * tela mudou desde então, sozinho, um segundo e meio depois de parar de
+   * digitar; e de 20 em 20 s (e ao voltar para a aba) o banco é relido e
+   * o campo que esta tela não mexeu passa a valer o de lá. Vazio do banco
+   * não apaga o que está escrito aqui. */
+  const clienteBase = useRef({ ...cliente });
+  const clienteRef = useRef(cliente);
+  clienteRef.current = cliente;
+  const [clienteSalvoEm, setClienteSalvoEm] = useState(null);
+  const clienteSujos = () => Object.keys(clienteRef.current)
+    .filter((k) => String(clienteRef.current[k] || "") !== String(clienteBase.current[k] || ""));
   const salvarCliente = async () => {
     if (!atendimento) { setErroCliente("Abra o atendimento pela lista para salvar."); return; }
+    const ks = clienteSujos();
+    if (!ks.length) { setClienteSalvoEm(new Date()); return; }
+    const corpo = {};
+    ks.forEach((k) => { corpo[k] = clienteRef.current[k]; });
     setErroCliente(""); setSalvandoCliente(true);
-    try { await atualizarAtendimento(atendimento.id, cliente); }
-    catch (e) { setErroCliente(e.message); }
+    try {
+      await atualizarAtendimento(atendimento.id, corpo);
+      ks.forEach((k) => { clienteBase.current[k] = corpo[k]; });
+      setClienteSalvoEm(new Date());
+    } catch (e) { setErroCliente(e.message); }
     setSalvandoCliente(false);
   };
+  useEffect(() => {
+    if (!atendimento || !clienteSujos().length) return;
+    const t = setTimeout(() => { salvarCliente(); }, 1500);
+    return () => clearTimeout(t);
+  }, [cliente]);
+  useEffect(() => {
+    if (!atendimento) return;
+    let vivo = true;
+    const ler = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const a = await lerAtendimento(atendimento.id);
+        if (!vivo || !a) return;
+        const sujos = clienteSujos();
+        const novo = { ...clienteRef.current };
+        let mudou = false;
+        Object.keys(novo).forEach((k) => {
+          if (!(k in a) || sujos.indexOf(k) >= 0) return;
+          const v = a[k] == null ? "" : String(a[k]);
+          if (!v) return;
+          clienteBase.current[k] = v;
+          if (v !== String(novo[k] || "")) { novo[k] = v; mudou = true; }
+        });
+        if (mudou) setCliente(novo);
+      } catch (e) {}
+    };
+    ler();
+    const t = setInterval(ler, 20000);
+    document.addEventListener("visibilitychange", ler);
+    return () => { vivo = false; clearInterval(t); document.removeEventListener("visibilitychange", ler); };
+  }, [atendimento && atendimento.id]);
 
   const blocoCliente = (
     <Bloco titulo="Dados do cliente" sub="Só o que se pergunta de saída. RG e endereço ficam para o fechamento — saem do CRLV e da CNH anexados abaixo.">
@@ -6810,6 +6867,27 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                       value={f.renavam} onChange={(e) => set("renavam", e.target.value)}
                       placeholder="do CRLV — o contrato pede" />
                   </Campo>
+                  {/* O CHASSI E O CLIENTE AQUI TAMBÉM (03/11/2026, a Schell:
+                      "diz que precisa colocar esses dados, mas não tem nenhum
+                      lugar para colocar o chassi"). O aviso de falta embaixo
+                      do botão citava campos que moravam no Lançamento e na
+                      Negociação, longe daqui. São os mesmos campos: mudar aqui
+                      muda lá. */}
+                  <Campo label="Chassi do carro" req>
+                    <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} maxLength={17}
+                      value={f.chassi} onChange={(e) => set("chassi", e.target.value.toUpperCase().replace(/\s/g, ""))}
+                      placeholder="17 caracteres, do CRLV" />
+                  </Campo>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <Campo label="Nome completo do cliente" req>
+                      <input className={inputCls} style={inputSty} value={cliente.cliente_nome}
+                        onChange={(e) => setCliente({ ...cliente, cliente_nome: e.target.value })} />
+                    </Campo>
+                    <Campo label="CPF do cliente" req>
+                      <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={cliente.cliente_cpf}
+                        onChange={(e) => setCliente({ ...cliente, cliente_cpf: e.target.value })} />
+                    </Campo>
+                  </div>
 
                   {/* O contrato qualifica o cliente com cidade, bairro,
                       CEP e UF separados, e a 0007 guardava tudo numa
@@ -6847,8 +6925,9 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                   <button onClick={salvarCliente} disabled={salvandoCliente}
                     className="w-full rounded-md border py-2 text-[12px] font-semibold"
                     style={{ borderColor: C.line, color: C.roxo }}>
-                    {salvandoCliente ? "Salvando…" : "Salvar dados do cliente"}
+                    {salvandoCliente ? "Salvando…" : clienteSalvoEm ? `Salvo às ${clienteSalvoEm.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })} — salva sozinho ao digitar` : "Salvar dados do cliente"}
                   </button>
+                  {erroCliente && <p className="text-[11.5px]" style={{ color: C.laranja }}>{erroCliente}</p>}
 
                   {(() => {
                     const faltaCarro = [["renavam", "renavam"], ["placa", "placa"], ["chassi", "chassi"],
