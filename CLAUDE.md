@@ -1334,6 +1334,21 @@ teste a âncora ficou numa folha e o traço na outra. **Quem acrescentar
 signatário acrescenta a âncora `signerN` no molde, na ordem da lista.**
 Se o PDF falhar no aparelho, vai o Markdown e a tela avisa.
 
+**O link fica guardado, e reenviar pede confirmação (0102).** A Schell:
+*"a cliente falou que não achou o link, o Marcos foi lá e reenviou… ele
+cria outro documento no ZapSign toda vez"*. O link só aparecia na
+mensagem da tela, uma vez. Agora `contrato_zapsign_link` e
+`contrato_zapsign_formato` ("pdf" ou "markdown") ficam no atendimento: a
+tela mostra o link com "Copiar" e "Mandar no WhatsApp", e "Enviar de
+novo" pede confirmação — cada envio é outro documento lá.
+
+**E a página velha publicava o formato velho.** O contrato das 12:55 de
+03/11/2026 saiu três minutos depois da correção no ar, de uma aba aberta
+antes: a página roda o código de quando foi carregada. A Action grava
+`versao.txt` a cada publicação, e `AvisoVersao` pede para recarregar
+quando ela muda (lê ao abrir, a cada 2 min e ao voltar para a aba). Não
+recarrega sozinha — alguém pode estar digitando.
+
 **A chave da conta (`ZAPSIGN_TOKEN`) só existe em variável de
 ambiente.** Não está no repositório, não vai ao navegador, não aparece
 em log. O `GET /api/documento?recurso=zapsign` responde apenas se ela

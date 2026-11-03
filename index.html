@@ -4981,6 +4981,14 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
    * digitar; e de 20 em 20 s (e ao voltar para a aba) o banco é relido e
    * o campo que esta tela não mexeu passa a valer o de lá. Vazio do banco
    * não apaga o que está escrito aqui. */
+  // O envio ao ZapSign que já aconteceu (0102): o link para mandar de
+  // novo, e se foi PDF ou texto simples.
+  const zapDe = (a) => (a && a.contrato_zapsign_token ? {
+    token: a.contrato_zapsign_token, em: a.contrato_enviado_em || null,
+    link: a.contrato_zapsign_link || "", formato: a.contrato_zapsign_formato || "",
+  } : null);
+  const [zapEnvio, setZapEnvio] = useState(() => zapDe(atendimento));
+  const [querReenviar, setQuerReenviar] = useState(false);
   const clienteBase = useRef({ ...cliente });
   const clienteRef = useRef(cliente);
   clienteRef.current = cliente;
@@ -5014,6 +5022,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
       try {
         const a = await lerAtendimento(atendimento.id);
         if (!vivo || !a) return;
+        if (a.contrato_zapsign_token) setZapEnvio(zapDe(a));
         const sujos = clienteSujos();
         const novo = { ...clienteRef.current };
         let mudou = false;
@@ -7135,9 +7144,43 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                             : zapOk ? "Chave do ZapSign configurada."
                             : "A chave do ZapSign não chegou à Vercel. Confira a variável ZAPSIGN_TOKEN em Settings → Environment Variables e refaça o deploy."}
                         </p>
+                        {/* O ENVIO QUE JÁ ACONTECEU (0102, a Schell: "a cliente
+                            falou que não achou o link, o Marcos foi lá e reenviou…
+                            ele cria outro documento no ZapSign toda vez"). O link
+                            fica à vista para copiar e mandar de novo; gerar outro
+                            documento pede confirmação. */}
+                        {zapEnvio && (
+                          <div className="rounded-md p-2.5 text-[12.5px]" style={{ background: C.roxoFraco }}>
+                            <b>Já foi para o ZapSign</b>
+                            {zapEnvio.em ? ` em ${new Date(zapEnvio.em).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : ""}
+                            {zapEnvio.formato === "pdf" ? " · PDF formatado, com a assinatura no lugar."
+                              : zapEnvio.formato === "markdown" ? " · como texto simples, sem a formatação." : "."}
+                            {zapEnvio.link ? (
+                              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                                <input readOnly value={zapEnvio.link} onFocus={(e) => e.target.select()}
+                                  className="min-w-0 flex-1 rounded border bg-white px-2 py-1 text-[11.5px]" style={{ borderColor: C.line, fontFamily: F.mono }} />
+                                <button onClick={() => { try { navigator.clipboard.writeText(zapEnvio.link); setEnvioZap("Link copiado."); } catch (e) {} }}
+                                  className="rounded border px-2.5 py-1 text-[12px] font-semibold" style={{ borderColor: C.roxo, color: C.roxo }}>Copiar link</button>
+                                {cliente.cliente_telefone && (
+                                  <a href={zap(cliente.cliente_telefone, `Olá ${String(cliente.cliente_nome || "").split(" ")[0]}! Segue o link para assinar o contrato da Vaapty: ${zapEnvio.link}`)}
+                                    target="_blank" rel="noreferrer" className="rounded border px-2.5 py-1 text-[12px] font-semibold" style={{ borderColor: C.verde, color: C.verde }}>Mandar no WhatsApp</a>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="mt-1" style={{ color: C.mute }}>O link deste envio não ficou guardado — ele é de antes de 03/11/2026, 13h.</div>
+                            )}
+                          </div>
+                        )}
+                        {zapEnvio && querReenviar && (
+                          <p className="text-[12px]" style={{ color: C.laranja }}>
+                            Isso cria <b>outro documento</b> no ZapSign, e o cliente recebe outro link. Só faça se algo mudou no contrato — senão, mande o link acima.
+                          </p>
+                        )}
                         <button
                           disabled={!pronto || !!enviandoZap || (!cliente.cliente_email && !cliente.cliente_telefone)}
                           onClick={async () => {
+                            if (zapEnvio && !querReenviar) { setQuerReenviar(true); return; }
+                            setQuerReenviar(false);
                             setEnvioZap(""); setEnviandoZap(true);
                             try {
                               const r = await enviarParaAssinatura(atendimento.id, {
@@ -7153,12 +7196,14 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                                 ? `Enviado. Link para ${r.assinantes[0].nome}: ${r.assinantes[0].link}`
                                 : "Enviado ao ZapSign.")
                                 + (r.formato === "markdown" ? " Atenção: o PDF não foi montado neste aparelho, e o contrato foi como texto simples (sem a formatação e com a assinatura no fim)." : ""));
+                              setZapEnvio({ token: r.token, em: new Date().toISOString(), link: (r.assinantes && r.assinantes[0] && r.assinantes[0].link) || "", formato: r.formato || "" });
                             } catch (e) { setEnvioZap(e.message); }
                             setEnviandoZap(false);
                           }}
                           className="w-full rounded-md border py-2.5 text-[13px] font-semibold"
                           style={{ borderColor: pronto ? C.roxo : C.line, color: pronto ? C.roxo : C.mute }}>
-                          {enviandoZap ? "Enviando…" : "Enviar para o cliente assinar no ZapSign"}
+                          {enviandoZap ? "Enviando…" : !zapEnvio ? "Enviar para o cliente assinar no ZapSign"
+                            : querReenviar ? "Sim, gerar outro documento no ZapSign" : "Enviar de novo (só se o contrato mudou)"}
                         </button>
                         {!cliente.cliente_email && !cliente.cliente_telefone && (
                           <p className="text-[11px]" style={{ color: C.mute }}>
@@ -20568,7 +20613,13 @@ function ContratoDoNegocio({ atendimento, checklist, perfil, aoSalvarChecklist }
     }
   };
 
+  const linkZap = atendimento && atendimento.contrato_zapsign_link;
   const mandarAssinar = async () => {
+    // Cada envio é OUTRO documento no ZapSign (0102): reenviar só porque o
+    // cliente não achou o link deixava dois contratos abertos.
+    if (atendimento && atendimento.contrato_zapsign_token &&
+        !window.confirm("Isso cria OUTRO documento no ZapSign e o cliente recebe outro link. Só faça se o contrato mudou." +
+          (linkZap ? "\n\nSe nada mudou, cancele e mande o link que já existe." : ""))) return;
     setErro(""); setAviso(""); setIndo("zap");
     try {
       const r = await enviarParaAssinatura(atendimento.id, {
@@ -20663,6 +20714,12 @@ function ContratoDoNegocio({ atendimento, checklist, perfil, aoSalvarChecklist }
               style={{ background: pronto ? C.roxo : C.line, color: pronto ? "#fff" : C.mute }}>
               Reemitir o contrato
             </button>
+            {linkZap && (
+              <button onClick={() => { try { navigator.clipboard.writeText(linkZap); setAviso("Link de assinatura copiado."); } catch (e) {} }}
+                className="rounded-md border px-3 py-2 text-[13px] font-semibold" style={{ borderColor: C.verde, color: C.verde }}>
+                Copiar o link de assinatura
+              </button>
+            )}
             <button onClick={mandarAssinar}
               disabled={!pronto || indo === "zap" || !zapOk || (!cli.cliente_email && !cli.cliente_telefone)}
               className="rounded-md border px-3 py-2 text-[13px] font-semibold"
@@ -26723,7 +26780,45 @@ function App() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById('raiz')).render(<RedeDeErro onde="sistema"><App /></RedeDeErro>);
+/* A VERSÃO NOVA PEDE RECARGA (03/11/2026). A página fica aberta o dia
+ * inteiro e roda o código de quando foi carregada: um contrato foi ao
+ * ZapSign pela versão antiga três minutos depois de a correção estar no
+ * ar, e "não resolveu" era só a aba velha. A Action grava `versao.txt` a
+ * cada publicação; a tela lê ao abrir, de novo a cada 2 minutos com a aba
+ * à vista e ao voltar para ela, e mostra a faixa quando muda. Não
+ * recarrega sozinha: pode haver alguém digitando. */
+function AvisoVersao() {
+  const [nova, setNova] = useState(false);
+  const base = useRef(null);
+  useEffect(() => {
+    let vivo = true;
+    const olhar = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const r = await fetch(`/versao.txt?t=${Date.now()}`, { cache: "no-store" });
+        if (!r.ok) return;
+        const v = (await r.text()).trim();
+        if (!/^[0-9a-f]{7,40}$/i.test(v) || !vivo) return;
+        if (base.current === null) base.current = v;
+        else if (v !== base.current) setNova(true);
+      } catch (e) {}
+    };
+    olhar();
+    const t = setInterval(olhar, 120000);
+    document.addEventListener("visibilitychange", olhar);
+    return () => { vivo = false; clearInterval(t); document.removeEventListener("visibilitychange", olhar); };
+  }, []);
+  if (!nova) return null;
+  return (
+    <div className="fixed inset-x-0 bottom-0 z-[60] flex flex-wrap items-center justify-center gap-3 px-4 py-2.5 text-[13.5px]"
+      style={{ background: C.ink, color: "#fff" }}>
+      <span>O sistema foi atualizado. Recarregue para usar a versão nova.</span>
+      <button onClick={() => window.location.reload()} className="rounded-md px-3 py-1 font-semibold" style={{ background: "#fff", color: C.ink }}>Recarregar</button>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('raiz')).render(<RedeDeErro onde="sistema"><App /><AvisoVersao /></RedeDeErro>);
 </script>
 </body>
 </html>

@@ -203,19 +203,21 @@ async function zapsign(req, res, tok) {
   }
 
   const zapToken = criado && (criado.token || criado.doc_token);
+  const links = (criado && Array.isArray(criado.signers) ? criado.signers : [])
+    .map((x) => ({ nome: x.name, link: x.sign_url }))
+    .filter((x) => x.link);
   if (zapToken) {
     // Sem isto o webhook não teria como saber de que atendimento o
     // documento assinado é.
     await banco(`${REST("atendimento")}?id=eq.${aid}`, {
       method: "PATCH",
       headers: json(tok),
-      body: JSON.stringify({ contrato_zapsign_token: zapToken, contrato_enviado_em: new Date().toISOString() }),
+      // O link fica (0102): é ele que se manda de novo quando o cliente
+      // diz que não achou — reenviar criava outro documento no ZapSign.
+      body: JSON.stringify({ contrato_zapsign_token: zapToken, contrato_enviado_em: new Date().toISOString(),
+        contrato_zapsign_link: links[0] ? links[0].link : null, contrato_zapsign_formato: comPdf ? "pdf" : "markdown" }),
     }).catch(() => {});
   }
-
-  const links = (criado && Array.isArray(criado.signers) ? criado.signers : [])
-    .map((x) => ({ nome: x.name, link: x.sign_url }))
-    .filter((x) => x.link);
 
   return res.status(201).json({ ok: true, token: zapToken || null, assinantes: links, formato: comPdf ? "pdf" : "markdown" });
 }

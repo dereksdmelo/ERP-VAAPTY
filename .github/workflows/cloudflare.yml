@@ -58,6 +58,13 @@ jobs:
           node ferramentas-shinkai.js
           node ferramentas-agendamento.js
 
+      - name: A versão que vai ao ar
+        # A página fica aberta o dia inteiro e roda o código de quando foi
+        # carregada: em 03/11/2026 um contrato foi ao ZapSign pela versão
+        # antiga, três minutos depois da correção publicada. A tela compara
+        # este arquivo de tempos em tempos e pede para recarregar.
+        run: echo "${GITHUB_SHA}" > versao.txt
+
       - name: Publicar
         uses: cloudflare/wrangler-action@v3
         with:

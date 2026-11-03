@@ -16,6 +16,9 @@
 *
 
 !index.html
+# Escrito pela Action a cada publicação: a tela aberta compara e pede
+# para recarregar quando a versão muda.
+!versao.txt
 !assinar.html
 !verificar.html
 !dut.html
