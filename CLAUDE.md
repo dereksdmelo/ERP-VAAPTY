@@ -921,7 +921,12 @@ em junho, caiu R$ 631. Só o "12 meses" diria "subiu" a quem está
 perdendo valor agora. Todos são verdade; verde só quando nenhum caiu.
 
 **Cache de 7 dias na borda:** a tabela FIPE muda uma vez por mês e a
-consulta gasta cota. O endpoint é aberto, como `/api/placa` — os dois
+consulta gasta cota. **Esse cache era da Vercel e no Cloudflare não
+existia** — e o desvalorizômetro roda sozinho a cada abertura do
+atendimento, em cada aparelho e a cada recarga. Em 03/11/2026 as 50
+consultas do dia acabaram às 14h40 com uns dez atendimentos. Desde então
+ele fica no banco por mês (`placa_cache` com a chave `D:<chave>`, a
+mesma da 0101): uma consulta por carro por mês. O endpoint é aberto, como `/api/placa` — os dois
 precisam de login junto, quando for a hora.
 
 ### 12. O funil: onde o dinheiro se perde

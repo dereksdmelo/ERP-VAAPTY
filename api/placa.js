@@ -69,6 +69,16 @@ async function desvalorizacao(req, res, token) {
     return res.status(400).json({ erro: "Falta a chave do desvalorizômetro." });
   }
 
+  /* O DESVALORIZÔMETRO GASTAVA A COTA (03/11/2026). Ele roda sozinho a
+   * cada abertura do atendimento — no celular, no computador, a cada
+   * recarga, para cada pessoa que olha — e cada vez era uma consulta: as
+   * 50 do dia acabaram às 14h40 com uns dez atendimentos. O `s-maxage`
+   * era da Vercel e no Cloudflare não guarda nada. Agora fica no banco
+   * por mês, como a placa (0101): uma consulta por carro por mês. */
+  const chaveCache = `D:${chave}`;
+  const guardado = await cacheRpc("placa_cache_ler", { p_placa: chaveCache, p_mes: mesAqui() });
+  if (guardado && guardado.atual) return res.status(200).json({ ...guardado, guardado: true });
+
   let d;
   try {
     const r = await fetch(`${HOST}/getdesvalorizometro`, {
@@ -82,7 +92,8 @@ async function desvalorizacao(req, res, token) {
   }
 
   if (d.codigo !== 1 || !d.desvalorizometro || !Array.isArray(d.desvalorizometro.tabelas)) {
-    return res.status(422).json({ erro: d.msg || "Histórico indisponível para este veículo." });
+    const limite = /limite/i.test(String(d.msg || ""));
+    return res.status(422).json({ erro: limite ? "Acabaram as consultas de hoje; o histórico da FIPE volta amanhã." : (d.msg || "Histórico indisponível para este veículo."), limite: limite || undefined });
   }
 
   const serie = d.desvalorizometro.tabelas
@@ -106,8 +117,7 @@ async function desvalorizacao(req, res, token) {
   };
   const pico = serie.reduce((a, b) => (b.valor > a.valor ? b : a), serie[0]);
 
-  res.setHeader("Cache-Control", "public, max-age=0, s-maxage=604800");
-  return res.status(200).json({
+  const resposta = {
     marca: d.marca,
     modelo: d.modelo,
     ano_modelo: d.ano_modelo,
@@ -121,7 +131,9 @@ async function desvalorizacao(req, res, token) {
     vinte_quatro_meses: conta(24),
     serie: serie.slice(-MESES_GRAFICO),
     meses_disponiveis: serie.length,
-  });
+  };
+  await cacheRpc("placa_cache_gravar", { p_placa: chaveCache, p_mes: mesAqui(), p_dados: resposta });
+  return res.status(200).json(resposta);
 }
 
 /* A CONSULTA GUARDADA NO MÊS (0101). O plano dá 20 consultas por dia e
