@@ -727,6 +727,13 @@ vazio e caía no id dele; para o ANDRÉ BRUNO, que tem o mesmo nome nas
 duas tabelas, o efeito preenchia o campo sozinho e o insert estourava —
 12/09/2026, com o cliente na frente dele.
 
+**O negociador da Abordagem é o do atendimento (03/11/2026).** O
+Sinvaldo estava com ANDRÉ BRUNO na lista (o "Chegou" da pré-venda) e
+MARCOS dentro: o campo da Abordagem era só da ficha. Agora trocar ali
+grava `negociador_nome` no atendimento (e o `negociador_id` quando o nome
+é o de quem está logado), e quando os dois discordam a Abordagem mostra
+os dois nomes com um botão para cada lado.
+
 **O vínculo só existe quando dá para saber o perfil.** Quem escolhe o
 próprio nome tem o dele na mão; escolhendo o nome de outra pessoa, vai
 só o NOME — que é como os 89 atendimentos importados já vivem, e o que

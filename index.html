@@ -4989,6 +4989,25 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     link: a.contrato_zapsign_link || "", formato: a.contrato_zapsign_formato || "",
   } : null);
   const [zapEnvio, setZapEnvio] = useState(() => zapDe(atendimento));
+  /* UM NEGOCIADOR SÓ (03/11/2026). O Sinvaldo estava com ANDRÉ BRUNO na
+   * lista — quem a pré-venda escolheu no "Chegou" — e MARCOS dentro do
+   * atendimento, porque o campo da Abordagem era só da ficha e nunca
+   * chegava ao atendimento. Agora trocar ali grava o atendimento (a lista,
+   * a fila da vez, o Meu dia), e quando os dois discordam a Abordagem diz
+   * e oferece acertar para um lado ou para o outro. */
+  const [negLista, setNegLista] = useState((atendimento && atendimento.negociador_nome) || "");
+  const [erroNeg, setErroNeg] = useState("");
+  const mesmoNome = (a, b) => semAcento(String(a || "")).trim().toUpperCase() === semAcento(String(b || "")).trim().toUpperCase();
+  const gravarNegociador = async (nome) => {
+    const n = String(nome || "").trim();
+    if (!atendimento || !n || mesmoNome(n, negLista)) return;
+    const souEu = perfil && (mesmoNome(n, perfil.nome) || mesmoNome(n.split(" ")[0], String(perfil.nome || "").split(" ")[0]));
+    setErroNeg("");
+    try {
+      await atualizarAtendimento(atendimento.id, { negociador_nome: n, negociador_id: souEu ? perfil.id : null });
+      setNegLista(n);
+    } catch (e) { setErroNeg(e.message); }
+  };
   const [querReenviar, setQuerReenviar] = useState(false);
   const clienteBase = useRef({ ...cliente });
   const clienteRef = useRef(cliente);
@@ -5024,6 +5043,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         const a = await lerAtendimento(atendimento.id);
         if (!vivo || !a) return;
         if (a.contrato_zapsign_token) setZapEnvio(zapDe(a));
+        if (a.negociador_nome) setNegLista(a.negociador_nome);
         const sujos = clienteSujos();
         const novo = { ...clienteRef.current };
         let mudou = false;
@@ -5799,7 +5819,22 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         {(
           <Bloco titulo="Chegada" sub="“Cliente não aguardou na loja” é a perda mais repetida no CRM — combine o tempo agora.">
             <div className="grid items-end gap-2 sm:grid-cols-[1fr_170px] lg:grid-cols-[1fr_170px_1.3fr]">
-              <Campo label="Negociador"><input className={inputCls} style={inputSty} value={f.negociador} onChange={(e) => set("negociador", e.target.value)} placeholder="Seu nome" /></Campo>
+              <Campo label="Negociador"><input className={inputCls} style={inputSty} value={f.negociador} onChange={(e) => set("negociador", e.target.value)}
+                onBlur={(e) => gravarNegociador(e.target.value)} placeholder="Seu nome" /></Campo>
+              {negLista && f.negociador && !mesmoNome(negLista, f.negociador) && (
+                <div className="rounded-md p-2 text-[12px]" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
+                  Na lista de Atendimentos ele está com <b>{negLista}</b>.
+                  <div className="mt-1.5 flex flex-wrap gap-2">
+                    <button onClick={() => gravarNegociador(f.negociador)} className="rounded border px-2 py-1 font-semibold" style={{ borderColor: AMARELO.texto }}>
+                      Quem atende é {f.negociador}
+                    </button>
+                    <button onClick={() => set("negociador", negLista)} className="rounded border px-2 py-1 font-semibold" style={{ borderColor: AMARELO.texto }}>
+                      Quem atende é {negLista}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {erroNeg && <p className="text-[11.5px]" style={{ color: C.laranja }}>{erroNeg}</p>}
               <Campo label="Chegou às">
                 <div className="flex gap-1.5">
                   <input type="time" className={inputCls} style={inputSty} value={f.chegada} onChange={(e) => set("chegada", e.target.value)} />
