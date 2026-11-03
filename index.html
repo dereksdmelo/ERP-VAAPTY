@@ -1238,6 +1238,8 @@ async function contratoEmPdf(html) {
   doc.querySelectorAll("[data-ancora]").forEach((el) => {
     el.className = "ancora"; el.textContent = `<<${el.getAttribute("data-ancora")}>>`;
   });
+  // O rodapé é flex na impressão; no PDF os pedaços colariam.
+  doc.querySelectorAll(".rodape > *:not(:last-child)").forEach((el) => el.insertAdjacentText("afterend", " · "));
   const conteudo = window.htmlToPdfmake(doc.body.innerHTML, {
     window, tableAutoSize: true,
     defaultStyles: {
@@ -1246,6 +1248,23 @@ async function contratoEmPdf(html) {
       td: { fontSize: 9.5 },
     },
   });
+  /* A ÂNCORA E A LINHA NA MESMA PÁGINA. No primeiro teste a âncora ficou
+   * no fim da página 2 e o traço no começo da 3 — a assinatura cairia
+   * longe da linha. O bloco de assinaturas inteiro não quebra, e cada
+   * linha também não. E a tabela de dados ocupa a largura da folha. */
+  const tem = (x, c) => x && Array.isArray(x.style) && x.style.indexOf(c) >= 0;
+  const andar = (lista) => {
+    if (!Array.isArray(lista)) return;
+    lista.forEach((x, i) => {
+      if (!x || typeof x !== "object") return;
+      if (Array.isArray(x.stack) && x.stack.length && x.stack.every((y) => tem(y, "assinatura"))) x.unbreakable = true;
+      if (tem(x, "linha") && !x.__preso) { x.__preso = true; lista[i] = { stack: [x], unbreakable: true }; }
+      if (x.table && tem(x, "dados") && x.table.body && x.table.body[0] && x.table.body[0].length === 2) x.table.widths = ["32%", "*"];
+      andar(x.stack);
+      if (x.table && x.table.body) x.table.body.forEach(andar);
+    });
+  };
+  andar(conteudo);
   const def = {
     pageSize: "A4", pageMargins: [48, 48, 48, 48], content: conteudo,
     defaultStyle: { fontSize: 10.5, lineHeight: 1.2 },
