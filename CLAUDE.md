@@ -536,6 +536,30 @@ de documento continuam devolvendo só o HTML, como no arquivo original.
 Se o rodapé mudar de texto, o protocolo passa a ser nulo, e o registro
 perde a única coisa que o amarra à folha impressa.
 
+**O mesmo protocolo é o mesmo papel (04/11/2026).** O documento
+impresso antes de a ficha do carro existir era registrado depois, sem o
+texto — e o celular e o computador registravam cada um a sua cópia: o
+MGX1133 ficou com o mesmo pré-contrato três vezes, nenhuma com conteúdo,
+e sem o id na ficha o termo não tinha link de assinatura. Agora o POST
+de `api/documento.js` devolve a linha que já existe para (veículo,
+protocolo); o registro tardio guarda o id; a união dos registros da
+ficha (decisão 44) não perde o id que um lado soube depois; e, com placa
+válida, imprimir cria a linha do veículo na hora (o caminho da foto),
+para o documento ir inteiro. **O gerente exclui documento** pelo check
+list de documentações (o de assinatura, não), e lá só a via mais recente
+de cada item aparece — as antigas ficam recolhidas.
+
+**O anexo troca de tipo sem reenviar** (PATCH em `?recurso=anexo`): a
+CNH que subiu como "Outro" vira "CNH do contratante", e no check list o
+papel solto vai para o item certo ("pôr em…").
+
+**O contrato de aceite sai com o check list (04/11/2026).** O desconto
+de um vidro corrigido no check list não chegava ao contrato: o atendimento
+só recebia o check list ao abrir e ao salvar, e o valor do contrato era o
+"valor fechado" da etapa T. Agora toda mudança chega ao atendimento, a aba
+relê o banco ao voltar a ficar à vista, e o valor bruto é o do check list
+quando há os dois — a tela avisa quando eles não batem.
+
 **Cada geração é uma linha.** Segunda via é evento novo, com protocolo
 novo: é assim que se sabe quantas vias existem circulando. Por isso a
 0003 não tem índice único.

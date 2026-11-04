@@ -687,12 +687,31 @@ module.exports = async function handler(req, res) {
         ? Math.trunc(Number(corpo.rodada))
         : null;
 
+      /* O MESMO PROTOCOLO É O MESMO PAPEL (04/11/2026). O documento
+       * impresso antes de a ficha do carro existir é registrado depois —
+       * e o celular e o computador registravam, cada um, a sua cópia: o
+       * MGX1133 ficou com o mesmo pré-contrato três vezes, todas sem
+       * conteúdo. Com protocolo já registrado para este carro, devolve a
+       * linha que existe (e completa o conteúdo, se ela estava vazia). */
+      const protocolo = texto(corpo.protocolo);
+      if (protocolo) {
+        const ja = await banco(`${REST("documento")}?select=id,gerado_em,conteudo&veiculo_id=eq.${vid}` +
+          `&protocolo=eq.${encodeURIComponent(protocolo)}&order=gerado_em.asc&limit=1`, { headers: cabecalhos(tok) });
+        const ex = Array.isArray(ja) ? ja[0] : null;
+        if (ex) {
+          if (conteudo && !ex.conteudo) {
+            await banco(`${REST("documento")}?id=eq.${ex.id}`, { method: "PATCH", headers: json(tok), body: JSON.stringify({ conteudo }) }).catch(() => {});
+          }
+          return res.status(200).json({ ok: true, id: ex.id, tipo, gerado_em: ex.gerado_em, ja_existia: true });
+        }
+      }
+
       const r = await banco(REST("documento"), {
         method: "POST",
         headers: json(tok, { Prefer: "return=representation" }),
         body: JSON.stringify({
           veiculo_id: vid, tipo, rodada,
-          protocolo: texto(corpo.protocolo),
+          protocolo,
           conteudo,
           negociador: texto(corpo.negociador),
         }),
@@ -707,8 +726,27 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    res.setHeader("Allow", "GET, POST");
-    return res.status(405).json({ erro: "Use GET ou POST." });
+    /* EXCLUIR UM REGISTRO (04/11/2026, o Derek: "teria que ter opção pra
+     * gente excluir documentos ali também, pelo menos o gestor… vai
+     * ficar tudo duplicado e são registro sem conteúdo nenhum"). Só o
+     * gerente: o documento é o que liga o papel na mão do cliente ao
+     * banco (decisão 15), e apagar um que valia apaga a prova. Documento
+     * com assinatura não se apaga. */
+    if (req.method === "DELETE") {
+      const id = String(req.query.id || "");
+      if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido." });
+      const eu = (() => { try { const b = String(tok).split(".")[1].replace(/-/g, "+").replace(/_/g, "/"); return JSON.parse(atob(b + "===".slice((b.length + 3) % 4))).sub; } catch (e) { return null; } })();
+      const p = eu ? await banco(`${URL_BASE}/rest/v1/perfil?select=papel&id=eq.${eu}`, { headers: cabecalhos(tok) }) : null;
+      if (!(Array.isArray(p) && p[0] && p[0].papel === "gerente")) return res.status(403).json({ erro: "Só o gerente exclui documento." });
+      const ass = await banco(`${URL_BASE}/rest/v1/assinatura?select=id&documento_id=eq.${id}&limit=1`, { headers: cabecalhos(tok) }).catch(() => []);
+      if (Array.isArray(ass) && ass.length) return res.status(409).json({ erro: "Este documento tem assinatura e não pode ser excluído." });
+      const r = await banco(`${REST("documento")}?id=eq.${id}`, { method: "DELETE", headers: cabecalhos(tok, { Prefer: "return=representation" }) });
+      if (!Array.isArray(r) || !r.length) return res.status(404).json({ erro: "Documento não encontrado." });
+      return res.status(200).json({ ok: true });
+    }
+
+    res.setHeader("Allow", "GET, POST, DELETE");
+    return res.status(405).json({ erro: "Use GET, POST ou DELETE." });
   } catch (e) {
     return res.status(e.status || 500).json({ erro: limpar(e.message) || "Falha ao registrar o documento." });
   }

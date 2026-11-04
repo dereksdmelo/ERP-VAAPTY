@@ -871,8 +871,27 @@ async function anexos(req, res, tok) {
     return res.status(200).json({ ok: true });
   }
 
-  res.setHeader("Allow", "GET, POST, DELETE");
-  return res.status(405).json({ erro: "Use GET, POST ou DELETE." });
+  /* TROCAR O TIPO DE UM ANEXO (04/11/2026). As CNHs do MGX1133 subiram
+   * como "Outro" no fechamento e ficaram fora dos itens CNH do check
+   * list: reenviar o arquivo só para trocar a etiqueta seria atrito à
+   * toa. Só a linha muda, pelo token de quem pede — o arquivo não. */
+  if (req.method === "PATCH") {
+    const id = String(req.query.id || "");
+    if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido." });
+    let c = req.body;
+    if (c && typeof Buffer !== "undefined" && Buffer.isBuffer(c)) c = c.toString("utf8");
+    if (typeof c === "string") { try { c = JSON.parse(c); } catch (e) { c = null; } }
+    const rotulo = String((c && c.rotulo) || "").trim().slice(0, 80);
+    if (!rotulo) return res.status(400).json({ erro: "Diga o novo tipo." });
+    const r = await banco(`${REST("anexo")}?id=eq.${id}`, {
+      method: "PATCH", headers: json(tok, { Prefer: "return=representation" }), body: JSON.stringify({ rotulo }),
+    });
+    if (!Array.isArray(r) || !r.length) return res.status(404).json({ erro: "Anexo não encontrado." });
+    return res.status(200).json({ ok: true, anexo: r[0] });
+  }
+
+  res.setHeader("Allow", "GET, POST, PATCH, DELETE");
+  return res.status(405).json({ erro: "Use GET, POST, PATCH ou DELETE." });
 }
 
 /* OS DOCUMENTOS DO COLABORADOR (0079): RG/CNH, comprovante, o contrato

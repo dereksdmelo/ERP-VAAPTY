@@ -1288,6 +1288,17 @@ async function guardarContratoAssinado(atendimentoId) {
   if (!r.ok) throw new Error(d.erro || "Não consegui guardar o contrato assinado.");
   return d;
 }
+async function mudarRotuloAnexo(id, rotulo) {
+  const r = await fetchAut(`/api/foto?recurso=anexo&id=${encodeURIComponent(id)}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rotulo }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui mudar o tipo.");
+  return d.anexo;
+}
+// Os tipos que o atendimento conhece, para reclassificar um anexo.
+const ROTULOS_ATENDIMENTO = ["CRLV", "CNH do contratante", "CNH do proprietário", "CNH (contratante e proprietário)",
+  "Identidade", "Dossiê do Detran", "Comprovante de residência", "Laudo cautelar", "Comprovante de pagamento", "Contrato assinado", "Outro"];
 async function apagarAnexo(id) {
   const r = await fetchAut(`/api/foto?recurso=anexo&id=${encodeURIComponent(id)}`, { method: "DELETE" });
   const d = await r.json().catch(() => ({}));
@@ -1635,6 +1646,13 @@ async function criarLinkAssinatura({ documento_id, nome, telefone, dias }) {
   return { url: `${location.origin}/assinar.html#t=${d.token}`, expira_em: d.expira_em };
 }
 
+// Só o gerente; documento com assinatura o servidor recusa.
+async function apagarDocumento(id) {
+  const r = await fetchAut(`/api/documento?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui excluir.");
+  return true;
+}
 async function registrarDocumento(reg) {
   const r = await fetchAut("/api/documento", {
     method: "POST",
@@ -2746,11 +2764,20 @@ const REGISTROS_DA_FICHA = {
 function unirRegistros(local, remoto, chaveDe) {
   const a = Array.isArray(local) ? local : [];
   const b = Array.isArray(remoto) ? remoto : [];
-  const vistos = new Set(); const out = [];
+  const vistos = {}; const out = [];
   [...a, ...b].forEach((x) => {
     const k = String(chaveDe(x));
-    if (vistos.has(k)) return;
-    vistos.add(k); out.push(x);
+    if (k in vistos) {
+      // O mesmo registro dos dois lados: o que um aparelho SOUBE depois
+      // (que foi ao banco, e com que id) não se perde porque o outro
+      // ainda não sabia (04/11/2026, o termo sem link).
+      const i = vistos[k], y = out[i];
+      if (y && x && typeof y === "object" && typeof x === "object" && (x.noBanco || x.docId) && !(y.noBanco && y.docId)) {
+        out[i] = { ...y, noBanco: y.noBanco || x.noBanco, docId: y.docId || x.docId };
+      }
+      return;
+    }
+    vistos[k] = out.length; out.push(x);
   });
   // Em ordem de quando aconteceu, senão a rodada do celular entraria
   // depois da do computador só por ter chegado depois.
@@ -3289,7 +3316,12 @@ function aceiteProposta(f, cl) {
   const temGravame = numeroBR(f.quitacao) > 0;
 
   const c = (v) => numeroBR(v);
-  const bruto = c(f.valorFechado) || c(cl && cl.valor_venda);
+  /* O CHECK LIST MANDA NO VALOR (04/11/2026, o Derek: "surgiu um vidro
+   * pra descontar, ele alterou o checklist… mas o novo contrato não veio
+   * com o novo valor"). O check list é a conta do negócio e é o que se
+   * corrige depois de fechado; o "valor fechado" da etapa T é o número
+   * da mesa. Havendo os dois, vale o do check list. */
+  const bruto = c(cl && cl.valor_venda) || c(f.valorFechado);
 
   /* As quatro deduções saem SEMPRE, com valor ou com a linha em branco.
    * Antes elas dependiam de o check list estar carregado, e sem ele o
@@ -4928,10 +4960,28 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
       noBanco: false,
     };
 
-    if (veiculoId) {
+    /* SEM FICHA DO CARRO AINDA, CRIA (04/11/2026). O documento impresso
+     * antes de existir veículo ia para o banco SEM o texto (o HTML não
+     * fica no aparelho) e sem link de assinatura. Com placa válida, a
+     * linha do veículo nasce agora com o que já está preenchido — o mesmo
+     * caminho da foto —, e o documento vai inteiro. */
+    let vid = veiculoId;
+    const placaAgora = String(fRef.current.placa || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (!vid && /^[A-Z]{3}\d[A-Z0-9]\d{2}$/.test(placaAgora)) {
+      try {
+        const vazio = (v) => v == null || v === "" || v === false || (Array.isArray(v) && v.every((x) => x == null || x === ""));
+        const corpo = Object.fromEntries(Object.entries(fichaParaBanco(fRef.current)).filter(([, v]) => !vazio(v)));
+        const d = await salvarFicha({ ...corpo, atendimento_id: atendimento ? atendimento.id : null });
+        if (d.id) {
+          vid = d.id; setVeiculoId(d.id);
+          window.storage.set(CH_VEIC, JSON.stringify({ id: d.id, placa: d.placa })).catch(() => {});
+        }
+      } catch (e) {}
+    }
+    if (vid) {
       try {
         const salvo = await registrarDocumento({
-          veiculo_id: veiculoId, tipo, rodada: reg.rodada,
+          veiculo_id: vid, tipo, rodada: reg.rodada,
           protocolo: reg.protocolo, conteudo: html, negociador: fRef.current.negociador,
         });
         reg.noBanco = true;
@@ -5186,21 +5236,24 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         // Documento gerado antes de existir veículo: registra agora. O
         // HTML já se perdeu (não fica no aparelho), então a linha vai
         // sem conteúdo — dá para saber que existiu, não o que dizia.
-        const feitos = [];
+        // O id volta junto (04/11/2026): sem ele o termo do MGX1133 ficou
+        // sem o botão de link de assinatura. E o servidor devolve a linha
+        // que já existe quando o outro aparelho registrou antes.
+        const feitos = {};
         for (const doc of (fRef.current.documentos || []).filter((x) => !x.noBanco)) {
           try {
-            await registrarDocumento({
+            const r = await registrarDocumento({
               veiculo_id: d.id, tipo: doc.tipo, rodada: doc.rodada,
               protocolo: doc.protocolo, conteudo: null, negociador: fRef.current.negociador,
             });
-            feitos.push(doc.em);
+            feitos[doc.em] = (r && r.id) || null;
           } catch (e) { setErroDoc(e.message); }
         }
-        if (feitos.length) {
+        if (Object.keys(feitos).length) {
           guardarFicha({
             ...fRef.current,
             documentos: (fRef.current.documentos || []).map((x) =>
-              feitos.indexOf(x.em) >= 0 ? { ...x, noBanco: true } : x),
+              x.em in feitos ? { ...x, noBanco: true, docId: x.docId || feitos[x.em] } : x),
           });
         }
       }
@@ -7246,6 +7299,13 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                           style={{ background: pronto ? C.roxo : "#E7E3EC", color: pronto ? "#fff" : C.mute }}>
                           Imprimir o contrato
                         </button>
+                        {checklist && numeroBR(checklist.valor_venda) > 0 && numeroBR(f.valorFechado) > 0 &&
+                          numeroBR(checklist.valor_venda) !== numeroBR(f.valorFechado) && (
+                          <p className="text-[11px]" style={{ color: AMARELO.texto }}>
+                            O valor fechado ({brl(numeroBR(f.valorFechado))}) e o do check list ({brl(numeroBR(checklist.valor_venda))}) não batem.
+                            O contrato sai com o do check list.
+                          </p>
+                        )}
                         {!pronto && (
                           <p className="text-[11px]" style={{ color: AMARELO.texto }}>
                             Falta{" "}
@@ -8603,9 +8663,32 @@ function ChecklistDigital({ atendimentoId, ficha, perfil, aoCarregar }) {
           valor_quitacao: ficha.quitacao || "",
         };
         setCl(base);
+        salvoRef.current = JSON.stringify(base);
         if (aoCarregar) aoCarregar(base);
       })
       .catch((e) => setErro(e.message));
+  }, [atendimentoId]);
+
+  /* O CONTRATO SAI COM O QUE ESTÁ NA TELA (04/11/2026). O pai (o
+   * atendimento) só recebia o check list ao abrir e ao salvar: corrigir o
+   * desconto do vidro e imprimir sem apertar "Salvar" imprimia a conta
+   * velha. Agora toda mudança chega a ele — e, com a aba voltando a ficar
+   * à vista sem nada por salvar aqui, relê o banco: a correção pode ter
+   * sido feita no outro aparelho. */
+  const salvoRef = useRef("");
+  useEffect(() => { if (cl && aoCarregar) aoCarregar(cl); }, [cl]);
+  useEffect(() => {
+    if (!atendimentoId) return;
+    const vis = () => {
+      if (document.hidden) return;
+      setCl((atual) => {
+        if (atual && JSON.stringify(atual) !== salvoRef.current) return atual;   // edição em curso aqui
+        lerChecklist(atendimentoId).then((d) => { if (d) { salvoRef.current = JSON.stringify(d); setCl(d); } }).catch(() => {});
+        return atual;
+      });
+    };
+    document.addEventListener("visibilitychange", vis);
+    return () => document.removeEventListener("visibilitychange", vis);
   }, [atendimentoId]);
 
   if (!atendimentoId) {
@@ -8659,6 +8742,7 @@ function ChecklistDigital({ atendimentoId, ficha, perfil, aoCarregar }) {
     setErro(""); setIndo(true);
     try {
       const d = await salvarChecklist(atendimentoId, { ...cl, valor_cliente: liquido });
+      salvoRef.current = JSON.stringify(d);
       setCl(d); setSalvoEm(new Date());
       if (aoCarregar) aoCarregar(d);
     } catch (e) { setErro(e.message); }
@@ -11187,6 +11271,18 @@ function Anexos({ atendimentoId, rotulos, aoMudar, legados }) {
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-3">
+                {/* Trocar o tipo sem reenviar (04/11/2026): a CNH que subiu
+                    como "Outro" vira "CNH do contratante" e passa a contar
+                    no check list de documentações. */}
+                <select value="" title="mudar o tipo deste arquivo" className="rounded border bg-white text-[11px]" style={{ borderColor: C.line, maxWidth: 110 }}
+                  onChange={async (e) => {
+                    const novo = e.target.value; if (!novo) return;
+                    try { await mudarRotuloAnexo(a.id, novo); setLista((ls) => ls.map((x) => (x.id === a.id ? { ...x, rotulo: novo } : x))); if (aoMudar) aoMudar(); }
+                    catch (er) { setErro(er.message); }
+                  }}>
+                  <option value="">mudar tipo…</option>
+                  {ROTULOS_ATENDIMENTO.filter((r) => r !== a.rotulo).map((r) => <option key={r} value={r}>{r}</option>)}
+                </select>
                 {a.url && (
                   <a href={a.url} target="_blank" rel="noopener noreferrer"
                     className="text-[11px] font-semibold" style={{ color: C.roxo }}>abrir</a>
@@ -21181,6 +21277,15 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
   const podeVisto = !!(perfil && (perfil.administrativo || perfil.papel === "gerente"));
 
   const [docs, setDocs] = useState([]);
+  // As vias antigas de um documento gerado ficam recolhidas: o MGX1133
+  // tinha doze contratos impressos na linha do item.
+  const [verVias, setVerVias] = useState({});
+  const eGerente = !!(perfil && perfil.papel === "gerente");
+  const excluirDoc = async (x) => {
+    if (!confirm(`Excluir o registro "${ROT_DOC[x.tipo] || x.tipo} · ${x.protocolo || ""}"? Isto não se desfaz.`)) return;
+    try { await apagarDocumento(x.id); setDocs((l) => l.filter((y) => y.id !== x.id)); }
+    catch (e) { alert(e.message); }
+  };
   const [novoItem, setNovoItem] = useState("");
   const [editandoLista, setEditandoLista] = useState(false);
 
@@ -21451,14 +21556,27 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
                   <div className="mt-1.5 flex flex-wrap items-center gap-2">
                     {/* O que o próprio sistema emitiu. Vale como papel do
                         item: o contrato existe, só não é arquivo anexado. */}
-                    {geradosDoItem(it[0]).map((x, gk) => (
-                      <button key={x.id}
-                        onClick={() => abrirNaFila(it[0], `d${x.id}`)}
-                        className="rounded-lg px-2 py-1 text-[11px] font-semibold"
-                        style={{ background: C.roxoFraco, color: C.roxo }}>
-                        {ROT_DOC[x.tipo] || x.tipo} · {diaBR(x.gerado_em)}{x.protocolo ? ` · ${x.protocolo}` : ""}
-                      </button>
-                    ))}
+                    {(() => {
+                      const gs = geradosDoItem(it[0]);
+                      const vis = verVias[it[0]] ? gs : gs.slice(0, 1);
+                      return (
+                        <>
+                          {vis.map((x, gk) => (
+                            <span key={x.id} className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px]" style={{ background: C.roxoFraco }}>
+                              <button onClick={() => abrirNaFila(it[0], `d${x.id}`)} className="font-semibold" style={{ color: C.roxo }}>
+                                {ROT_DOC[x.tipo] || x.tipo} · {diaBR(x.gerado_em)}{x.protocolo ? ` · ${x.protocolo}` : ""}{gk === 0 && gs.length > 1 ? " · a mais recente" : ""}
+                              </button>
+                              {eGerente && <button onClick={() => excluirDoc(x)} style={{ color: C.mute }} title="excluir este registro">×</button>}
+                            </span>
+                          ))}
+                          {gs.length > 1 && (
+                            <button onClick={() => setVerVias({ ...verVias, [it[0]]: !verVias[it[0]] })} className="text-[11px] underline" style={{ color: C.mute }}>
+                              {verVias[it[0]] ? "esconder as vias antigas" : `+${gs.length - 1} ${gs.length === 2 ? "via antiga" : "vias antigas"}`}
+                            </button>
+                          )}
+                        </>
+                      );
+                    })()}
                     {arqs.map((a, k) => (
                       <span key={a.id} className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px]" style={{ background: C.bg }}>
                         <button onClick={() => abrirNaFila(it[0], a.id)} style={{ color: C.roxo, fontWeight: 600 }}>
@@ -21509,10 +21627,24 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
                 </button>
               ))}
               {soltos.map((a, k) => (
-                <button key={a.id} onClick={() => setVisor({ lista: gerSoltos.map(comoItem).concat(soltos), i: gerSoltos.length + k })} className="rounded-lg px-2 py-1 text-[11px]"
-                  style={{ background: C.bg, color: C.roxo, fontWeight: 600 }}>
-                  {a.rotulo} · {String(a.nome || "arquivo").slice(0, 20)}
-                </button>
+                <span key={a.id} className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px]" style={{ background: C.bg }}>
+                  <button onClick={() => setVisor({ lista: gerSoltos.map(comoItem).concat(soltos), i: gerSoltos.length + k })}
+                    style={{ color: C.roxo, fontWeight: 600 }}>
+                    {a.rotulo} · {String(a.nome || "arquivo").slice(0, 20)}
+                  </button>
+                  {/* Papel que subiu como "Outro" vai para o item certo
+                      sem reenviar o arquivo (04/11/2026). */}
+                  {podeVisto && (
+                    <select value="" title="pôr este papel num item" className="rounded border bg-white text-[11px]" style={{ borderColor: C.line, maxWidth: 120 }}
+                      onChange={async (e) => {
+                        const cod = e.target.value; if (!cod) return;
+                        try { await mudarRotuloAnexo(a.id, `doc:${cod}`); carregarAnexos(); } catch (er) { alert(er.message); }
+                      }}>
+                      <option value="">pôr em…</option>
+                      {d.itens.filter((it) => it[4]).map((it) => <option key={it[0]} value={it[0]}>{it[1]}</option>)}
+                    </select>
+                  )}
+                </span>
               ))}
             </div>
           </div>
