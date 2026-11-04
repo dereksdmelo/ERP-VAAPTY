@@ -13821,6 +13821,9 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
   const [filaAberta, setFilaAberta] = useState(false);
   const [importando, setImportando] = useState(false);
   const eGerente = !!(perfil && perfil.papel === "gerente");
+  const [limpando, setLimpando] = useState(false);
+  const [marcados, setMarcados] = useState({});
+  const [tirando, setTirando] = useState(false);
 
   const carregar = async () => {
     setErro("");
@@ -14028,6 +14031,50 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
        * quebrarem a linha: placa, custo e dias são o que decide, e o
        * resto cabe quando a tela comporta.
        */}
+      {/* LIMPAR O PÁTIO (04/11/2026, o Derek: "tenho que fazer uma limpa
+          nos carros de estoque que estão errados… tem alguma maneira?").
+          Marca vários e tira de uma vez: teste, entrada repetida, carro
+          que nunca esteve aqui. Só o gerente, só carro no pátio (o
+          servidor confere), e as linhas de custo saem junto. Carro que
+          já foi vendido e ficou aqui não se tira — vende-se, para a venda
+          e a margem existirem. */}
+      {filtro === "em_estoque" && eGerente && (
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <button onClick={() => { setLimpando(!limpando); setMarcados({}); }}
+            className="rounded-md border px-3 py-1.5 text-[12.5px] font-semibold"
+            style={{ borderColor: limpando ? C.laranja : C.line, color: limpando ? C.laranja : C.roxo, background: "#fff" }}>
+            {limpando ? "sair da limpeza" : "limpar o pátio"}
+          </button>
+          {limpando && (
+            <>
+              <span className="text-[12.5px]" style={{ color: C.mute }}>
+                Marque o que entrou errado (teste, repetido, carro que não está aqui). Carro vendido que ficou no pátio: abra e use "Vender carro".
+              </span>
+              <button disabled={!Object.keys(marcados).length || !!tirando}
+                onClick={async () => {
+                  const alvos = visivel.filter((x) => marcados[x.id]);
+                  if (!confirm(`Tirar ${alvos.length} carro(s) do estoque?\n\n${alvos.map((x) => `${(x.veiculo && x.veiculo.placa) || "—"} · ${(x.veiculo && x.veiculo.marca_modelo) || ""}`).join("\n")}\n\nAs linhas de custo deles saem junto. Isto não se desfaz.`)) return;
+                  setTirando(true); setErro("");
+                  const falhas = [];
+                  for (const x of alvos) {
+                    try {
+                      const r = await fetchAut(`/api/veiculo?recurso=estoque&id=${encodeURIComponent(x.id)}`, { method: "DELETE" });
+                      const d = await r.json().catch(() => ({}));
+                      if (!r.ok) falhas.push(`${(x.veiculo && x.veiculo.placa) || "—"}: ${d.erro || "falhou"}`);
+                    } catch (ex) { falhas.push(`${(x.veiculo && x.veiculo.placa) || "—"}: ${ex.message}`); }
+                  }
+                  setTirando(false); setMarcados({}); setLimpando(false);
+                  if (falhas.length) setErro(`Não saíram: ${falhas.join(" · ")}`);
+                  carregar();
+                }}
+                className="rounded-md px-3 py-1.5 text-[12.5px] font-semibold"
+                style={{ background: Object.keys(marcados).length ? C.laranja : C.line, color: "#fff" }}>
+                {tirando ? "tirando…" : `Tirar ${Object.keys(marcados).length || ""} do estoque`}
+              </button>
+            </>
+          )}
+        </div>
+      )}
       <div className="rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
         {filtro === "em_estoque" && visivel.map((e, i) => {
           const v = e.veiculo || {};
@@ -14039,9 +14086,10 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
            * lido. */
           const cor = dias == null ? C.mute : dias >= 60 ? C.laranja : dias >= 30 ? AMARELO.texto : C.mute;
           return (
-            <button key={e.id} onClick={() => setAbrindo(e.id)}
+            <button key={e.id} onClick={() => (limpando ? setMarcados((m) => { const n = { ...m }; if (n[e.id]) delete n[e.id]; else n[e.id] = true; return n; }) : setAbrindo(e.id))}
               className="flex w-full items-center gap-3 px-3 py-2 text-left"
-              style={{ borderTop: i ? `1px solid ${C.line}` : "none" }}>
+              style={{ borderTop: i ? `1px solid ${C.line}` : "none", background: limpando && marcados[e.id] ? "#FFF1EB" : "transparent" }}>
+              {limpando && <input type="checkbox" readOnly checked={!!marcados[e.id]} className="shrink-0" />}
               <span className="w-[86px] shrink-0 text-[13px] font-bold" style={{ fontFamily: F.mono }}>
                 {v.placa || "—"}
               </span>
@@ -14315,6 +14363,7 @@ function FichaEstoque({ id, perfil, aoVoltar }) {
           {e.natureza !== "indicacao" && (
             <BotaoPrimario className="mt-3 w-full" onClick={() => setContratoLoj(true)}>Contrato do lojista</BotaoPrimario>
           )}
+          {e.natureza !== "indicacao" && <SituacaoContratoLojista e={e} recarga={contratoLoj} />}
           {contratoLoj && <ContratoDoLojista e={e} valor={c.venda} aoFechar={() => setContratoLoj(false)} />}
         </div>
       ) : vendendo ? (
@@ -22049,6 +22098,43 @@ const CAMPOS_REPRESENTANTE = [
   ["rep_contato", "Contato"], ["rep_email", "E-mail"],
 ];
 const TIPO_ESPECIE = { 1: "Automóvel / Passageiro", 2: "Motocicleta / Passageiro", 3: "Caminhão / Carga" };
+
+/* ONDE ESTÁ A ASSINATURA DO LOJISTA, na ficha do carro (04/11/2026, o
+ * Derek: "mandei o link pra ele mas depois que sair já não consigo mais
+ * acompanhar se ele assinou"). O estado morava só dentro da janela do
+ * contrato. Agora a ficha do carro vendido diz, sempre: o envio pelo
+ * ZapSign (0109) e, para os contratos mandados antes dele pelo link da
+ * assinatura própria (decisão 42), se o link foi usado. */
+function SituacaoContratoLojista({ e, recarga }) {
+  const [zap, setZap] = useState(null);
+  const [proprios, setProprios] = useState([]);
+  useEffect(() => {
+    fetchAut(`/api/documento?recurso=zapsign&estoque_id=${e.id}`).then((r) => r.json())
+      .then((d) => setZap(d && !d.erro ? d : null)).catch(() => {});
+    listarDocumentos(e.veiculo_id).then(async (ls) => {
+      const docs = (ls || []).filter((x) => x.tipo === "contrato_lojista");
+      const est = docs.length ? await lerEstadosAssinatura(docs.map((x) => x.id)).catch(() => ({})) : {};
+      setProprios(docs.map((x) => ({ ...x, estado: est[x.id] || null })).filter((x) => x.estado));
+    }).catch(() => {});
+  }, [e.id, recarga]);
+  const linhas = [];
+  if (zap && zap.enviado) {
+    linhas.push(zap.assinado_em
+      ? <span key="z" style={{ color: C.verde, fontWeight: 600 }}>✓ Assinado pelo ZapSign em {new Date(zap.assinado_em).toLocaleString("pt-BR")}
+          {zap.arquivo_assinado && <> · <a href={zap.arquivo_assinado} target="_blank" rel="noopener noreferrer" className="underline">via assinada</a></>}</span>
+      : <span key="z" style={{ color: AMARELO.texto }}>Enviado pelo ZapSign em {zap.enviado_em ? new Date(zap.enviado_em).toLocaleString("pt-BR") : "—"} · aguardando o lojista assinar
+          {zap.link && <> · <button onClick={() => { try { navigator.clipboard.writeText(zap.link); } catch (x) {} }} className="underline">copiar o link</button></>}</span>);
+  }
+  proprios.forEach((x) => {
+    const st = x.estado || {};
+    linhas.push(st.situacao === "assinado"
+      ? <span key={x.id} style={{ color: C.verde, fontWeight: 600 }}>✓ {x.protocolo} assinado{st.nome ? ` por ${st.nome}` : ""}{st.assinado_em ? ` em ${new Date(st.assinado_em).toLocaleString("pt-BR")}` : ""}</span>
+      : <span key={x.id} style={{ color: st.situacao === "expirado" ? C.laranja : AMARELO.texto }}>{x.protocolo} · {st.situacao === "expirado"
+          ? "o link de assinatura venceu sem ser usado — mande pelo ZapSign" : "link de assinatura enviado, ainda não assinado"}</span>);
+  });
+  if (!linhas.length) return <p className="mt-2 text-[12px]" style={{ color: C.mute }}>Contrato do lojista ainda não foi enviado para assinar.</p>;
+  return <div className="mt-2 flex flex-col gap-0.5 text-[12.5px]">{linhas}</div>;
+}
 
 function ContratoDoLojista({ e, valor, aoFechar }) {
   const v = e.veiculo || {};

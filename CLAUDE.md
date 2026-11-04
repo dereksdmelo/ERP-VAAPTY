@@ -4030,7 +4030,15 @@ no `estoque` — o contrato é do carro vendido, não do atendimento. O
 webhook marca as duas pontas: `marcar_contrato_assinado` (cliente) e
 `marcar_contrato_lojista_assinado` (lojista). Assina quem é o
 representante legal, quando há; senão o próprio lojista, por e-mail ou
-pelo contato.
+pelo contato. **A ficha do carro vendido diz sempre onde está a
+assinatura** (`SituacaoContratoLojista`): enviado e aguardando, assinado
+(com a via), ou — nos mandados antes do ZapSign pelo link próprio — se o
+link foi usado ou venceu. O Derek: *"depois que sair já não consigo mais
+acompanhar se ele assinou"*.
+
+**Limpar o pátio** (gerente): na lista "No pátio", "limpar o pátio"
+marca vários e tira de uma vez o que entrou errado. Carro vendido que
+ficou no pátio não se tira — abre-se e vende-se, para a venda existir.
 
 **O comprador é cadastro, não texto solto.** O mesmo lojista leva
 dezenas de carros; sem cadastro, "AUTO CENTER SUL" e "Auto Center Sul"
