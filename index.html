@@ -2977,7 +2977,7 @@ final deste documento.</p>`;
  * cautelar** não precisa de assinatura; e os extratos são folha de
  * mesa, não instrumento — ninguém assina uma lista de propostas.
  */
-const ASSINAVEIS = ["pre_contrato", "termo_aceite", "check_list"];
+const ASSINAVEIS = ["pre_contrato", "termo_aceite", "check_list", "contrato_lojista"];
 
 function moldura({ titulo, corpo, protocolo, logo, paisagem }) {
   return `<!DOCTYPE html>
@@ -3634,6 +3634,279 @@ qualquer outro, por mais privilegiado que seja.</p>
     corpo,
     protocolo: protocolo(f, "ACEITE"),
   });
+}
+
+/**
+ * O CONTRATO DO LOJISTA (04/11/2026). A Schell: "como faz o contrato do
+ * lojista? fui em estoque e lancei a venda… mas ele não gera nada para
+ * contrato". É o "Instrumento particular de compra de veículo mediante
+ * intermediação" — a outra ponta do negócio: a Vaapty vende o carro ao
+ * lojista. O texto é o do PDF que a casa usa (o da Pereira Automóveis,
+ * mandado pelo Derek no mesmo dia), transcrito sem mudar cláusula,
+ * número nem redação (decisão 7). Os dados vêm do cadastro do comprador
+ * (0108), da ficha do carro e do cliente que vendeu, e a tela deixa
+ * corrigir tudo antes de imprimir.
+ */
+function contratoLojista(d) {
+  const L = d.lojista || {}, V = d.veiculo || {}, B = d.banco || {};
+  const marca = (on) => (on ? "[X]" : "[ ]");
+  const especie = String(L.rep_especie || "");
+  const valor = numDoc(d.valor);
+  const corpo = `<h1>Instrumento particular de compra de veículo<br>mediante intermediação</h1>
+
+<p><strong>IDENTIFICAÇÃO DAS PARTES.</strong></p>
+
+<p><strong>CONTRATADA:</strong> VAAPTY INTERMEDIACAO VEICULAR LTDA - VAAPTY JOINVILLE, pessoa jurídica de direito
+privado, inscrita no CNPJ sob n.34.840.903/0001-00, com sede em Joinville/SC, bairro: Anita Garibaldi,
+Anita Garibaldi - 705 CEP: 89.203-300, doravante denominada simplesmente <strong>“VAAPTY”</strong>.</p>
+
+<p><strong>CONTRATANTE:</strong></p>
+<table class="dados">
+  <tr><td class="r">Nome ou razão social</td><td>${ou(L.nome, "nome ou razão social")}</td></tr>
+  <tr><td class="r">Cidade</td><td>${ou(L.cidade, "cidade")}</td></tr>
+  <tr><td class="r">Estado</td><td>${ou(L.uf, "UF")}</td></tr>
+  <tr><td class="r">CEP</td><td>${ou(L.cep, "CEP")}</td></tr>
+  <tr><td class="r">Bairro</td><td>${ou(L.bairro, "bairro")}</td></tr>
+  <tr><td class="r">RG ou Inscrição Estadual</td><td>${ou(L.rg_ie, "RG ou IE")}</td></tr>
+  <tr><td class="r">Endereço</td><td>${ou(L.endereco, "endereço")}</td></tr>
+  <tr><td class="r">CPF ou CNPJ</td><td>${ou(L.documento, "CPF ou CNPJ")}</td></tr>
+  <tr><td class="r">Contato</td><td>${ou(L.telefone, "contato")}</td></tr>
+  <tr><td class="r">E-mail</td><td>${ou(L.email, "e-mail")}</td></tr>
+</table>
+
+<table class="dados">
+  <tr><td class="r">Nome do representante legal</td><td>${ou(L.rep_nome, "nome")}</td></tr>
+  <tr><td class="r">Cidade</td><td>${ou(L.rep_cidade, "cidade")}</td></tr>
+  <tr><td class="r">Estado</td><td>${ou(L.rep_uf, "UF")}</td></tr>
+  <tr><td class="r">CEP</td><td>${ou(L.rep_cep, "CEP")}</td></tr>
+  <tr><td class="r">Bairro</td><td>${ou(L.rep_bairro, "bairro")}</td></tr>
+  <tr><td class="r">Endereço</td><td>${ou(L.rep_endereco, "endereço")}</td></tr>
+  <tr><td class="r">CPF</td><td>${ou(L.rep_cpf, "CPF")}</td></tr>
+  <tr><td class="r">RG</td><td>${ou(L.rep_rg, "RG")}</td></tr>
+  <tr><td class="r">Contato</td><td>${ou(L.rep_contato, "contato")}</td></tr>
+  <tr><td class="r">E-mail</td><td>${ou(L.rep_email, "e-mail")}</td></tr>
+</table>
+
+<p>Representante Legal: ${marca(L.rep_nome)} Sim ${marca(!L.rep_nome)} Não se aplica</p>
+<p>Espécie de representante: ${marca(especie === "Administrador")} Administrador ${marca(especie === "Procurador")} Procurador
+${marca(especie === "Curador")} Curador ${marca(especie === "Inventariante")} Inventariante
+${marca(especie && ["Administrador", "Procurador", "Curador", "Inventariante"].indexOf(especie) < 0)} Outros: ${especie && ["Administrador", "Procurador", "Curador", "Inventariante"].indexOf(especie) < 0 ? especie : "______________"}</p>
+
+<p><strong>DADOS DO VEÍCULO:</strong></p>
+<table class="dados">
+  <tr><td class="r">Renavam</td><td>${ou(V.renavam, "renavam — do CRLV")}</td></tr>
+  <tr><td class="r">Nome</td><td>${ou(V.proprietario_nome, "nome do proprietário")}</td></tr>
+  <tr><td class="r">CPF / CNPJ</td><td>${ou(V.proprietario_doc, "CPF ou CNPJ")}</td></tr>
+  <tr><td class="r">Placa</td><td>${ou(V.placa, "placa")}</td></tr>
+  <tr><td class="r">Chassi</td><td>${ou(V.chassi, "chassi — do CRLV")}</td></tr>
+  <tr><td class="r">Espécie / tipo</td><td>${ou(V.especie, "espécie — do CRLV")}</td></tr>
+  <tr><td class="r">Combustível</td><td>${ou(V.combustivel, "combustível")}</td></tr>
+  <tr><td class="r">Marca / modelo</td><td>${ou(V.marca_modelo, "marca e modelo")}</td></tr>
+  <tr><td class="r">Ano / modelo</td><td>${ou(V.ano, "ano")}</td></tr>
+  <tr><td class="r">KM</td><td>${ou(V.km, "km")}</td></tr>
+  <tr><td class="r">Categoria</td><td>${ou(V.categoria, "categoria — do CRLV")}</td></tr>
+  <tr><td class="r">Cor predominante</td><td>${ou(V.cor, "cor")}</td></tr>
+  <tr><td class="r">Alienação fiduciária</td><td>${V.alienacao ? "Sim" : "Não"}</td></tr>
+  <tr><td class="r">Situação</td><td>${ou(V.situacao, "")}</td></tr>
+  <tr><td class="r">Cidade / UF</td><td>Joinville</td></tr>
+</table>
+
+<p>Pelo presente instrumento particular de aceite de proposta de compra de veículo de intermediação, as
+partes acima qualificadas têm entre si justo e acertado o seguinte.</p>
+
+<p><strong>Das Declarações Iniciais</strong></p>
+<p><strong>1.</strong> A parte CONTRATANTE reconhece como perfeitos os serviços até então prestados pela VAAPTY,
+para intermediar a compra do veículo automotor, qualificado no preâmbulo.</p>
+<p><strong>2.</strong> A parte CONTRATANTE confessa ter efetuado a inspeção da documentação, características,
+acessórios, itens internos e externos, inclusive de lataria, mecânica e elétrica em geral, motor e câmbio
+do veículo, concordando em recebê-lo sem qualquer restrição, não podendo com a transmissão da posse
+reivindicar qualquer reparo ou responsabilidade sobre reparos no veículo, presente ou futuro, abdicando de
+invocar contra a VAAPTY vício redibitório ou qualquer situação que venha alegar não ser de seu conhecimento
+sobre o estado de uso e conservação do veículo.</p>
+<p><strong>2.1.</strong> A parte CONTRATANTE declara que atua no segmento de comercialização de veículos
+seminovos e adquiriu o bem para revendê-lo, não se enquadrando no conceito de consumidor estabelecido pela
+Lei n.8.078/1990.</p>
+<p><strong>2.2.</strong> A parte CONTRATANTE está ciente de que a VAAPTY, mera intermediadora do negócio, não
+oferece qualquer tipo de garantia por vícios do veículo, sejam aparentes ou ocultos.</p>
+
+<p><strong>Da Negociação</strong></p>
+<p><strong>3.</strong> Pelo presente instrumento, a parte CONTRATANTE, em caráter irrevogável e irretratável,
+adquire o veículo qualificado no preâmbulo, no valor bruto a seguir descrito:</p>
+
+<p><strong>DADOS BANCÁRIOS</strong></p>
+<table class="dados">
+  <tr><td class="r">Favorecido</td><td>VAAPTY INTERMEDIACAO VEICULAR LTDA - VAAPTY JOINVILLE</td></tr>
+  <tr><td class="r">CPF/CNPJ</td><td>34.840.903/0001-00</td></tr>
+  <tr><td class="r">Banco</td><td>${ou(B.banco, "")}</td></tr>
+  <tr><td class="r">Agência</td><td>${ou(B.agencia, "")}</td></tr>
+  <tr><td class="r">Conta</td><td>${ou(B.conta, "")}</td></tr>
+  <tr><td class="r">C/C ou C/PO</td><td>${ou(B.tipo, "")}</td></tr>
+  <tr><td class="r">Chave PIX</td><td>${ou(B.pix, "")}</td></tr>
+  <tr><td class="r">Observação</td><td>${ou(B.obs, "")}</td></tr>
+</table>
+<table class="dados conta">
+  <tr><td class="r">Forma de pagamento do comprador</td><td class="r">Valor</td></tr>
+  <tr><td>${ou(d.forma, "forma de pagamento")}</td><td class="num">${brlDoc(valor)}</td></tr>
+  <tr class="liquido"><td class="r">Valor Total</td><td class="num">${brlDoc(valor)}</td></tr>
+</table>
+
+<p><strong>3.1.</strong> A parte CONTRATANTE obriga-se a efetuar o pagamento acima, em até 4h, por meio de
+transferência bancária, sob pena de resolução do negócio, o que ocorrerá de pleno direito,
+independentemente de decisão judicial, nos termos do artigo 474, do Código Civil, devendo suportar o
+pagamento da cláusula penal no importe de 10% (dez por cento) sobre o valor bruto da negociação do
+veículo, devidamente corrigido monetariamente, sem prejuízo dos pedidos de indenização por eventuais
+perdas e danos complementares, comprovadamente suportados, neles eventuais indenizações devidas aos
+cliente vendedor.</p>
+<p><strong>3.2.</strong> Havendo abatimento dos custos de confecção de chave cópia do veículo objeto do
+contrato, toda a responsabilidade para a respectiva compra do item será da parte CONTRATANTE, eximindo a
+VAAPTY de qualquer responsabilidade em caso de indisponibilidade ou impossibilidade de aquisição da chave
+ou de reembolso de despesas, caso o custo seja superior ao previsto acima.</p>
+<p><strong>3.3.</strong> Quando o vencimento do prazo de pagamento se der em momento sem expediente
+bancário, a transferência necessariamente será realizada via PIX.</p>
+
+<p><strong>Das Obrigações da Contratada</strong></p>
+<p><strong>4.</strong> A VAAPTY obriga-se a:</p>
+<p>a) efetuar o pagamento do preço ao vendedor;</p>
+<p>b) efetuar o pagamento dos débitos que recaem sobre o veículo e que tenham origem anteriormente à data
+da entrega, exceto se expressamente ressalvados na planilha acima;</p>
+<p>c) efetuar a entrega do bem à parte CONTRATANTE;</p>
+<p>d) preencher e deixar à disposição da parte CONTRATANTE o documento único de transferência – DUT,
+devidamente preenchido e com firma reconhecida, juntamente com o dossiê necessário para a transferência
+do veículo.</p>
+<p>e) efetuar o pagamento das infrações de trânsito que estiverem com defesa ou recurso pendente de
+julgamento, em caso rejeição da defesa administrativa ou desprovimento do eventual recurso, no prazo
+estabelecido pelo órgão responsável pela lavratura do autor de infração, desde que o respectivo boleto
+tenha sido remetido a VAAPTY com, ao menos, 15 (quinze) dias de antecedência.</p>
+
+<p><strong>Das Obrigações da Contratante</strong></p>
+<p><strong>5.</strong> A parte CONTRATANTE obriga-se a:</p>
+<p>a) por meio de seu administrador, procurador ou pessoa autorizada, retirar e inspecionar o veículo na
+respectiva unidade da VAAPTY, ciente de que a retirada importa em aceitação irretratável do bem;</p>
+<p>b) responsabilizar-se por quaisquer danos, inclusive, contra terceiros, multas, infrações, tributos,
+taxas, seguros contratuais e obrigatórios, além de outros encargos incidentes sobre o veículo, cujo fato
+gerador tenha ocorrido após a momento exato da entrega. Caso a VAAPTY e/ou o vendedor venham a ser
+responsabilizados ou demandados judicialmente por fatos jurídicos de responsabilidade da CONTRATANTE,
+ficam autorizados a proceder à denunciação da lide desta.</p>
+<p>c) caso a VAAPTY ou o vendedor do veículo venha a ser compelido a pagar qualquer despesa relacionada na
+alínea anterior, reserva-se no direito de pagar diretamente aos credores, sub-rogando-se no direito de
+cobrar da parte CONTRATANTE todos os valores eventualmente pagos, inclusive encargos moratórios,
+remuneratórios, custas processuais, honorários advocatícios e qualquer outra despesa que decorra do
+inadimplemento, com acréscimo de correção monetária pelo IPCA-E/IBGE e juros de mora de 1% (um por cento)
+ao mês desde o efetivo pagamento, multa de 10% (dez por cento) e honorários de 10% (dez por cento), sem
+prejuízo de promover a negativação e/ou protesto do título a ser emitido e encaminhado à CONTRATANTE;</p>
+<p>d) considerando que o vendedor outorgará procuração aos prepostos da VAAPTY, a parte CONTRATANTE
+obriga-se a indicar os dados do comprador em até 30 (trinta) dias após a concretização do negócio. Não o
+fazendo, será facultado à VAAPTY preencher os dados da parte CONTRATANTE na qualidade de compradora.</p>
+<p>e) a despeito do prazo acima, na superveniência de bloqueio administrativo ou judicial sobre o bem, é de
+responsabilidade da parte CONTRATANTE arcar com despesas, inclusive custas processuais e honorários
+advocatícios, necessárias para a(s) respectiva(s) baixa(s), razão pela qual lhe foi recomendado realizar
+a transferência o mais rápido possível.</p>
+<p>f) retirar o DUT preenchido na unidade da VAAPTY. Caso opte pelo envio do referido documento por outra
+forma, serão de responsabilidade da parte CONTRATANTE os custos de envio.</p>
+<p>g) por um período de 2 (dois) anos após a última compra, a não praticar qualquer dos seguintes atos: (a)
+convidar, encorajar, induzir ou tentar induzir qualquer administrador, empregado, consultor ou prestador
+de serviço da VAAPTY e da sua rede de franquia a deixar de trabalhar, assessorar ou prestar serviços a
+ela; (b) convidar, encorajar, induzir ou tentar induzir qualquer fornecedor ou cliente da VAAPTY e da sua
+rede de franquia a deixar de fornecer a ela ou a deixar de adquirir os seus produtos ou serviços; (c)
+contratar (por si ou interposta pessoa) ou de qualquer forma estabelecer um vínculo de prestação de
+serviços com qualquer administrador, empregado ou ex-empregado da VAAPTY e da sua rede de franquia que
+tenha participado direta ou indiretamente na execução deste Contrato, sem antes obter o consentimento
+por escrito. Pelo descumprimento desta obrigação, a parte CONTRATANTE ficará obrigada ao pagamento de
+indenização equivalente a dois anos de remuneração do prestador de serviço aliciado, sem prejuízo de
+eventuais perdas e danos.</p>
+
+<p><strong>Da Proteção de Dados</strong></p>
+<p><strong>6.</strong> As PARTES comprometem-se a respeitar toda a legislação aplicável sobre segurança da
+informação, privacidade e proteção de dados, inclusive, mas não se limitando à Lei Geral de Proteção de
+Dados (LGPD) no tratamento dos dados pessoais dos clientes vendedores prospectados para execução do
+serviço ora contratado, sob pena de responder pelos danos eventualmente ocasionados.</p>
+<p><strong>6.1.</strong> Caso a VAAPTY venha a sofrer danos ou prejuízos em decorrência do descumprimento
+comprovado desta cláusula de proteção de dados pessoais ou do descumprimento legal de obrigações de
+proteção de dados, ocasionado por ação ou omissão direta por causa da parte CONTRATANTE, este ficará
+obrigado a ressarcir os danos e prejuízos a que tiver dado causa em razão da irregularidade perpetrada no
+tratamento dos dados.</p>
+<p><strong>6.2.</strong> Cada Parte continuará sendo a proprietária de seus Dados Pessoais, bem como será
+responsável por quaisquer Dados Pessoais de terceiros compartilhados no âmbito da execução do objeto deste
+Contrato, a qualquer título.</p>
+<p><strong>6.3.</strong> As Partes deverão tratar os Dados Pessoais de forma confidencial e com o mesmo
+nível de segurança que tratam seus dados e informações de caráter confidencial, ainda que este
+instrumento venha a ser resolvido e independentemente dos motivos que deram causa ao seu término ou
+resolução.</p>
+<p><strong>6.4.</strong> Se uma das Partes receber uma solicitação do Titular relativa a um tratamento que
+não seja de sua responsabilidade, deverá notificar a Parte responsável sobre a solicitação do Titular
+recebida.</p>
+<p><strong>6.5.</strong> Fica vedado ao FINDER transferir, no todo ou em parte, os Dados Pessoais que lhe
+forem confiados por força deste Contrato para quaisquer terceiros não relacionados com a execução deste
+Contrato, mesmo que de forma agregada e/ou anônima.</p>
+
+<p><strong>Da Anticorrupção</strong></p>
+<p><strong>7.</strong> As PARTES declaram, na data de assinatura deste contrato, que cumprem as leis
+nacionais e internacionais às quais estão submetidas, bem como as leis nacionais e internacionais que
+tenham por finalidade o combate ou a mitigação dos riscos relacionados a práticas corruptas, atos lesivos,
+infrações ou crimes contra a ordem econômica ou tributária, de “lavagem” ou ocultação de bens, direitos e
+valores, contra a administração pública, nacional ou estrangeira, incluindo, sem limitação, a Lei no
+9.613/1998, a Lei no 12.529/2011 e a Lei no 12.846/2013.</p>
+
+<p><strong>Das Disposições Finais</strong></p>
+<p><strong>8.</strong> Este contrato é firmado em caráter irrevogável e irretratável unilateralmente.</p>
+<p><strong>8.1.</strong> O presente contrato vincula as partes e seus sucessores a qualquer título, ao fiel
+cumprimento.</p>
+<p><strong>8.2.</strong> A parte CONTRATANTE tem plena ciência que a VAAPTY não é responsável solidária ou
+subsidiária, por qualquer despesa, custo, impedimento e/ou irregularidade quando da transferência
+veicular.</p>
+<p><strong>8.3.</strong> A parte CONTRATANTE tem plena ciência que a VAAPTY é mera intermediadora do
+negócio e não possui nenhuma obrigação e responsabilidade sobre todo e qualquer vício ou ônus que
+porventura recaia sobre a documentação do veículo, seja perante qualquer instituição, órgão, DETRAN, Poder
+Judiciário e/ou setor privado.</p>
+<p><strong>8.4.</strong> Constitui obrigação das PARTES encaminharem uma à outra todas as notificações,
+avisos ou intimações dos Poderes Públicos e/ou de particulares, referentes ao veículo em apreço, que lhes
+forem entregues, sob pena de responder pelas multas, correção monetária e penalidades decorrentes do
+atraso no pagamento ou satisfação no cumprimento de determinações por aqueles Poderes ou particulares.</p>
+<p><strong>8.5.</strong> A VAAPTY poderá ceder os direitos deste instrumento, sem anuência da parte
+CONTRATANTE, que não poderá fazê-lo sem obter o prévio e expresso consentimento, por escrito, da
+VAAPTY.</p>
+<p><strong>8.6.</strong> Qualquer tolerância de parte a parte no cumprimento das obrigações assumidas não
+importará em precedente, novação ou alteração do presente contrato, sendo considerada ato de mera
+liberalidade.</p>
+<p><strong>8.7.</strong> Qualquer alteração, modificação ou aditamento deste contrato somente será
+admitido se celebrado por documento escrito, assinado pelas partes.</p>
+<p><strong>8.8.</strong> As partes reconhecem que não se estabelece, por força deste contrato, qualquer
+vínculo empregatício entre elas, nem entre uma parte e os colaboradores da outra, que não há entre elas
+relação de representação comercial, bem como que são empresas distintas, não constituindo entre si
+nenhuma forma de sociedade, Joint Venture ou vínculo de agência.</p>
+<p><strong>8.9.</strong> As partes estão cientes de que este instrumento cancela e substitui integralmente
+qualquer acordo escrito ou verbal, desta natureza, firmado anteriormente, representando todo o
+entendimento havido entre as PARTES sobre seu objeto, sobrepondo-se a todo e qualquer ajuste anterior, e
+nada será a ele incorporado, se não por escrito;</p>
+<p><strong>8.10.</strong> Todas as notificações e comunicações exigidas ou permitidas neste contrato
+deverão ser enviadas por escrito e entregues a cada parte nos endereços físicos, em atenção aos
+respectivos representantes legais ou por meio de correio eletrônico, no endereço descrito neste contrato,
+desde que a parte contrária acuse o recebimento.</p>
+<p><strong>8.11.</strong> As partes declaram que (i) leram este instrumento em sua íntegra e que a elas foi
+dada a oportunidade de esclarecer qualquer dispositivo e informação que não tivessem entendido, bem como a
+possibilidade de consultar um advogado ou outro consultor; (ii) entendem os termos, condições e
+obrigações deste instrumento, e concordam em estar legalmente submetidas por meio dele; (iii) não se
+verifica, na presente contratação, qualquer fato ou obrigação que possa vir a ser caracterizada como
+coação, estado de perigo ou lesão, conforme os arts. 151, 156 e 157 do Código Civil, respectivamente; e
+(iv) estão cientes de todas as circunstâncias e regras que norteiam o presente Negócio jurídico, e detêm
+experiência nas atividades que lhe competem por força deste instrumento, para os efeitos do art. 157 do
+Código Civil Brasileiro; (v) reconhecem a veracidade, autenticidade, integridade, validade e eficácia
+deste instrumento e seus termos, em formato eletrônico e assinado por meio de certificados eletrônicos,
+ainda que sejam certificados eletrônicos não emitidos pela ICP-Brasil, conforme o disposto no artigo 10,
+parágrafo 2o da Medida Provisória no 2.220-2/2001, como, por exemplo, por meio de upload e existência
+deste, em plataformas como a DocuSign, AdobeSign, CertiSign, ZapSign ou similar.</p>
+<p><strong>8.12.</strong> As partes elegem o foro da Comarca da sede da CONTRATANTE, com renúncia expressa
+de qualquer outro, por mais privilegiado que seja, vinculando seus herdeiros e sucessores.</p>
+
+<p style="margin-top:18px">Local: Joinville - SC, ${diaDoc().join("/")}</p>
+
+<div class="assinatura">
+  <div class="linha">VAAPTY INTERMEDIACAO VEICULAR LTDA - VAAPTY JOINVILLE</div>
+  <div class="linha"><span data-ancora="signer1"></span>${ou(L.nome, "nome do contratante")} — Reconhecimento por autenticidade</div>
+  <div class="linha">Testemunha 1 — NOME: ${vazio("nome")} · CPF: ${vazio("CPF")}</div>
+  <div class="linha">Testemunha 2 — NOME: ${vazio("nome")} · CPF: ${vazio("CPF")}</div>
+</div>`;
+  return moldura({ titulo: "Contrato de compra — lojista", corpo, protocolo: protocolo({ placa: V.placa }, "LOJ") });
 }
 
 /**
@@ -13804,6 +14077,7 @@ function FichaEstoque({ id, perfil, aoVoltar }) {
   const [erro, setErro] = useState("");
   const [novo, setNovo] = useState(null);
   const [vendendo, setVendendo] = useState(false);
+  const [contratoLoj, setContratoLoj] = useState(false);
   const [recado, setRecado] = useState(null);
   const [mandando, setMandando] = useState(false);
   // Mandar de novo, ou desfazer a venda dos dois lados (0071).
@@ -14027,6 +14301,12 @@ function FichaEstoque({ id, perfil, aoVoltar }) {
             )}
             <button disabled={mandando} onClick={desfazerVenda} style={{ color: C.laranja }}>a venda caiu — desfazer</button>
           </div>
+          {/* O CONTRATO DO LOJISTA (0108, a Schell: "lancei a venda… mas
+              ele não gera nada para contrato"). */}
+          {e.natureza !== "indicacao" && (
+            <BotaoPrimario className="mt-3 w-full" onClick={() => setContratoLoj(true)}>Contrato do lojista</BotaoPrimario>
+          )}
+          {contratoLoj && <ContratoDoLojista e={e} valor={c.venda} aoFechar={() => setContratoLoj(false)} />}
         </div>
       ) : vendendo ? (
         <VenderCarro e={e} aoFechar={() => setVendendo(false)}
@@ -20530,6 +20810,7 @@ const ANEXO_DE_ITEM = {
 };
 // E o documento que o próprio sistema gerou também é papel do item.
 const DOC_DE_ITEM = {
+  contrato_lojista: "arq_contrato_lojista",
   contrato_final: "contrato",
   pre_contrato: "pre_contrato",
   check_list: "fechamento",
@@ -20537,7 +20818,7 @@ const DOC_DE_ITEM = {
 };
 const ROT_DOC = {
   termo_aceite: "Termo de aceite", autorizacao_cautelar: "Autorização de cautelar",
-  pre_contrato: "Pré-contrato", check_list: "Check list", extrato_ofertas: "Extrato de ofertas",
+  pre_contrato: "Pré-contrato", check_list: "Check list", extrato_ofertas: "Extrato de ofertas", contrato_lojista: "Contrato do lojista",
   extrato_revisao: "Extrato da revisão", contrato_final: "Contrato",
 };
 
@@ -21719,6 +22000,167 @@ function TelefoneParaShinkai({ comprador, aoSalvar }) {
         <span style={{ color: C.mute }}>ou confirme assim mesmo</span>
       </div>
       {erro && <div className="mt-1" style={{ color: C.laranja }}>{erro}</div>}
+    </div>
+  );
+}
+
+/* A JANELA DO CONTRATO DO LOJISTA (0108). Tudo vem preenchido — o
+ * cadastro do comprador, a ficha do carro, o cliente que vendeu — e tudo
+ * se corrige aqui antes de imprimir. O que é do lojista volta para o
+ * cadastro dele ("Guardar no cadastro"), para o próximo carro dele já
+ * sair completo. Impresso, o contrato entra no registro do carro e no
+ * item "Contrato Lojista" do check list de documentações, e o link de
+ * assinatura vai para o celular do lojista (decisão 42). */
+const CAMPOS_LOJISTA = [
+  ["nome", "Nome ou razão social"], ["documento", "CPF ou CNPJ"], ["rg_ie", "RG ou Inscrição Estadual"],
+  ["endereco", "Endereço"], ["bairro", "Bairro"], ["cidade", "Cidade"], ["uf", "Estado"], ["cep", "CEP"],
+  ["telefone", "Contato"], ["email", "E-mail"],
+];
+const CAMPOS_REPRESENTANTE = [
+  ["rep_nome", "Nome do representante legal"], ["rep_cpf", "CPF"], ["rep_rg", "RG"], ["rep_endereco", "Endereço"],
+  ["rep_bairro", "Bairro"], ["rep_cidade", "Cidade"], ["rep_uf", "Estado"], ["rep_cep", "CEP"],
+  ["rep_contato", "Contato"], ["rep_email", "E-mail"],
+];
+const TIPO_ESPECIE = { 1: "Automóvel / Passageiro", 2: "Motocicleta / Passageiro", 3: "Caminhão / Carga" };
+
+function ContratoDoLojista({ e, valor, aoFechar }) {
+  const v = e.veiculo || {};
+  const [L, setL] = useState(null);
+  const [V, setV] = useState({
+    renavam: v.renavam || "", proprietario_nome: "", proprietario_doc: "", placa: v.placa || e.placa || "",
+    chassi: v.chassi || "", especie: TIPO_ESPECIE[v.tipo_veiculo] || "", combustivel: v.combustivel || "",
+    marca_modelo: v.marca_modelo || "", ano: [v.ano_fabricacao, v.ano_modelo].filter(Boolean).join("/"),
+    km: v.km_atual || v.km_entrada || "", categoria: "Particular", cor: v.cor || "", alienacao: false, situacao: "",
+  });
+  const lembrado = (() => { try { return JSON.parse(localStorage.getItem("vaapty:recebe-lojista") || "{}"); } catch (x) { return {}; } })();
+  const [B, setB] = useState({ banco: "", agencia: "", conta: "", tipo: "", pix: "", obs: "", ...lembrado });
+  const [forma, setForma] = useState(lembrado.forma || "PIX");
+  const [val, setVal] = useState(String(valor || e.valor_venda || ""));
+  const [erro, setErro] = useState("");
+  const [indo, setIndo] = useState("");
+  const [doc, setDoc] = useState(null);
+  const [assin, setAssin] = useState(null);
+
+  useEffect(() => {
+    const cid = e.comprador && e.comprador.id;
+    (cid ? fetchAut(`/api/veiculo?recurso=comprador&id=${cid}`).then((r) => r.json()).then((d) => d.comprador) : Promise.resolve(null))
+      .then((c) => setL(c || { nome: (e.comprador && e.comprador.nome) || "" }))
+      .catch(() => setL({ nome: (e.comprador && e.comprador.nome) || "" }));
+    // O nome e o CPF do proprietário são os do cliente que vendeu o carro
+    // — é o que está no CRLV, e é o que o contrato da casa imprime.
+    if (e.atendimento_id) {
+      lerAtendimento(e.atendimento_id).then((a) => {
+        if (a) setV((x) => ({ ...x, proprietario_nome: x.proprietario_nome || a.cliente_nome || "", proprietario_doc: x.proprietario_doc || a.cliente_cpf || "" }));
+      }).catch(() => {});
+    }
+  }, []);
+
+  const campo = (obj, set, k, rot, extra) => (
+    <label key={k} className="block">
+      <span className="block text-[10px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>{rot}</span>
+      <input className={inputCls} style={{ ...inputSty, padding: "6px 8px" }} value={obj[k] || ""} {...(extra || {})}
+        onChange={(ev) => set({ ...obj, [k]: ev.target.value })} />
+    </label>
+  );
+
+  const guardarCadastro = async () => {
+    if (!e.comprador || !e.comprador.id) { setErro("Esta venda não tem comprador cadastrado."); return; }
+    setIndo("cadastro"); setErro("");
+    try {
+      const corpo = {};
+      CAMPOS_LOJISTA.concat(CAMPOS_REPRESENTANTE).concat([["rep_especie"]]).forEach(([k]) => { corpo[k] = L[k] || ""; });
+      const r = await fetchAut(`/api/veiculo?recurso=comprador&id=${e.comprador.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.erro || "Não consegui guardar.");
+      setL(d.comprador || L);
+    } catch (x) { setErro(x.message); }
+    setIndo("");
+  };
+
+  const imprimir = async () => {
+    setErro("");
+    try { localStorage.setItem("vaapty:recebe-lojista", JSON.stringify({ ...B, forma })); } catch (x) {}
+    const html = contratoLojista({ lojista: L, veiculo: V, banco: B, forma, valor: val });
+    // A janela abre no clique, antes de qualquer espera (decisão 15).
+    const r = abrirDocumento(html);
+    if (!r.ok) { setErro(r.erro); return; }
+    setIndo("imprimir");
+    try {
+      const d = await registrarDocumento({ veiculo_id: e.veiculo_id, tipo: "contrato_lojista", rodada: null,
+        protocolo: extrairProtocolo(html), conteudo: html, negociador: e.negociador_nome || null });
+      setDoc({ docId: d.id, tipo: "contrato_lojista", rotulo: "Contrato do lojista", protocolo: extrairProtocolo(html) });
+    } catch (x) { setErro(`Impresso, mas não entrou no registro: ${x.message}`); }
+    setIndo("");
+  };
+
+  if (!L) return (
+    <div className="fixed inset-0 z-50 grid place-items-center" style={{ background: "rgba(24,18,33,0.45)" }}>
+      <div className="rounded-xl p-5" style={{ background: C.paper }}>Carregando…</div>
+    </div>
+  );
+  const especie = L.rep_especie || "";
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center lg:items-center" style={{ background: "rgba(24,18,33,0.45)" }} onClick={aoFechar}>
+      <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-t-2xl p-4 lg:rounded-2xl" style={{ background: C.paper }} onClick={(ev) => ev.stopPropagation()}>
+        <div className="flex items-baseline justify-between">
+          <span className="text-[17px] font-bold">Contrato do lojista</span>
+          <button onClick={aoFechar} className="text-[13px]" style={{ color: C.mute }}>fechar</button>
+        </div>
+        <p className="mt-0.5 text-[12.5px]" style={{ color: C.mute }}>
+          Instrumento particular de compra de veículo mediante intermediação — o texto é o da casa. Confira os dados; o que ficar vazio sai como linha em branco.
+        </p>
+
+        <div className="mt-3 text-[11px] font-bold uppercase tracking-[0.1em]" style={{ color: C.roxo }}>Contratante (o lojista)</div>
+        <div className="mt-1 grid grid-cols-2 gap-2 md:grid-cols-3">{CAMPOS_LOJISTA.map(([k, r]) => campo(L, setL, k, r))}</div>
+        <details className="mt-2">
+          <summary className="cursor-pointer text-[12.5px] font-semibold" style={{ color: C.roxo }}>Representante legal {L.rep_nome ? `· ${L.rep_nome}` : "(se for empresa)"}</summary>
+          <div className="mt-1 grid grid-cols-2 gap-2 md:grid-cols-3">{CAMPOS_REPRESENTANTE.map(([k, r]) => campo(L, setL, k, r))}</div>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {["Administrador", "Procurador", "Curador", "Inventariante"].map((x) => (
+              <button key={x} onClick={() => setL({ ...L, rep_especie: especie === x ? "" : x })} className="rounded-full border px-2.5 py-1 text-[12px]"
+                style={{ borderColor: especie === x ? C.roxo : C.line, background: especie === x ? C.roxo : "#fff", color: especie === x ? "#fff" : C.ink }}>{x}</button>
+            ))}
+          </div>
+        </details>
+        <button onClick={guardarCadastro} disabled={!!indo} className="mt-2 text-[12.5px] font-semibold underline" style={{ color: C.roxo }}>
+          {indo === "cadastro" ? "guardando…" : "Guardar no cadastro do lojista (para os próximos carros)"}
+        </button>
+
+        <div className="mt-3 text-[11px] font-bold uppercase tracking-[0.1em]" style={{ color: C.roxo }}>O veículo</div>
+        <div className="mt-1 grid grid-cols-2 gap-2 md:grid-cols-3">
+          {[["placa", "Placa"], ["renavam", "Renavam"], ["chassi", "Chassi"], ["marca_modelo", "Marca / modelo"], ["ano", "Ano / modelo"],
+            ["km", "KM"], ["cor", "Cor"], ["combustivel", "Combustível"], ["especie", "Espécie / tipo"], ["categoria", "Categoria"],
+            ["proprietario_nome", "Proprietário (nome)"], ["proprietario_doc", "Proprietário (CPF/CNPJ)"]].map(([k, r]) => campo(V, setV, k, r))}
+        </div>
+        <label className="mt-1.5 flex items-center gap-2 text-[13px]">
+          <input type="checkbox" checked={!!V.alienacao} onChange={(ev) => setV({ ...V, alienacao: ev.target.checked })} /> Alienação fiduciária
+        </label>
+
+        <div className="mt-3 text-[11px] font-bold uppercase tracking-[0.1em]" style={{ color: C.roxo }}>Pagamento</div>
+        <div className="mt-1 grid grid-cols-2 gap-2 md:grid-cols-4">
+          <label className="block"><span className="block text-[10px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>Valor</span>
+            <input className={inputCls} style={{ ...inputSty, padding: "6px 8px", fontFamily: F.mono }} value={val} onChange={(ev) => setVal(ev.target.value)} /></label>
+          <label className="block"><span className="block text-[10px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>Forma</span>
+            <input className={inputCls} style={{ ...inputSty, padding: "6px 8px" }} value={forma} onChange={(ev) => setForma(ev.target.value)} /></label>
+          {[["banco", "Banco"], ["agencia", "Agência"], ["conta", "Conta"], ["tipo", "C/C ou C/PO"], ["pix", "Chave PIX"], ["obs", "Observação"]].map(([k, r]) => campo(B, setB, k, r))}
+        </div>
+        <p className="mt-1 text-[11px]" style={{ color: C.mute }}>Os dados bancários da Vaapty ficam lembrados neste aparelho.</p>
+
+        {erro && <p className="mt-2 text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
+        <BotaoPrimario className="mt-3 w-full" disabled={!!indo || !numDoc(val)} onClick={imprimir}>
+          {indo === "imprimir" ? "Registrando…" : doc ? "Imprimir de novo" : "Imprimir o contrato"}
+        </BotaoPrimario>
+        {!numDoc(val) && <p className="mt-1 text-[12px]" style={{ color: AMARELO.texto }}>Falta o valor da venda.</p>}
+        {doc && (
+          <div className="mt-2 rounded-lg p-2.5 text-[12.5px]" style={{ background: "#F0F8F4", color: C.verde }}>
+            Registrado no carro · {doc.protocolo}. Vai para o item "Contrato Lojista" do check list.
+            <MandarAssinar doc={doc} telefone={L.telefone || L.rep_contato} nome={L.rep_nome || L.nome}
+              estado={assin} aoMudar={() => setAssin({ situacao: "aguardando" })} />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -249,7 +249,7 @@ const base = (tabela) => `${URL_BASE}/rest/v1/${tabela}`;
 // seria uma consulta por carro na hora de anunciar. São colunas
 // pequenas; o teto da lista continua sendo 300 linhas.
 const CAMPOS_ESTOQUE =
-  "*,veiculo(id,placa,chassi,marca_modelo,ano_fabricacao,ano_modelo,cor,combustivel,cambio," +
+  "*,veiculo(id,placa,chassi,renavam,tipo_veiculo,marca_modelo,ano_fabricacao,ano_modelo,cor,combustivel,cambio," +
   "km_atual,km_entrada,fipe_codigo,fipe_valor,valor_por,preco_pedido,gastos_descricao,opcionais," +
   "pneu_de,pneu_dd,pneu_te,pneu_td,leilao_sinistro,gnv,detalhes_lataria,detalhes_mecanica," +
   // A foto pende do VEÍCULO, não do estoque: embutida solta aqui o
@@ -693,6 +693,11 @@ async function comprador(req, res, tok) {
   const cab = cabecalhos(tok);
 
   if (req.method === "GET") {
+    // Um só, inteiro: o contrato do lojista lê o cadastro todo.
+    if (RX_ID.test(String(req.query.id || ""))) {
+      const um = await supa(`${base("comprador")}?select=*&id=eq.${req.query.id}`, { headers: cab });
+      return res.status(200).json({ comprador: (um || [])[0] || null });
+    }
     const busca = String(req.query.busca || "").trim();
     // O `ilike` do PostgREST usa vírgula e parêntese como sintaxe —
     // mesmo cuidado do api/atendimento.js.
@@ -742,7 +747,11 @@ async function comprador(req, res, tok) {
     if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
 
     const mud = {};
-    ["nome", "documento", "telefone", "email", "cidade"].forEach((k) => {
+    // Os do contrato do lojista (0108): endereço completo e o
+    // representante legal.
+    ["nome", "documento", "telefone", "email", "cidade", "rg_ie", "endereco", "bairro", "cep",
+     "rep_nome", "rep_cpf", "rep_rg", "rep_endereco", "rep_bairro", "rep_cidade", "rep_uf", "rep_cep",
+     "rep_contato", "rep_email", "rep_especie"].forEach((k) => {
       if (c[k] !== undefined) mud[k] = texto(c[k]);
     });
     if (c.uf !== undefined) mud.uf = texto(c.uf) ? String(c.uf).toUpperCase().slice(0, 2) : null;

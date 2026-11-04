@@ -3998,6 +3998,19 @@ escondendo o carro que fechou hoje seria pior que a fila comprida.
 ele, dois cliques no botão criariam duas fichas de custo para o mesmo
 carro e o total dobraria.
 
+**O contrato do lojista (0108, 04/11/2026).** A Schell lançou a venda
+no Estoque e não havia contrato para o lojista assinar. É o
+"Instrumento particular de compra de veículo mediante intermediação" da
+casa (o PDF da Pereira Automóveis), transcrito sem mudar cláusula
+(decisão 7), em `contratoLojista()`. Abre pelo botão "Contrato do
+lojista" no carro vendido: o cadastro do comprador ganhou endereço
+completo, RG/IE e o representante legal ("Guardar no cadastro" vale para
+os próximos carros dele), o proprietário é o cliente que vendeu, e os
+dados bancários da Vaapty ficam lembrados no aparelho. Impresso, entra
+no registro do carro (`contrato_lojista`), no item "Contrato Lojista" do
+check list e manda o link de assinatura própria (decisão 42) ao lojista —
+a cláusula 8.11 do texto já prevê a assinatura eletrônica.
+
 **O comprador é cadastro, não texto solto.** O mesmo lojista leva
 dezenas de carros; sem cadastro, "AUTO CENTER SUL" e "Auto Center Sul"
 viram dois compradores e o histórico se parte no meio. `shinkai_id`
