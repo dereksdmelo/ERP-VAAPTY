@@ -1155,13 +1155,19 @@ async function estadoDaFila(tok, ignorar) {
     const meta = mes.metas.find((n) => n.perfil_id === p.id);
     const nomes = [caixaAlta(p.nome)].concat(meta ? [caixaAlta(meta.nome)] : []);
     const dele = (a) => a.negociador_id === p.id || nomes.indexOf(caixaAlta(a.negociador_nome)) >= 0;
-    const conta = (de) => {
-      const lista = mes.doMes.filter((a) => dele(a) && String(a.data).slice(0, 7) === de.slice(0, 7));
+    const conta = (de, ateOntem) => {
+      const lista = mes.doMes.filter((a) => dele(a) && String(a.data).slice(0, 7) === de.slice(0, 7) &&
+        (!ateOntem || String(a.data) < hoje));
       return { fluxo: lista.length, vendas: lista.filter((a) => a.status === "fechado").length };
     };
     const scoreDe = (cp) => R.score(meta ? mes.desemp.find((d) => d.negociador_id === meta.id && d.competencia === cp) : null);
     const doMesAtual = conta(mes.comp), mesAnt = conta(mes.ant);
     const score = scoreDe(mes.comp);
+    /* O ÍNDICE DA ORDEM é o do COMEÇO do dia: só até ontem. Contando
+     * hoje, cada cliente que alguém recebe aumenta o fluxo dele e baixa o
+     * índice — em 04/11/2026 o André Bruno caiu de 3,33 para 2,50 com o
+     * cliente das 8h58 e a ordem trocou ele de lugar com o Marcos. */
+    const doDia = conta(mes.comp, true);
     const naMesa = ats.filter((a) => dele(a) && emLoja({ ...a, data: hoje }, agora))
       .map((a) => ({ id: a.id, status: a.status, cliente: a.cliente_nome || "", carro: a.carro_descricao || "", desde: a.chegada_em || a.criado_em }));
     // O fim do último atendimento: é dele que contam os dez minutos da
@@ -1194,6 +1200,7 @@ async function estadoDaFila(tok, ignorar) {
       conversao: doMesAtual.fluxo ? doMesAtual.vendas / doMesAtual.fluxo : 0,
       score,
       indice_at: R.indiceAt({ ...doMesAtual, score }),
+      indice_dia: R.indiceAt({ ...doDia, score }),
       indice_anterior: R.indiceAt({ ...mesAnt, score: scoreDe(mes.ant) }),
       sem_meta: !meta,
       atendendo: naMesa,
@@ -1212,7 +1219,7 @@ async function estadoDaFila(tok, ignorar) {
     const c = congelada.find((x) => x.perfil_id === p.perfil_id);
     if (c && c.indice_at != null) p.indice_ordem = c.indice_at;
   });
-  const circulo = F.circuloDoDia(veio, congelada);
+  const circulo = F.circuloDoDia(veio.map((p) => ({ ...p, indice_at: p.indice_dia })), congelada);
   const st = F.estadoDosEventos(eventos || []);
   const porId = {};
   pessoas.forEach((p) => { porId[p.perfil_id] = { presente: p.presente, atendendo: p.atendendo.length, fim_ultimo: p.fim_ultimo }; });
@@ -1254,7 +1261,7 @@ async function congelarOrdem(tok, s) {
   if (s.congelada) return;
   const ordem = s.circulo.map((id) => {
     const p = s.pessoas.find((x) => x.perfil_id === id) || {};
-    return { perfil_id: id, nome: p.nome, indice_at: p.indice_at, indice_anterior: p.indice_anterior };
+    return { perfil_id: id, nome: p.nome, indice_at: p.indice_dia, indice_anterior: p.indice_anterior };
   });
   await banco(`${REST("fila_dia")}?on_conflict=dia`, {
     method: "POST", headers: json(tok, { Prefer: "resolution=ignore-duplicates,return=minimal" }),
@@ -1291,6 +1298,8 @@ async function registrarNaFila(tok, at, modo) {
       ((s.pessoas.find((p) => at.negociador_nome && p.nomes.indexOf(chaveNome(at.negociador_nome)) >= 0) || {}).perfil_id) || null;
     const nomeDe = (id) => ((s.pessoas.find((p) => p.perfil_id === id) || {}).nome) || at.negociador_nome || null;
     const base = { dia: s.hoje, atendimento_id: at.id, perfil_id: quemRecebeu, nome: nomeDe(quemRecebeu) };
+    // A ordem congela no PRIMEIRO cliente, venha ele como vier.
+    await congelarOrdem(tok, s);
     if (modo === "especifico" || modo === "ja_atendendo") {
       await gravarEventos(tok, [{ ...base, tipo: "especifico",
         motivo: modo === "ja_atendendo" ? "registrou depois um cliente que já estava atendendo"

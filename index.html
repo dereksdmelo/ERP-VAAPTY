@@ -24026,7 +24026,7 @@ function TelaFilaDaVez({ perfil, aoAbrir }) {
                 <span className="text-right" style={{ fontFamily: F.mono }}>{p.vendas}</span>
                 <span className="text-right" style={{ fontFamily: F.mono }}>{pctFmt(p.conversao)}</span>
                 <span className="text-right" style={{ fontFamily: F.mono }}>{pctFmt(p.score)}</span>
-                <span className="text-right" style={{ fontFamily: F.mono, fontWeight: 700 }}>{indiceFmt(p.indice_ordem != null ? p.indice_ordem : p.indice_at)}</span>
+                <span className="text-right" style={{ fontFamily: F.mono, fontWeight: 700 }}>{indiceFmt(p.indice_ordem != null ? p.indice_ordem : p.indice_dia != null ? p.indice_dia : p.indice_at)}</span>
               </div>
               <div className="ml-[36px] mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px]" style={{ color: C.mute }}>
                 {estado(p)}
