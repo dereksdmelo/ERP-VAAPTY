@@ -4022,8 +4022,15 @@ completo, RG/IE e o representante legal ("Guardar no cadastro" vale para
 os próximos carros dele), o proprietário é o cliente que vendeu, e os
 dados bancários da Vaapty ficam lembrados no aparelho. Impresso, entra
 no registro do carro (`contrato_lojista`), no item "Contrato Lojista" do
-check list e manda o link de assinatura própria (decisão 42) ao lojista —
-a cláusula 8.11 do texto já prevê a assinatura eletrônica.
+check list. **A assinatura vai pelo ZapSign (0109)**, a pedido do Derek
+no mesmo dia: o mesmo caminho do contrato do cliente (PDF com a âncora
+`signer1` na linha do lojista, link guardado para mandar de novo, envio
+repetido pede confirmação), com o token, o link e a data da assinatura
+no `estoque` — o contrato é do carro vendido, não do atendimento. O
+webhook marca as duas pontas: `marcar_contrato_assinado` (cliente) e
+`marcar_contrato_lojista_assinado` (lojista). Assina quem é o
+representante legal, quando há; senão o próprio lojista, por e-mail ou
+pelo contato.
 
 **O comprador é cadastro, não texto solto.** O mesmo lojista leva
 dezenas de carros; sem cadastro, "AUTO CENTER SUL" e "Auto Center Sul"

@@ -2977,7 +2977,7 @@ final deste documento.</p>`;
  * cautelar** não precisa de assinatura; e os extratos são folha de
  * mesa, não instrumento — ninguém assina uma lista de propostas.
  */
-const ASSINAVEIS = ["pre_contrato", "termo_aceite", "check_list", "contrato_lojista"];
+const ASSINAVEIS = ["pre_contrato", "termo_aceite", "check_list"];
 
 function moldura({ titulo, corpo, protocolo, logo, paisagem }) {
   return `<!DOCTYPE html>
@@ -22066,7 +22066,14 @@ function ContratoDoLojista({ e, valor, aoFechar }) {
   const [erro, setErro] = useState("");
   const [indo, setIndo] = useState("");
   const [doc, setDoc] = useState(null);
-  const [assin, setAssin] = useState(null);
+  // O ZapSign (0109, o Derek: "a assinatura do contrato do lojista seria
+  // bom se fosse pelo ZapSign"): o que já foi enviado e se assinou.
+  const [zap, setZap] = useState(null);
+  const [querReenviar, setQuerReenviar] = useState(false);
+  const [copiou, setCopiou] = useState(false);
+  const lerZap = () => fetchAut(`/api/documento?recurso=zapsign&estoque_id=${e.id}`)
+    .then((r) => r.json()).then((d) => setZap(d && !d.erro ? d : { enviado: false })).catch(() => setZap({ enviado: false }));
+  useEffect(() => { lerZap(); }, []);
 
   useEffect(() => {
     const cid = e.comprador && e.comprador.id;
@@ -22119,6 +22126,32 @@ function ContratoDoLojista({ e, valor, aoFechar }) {
         protocolo: extrairProtocolo(html), conteudo: html, negociador: e.negociador_nome || null });
       setDoc({ docId: d.id, tipo: "contrato_lojista", rotulo: "Contrato do lojista", protocolo: extrairProtocolo(html) });
     } catch (x) { setErro(`Impresso, mas não entrou no registro: ${x.message}`); }
+    setIndo("");
+  };
+
+  const montar = () => contratoLojista({ lojista: L, veiculo: V, banco: B, forma, valor: val });
+  const quemAssina = { nome: L.rep_nome || L.nome, email: L.rep_email || L.email || "", telefone: L.rep_contato || L.telefone || "" };
+  const enviarZap = async () => {
+    setErro(""); setIndo("zap");
+    try { localStorage.setItem("vaapty:recebe-lojista", JSON.stringify({ ...B, forma })); } catch (x) {}
+    try {
+      const html = montar();
+      // O papel também entra no registro do carro, como o impresso.
+      registrarDocumento({ veiculo_id: e.veiculo_id, tipo: "contrato_lojista", rodada: null,
+        protocolo: extrairProtocolo(html), conteudo: html, negociador: e.negociador_nome || null }).catch(() => {});
+      let pdf_base64 = null;
+      try { pdf_base64 = await contratoEmPdf(html); } catch (x) {}
+      const r = await fetchAut("/api/documento?recurso=zapsign", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ estoque_id: e.id, conteudo: html, pdf_base64,
+          nome: `Contrato de compra — ${L.nome || "lojista"} — ${V.placa || ""}`.trim(),
+          signatarios: [quemAssina] }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.erro || "Não consegui enviar ao ZapSign.");
+      setQuerReenviar(false);
+      await lerZap();
+    } catch (x) { setErro(x.message); }
     setIndo("");
   };
 
@@ -22183,10 +22216,49 @@ function ContratoDoLojista({ e, valor, aoFechar }) {
         {doc && (
           <div className="mt-2 rounded-lg p-2.5 text-[12.5px]" style={{ background: "#F0F8F4", color: C.verde }}>
             Registrado no carro · {doc.protocolo}. Vai para o item "Contrato Lojista" do check list.
-            <MandarAssinar doc={doc} telefone={L.telefone || L.rep_contato} nome={L.rep_nome || L.nome}
-              estado={assin} aoMudar={() => setAssin({ situacao: "aguardando" })} />
           </div>
         )}
+
+        {/* A ASSINATURA PELO ZAPSIGN (0109). */}
+        <div className="mt-3 rounded-lg border p-3" style={{ borderColor: C.line }}>
+          <div className="text-[11px] font-bold uppercase tracking-[0.1em]" style={{ color: C.roxo }}>Assinatura pelo ZapSign</div>
+          {zap === null ? <p className="mt-1 text-[12.5px]" style={{ color: C.mute }}>Conferindo…</p> : zap.assinado_em ? (
+            <p className="mt-1 text-[13px] font-semibold" style={{ color: C.verde }}>
+              ✓ Assinado pelo lojista em {new Date(zap.assinado_em).toLocaleString("pt-BR")}.
+              {zap.arquivo_assinado && <> <a href={zap.arquivo_assinado} target="_blank" rel="noopener noreferrer" className="underline">baixar a via assinada</a></>}
+            </p>
+          ) : (
+            <>
+              <p className="mt-1 text-[12.5px]" style={{ color: C.mute }}>
+                Vai para <b>{quemAssina.nome || "o lojista"}</b>{quemAssina.email ? ` · ${quemAssina.email}` : quemAssina.telefone ? ` · ${quemAssina.telefone}` : ""}.
+                {!quemAssina.email && !quemAssina.telefone && <span style={{ color: C.laranja }}> Falta o e-mail ou o contato do lojista.</span>}
+              </p>
+              {zap.enviado && (
+                <div className="mt-1.5 text-[12.5px]">
+                  Enviado em {zap.enviado_em ? new Date(zap.enviado_em).toLocaleString("pt-BR") : "—"} · aguardando a assinatura.
+                  {zap.link && (
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <input readOnly value={zap.link} className={inputCls} style={{ ...inputSty, padding: "4px 6px", fontSize: 11, flex: 1, minWidth: 180 }} />
+                      <button onClick={() => { try { navigator.clipboard.writeText(zap.link); setCopiou(true); } catch (x) {} }}
+                        className="rounded border px-2 py-1 text-[12px]" style={{ borderColor: C.line, color: C.roxo }}>{copiou ? "copiado" : "Copiar link"}</button>
+                      {quemAssina.telefone && (
+                        <a href={`https://wa.me/55${String(quemAssina.telefone).replace(/\D/g, "").replace(/^55/, "")}?text=${encodeURIComponent(`Olá! Segue o contrato de compra do ${V.marca_modelo || "veículo"} ${V.placa || ""} para assinar: ${zap.link}`)}`}
+                          target="_blank" rel="noopener noreferrer" className="rounded border px-2 py-1 text-[12px]" style={{ borderColor: C.line, color: C.verde }}>Mandar no WhatsApp</a>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+              <button disabled={!!indo || !numDoc(val) || (!quemAssina.email && !quemAssina.telefone)}
+                onClick={() => (zap.enviado && !querReenviar ? setQuerReenviar(true) : enviarZap())}
+                className="mt-2 w-full rounded-md border py-2 text-[13px] font-semibold"
+                style={{ borderColor: C.roxo, color: C.roxo }}>
+                {indo === "zap" ? "Enviando…" : !zap.enviado ? "Enviar para o lojista assinar no ZapSign"
+                  : querReenviar ? "Sim, gerar outro documento no ZapSign" : "Enviar de novo (só se o contrato mudou)"}
+              </button>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

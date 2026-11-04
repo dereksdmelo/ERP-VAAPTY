@@ -131,6 +131,28 @@ async function zapsign(req, res, tok) {
      * simples), a situação e o link de cada signatário — que recupera o
      * link dos envios de antes da 0102 e o grava. O atendimento é lido
      * com o token de quem pergunta: sem RLS devolvendo, nada sai. */
+    /* O CONTRATO DO LOJISTA (0109): o mesmo, pelo carro vendido. */
+    const eidQ = String(req.query.estoque_id || "");
+    if (eidQ) {
+      if (!RX_UUID.test(eidQ)) return res.status(400).json({ erro: "estoque_id inválido." });
+      if (!ZAP_TOKEN) return res.status(503).json({ erro: "A chave do ZapSign não está configurada." });
+      const es = (await banco(`${REST("estoque")}?select=id,lojista_zapsign_token,lojista_zapsign_link,lojista_assinado_em,lojista_enviado_em&id=eq.${eidQ}&limit=1`, { headers: cabecalhos(tok) }) || [])[0];
+      if (!es) return res.status(404).json({ erro: "Carro não encontrado." });
+      if (!es.lojista_zapsign_token) return res.status(200).json({ enviado: false });
+      let d = null;
+      try {
+        const r = await fetch(`${ZAPSIGN}/docs/${encodeURIComponent(es.lojista_zapsign_token)}/`, { headers: { Authorization: `Bearer ${ZAP_TOKEN}` } });
+        d = await r.json().catch(() => null);
+      } catch (e) {}
+      const assinantes = (d && Array.isArray(d.signers) ? d.signers : []).map((x) => ({ nome: x.name, link: x.sign_url, situacao: x.status }));
+      const assinado = d && String(d.status || "").toLowerCase() === "signed";
+      if (assinado && !es.lojista_assinado_em) {
+        await banco(`${REST("estoque")}?id=eq.${eidQ}`, { method: "PATCH", headers: json(tok), body: JSON.stringify({ lojista_assinado_em: new Date().toISOString() }) }).catch(() => {});
+      }
+      return res.status(200).json({ enviado: true, enviado_em: es.lojista_enviado_em, link: es.lojista_zapsign_link || (assinantes[0] && assinantes[0].link) || null,
+        situacao: d && d.status, assinado_em: es.lojista_assinado_em || (assinado ? new Date().toISOString() : null),
+        arquivo_assinado: d && (d.signed_file || null), assinantes });
+    }
     const aidQ = String(req.query.atendimento_id || "");
     if (!aidQ) return res.status(200).json({ configurado: !!ZAP_TOKEN });
     if (!RX_UUID.test(aidQ)) return res.status(400).json({ erro: "atendimento_id inválido." });
@@ -172,7 +194,10 @@ async function zapsign(req, res, tok) {
   if (!c || typeof c !== "object") return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
 
   const aid = String(c.atendimento_id || "");
-  if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
+  // O contrato do lojista (0109) vai pelo carro vendido, não pelo atendimento.
+  const eid = String(c.estoque_id || "");
+  const doLojista = RX_UUID.test(eid);
+  if (!doLojista && !RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
 
   const markdown = emMarkdown(c.conteudo);
   if (markdown.length < 200) return res.status(400).json({ erro: "Contrato vazio ou curto demais." });
@@ -192,8 +217,10 @@ async function zapsign(req, res, tok) {
 
   // A leitura pelo token do usuário é o que confirma que ele enxerga
   // este atendimento. Só depois o documento vai para fora.
-  const achado = await banco(`${REST("atendimento")}?select=id&id=eq.${aid}&limit=1`, { headers: cabecalhos(tok) });
-  if (!Array.isArray(achado) || !achado[0]) return res.status(404).json({ erro: "Atendimento não encontrado." });
+  const achado = doLojista
+    ? await banco(`${REST("estoque")}?select=id&id=eq.${eid}&limit=1`, { headers: cabecalhos(tok) })
+    : await banco(`${REST("atendimento")}?select=id&id=eq.${aid}&limit=1`, { headers: cabecalhos(tok) });
+  if (!Array.isArray(achado) || !achado[0]) return res.status(404).json({ erro: doLojista ? "Carro não encontrado." : "Atendimento não encontrado." });
 
   /* PDF com âncora, quando a tela conseguiu montar (03/11/2026). O
    * Markdown perdia tabela, sublinhado e o lugar das assinaturas; o PDF
@@ -239,7 +266,13 @@ async function zapsign(req, res, tok) {
   const links = (criado && Array.isArray(criado.signers) ? criado.signers : [])
     .map((x) => ({ nome: x.name, link: x.sign_url }))
     .filter((x) => x.link);
-  if (zapToken) {
+  if (zapToken && doLojista) {
+    await banco(`${REST("estoque")}?id=eq.${eid}`, {
+      method: "PATCH", headers: json(tok),
+      body: JSON.stringify({ lojista_zapsign_token: zapToken, lojista_enviado_em: new Date().toISOString(),
+        lojista_zapsign_link: links[0] ? links[0].link : null, lojista_zapsign_formato: comPdf ? "pdf" : "markdown" }),
+    }).catch(() => {});
+  } else if (zapToken) {
     // Sem isto o webhook não teria como saber de que atendimento o
     // documento assinado é.
     await banco(`${REST("atendimento")}?id=eq.${aid}`, {
@@ -296,6 +329,12 @@ async function zapsignWebhook(req, res) {
       headers: { apikey: ANON, "Content-Type": "application/json" },
       body: JSON.stringify({ tok: tokenDoc }),
     });
+    // O mesmo token pode ser de um contrato de lojista (0109).
+    await fetch(`${URL_BASE}/rest/v1/rpc/marcar_contrato_lojista_assinado`, {
+      method: "POST",
+      headers: { apikey: ANON, "Content-Type": "application/json" },
+      body: JSON.stringify({ tok: tokenDoc }),
+    }).catch(() => {});
   } catch (e) { /* o ZapSign repete; não há o que devolver */ }
 
   return ok();
