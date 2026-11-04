@@ -13828,7 +13828,16 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
   const carregar = async () => {
     setErro("");
     try {
-      const e = await listarEstoque();
+      /* A MESMA BASE DA VENDA PARA LOJISTAS (04/11/2026). Pedir tudo de
+       * uma vez batia no teto de 300 carros, ordenado pela entrada: o
+       * pátio daqui mostrava 14 enquanto a Venda para lojistas, que pede
+       * só o pátio, mostrava 60 — os 46 de fora eram os mais antigos. O
+       * Derek: "o estoque tem que ser ligado como venda para lojistas, tem
+       * que ser uma base só". Agora o pátio vem inteiro, à parte. */
+      const [patio, resto, baixados] = await Promise.all([
+        listarEstoque("em_estoque"), listarEstoque("vendido"), listarEstoque("baixado").catch(() => []),
+      ]);
+      const e = patio.concat(resto).concat(baixados);
       setLista(e);
       // Quem já fechou e ainda não entrou. Compara por veículo porque é
       // o veículo que tem o índice único no banco.
@@ -17756,6 +17765,16 @@ function TelaVendaLojistas({ perfil }) {
                   <span className="text-[12px]" style={{ color: e.shinkai_status === "disponivel" ? C.verde : AMARELO.texto }}>
                     no Shinkai {diaBR(e.shinkai_em)}{e.shinkai_status ? ` · ${e.shinkai_status}` : ""}
                   </span>
+                )}
+                {/* JÁ SAIU (0110, o Derek: "aqui tem um monte de carro que
+                    já tinha sido vendido"). Os da planilha antiga que nunca
+                    tiveram a venda marcada: saem daqui e do pátio sem
+                    contar na rentabilidade. Em lote, pelo Estoque. */}
+                {perfil && perfil.papel === "gerente" && (
+                  <button onClick={async () => {
+                    if (!confirm(`${(e.veiculo && e.veiculo.placa) || "Este carro"} já saiu do pátio? Ele vai para "Baixados" e não conta na rentabilidade.`)) return;
+                    try { await atualizarEstoque(e.id, { situacao: "baixado" }); carregar(); } catch (ex) { setErro(ex.message); }
+                  }} className="text-[12px] underline" style={{ color: C.mute }}>já saiu — baixar</button>
                 )}
                 <button onClick={() => setVendendo(vendendo === e.id ? null : e.id)}
                   className="ml-auto rounded-lg px-4 py-2 font-semibold" style={{ background: C.verde, color: "#fff" }}>

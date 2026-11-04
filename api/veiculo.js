@@ -454,7 +454,9 @@ async function estoque(req, res, tok) {
     const sit = SITUACOES.indexOf(String(req.query.situacao || "")) >= 0
       ? `&situacao=eq.${req.query.situacao}` : "";
     const lista = await supa(
-      `${base("estoque")}?select=${CAMPOS_ESTOQUE}${sit}&order=entrou_em.desc&limit=300`,
+      // Vendidos pela data da VENDA: pela entrada, o carro antigo vendido
+      // este mês ficava além dos 300 e sumia da rentabilidade do mês.
+      `${base("estoque")}?select=${CAMPOS_ESTOQUE}${sit}&order=${req.query.situacao === "vendido" ? "vendido_em.desc.nullslast,entrou_em.desc" : "entrou_em.desc"}&limit=300`,
       { headers: cab });
     return res.status(200).json({ estoque: lista || [] });
   }
