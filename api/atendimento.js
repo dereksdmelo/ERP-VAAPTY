@@ -1076,6 +1076,8 @@ function emLoja(a, agora) {
 const comEmLoja = (a) => (a ? { ...a, em_loja: emLoja(a) } : a);
 
 const caixaAlta = (s) => String(s || "").trim().toUpperCase();
+// Nome para comparar: sem acento, sem espaço sobrando ("ANDRÉ" = "ANDRE").
+const chaveNome = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/\s+/g, " ").trim();
 
 /* A CONVERSA ESPERA RESPOSTA quando o cliente falou depois da nossa última
  * mensagem e de quem a deu por lida, ou quando alguém a marcou como não
@@ -1182,7 +1184,7 @@ async function estadoDaFila(tok, ignorar) {
       else if (agora - ultimo > JANELA_ATIVO_MS) fora = "sem resposta";
     }
     return {
-      perfil_id: p.id, nome: (meta && meta.nome) || p.nome,
+      perfil_id: p.id, nome: (meta && meta.nome) || p.nome, nomes: nomes.map(chaveNome),
       veio_hoje: !!pres,
       presente: marcou && !fora, fora, ultimo_sinal: ultimo ? new Date(ultimo).toISOString() : null,
       sinal_tipo: sinal ? sinal.tipo : null,
@@ -1279,17 +1281,25 @@ async function registrarNaFila(tok, at, modo) {
     if (!modo && at.chegada_em && Date.now() - Date.parse(at.chegada_em) > 30 * 60000) modo = "ja_atendendo";
     const s = await estadoDaFila(tok, at.id);
     const eu = donoDoToken(tok);
+    /* QUEM RECEBEU, pelo id OU pelo nome. O "Chegou" da pré-venda grava
+     * só o NOME: `idDePerfil` lê `perfil` com o token de quem chama, e a
+     * pré-venda não lê o perfil dos outros (a RLS da 0004) — o id volta
+     * nulo. Em 04/11/2026 isso registrou todo cliente da Meiriane como
+     * "fora da vez" ("a vez era de TIAGO" para o próprio Tiago), a roda
+     * não andou sozinha e a Schell corrigiu à mão a manhã inteira. */
+    const quemRecebeu = at.negociador_id ||
+      ((s.pessoas.find((p) => at.negociador_nome && p.nomes.indexOf(chaveNome(at.negociador_nome)) >= 0) || {}).perfil_id) || null;
     const nomeDe = (id) => ((s.pessoas.find((p) => p.perfil_id === id) || {}).nome) || at.negociador_nome || null;
-    const base = { dia: s.hoje, atendimento_id: at.id, perfil_id: at.negociador_id || null, nome: nomeDe(at.negociador_id) };
+    const base = { dia: s.hoje, atendimento_id: at.id, perfil_id: quemRecebeu, nome: nomeDe(quemRecebeu) };
     if (modo === "especifico" || modo === "ja_atendendo") {
       await gravarEventos(tok, [{ ...base, tipo: "especifico",
         motivo: modo === "ja_atendendo" ? "registrou depois um cliente que já estava atendendo"
           : "o cliente pediu ou já era dele — não conta na fila" }]);
       return { tipo: "especifico" };
     }
-    if (s.vez && at.negociador_id && s.vez.quem === at.negociador_id) {
+    if (s.vez && quemRecebeu && s.vez.quem === quemRecebeu) {
       await congelarOrdem(tok, s);
-      const resp = eu && eu === at.negociador_id ? { resposta: "aceitou", respondido_em: new Date().toISOString() } : {};
+      const resp = eu && eu === quemRecebeu ? { resposta: "aceitou", respondido_em: new Date().toISOString() } : {};
       const g = await gravarEventos(tok, eventosDaEscolha(s, s.vez, { atendimento_id: at.id, ...resp }));
       return { tipo: "vez", via: s.vez.via, evento: g[g.length - 1] || null };
     }
@@ -1506,7 +1516,19 @@ async function vez(req, res, tok) {
     segundo: s.segundo ? s.segundo.quem : null,
     ponteiro: s.ponteiro, ponteiro_nome: nomeDe(s.ponteiro),
     chamadas,
-    eventos: s.eventos.slice(-80).reverse(),
+    eventos: await (async () => {
+      // Quem corrigiu aparece no registro: correção anônima não responde
+      // "por que a vez pulou fulano" (04/11/2026, o Marcos). Só o gerente
+      // lê o perfil dos outros; para o resto, fica sem o nome.
+      const ult = s.eventos.slice(-80).reverse();
+      const ids = Array.from(new Set(ult.filter((e) => e.tipo === "correcao" || e.tipo === "credito").map((e) => e.por).filter(Boolean)));
+      let nomes = {};
+      if (ids.length) {
+        const l = await banco(`${URL_BASE}/rest/v1/perfil?select=id,nome&id=in.(${ids.join(",")})`, { headers: cabecalhos(tok) }).catch(() => []);
+        (l || []).forEach((x) => { nomes[x.id] = x.nome; });
+      }
+      return ult.map((e) => ({ ...e, por_nome: nomes[e.por] || null }));
+    })(),
     // Quem atende e não passou pela loja hoje (ou não está na fila).
     ausentes: s.pessoas.filter((p) => !p.presente).map(pessoa).sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR")),
     eu,

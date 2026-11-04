@@ -3724,6 +3724,15 @@ cliente — reabre o de hoje ou registra um sem mexer na roda), almoço,
 pausa ou saí. **O gerente corrige**: põe a vez em alguém, devolve uma
 vez, desfaz o ponto de uma chamada (`fila_estornar`).
 
+**Quem recebeu o cliente é achado pelo id OU pelo nome.** No primeiro
+dia (04/11/2026) todo "Chegou" da Meiriane virou "fora da vez" — "a vez
+era de TIAGO" para o próprio Tiago — porque o atendimento da pré-venda
+nasce sem `negociador_id` (`idDePerfil` lê `perfil` com o token dela, e a
+RLS não deixa). A roda não andou sozinha, e a Schell a corrigiu à mão a
+manhã inteira; a última correção pôs a vez no André Bruno e pulou o
+Marcos. Agora `registrarNaFila` casa pelo nome do login e da meta, e o
+registro mostra quem fez cada correção.
+
 **O que libera é "encerrar atendimento", não o status (0106).** O
 Derek: o negociador fechou o carro, mudou o status sozinho e ficou livre
 na fila com o cliente ainda assinando papel. `emLoja` deixou de olhar o

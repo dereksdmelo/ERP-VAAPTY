@@ -24042,7 +24042,7 @@ function TelaFilaDaVez({ perfil, aoAbrir }) {
                 {p.sem_meta && <span>sem meta ligada — confiabilidade 100%</span>}
                 {gerente && corrigir && (
                   <>
-                    <button onClick={() => fazer(p.perfil_id, "corrigir", { tipo: "vez", perfil_id: p.perfil_id })} disabled={!!indo}
+                    <button onClick={() => { if (confirm(`Pôr a vez em ${p.nome}? A roda continua dele em diante — quem estiver antes dele na roda perde esta volta.`)) fazer(p.perfil_id, "corrigir", { tipo: "vez", perfil_id: p.perfil_id }); }} disabled={!!indo}
                       className="font-semibold underline" style={{ color: C.roxo }}>pôr a vez aqui</button>
                     <button onClick={() => fazer(p.perfil_id, "corrigir", { tipo: "devolver", perfil_id: p.perfil_id })} disabled={!!indo}
                       className="font-semibold underline" style={{ color: C.roxo }}>devolver uma vez</button>
@@ -24082,6 +24082,7 @@ function TelaFilaDaVez({ perfil, aoAbrir }) {
             {e.resposta && <span style={{ color: e.resposta === "aceitou" ? C.verde : C.laranja }}>· {RESPOSTA[e.resposta]}</span>}
             {e.penalizado && <span style={{ color: e.estornado_em ? C.mute : C.laranja, textDecoration: e.estornado_em ? "line-through" : "none" }}>· perdeu atendimento</span>}
             {e.motivo && <span style={{ color: C.mute }}>· {e.motivo}</span>}
+            {e.por_nome && <span style={{ color: C.mute }}>· por {e.por_nome}</span>}
             {e.atendimento_id && aoAbrir && <button onClick={() => aoAbrir(e.atendimento_id)} className="underline" style={{ color: C.mute }}>abrir</button>}
             {gerente && corrigir && e.penalizado && !e.estornado_em && (
               <button onClick={() => fazer(e.id, "corrigir", { tipo: "estornar", evento_id: e.id })} disabled={!!indo}
