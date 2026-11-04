@@ -4037,8 +4037,15 @@ link foi usado ou venceu. O Derek: *"depois que sair já não consigo mais
 acompanhar se ele assinou"*.
 
 **Limpar o pátio** (gerente): na lista "No pátio", "limpar o pátio"
-marca vários e tira de uma vez o que entrou errado. Carro vendido que
-ficou no pátio não se tira — abre-se e vende-se, para a venda existir.
+marca vários e escolhe. **Baixar (0110)** é para o que já saiu no passado
+— o Derek: *"tem muitos do passado e não temos tempo pra isso… só vamos
+começar a contar a rentabilidade desse mês o que estava de fato em
+estoque e foi vendido esse mês e o que foi uma nova negociação"*. Vender
+pede comprador e valor, e sem data o carro cai na rentabilidade do mês
+em que entrou (para o que entrou hoje, este mês). `baixado` sai do pátio
+sem venda e não conta em nada que olha `vendido`; aparece em "Baixados"
+e volta ao pátio com um clique. **Tirar** é para o que nunca devia ter
+entrado (teste, repetido): apaga, com os custos.
 
 **O comprador é cadastro, não texto solto.** O mesmo lojista leva
 dezenas de carros; sem cadastro, "AUTO CENTER SUL" e "Auto Center Sul"

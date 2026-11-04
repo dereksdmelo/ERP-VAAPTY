@@ -224,7 +224,9 @@ const RX_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const TIPOS_CUSTO = ["quitacao", "debitos", "cautelar", "transporte",
                      "reparo", "juros", "documentacao", "deducao", "comissao_externa", "outro"];
-const SITUACOES = ["em_estoque", "vendido", "devolvido"];
+// "baixado" (0110): saiu do pátio antes de o sistema registrar a venda —
+// não conta em rentabilidade nem em recebimento, que só olham "vendido".
+const SITUACOES = ["em_estoque", "vendido", "devolvido", "baixado"];
 const TIPOS_COMPRADOR = ["lojista", "pessoa_fisica"];
 
 const dataISO = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || "")) ? String(v) : null);
@@ -577,7 +579,10 @@ async function estoque(req, res, tok) {
     if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
 
     const mud = {};
-    if (c.situacao !== undefined && SITUACOES.indexOf(String(c.situacao)) >= 0) mud.situacao = c.situacao;
+    if (c.situacao !== undefined && SITUACOES.indexOf(String(c.situacao)) >= 0) {
+      mud.situacao = c.situacao;
+      mud.baixado_em = c.situacao === "baixado" ? new Date().toISOString() : null;
+    }
     if (c.valor_compra !== undefined) mud.valor_compra = decimal(c.valor_compra);
     if (c.valor_venda !== undefined) mud.valor_venda = decimal(c.valor_venda);
     if (c.vendido_em !== undefined) mud.vendido_em = dataISO(c.vendido_em);

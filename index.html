@@ -13980,7 +13980,11 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
 
       {/* ---- filtro e totais ---- */}
       <div className={`flex flex-wrap items-center gap-2 ${soRentab ? "hidden" : ""}`}>
-        {!soRentab && [["em_estoque", "No pátio"], ["vendido", "Rentabilidade"]].map(([v, r]) => (
+        {!soRentab && [["em_estoque", "No pátio"], ["vendido", "Rentabilidade"]]
+          // Os baixados (0110) aparecem só quando existem: é onde se
+          // confere o que saiu do pátio e se devolve o que saiu errado.
+          .concat((lista || []).some((x) => x.situacao === "baixado") ? [["baixado", `Baixados (${(lista || []).filter((x) => x.situacao === "baixado").length})`]] : [])
+          .map(([v, r]) => (
           <button key={v} onClick={() => setFiltro(v)}
             className="rounded-full px-3 py-1 text-[12px] font-semibold"
             style={{
@@ -14048,8 +14052,30 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
           {limpando && (
             <>
               <span className="text-[12.5px]" style={{ color: C.mute }}>
-                Marque o que entrou errado (teste, repetido, carro que não está aqui). Carro vendido que ficou no pátio: abra e use "Vender carro".
+                Marque e escolha: <b>baixar</b> o que já saiu no passado (não conta na rentabilidade, volta se precisar),
+                ou <b>tirar</b> o que nunca deveria ter entrado (teste, repetido).
               </span>
+              {/* BAIXAR EM LOTE (0110, o Derek: "tem muitos do passado e
+                  não temos tempo… não vai contar pra rentabilidade desse
+                  mês"). Sai do pátio sem venda registrada. */}
+              <button disabled={!Object.keys(marcados).length || !!tirando}
+                onClick={async () => {
+                  const alvos = visivel.filter((x) => marcados[x.id]);
+                  if (!confirm(`Baixar ${alvos.length} carro(s) — já saíram do pátio no passado?\n\n${alvos.map((x) => `${(x.veiculo && x.veiculo.placa) || "—"} · ${(x.veiculo && x.veiculo.marca_modelo) || ""}`).join("\n")}\n\nSaem do pátio e não contam na rentabilidade. Dá para voltar em "Baixados".`)) return;
+                  setTirando(true); setErro("");
+                  const falhas = [];
+                  for (const x of alvos) {
+                    try { await atualizarEstoque(x.id, { situacao: "baixado" }); }
+                    catch (ex) { falhas.push(`${(x.veiculo && x.veiculo.placa) || "—"}: ${ex.message}`); }
+                  }
+                  setTirando(false); setMarcados({}); setLimpando(false);
+                  if (falhas.length) setErro(`Não baixaram: ${falhas.join(" · ")}`);
+                  carregar();
+                }}
+                className="rounded-md px-3 py-1.5 text-[12.5px] font-semibold"
+                style={{ background: Object.keys(marcados).length ? C.roxo : C.line, color: "#fff" }}>
+                {tirando ? "gravando…" : `Baixar ${Object.keys(marcados).length || ""} — já saíram`}
+              </button>
               <button disabled={!Object.keys(marcados).length || !!tirando}
                 onClick={async () => {
                   const alvos = visivel.filter((x) => marcados[x.id]);
@@ -14076,7 +14102,7 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
         </div>
       )}
       <div className="rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-        {filtro === "em_estoque" && visivel.map((e, i) => {
+        {(filtro === "em_estoque" || filtro === "baixado") && visivel.map((e, i) => {
           const v = e.veiculo || {};
           const c = contaDoEstoque(e);
           const dias = diasNoPatio(e);
@@ -14320,7 +14346,17 @@ function FichaEstoque({ id, perfil, aoVoltar }) {
       </div>
 
       {/* ---- a venda ---- */}
-      {e.situacao === "vendido" ? (
+      {e.situacao === "baixado" ? (
+        // BAIXADO (0110): saiu do pátio sem venda registrada.
+        <div className="rounded-lg p-3.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+          <div className="text-[14px]">
+            <b>Baixado</b>{e.baixado_em ? ` em ${diaBR(e.baixado_em)}` : ""} — saiu do pátio antes de o sistema registrar a venda. Não conta na rentabilidade.
+          </div>
+          <button onClick={async () => {
+            try { await atualizarEstoque(e.id, { situacao: "em_estoque" }); await carregar(); } catch (ex) { setErro(ex.message); }
+          }} className="mt-2 text-[13px] font-semibold underline" style={{ color: C.roxo }}>voltar para o pátio</button>
+        </div>
+      ) : e.situacao === "vendido" ? (
         <div className="rounded-lg p-3.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
           <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>Venda</div>
           <div className="mt-1 text-[15px]">
