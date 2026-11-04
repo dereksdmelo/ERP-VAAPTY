@@ -470,6 +470,16 @@ async function estoque(req, res, tok) {
     if ((jaTem || []).length) {
       return res.status(409).json({ erro: "Este carro já está no estoque.", id: jaTem[0].id });
     }
+    // A MESMA PLACA JÁ NO PÁTIO, por outro atendimento (04/11/2026: o
+    // MHW1824 tinha quatro atendimentos e entrou quatro vezes).
+    if (c.natureza !== "indicacao") {
+      const v = ((await supa(`${base("veiculo")}?select=placa&id=eq.${veiculoId}`, { headers: cab })) || [])[0];
+      if (v && v.placa) {
+        const mesma = await supa(`${base("estoque")}?select=id,veiculo!inner(placa)&situacao=eq.em_estoque` +
+          `&veiculo.placa=eq.${encodeURIComponent(v.placa)}&limit=1`, { headers: cab }).catch(() => []);
+        if ((mesma || []).length) return res.status(409).json({ erro: `O ${v.placa} já está no pátio.`, id: mesma[0].id });
+      }
+    }
 
     const linha = {
       veiculo_id: veiculoId,
@@ -543,6 +553,21 @@ async function estoque(req, res, tok) {
 
     const completo = await supa(`${base("estoque")}?select=${CAMPOS_ESTOQUE}&id=eq.${novo.id}`, { headers: cab });
     return res.status(201).json({ ok: true, estoque: (completo || [])[0] || novo });
+  }
+
+  /* TIRAR DO ESTOQUE o que entrou por engano (04/11/2026: o MHW1824
+   * entrou quatro vezes). Só o gerente (a RLS da 0019 já é assim), só
+   * carro no pátio — vendido tem venda, margem e recebimento pendurados —
+   * e as linhas de custo saem junto (on delete cascade). */
+  if (req.method === "DELETE") {
+    const id = String(req.query.id || "");
+    if (!RX_ID.test(id)) return res.status(400).json({ erro: "id inválido." });
+    const atual = ((await supa(`${base("estoque")}?select=situacao&id=eq.${id}`, { headers: cab })) || [])[0];
+    if (!atual) return res.status(404).json({ erro: "Carro não encontrado no estoque." });
+    if (atual.situacao !== "em_estoque") return res.status(409).json({ erro: "Só sai do estoque carro que está no pátio — vendido tem a venda pendurada." });
+    const apagado = await supa(`${base("estoque")}?id=eq.${id}`, { method: "DELETE", headers: cabecalhos(tok, { Prefer: "return=representation" }) });
+    if (!(Array.isArray(apagado) && apagado.length)) return res.status(403).json({ erro: "Só o gerente tira carro do estoque." });
+    return res.status(200).json({ ok: true });
   }
 
   if (req.method === "PATCH") {
@@ -875,3 +900,62 @@ module.exports = async function handler(req, res) {
     return res.status(e.status || 500).json({ erro: limpar(e.message) || "Falha ao gravar." });
   }
 };
+
+/**
+ * FECHOU, ENTRA NO ESTOQUE (04/11/2026, o Derek: "se foi fechado, entra no
+ * estoque — não faz sentido fechar o carro e o carro ficar fora do
+ * estoque"). Até aqui a entrada era um ato à parte (decisão 23), e o
+ * carro fechado ficava numa fila amarela esperando alguém lembrar —
+ * e quem lembrou apertou o botão quatro vezes no mesmo MHW1824, que
+ * tinha quatro atendimentos. Agora o status "Fechado" põe o carro no
+ * pátio na hora, com o previsto do check list (o mesmo que o botão
+ * fazia), e não entra de novo:
+ *   - o veículo já tem linha no estoque (o índice único da 0019);
+ *   - a mesma PLACA já está no pátio, por outro atendimento.
+ * Falha não derruba o status: o carro continua na fila para o botão.
+ */
+async function entrarAoFechar(tok, atendimentoId) {
+  const cab = { headers: cabecalhos(tok) };
+  const at = ((await supa(`${base("atendimento")}?select=id,valor_fechado,negociador_nome,origem,prospec,` +
+    `veiculo(id,placa),checklist(*)&id=eq.${atendimentoId}`, cab)) || [])[0];
+  if (!at) return { ok: false, motivo: "atendimento não encontrado" };
+  const v = Array.isArray(at.veiculo) ? at.veiculo[0] : at.veiculo;
+  if (!v || !v.id) return { ok: false, motivo: "sem ficha do carro" };
+  const ja = await supa(`${base("estoque")}?select=id&veiculo_id=eq.${v.id}`, cab);
+  if ((ja || []).length) return { ok: true, ja: true, id: ja[0].id };
+  if (v.placa) {
+    const mesmaPlaca = await supa(`${base("estoque")}?select=id,veiculo!inner(placa)&situacao=eq.em_estoque` +
+      `&veiculo.placa=eq.${encodeURIComponent(v.placa)}&limit=1`, cab).catch(() => []);
+    if ((mesmaPlaca || []).length) return { ok: true, ja: true, id: mesmaPlaca[0].id, mesma_placa: true };
+  }
+  const cl = (Array.isArray(at.checklist) ? at.checklist[0] : at.checklist) || {};
+  const num = (x) => decimal(x) || 0;
+  const itensDeb = (Array.isArray(cl.debitos_itens) ? cl.debitos_itens : []).filter((x) => x && (x.descricao || num(x.valor)));
+  const extras = (Array.isArray(cl.descontos_extras) ? cl.descontos_extras : []).filter((x) => x && x.custo !== false && num(x.valor));
+  // O mesmo previsto do botão "pôr no estoque": quitação, cautelar,
+  // débitos linha a linha e os "entre outros" — a comissão nunca é custo.
+  const custos = [
+    { tipo: "quitacao", descricao: "Quitação do financiamento", previsto: cl.valor_quitacao },
+    { tipo: "cautelar", descricao: "Perícia cautelar", previsto: cl.valor_cautelar },
+  ].concat(itensDeb.length
+    ? itensDeb.map((x) => ({ tipo: "debitos", descricao: x.descricao || "Débito do veículo", previsto: x.valor }))
+    : [{ tipo: "debitos", descricao: "Débitos do veículo", previsto: cl.valor_debitos }])
+    .concat(extras.map((x) => ({ tipo: "outro", descricao: x.descricao || "Outro desconto", previsto: x.valor })));
+  const criado = await supa(base("estoque"), {
+    method: "POST", headers: cabecalhos(tok, { Prefer: "return=representation" }),
+    body: JSON.stringify({
+      veiculo_id: v.id, atendimento_id: at.id,
+      valor_compra: decimal(cl.valor_cliente) || decimal(at.valor_fechado),
+      negociador_nome: texto(at.negociador_nome), meio_alcance: texto(at.origem), prospector: texto(at.prospec),
+      observacoes: "Entrou sozinho ao fechar o atendimento.",
+    }),
+  });
+  const novo = (Array.isArray(criado) ? criado[0] : criado) || null;
+  if (!novo) return { ok: false, motivo: "o banco recusou" };
+  const linhas = custos.map((x) => ({ estoque_id: novo.id, tipo: TIPOS_CUSTO.indexOf(x.tipo) >= 0 ? x.tipo : "outro",
+    descricao: texto(x.descricao) || "Custo do fechamento", previsto: num(x.previsto), do_fechamento: true }))
+    .filter((x) => x.previsto > 0);
+  if (linhas.length) await supa(base("estoque_custo"), { method: "POST", headers: cabecalhos(tok), body: JSON.stringify(linhas) }).catch(() => {});
+  return { ok: true, id: novo.id };
+}
+module.exports.entrarAoFechar = entrarAoFechar;

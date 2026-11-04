@@ -1076,6 +1076,11 @@ function emLoja(a, agora) {
 const comEmLoja = (a) => (a ? { ...a, em_loja: emLoja(a) } : a);
 
 const caixaAlta = (s) => String(s || "").trim().toUpperCase();
+// A entrada no estoque mora em api/veiculo.js, com o resto do estoque.
+async function entrarNoEstoqueAoFechar(tok, id) {
+  try { return await require("./veiculo.js").entrarAoFechar(tok, id); }
+  catch (e) { return { ok: false, motivo: e.message }; }
+}
 // Nome para comparar: sem acento, sem espaço sobrando ("ANDRÉ" = "ANDRE").
 const chaveNome = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/\s+/g, " ").trim();
 
@@ -1429,7 +1434,8 @@ async function vez(req, res, tok) {
       body: JSON.stringify({ atendimento_fim_em: new Date().toISOString(), status: st }),
     });
     if (!Array.isArray(d) || !d.length) return res.status(403).json({ erro: "Só quem atende (ou o gerente) encerra este atendimento." });
-    return res.status(200).json({ ok: true, atendimento: comEmLoja(d[0]) });
+    const estoque = st === "fechado" ? await entrarNoEstoqueAoFechar(tok, id) : undefined;
+    return res.status(200).json({ ok: true, atendimento: comEmLoja(d[0]), estoque });
   }
 
   /* "ESTOU ATENDENDO ESTE" (0106): a pergunta de quem está fora da fila
@@ -3612,7 +3618,10 @@ module.exports = async function handler(req, res) {
       if (!salvo) return res.status(403).json({ erro: "Este atendimento é de outro negociador." });
       // Telefone digitado depois de abrir o atendimento também liga o lead.
       const lead = linha.cliente_telefone ? await leadQueVeio(tok, salvo) : null;
-      return res.status(200).json({ ok: true, atendimento: salvo, lead_ligado: lead });
+      // FECHOU, ENTRA NO ESTOQUE (04/11/2026, o Derek). Nunca derruba o
+      // status: se falhar, o carro continua na fila do Estoque.
+      const estoque = linha.status === "fechado" ? await entrarNoEstoqueAoFechar(tok, id) : undefined;
+      return res.status(200).json({ ok: true, atendimento: salvo, lead_ligado: lead, estoque });
     }
 
     res.setHeader("Allow", "GET, POST, PATCH");

@@ -3994,6 +3994,20 @@ desfazer custa mais que um toque. A fila mostra os 8 mais recentes
 porque há 55 fechados importados da planilha, e negócio de agosto
 escondendo o carro que fechou hoje seria pior que a fila comprida.
 
+**Desde 04/11/2026 FECHAR PÕE NO ESTOQUE** (o Derek: *"se foi fechado,
+entra no estoque, não faz sentido fechar o carro e o carro ficar fora do
+estoque"*). O parágrafo acima era a regra até aqui; a fila amarela fazia
+o carro esperar alguém lembrar, e quem lembrou apertou o botão quatro
+vezes no MHW1824 — quatro atendimentos do mesmo carro, quatro linhas no
+pátio. Agora o status "Fechado" (no PATCH e no "encerrar") chama
+`entrarAoFechar` (`api/veiculo.js`), com o mesmo previsto do check list,
+e a mesma PLACA já no pátio não entra de novo — nem pelo botão. A fila
+amarela fica para o que falhou: só os últimos 60 dias, e conferindo a
+placa, porque a lista do estoque traz 300 carros e o que ficava além
+dela aparecia como "fora do estoque". **O gerente tira do estoque** o que
+entrou repetido ou por engano (só carro no pátio; as linhas de custo
+saem junto).
+
 **Um carro entra uma vez** — índice único em `estoque (veiculo_id)`. Sem
 ele, dois cliques no botão criariam duas fichas de custo para o mesmo
 carro e o total dobraria.

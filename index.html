@@ -13829,12 +13829,21 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
       setLista(e);
       // Quem já fechou e ainda não entrou. Compara por veículo porque é
       // o veículo que tem o índice único no banco.
-      const dentro = {};
-      e.forEach((x) => { if (x.veiculo_id) dentro[x.veiculo_id] = true; });
-      const fechados = await listarAtendimentos({ status: "fechado", limite: 200 });
+      const dentro = {}, placas = {};
+      e.forEach((x) => {
+        if (x.veiculo_id) dentro[x.veiculo_id] = true;
+        if (x.veiculo && x.veiculo.placa) placas[x.veiculo.placa] = true;
+      });
+      /* Desde 04/11/2026 fechar já põe no estoque (`entrarAoFechar`); a
+       * fila fica para o que falhou. Só os fechados dos últimos 60 dias,
+       * e conferindo a PLACA também: a lista do estoque traz 300 carros,
+       * e o que ficou além dela aparecia aqui como "fora do estoque" —
+       * foi assim que o MHW1824 entrou quatro vezes no pátio. */
+      const desde = diaMais(hojeEmSP(), -60);
+      const fechados = await listarAtendimentos({ status: "fechado", de: desde, limite: 200 });
       setFila(fechados.filter((a) => {
         const v = (a.veiculo || [])[0];
-        return v && v.id && !dentro[v.id];
+        return v && v.id && !dentro[v.id] && !(v.placa && placas[v.placa]);
       }));
     } catch (ex) { setErro(ex.message); }
   };
@@ -14316,10 +14325,28 @@ function FichaEstoque({ id, perfil, aoVoltar }) {
             catch (ex) { setErro(ex.message); }
           }} />
       ) : (
-        <button onClick={() => setVendendo(true)} className="w-full rounded-md py-3 text-[15px] font-semibold"
-          style={{ background: C.roxo, color: "#fff" }}>
-          Vender carro
-        </button>
+        <>
+          <button onClick={() => setVendendo(true)} className="w-full rounded-md py-3 text-[15px] font-semibold"
+            style={{ background: C.roxo, color: "#fff" }}>
+            Vender carro
+          </button>
+          {/* O que entrou por engano sai (04/11/2026: o MHW1824 entrou
+              quatro vezes, um por atendimento do mesmo carro). Só o
+              gerente, e só carro no pátio. */}
+          {perfil && perfil.papel === "gerente" && (
+            <button onClick={async () => {
+              if (!confirm(`Tirar ${(e.veiculo && e.veiculo.placa) || "este carro"} do estoque? Use só para entrada repetida ou por engano — as linhas de custo dele saem junto.`)) return;
+              try {
+                const r = await fetchAut(`/api/veiculo?recurso=estoque&id=${encodeURIComponent(e.id)}`, { method: "DELETE" });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(d.erro || "Não consegui tirar do estoque.");
+                aoVoltar();
+              } catch (ex) { setErro(ex.message); }
+            }} className="mt-2 w-full text-center text-[12.5px] underline" style={{ color: C.mute }}>
+              tirar do estoque (entrou repetido ou por engano)
+            </button>
+          )}
+        </>
       )}
     </div>
   );
