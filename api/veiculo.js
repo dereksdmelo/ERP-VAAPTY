@@ -587,7 +587,15 @@ async function estoque(req, res, tok) {
     }
     if (c.valor_compra !== undefined) mud.valor_compra = decimal(c.valor_compra);
     if (c.valor_venda !== undefined) mud.valor_venda = decimal(c.valor_venda);
-    if (c.vendido_em !== undefined) mud.vendido_em = dataISO(c.vendido_em);
+    if (c.vendido_em !== undefined) {
+      mud.vendido_em = dataISO(c.vendido_em);
+      /* A SEMANA DA VENDA É A DO DIA DA VENDA (05/11/2026, o Derek: "no
+       * dia da venda a semana pra cálculo de comissões"), pelas quatro
+       * semanas da casa (`regras/remuneracao.js`: 1–8, 9–15, 16–22,
+       * 23–fim). Gravada junto para quem só lê a coluna. */
+      const d = mud.vendido_em ? Number(mud.vendido_em.slice(8, 10)) : 0;
+      mud.semana_venda = d ? (d <= 8 ? 1 : d <= 15 ? 2 : d <= 22 ? 3 : 4) : null;
+    }
     if (c.nota_venda !== undefined) mud.nota_venda = texto(c.nota_venda);
     if (c.observacoes !== undefined) mud.observacoes = texto(c.observacoes);
     if (c.comprador_id !== undefined) {
@@ -609,7 +617,7 @@ async function estoque(req, res, tok) {
       }
       mud.preco_pedido = novoPreco;
     }
-    if (c.semana_venda !== undefined) {
+    if (c.semana_venda !== undefined && c.vendido_em === undefined) {
       const n = Number(c.semana_venda);
       mud.semana_venda = n >= 1 && n <= 5 ? Math.trunc(n) : null;
     }

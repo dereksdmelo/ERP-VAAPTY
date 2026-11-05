@@ -3496,6 +3496,35 @@ module.exports = async function handler(req, res) {
     catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Falhou." }); }
   }
 
+  /* A CONVERSÃO DO PERÍODO E A DO DIA (05/11/2026, o Derek: "mostrar a
+   * conversão do dia e conversão e número de atendimentos do período").
+   * Contada aqui, não em cima da lista: a lista tem teto de 100–200 e um
+   * mês passa disso (decisão 12). Conversão é fechados ÷ atendimentos, a
+   * mesma do funil e da remuneração. Respeita o negociador escolhido. */
+  if (String(req.query.recurso || "") === "conversao") {
+    try {
+      const de = data(req.query.de), ate = data(req.query.ate) || de;
+      const negNome = String(req.query.negociador_nome || "").replace(/[(),*]/g, " ").trim();
+      const fNeg = negNome === "__sem__" ? "&negociador_nome=is.null" : negNome ? `&negociador_nome=ilike.${encodeURIComponent(negNome)}` : "";
+      const hoje = hojeAqui();
+      // Pelo contador do banco (Content-Range), não pelas linhas: o
+      // PostgREST do Supabase devolve no máximo 1.000 por consulta.
+      const contar = async (filtro) => {
+        const r = await fetch(`${REST("atendimento")}?select=id${filtro}&limit=1`, { headers: { ...cabecalhos(tok), Prefer: "count=exact" } });
+        if (!r.ok) { const e = new Error("Não consegui contar os atendimentos."); e.status = 502; throw e; }
+        const m = String(r.headers.get("content-range") || "").match(/\/(\d+)$/);
+        return m ? Number(m[1]) : 0;
+      };
+      const conta = async (a, b) => {
+        const base0 = `&data=gte.${a}&data=lte.${b}${fNeg}`;
+        const [n, fechados] = await Promise.all([contar(base0), contar(`${base0}&status=eq.fechado`)]);
+        return { atendimentos: n, fechados, conversao: n ? Math.round((fechados / n) * 1000) / 10 : null };
+      };
+      const [periodo, dia] = await Promise.all([de ? conta(de, ate) : null, conta(hoje, hoje)]);
+      return res.status(200).json({ de, ate, periodo, hoje: dia });
+    } catch (e) { return res.status(e.status || 502).json({ erro: limpar(e.message) }); }
+  }
+
   if (String(req.query.recurso || "") === "duplicados") {
     try { return await duplicados(req, res, tok); }
     catch (e) { return res.status(e.status || 502).json({ erro: limpar(e.message) }); }

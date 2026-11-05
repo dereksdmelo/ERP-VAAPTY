@@ -2376,7 +2376,8 @@ async function projecaoRemuneracao(tok, comp) {
   (vendidos || []).forEach((e) => {
     const r = rentabilidadeDe(e).liquida;
     const dia = Number(String(e.vendido_em || "").slice(8, 10)) || null;
-    const sem = R.semanaDaPlanilha(Number(e.semana_venda)) || semDoDia(dia);
+    // O dia da venda manda (05/11/2026); a semana da planilha só sem o dia.
+    const sem = semDoDia(dia) || R.semanaDaPlanilha(Number(e.semana_venda));
     const naQ1 = dia ? dia <= 15 : (sem ? sem <= 2 : false);
     [de(e.negociador_nome), L].forEach((P) => {
       P.mes.carros += 1; P.mes.rent += r;

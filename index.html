@@ -13038,6 +13038,42 @@ const veiculoDaLinha = (a) => {
 };
 const pretensaoDaLinha = (a) => a.pretensao || numeroBR(vivaDaLinha(a).pretensao) || null;
 
+/* AS SEMANAS DA CASA (27/10/2026, a regra do comissionamento, em
+ * `regras/remuneracao.js`): quatro por mês, nenhuma atravessa a virada —
+ * 1–8, 9–15, 16–22 e 23 até o fim. "Esta semana" e "semana passada" são
+ * essas, não as de domingo a sábado. */
+const INICIO_SEMANA = [1, 9, 16, 23];
+const semanaNoMes = (ano, mes, n) => {
+  const ultimo = new Date(Date.UTC(ano, mes, 0)).getUTCDate();
+  const de = INICIO_SEMANA[n - 1], ate = n < 4 ? INICIO_SEMANA[n] - 1 : ultimo;
+  const p2 = (x) => String(x).padStart(2, "0");
+  return { n, de: `${ano}-${p2(mes)}-${p2(de)}`, ate: `${ano}-${p2(mes)}-${p2(ate)}` };
+};
+const semanaDaData = (iso) => {
+  const ano = Number(iso.slice(0, 4)), mes = Number(iso.slice(5, 7)), d = Number(iso.slice(8, 10));
+  return semanaNoMes(ano, mes, d <= 8 ? 1 : d <= 15 ? 2 : d <= 22 ? 3 : 4);
+};
+const diaAntes = (iso) => new Date(Date.parse(`${iso}T12:00:00Z`) - 86400000).toISOString().slice(0, 10);
+const PERIODOS = [
+  ["mes", "Mês escolhido"], ["hoje", "Hoje"], ["ontem", "Ontem"], ["semana", "Esta semana"], ["semana_passada", "Semana passada"],
+  ["s1", "1ª semana do mês"], ["s2", "2ª semana do mês"], ["s3", "3ª semana do mês"], ["s4", "4ª semana do mês"], ["livre", "Personalizado"],
+];
+// O período escolhido vira de/até. `comp` é o mês do cabeçalho (vazio =
+// todos os meses), que vale para "Mês escolhido" e para as semanas do mês.
+function faixaDoPeriodo(p, comp, livre) {
+  const hoje = hojeEmSP();
+  if (p === "hoje") return { de: hoje, ate: hoje };
+  if (p === "ontem") { const o = diaAntes(hoje); return { de: o, ate: o }; }
+  if (p === "semana") return semanaDaData(hoje);
+  if (p === "semana_passada") return semanaDaData(diaAntes(semanaDaData(hoje).de));
+  if (/^s[1-4]$/.test(p)) {
+    const base = comp || hoje.slice(0, 7) + "-01";
+    return semanaNoMes(Number(base.slice(0, 4)), Number(base.slice(5, 7)), Number(p.slice(1)));
+  }
+  if (p === "livre") return livre && livre.de ? { de: livre.de, ate: livre.ate || livre.de } : comp ? faixaDoMes(comp) : {};
+  return comp ? faixaDoMes(comp) : {};
+}
+
 function CRM({ perfil, aoAbrir, mes }) {
   const { comp, setComp, MESES } = mes;
   const [lista, setLista] = useState([]);
@@ -13049,6 +13085,19 @@ function CRM({ perfil, aoAbrir, mes }) {
   const [neg, setNeg] = useState("");
   const [equipe, setEquipe] = useState([]);
   useEffect(() => { listarNegociadores().then(setEquipe).catch(() => {}); }, []);
+  // O período (05/11/2026): hoje, ontem, as semanas da casa, ou de/até.
+  // Fica no aparelho — é como cada um gosta de abrir a tela.
+  const [periodo, setPeriodoE] = useState(() => { try { return localStorage.getItem("vaapty:crm-periodo") || "mes"; } catch (e) { return "mes"; } });
+  const escolherPeriodo = (v) => { setPeriodoE(v); try { localStorage.setItem("vaapty:crm-periodo", v); } catch (e) {} };
+  const [livre, setLivre] = useState({ de: "", ate: "" });
+  const faixa = faixaDoPeriodo(periodo, comp, livre);
+  const [conv, setConv] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    const q = comoQuery({ recurso: "conversao", de: faixa.de, ate: faixa.ate, negociador_nome: neg || undefined });
+    fetchAut(`/api/atendimento?${q}`).then((r) => r.json()).then((d) => { if (vivo && d && !d.erro) setConv(d); }).catch(() => {});
+    return () => { vivo = false; };
+  }, [faixa.de, faixa.ate, neg]);
   // Os repetidos dos últimos 14 dias (0099). "Não é o mesmo cliente"
   // esconde o par neste aparelho — nome igual nem sempre é a mesma pessoa.
   const [repetidos, setRepetidos] = useState([]);
@@ -13075,15 +13124,12 @@ function CRM({ perfil, aoAbrir, mes }) {
   };
 
   const filtrosAtuais = (extra) => {
-    const f = { status, negociador_nome: neg || undefined, ...(extra || {}) };
-    if (comp) {
-      const { de, ate } = faixaDoMes(comp);
-      f.de = de; f.ate = ate;
-    }
+    const f = { status, negociador_nome: neg || undefined, limite: 200, ...(extra || {}) };
+    if (faixa.de) { f.de = faixa.de; f.ate = faixa.ate; }
     return f;
   };
 
-  useEffect(() => { carregar(filtrosAtuais({ q: busca })); }, [status, comp, neg]);
+  useEffect(() => { carregar(filtrosAtuais({ q: busca })); }, [status, comp, neg, faixa.de, faixa.ate]);
 
   const buscar = (ev) => { if (ev) ev.preventDefault(); carregar(filtrosAtuais({ q: busca })); };
   // Finalizou: a linha volta a mostrar o status, sem reler a lista.
@@ -13119,6 +13165,44 @@ function CRM({ perfil, aoAbrir, mes }) {
           + (neg ? ` · ${neg === "__sem__" ? "sem negociador" : neg}` : "")}
         mes={mes}
         acao={!novo && <BotaoPrimario onClick={() => setNovo(true)}>Novo atendimento</BotaoPrimario>} />
+
+      {/* O PERÍODO E A CONVERSÃO (05/11/2026). Conversão = fechados ÷
+          atendimentos, contada no servidor (a lista tem teto). */}
+      <div className="mb-3 flex flex-wrap items-stretch gap-2">
+        <div className="flex flex-wrap items-center gap-1.5 rounded-xl px-3 py-2" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+          <span className="text-[10.5px] font-semibold uppercase tracking-[0.08em]" style={{ color: ROTULO_COR }}>Período</span>
+          <select value={periodo} onChange={(e) => escolherPeriodo(e.target.value)} className="rounded-md border px-2 py-1 text-[13px] outline-none" style={inputSty}>
+            {PERIODOS.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
+          </select>
+          {periodo === "livre" && (
+            <>
+              <input type="date" value={livre.de} onChange={(e) => setLivre({ ...livre, de: e.target.value })} className="rounded-md border px-2 py-1 text-[13px] outline-none" style={inputSty} />
+              <span className="text-[12px]" style={{ color: C.mute }}>até</span>
+              <input type="date" value={livre.ate} onChange={(e) => setLivre({ ...livre, ate: e.target.value })} className="rounded-md border px-2 py-1 text-[13px] outline-none" style={inputSty} />
+            </>
+          )}
+          <span className="text-[12px]" style={{ color: C.mute }}>
+            {faixa.de ? (faixa.de === faixa.ate ? diaBR(faixa.de) : `${diaBR(faixa.de).slice(0, 5)} a ${diaBR(faixa.ate)}`) : "todos os meses"}
+            {faixa.n ? ` · ${faixa.n}ª semana` : ""}
+          </span>
+        </div>
+        {conv && conv.periodo && (
+          <div className="flex items-center gap-4 rounded-xl px-4 py-2" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+            <span className="text-[10.5px] font-semibold uppercase tracking-[0.08em]" style={{ color: ROTULO_COR }}>No período</span>
+            <span className="text-[13px]"><b className="text-[18px]" style={{ fontVariantNumeric: "tabular-nums" }}>{conv.periodo.atendimentos}</b> atendimentos</span>
+            <span className="text-[13px]"><b className="text-[18px]" style={{ fontVariantNumeric: "tabular-nums", color: C.verde }}>{conv.periodo.fechados}</b> fechados</span>
+            <span className="text-[13px]"><b className="text-[18px]" style={{ fontVariantNumeric: "tabular-nums", color: C.roxo }}>{conv.periodo.conversao == null ? "—" : `${String(conv.periodo.conversao).replace(".", ",")}%`}</b> conversão</span>
+          </div>
+        )}
+        {conv && conv.hoje && (
+          <div className="flex items-center gap-4 rounded-xl px-4 py-2" style={{ background: C.roxoFraco, border: `1px solid ${C.line}` }}>
+            <span className="text-[10.5px] font-semibold uppercase tracking-[0.08em]" style={{ color: C.roxo }}>Hoje</span>
+            <span className="text-[13px]"><b className="text-[18px]" style={{ fontVariantNumeric: "tabular-nums" }}>{conv.hoje.atendimentos}</b> atend.</span>
+            <span className="text-[13px]"><b className="text-[18px]" style={{ fontVariantNumeric: "tabular-nums", color: C.verde }}>{conv.hoje.fechados}</b> fech.</span>
+            <span className="text-[13px]"><b className="text-[18px]" style={{ fontVariantNumeric: "tabular-nums", color: C.roxo }}>{conv.hoje.conversao == null ? "—" : `${String(conv.hoje.conversao).replace(".", ",")}%`}</b> conversão</span>
+          </div>
+        )}
+      </div>
 
       {novo && (
         <div className="mb-4">
@@ -13652,10 +13736,13 @@ function rentabilidadeDe(e) {
 // fechamento do mês anterior), 9–15 (fecha com a quinzena), 16–22 e 23
 // até o fim. A SEM. 5 da planilha antiga cai na 4.
 // A mesma regra do bônus semanal, em `regras/remuneracao.js`.
+// O DIA DA VENDA manda (05/11/2026, o Derek: "consideramos no dia da
+// venda a semana pra cálculo de comissões"); a semana digitada só vale
+// para o carro importado da planilha, que não tem o dia.
 const semanaDe = (e) => {
-  if (e.semana_venda) return Math.min(4, Number(e.semana_venda));
   const d = Number(String(e.vendido_em || "").slice(8, 10));
-  return !d ? null : d <= 8 ? 1 : d <= 15 ? 2 : d <= 22 ? 3 : 4;
+  if (d) return d <= 8 ? 1 : d <= 15 ? 2 : d <= 22 ? 3 : 4;
+  return e.semana_venda ? Math.min(4, Number(e.semana_venda)) : null;
 };
 
 /* A RENTABILIDADE COM CARA DE PLANILHA (24/10/2026, o Derek: *"vamos
@@ -13668,7 +13755,7 @@ const semanaDe = (e) => {
  * o total colado embaixo — e a tela inteira de largura. */
 const PLAN = { grade: "#D5D9DE", cab: "#2F3B4C", cabTexto: "#FFFFFF", total: "#FFF4CC", conta: "#EAF5EE", contaTexto: "#11683F", perda: "#B42318", zebra: "#FAFBFC" };
 
-function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar }) {
+function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar, aoMudar }) {
   const rs = (v) => (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   // TOTAL NEGOCIADORES abre por botão (24/10/2026, o Derek: *"pode ser um
   // botão que abre um pop-up, aí não fica ocupando espaço na lateral"*):
@@ -13763,7 +13850,7 @@ function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar }) {
           <table className="w-full" style={{ borderCollapse: "collapse" }}>
             <thead>
               <tr>
-                {th("Data", "left")}{th("Dias")}{th("Carro", "left", 110)}{th("Placa", "left")}{th("Comprador", "left", 160)}
+                {th("Compra", "left")}{th("Venda", "left")}{th("Dias")}{th("Carro", "left", 110)}{th("Placa", "left")}{th("Comprador", "left", 160)}
                 {th("Valor de venda")}{th("Valor cliente")}{th("Débitos")}{th("Quitação")}{th("Deduções")}{th("Rent. bruta")}
                 {th("Cautelar")}{th("Comissão ext.")}{th("Rent. líquida")}{th("Sem.")}{th("Negociador", "left")}{th("Meio de alcance", "left")}{th("Prospector", "left")}
               </tr>
@@ -13776,6 +13863,14 @@ function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar }) {
                   <tr key={e.id} onClick={aoAbrir ? () => aoAbrir(e.id) : undefined} title="Abrir a ficha do carro"
                     className={aoAbrir ? "cursor-pointer hover:brightness-[0.97]" : ""} style={{ background: z }}>
                     {td(diaBR(e.entrou_em), { dir: "left" })}
+                    {/* O DIA DA VENDA decide a semana da comissão; corrigível
+                        aqui sem abrir a ficha. */}
+                    {td(aoMudar ? (
+                      <input type="date" defaultValue={e.vendido_em ? String(e.vendido_em).slice(0, 10) : ""} onClick={(ev) => ev.stopPropagation()}
+                        onBlur={(ev) => { const v = ev.target.value; if (v && v !== String(e.vendido_em || "").slice(0, 10)) aoMudar(e.id, { vendido_em: v }); }}
+                        className="w-[118px] rounded border px-1 text-[11.5px] outline-none" style={{ borderColor: e.vendido_em ? PLAN.grade : C.laranja }}
+                        title="Dia da venda — decide a semana da comissão" />
+                    ) : (e.vendido_em ? diaBR(e.vendido_em) : "—"), { dir: "left" })}
                     {td(dias != null ? dias : "—")}
                     {td(v.marca_modelo || "—", { dir: "left" })}
                     {td(v.placa || "—", { dir: "left" })}
@@ -13793,7 +13888,12 @@ function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar }) {
                     {td(rs(r.cautelar))}
                     {td(rs(r.comissaoExterna))}
                     {td(rs(r.liquida), { cor: corDe(r.liquida), forte: true, fundo: PLAN.conta })}
-                    {td(semana ? `${semana}ª` : "—")}
+                    {td(aoMudar && !e.vendido_em ? (
+                      <select value={semana || ""} onClick={(ev) => ev.stopPropagation()} onChange={(ev) => aoMudar(e.id, { semana_venda: ev.target.value || null })}
+                        className="rounded border px-0.5 text-[11.5px] outline-none" style={{ borderColor: semana ? PLAN.grade : C.laranja }} title="Sem o dia da venda: escolha a semana">
+                        <option value="">—</option>{[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n}ª</option>)}
+                      </select>
+                    ) : <b title={e.vendido_em ? "Pelo dia da venda (1–8, 9–15, 16–22, 23–fim)" : ""}>{semana ? `${semana}ª` : "—"}</b>)}
                     {td(e.negociador_nome || "—", { dir: "left" })}
                     {td(e.meio_alcance || "—", { dir: "left" })}
                     {td(e.prospector || "—", { dir: "left" })}
@@ -13801,7 +13901,7 @@ function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar }) {
                 );
               })}
               <tr style={{ background: PLAN.total }}>
-                {td("TOTAL", { dir: "left", forte: true, fundo: PLAN.total })}{td(linhas.length + " carros", { fundo: PLAN.total })}
+                {td("TOTAL", { dir: "left", forte: true, fundo: PLAN.total })}{td("", { fundo: PLAN.total })}{td(linhas.length + " carros", { fundo: PLAN.total })}
                 {td("", { fundo: PLAN.total })}{td("", { fundo: PLAN.total })}{td("", { fundo: PLAN.total })}
                 {td(rs(total.venda), { forte: true, fundo: PLAN.total })}{td(rs(total.compra), { forte: true, fundo: PLAN.total })}
                 {td(rs(total.debitos), { forte: true, fundo: PLAN.total })}{td(rs(total.quitacao), { forte: true, fundo: PLAN.total })}
@@ -14166,6 +14266,10 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
       {filtro === "vendido" && lista !== null && (
         <Rentabilidade comp={comp} aoAbrir={(id) => setAbrindo(id)} mes={soRentab ? mes : null}
           aoImportar={eGerente && !importando ? () => setImportando(true) : null}
+          aoMudar={async (id, dados) => {
+            try { const novo = await atualizarEstoque(id, dados); if (novo) setLista((l) => l.map((x) => (x.id === id ? { ...x, ...novo } : x))); }
+            catch (err) { alert(err.message); }
+          }}
           vendidos={lista.filter((e) => e.situacao === "vendido" && String(e.vendido_em || e.entrou_em || "").slice(0, 7) === String(comp).slice(0, 7))} />
       )}
 

@@ -3931,6 +3931,13 @@ propriedade. Ele nasceu dentro do `Funil` e subiu na primeira vez que o
 Derek usou: filtrar só o painel deixa a lista embaixo mostrando outro
 recorte, e duas verdades na mesma tela é pior que uma só.
 
+**Atendimentos tem período e conversão** (05/11/2026): hoje, ontem, esta
+semana, semana passada, a 1ª–4ª semana do mês escolhido (as semanas da
+casa, `faixaDoPeriodo`) ou de/até, e no alto o número de atendimentos,
+fechados e a conversão (fechados ÷ atendimentos) do período e do dia,
+contados no servidor pelo contador do banco (`?recurso=conversao`) —
+a lista tem teto e o PostgREST devolve no máximo 1.000 linhas.
+
 **"Todos os meses" existe** porque procurar um cliente de abril não
 pode exigir lembrar em que mês ele passou aqui. Nesse caso o dashboard
 cai no mês corrente — ele mede um mês por definição — e o cabeçalho diz
@@ -4250,6 +4257,13 @@ totais, grade em toda célula, as colunas na ordem da CONTROLE DE
 VEÍCULOS e a caixa TOTAL NEGOCIADORES num botão que abre em janela, no mesmo desenho — ao lado, ela cortava a planilha em DÉBITOS. É conta na tela, não no servidor — a
 lista do estoque vem inteira (teto 300), diferente do CRM paginado.
 Passou de 300 carros, isto vai para `api/veiculo.js`.
+
+**A semana da venda é a do DIA DA VENDA** (05/11/2026, o Derek:
+*"consideramos no dia da venda a semana pra cálculo de comissões"*), pelas
+quatro semanas da casa (1–8, 9–15, 16–22, 23–fim). A grade tem a coluna
+"Venda", editável na linha, e gravar `vendido_em` grava `semana_venda`
+junto; a semana digitada (select) só aparece no carro importado sem o
+dia. A comissão (`api/financeiro.js`) segue a mesma ordem: o dia primeiro.
 
 **A planilha só sabe a semana da venda, não o dia.** Por isso
 `semana_venda` existe ao lado de `vendido_em`; `semanaDe()` prefere a
