@@ -4877,6 +4877,100 @@ function TrilhoFechamento({ f, preContratoFeito, contratoLiberado }) {
 }
 
 /* ===================== app ===================== */
+/* O RESUMO DO ATENDIMENTO, numa faixa fina à esquerda (05/11/2026, o
+ * Derek: "dividir a tela de atendimento em duas partes… uma mostra os
+ * dados que já foram coletados do cliente, motivo de venda, motivo
+ * porque não fechou, dados do carro, pedida, tudo mais… quando clica pra
+ * editar, leva direto ao local onde coloca os dados"). A página do
+ * atendimento é longa (oito etapas numa só, decisão 24) e o que já foi
+ * dito ficava espalhado por ela; a faixa junta tudo em uma coluna, só
+ * para LER. Editar é sempre no lugar de sempre: "editar" rola até o
+ * campo (`irParaCampo`, pelo rótulo que está na tela), acende ele e põe
+ * o cursor lá — duas cópias do mesmo campo seriam duas verdades.
+ * Só no computador (≥ 1024 px): no celular a tela não tem duas colunas. */
+function ResumoAtendimento({ f, cliente, statusAtual, voltaEm, fotos, irParaCampo, irPara }) {
+  const v = (x) => (x === 0 || (x && String(x).trim()) ? x : null);
+  const din = (x) => (v(x) != null && numeroBR(x) ? brl(numeroBR(x)) : null);
+  const ult = (f.rodadas || []).length ? f.rodadas[f.rodadas.length - 1] : null;
+  const pneusOk = (f.pneus || []).filter(Boolean).length;
+  const secoes = [
+    ["Cliente", [
+      ["Nome", cliente.cliente_nome, "Nome completo do cliente", "T"],
+      ["Telefone", cliente.cliente_telefone, null, null],
+      ["CPF", cliente.cliente_cpf, "CPF do cliente", "T"],
+      ["Cidade", [cliente.cliente_cidade, cliente.cliente_uf].filter(Boolean).join(" / "), "Cidade", "T"],
+      ["Chegou às", f.chegada, "Chegou às", "A"],
+      ["Negociador", f.negociador, "Negociador", "A"],
+    ]],
+    ["Por que vende", [
+      ["Motivo da venda", [f.motivo, f.motivoDetalhe].filter(Boolean).join(" — "), "Motivo da venda", "P"],
+      ["Necessidade", f.necessidadeCliente, "Necessidade principal do cliente", "O"],
+      ["Decisor na loja", f.decisorPresente ? "sim" : "não", "O decisor está na loja", "P"],
+      ["Proposta de fora", f.temPropostaFora ? [din(f.propostaForaValor), f.propostaForaOnde].filter(Boolean).join(" · ") || "sim" : null, "Quanto", "P"],
+    ]],
+    ["Situação", [
+      ["Status", statusAtual ? rotuloStatus(statusAtual) : null, null, null],
+      ["Por que não fechou", f.objecao, "Objeção principal", "N"],
+      ["Volta em", voltaEm ? diaBR(voltaEm) : null, null, null],
+    ]],
+    ["Valores", [
+      ["Pretensão", din(f.pretensao), "Pretensão", "P"],
+      ["Quitação", din(f.quitacao), "Quitação", "P"],
+      ["Débitos", din(f.debitos), "Débitos", "P"],
+      ["FIPE", din(f.fipe), "FIPE", "PUB"],
+      ["POR / pedida", din(f.por || f.pedida), "POR — o valor que vai pro lojista", "PUB"],
+      ["Última rodada", ult ? [din(ult.impresso) && `ofertado ${din(ult.impresso)}`, din(ult.contra) && `cliente pediu ${din(ult.contra)}`].filter(Boolean).join(" · ") || null : null, null, "N"],
+      ["Valor fechado", din(f.valorFechado), "Valor fechado", "T"],
+    ]],
+    ["Carro", [
+      ["Modelo", f.modelo, "Modelo", "PUB"],
+      ["Ano", f.ano, "Ano / modelo", "PUB"],
+      ["Placa", f.placa, "Placa", "PUB"],
+      ["KM", v(f.km) ? `${Number(numeroBR(f.km)).toLocaleString("pt-BR")} km` : null, "KM atual", "PUB"],
+      ["Cor", f.cor, "Cor", "PUB"],
+      ["Câmbio", f.cambio, "Câmbio", "PUB"],
+      ["Renavam", f.renavam, "Renavam", "PUB"],
+      ["Pneus", pneusOk ? `${pneusOk} de 4 classificados` : null, null, "PUB"],
+      ["Opcionais", (f.opcionais || []).length ? f.opcionais.join(", ") : null, null, "PUB"],
+      ["Fotos", fotos ? `${fotos} no servidor` : null, null, "PUB"],
+      ["Gastos / peças", f.gastos, "Gastos / peças", "PUB"],
+      ["Ressalvas", f.ressalvas, "Ressalvas — vai pro lojista", "PUB"],
+    ]],
+    ["Só da loja", [
+      ["Internas", f.internas, "Internas — nunca sai da loja", "PUB"],
+    ]],
+  ];
+  return (
+    <aside className="fixed bottom-0 left-0 top-0 z-20 hidden w-[264px] overflow-y-auto px-3 pb-6 pt-3 lg:block"
+      style={{ background: C.paper, borderRight: `1px solid ${C.line}` }} aria-label="Resumo do atendimento">
+      <div className="text-[10px] font-semibold uppercase tracking-[0.12em]" style={{ color: C.roxo }}>O que já sabemos</div>
+      {secoes.map(([titulo, linhas]) => (
+        <div key={titulo} className="mt-3">
+          <div className="text-[10px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>{titulo}</div>
+          <dl className="mt-1 space-y-1">
+            {linhas.map(([rot, valor, alvo, etapa]) => {
+              const tem = valor != null && String(valor).trim() !== "";
+              const ir = alvo ? () => irParaCampo(alvo, etapa) : etapa ? () => irPara(etapa) : null;
+              return (
+                <div key={rot} className="group flex items-baseline gap-1.5 text-[12px] leading-snug">
+                  <dt className="w-[78px] shrink-0 text-[11px]" style={{ color: C.mute }}>{rot}</dt>
+                  <dd className="min-w-0 flex-1 break-words" style={{ color: tem ? C.ink : C.line, fontWeight: tem ? 600 : 400 }}>
+                    {tem ? valor : "—"}
+                  </dd>
+                  {ir && (
+                    <button onClick={ir} className="shrink-0 text-[10.5px] font-semibold opacity-60 group-hover:opacity-100"
+                      style={{ color: C.roxo }} title={`Ir para ${rot.toLowerCase()}`}>{tem ? "editar" : "preencher"}</button>
+                  )}
+                </div>
+              );
+            })}
+          </dl>
+        </div>
+      ))}
+    </aside>
+  );
+}
+
 function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   // Cada atendimento tem o seu canto no aparelho. Sem isto, abrir o
   // segundo carro sobrescreveria a ficha do primeiro.
@@ -6076,6 +6170,33 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     const el = document.getElementById(`etapa-${id}`);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
   };
+  /* Leva ao campo pelo rótulo que está na tela (o `Campo`, o `Toggle`
+   * ou o título do `Bloco`), acende e põe o cursor nele. Sem achar o
+   * rótulo (bloco que ainda não aparece), vai para a etapa. */
+  const irParaCampo = (rotulo, etapaId) => {
+    const alvo = semAcento(rotulo).toLowerCase();
+    const raiz = document.getElementById("vp-atendimento-corpo") || document;
+    const casa = [...raiz.querySelectorAll("label > span, button span, section > h3")]
+      .filter((x) => !x.closest("aside") && semAcento(x.textContent || "").toLowerCase().trim().startsWith(alvo));
+    // Primeiro dentro da etapa (entre o cabeçalho dela e o da seguinte):
+    // "Placa" e "FIPE" também existem na consulta da Pesquisa.
+    const ini = etapaId && document.getElementById(`etapa-${etapaId}`);
+    const k = ETAPAS.findIndex((x) => x.id === etapaId);
+    const fim = k >= 0 && ETAPAS[k + 1] && document.getElementById(`etapa-${ETAPAS[k + 1].id}`);
+    const naEtapa = (x) => (!ini || (ini.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_FOLLOWING))
+      && (!fim || (fim.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_PRECEDING));
+    const el = casa.find(naEtapa) || casa[0];
+    if (!el) { if (etapaId) irPara(etapaId); return; }
+    const caixa = el.closest("label") || el.closest("button") || el.closest("section") || el;
+    if (etapaId) setEtapa(etapaId);
+    caixa.scrollIntoView({ behavior: "smooth", block: "center" });
+    const campo = caixa.matches("input,select,textarea,button") ? null : caixa.querySelector("input,select,textarea");
+    setTimeout(() => { try { (campo || caixa).focus({ preventScroll: true }); } catch (e) {} }, 350);
+    const antes = caixa.style.boxShadow;
+    caixa.style.transition = "box-shadow .3s";
+    caixa.style.boxShadow = `0 0 0 3px ${C.roxo}`;
+    setTimeout(() => { caixa.style.boxShadow = antes; }, 1800);
+  };
   const cabecaEtapa = (id) => {
     const e = ETAPAS.filter((x) => x.id === id)[0];
     const ok = etapaConcluida(id, f, enviadas);
@@ -6092,7 +6213,9 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   };
 
   return (
-    <div className="min-h-screen w-full pb-16" style={{ background: C.bg, fontFamily: F.body, color: C.ink }}>
+    <div id="vp-atendimento-corpo" className="min-h-screen w-full pb-16 lg:pl-[264px]" style={{ background: C.bg, fontFamily: F.body, color: C.ink }}>
+      <ResumoAtendimento f={f} cliente={cliente} statusAtual={statusAtual} voltaEm={voltaEm} fotos={enviadas.length}
+        irParaCampo={irParaCampo} irPara={irPara} />
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Public+Sans:wght@400;500;600&family=Roboto+Mono:wght@500;700&display=swap');
         input:focus,textarea:focus,select:focus{border-color:${C.roxo}!important;box-shadow:0 0 0 3px ${C.roxoFraco}}
         .rolar::-webkit-scrollbar{height:0}

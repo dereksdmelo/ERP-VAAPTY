@@ -4197,6 +4197,16 @@ estavam dando 404 desde que a lista do `.assetsignore` virou de
 permissão — `!apresentacao` libera a pasta, não os arquivos dentro;
 é `!apresentacao/*.jpg`.
 
+**E desde 05/11/2026 há a faixa do resumo à esquerda**
+(`ResumoAtendimento`, só no computador; o Derek: *"uma mostra os dados
+que já foram coletados… quando clica pra editar, leva direto ao local"*):
+cliente, por que vende, situação (status, objeção, volta), valores e
+carro, só para ler. "Editar" rola até o campo pelo rótulo que está na
+tela (`irParaCampo`, procurando primeiro dentro da etapa), acende e põe o
+cursor nele — o campo continua um só. **Quem renomear o rótulo de um
+campo confere a lista do resumo**: sem achar o rótulo, o "editar" cai no
+começo da etapa.
+
 **As fontes nomeadas nunca foram carregadas.** `F` citava Archivo,
 Public Sans e Roboto Mono, mas não havia `<link>` — cada aparelho caía
 num fallback diferente e o mono virava Courier. A escolha agora é a
