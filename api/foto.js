@@ -1283,15 +1283,26 @@ async function waEnvio(req, res, tok) {
   const anexo = { tipo: qual === "document" ? "document" : qual, mime: tipo, nome, legenda, voz: qual === "audio", chave: caminho };
   const wa = String(d.id || `erp-${agora}`);
   const comum = { p_canal: ca.slug, p_wa_id: wa, p_eco: true, p_tipo: "midia", p_texto: legenda, p_anexo: anexo, p_quando: new Date(agora).toISOString() };
+  let msgId = null;
   try {
     if (cv.grupo) {
-      await banco(`${URL_BASE}/rest/v1/rpc/wa_receber_grupo`, { method: "POST", headers: json(tok),
+      msgId = await banco(`${URL_BASE}/rest/v1/rpc/wa_receber_grupo`, { method: "POST", headers: json(tok),
         body: JSON.stringify({ ...comum, p_grupo: cv.telefone, p_nome: "", p_autor: "" }) });
     } else {
-      await banco(`${URL_BASE}/rest/v1/rpc/wa_receber`, { method: "POST", headers: json(tok),
+      msgId = await banco(`${URL_BASE}/rest/v1/rpc/wa_receber`, { method: "POST", headers: json(tok),
         body: JSON.stringify({ ...comum, p_telefone: cv.telefone, p_nome: "", p_anuncio: null }) });
     }
   } catch (e) { return res.status(200).json({ ok: true, registrada: false }); }
+  // Quem mandou o arquivo (0112): o login de quem estava na caixa.
+  try {
+    const meio = String(tok).replace(/^Bearer\s+/, "").split(".")[1];
+    const eu = meio ? JSON.parse(Buffer.from(meio.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8")).sub : null;
+    if (eu && typeof msgId === "string" && RX_UUID.test(msgId)) {
+      const p = (await banco(`${REST("perfil")}?select=nome&id=eq.${eu}&limit=1`, { headers: cabecalhos(tok) }) || [])[0];
+      await banco(`${REST("wa_mensagem")}?id=eq.${msgId}`, { method: "PATCH", headers: json(tok),
+        body: JSON.stringify({ enviado_por: eu, enviado_por_nome: (p && p.nome) || null }) });
+    }
+  } catch (e) {}
   return res.status(200).json({ ok: true, registrada: true });
 }
 

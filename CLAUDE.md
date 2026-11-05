@@ -1998,6 +1998,15 @@ gerente. Mensagem que sai não cria lead (0059). A janela avisa do risco
 de bloqueio: mandar para muita gente que nunca falou com o número é o
 que derrubou a Prospecção em 29/10/2026.
 
+**Quem mandou cada mensagem (0112, 05/11/2026, o Derek: "era bom que o
+WhatsApp identificasse qual o usuário que mandou").** O envio pela caixa
+de Conversas (texto e arquivo) grava `enviado_por` e `enviado_por_nome`;
+a Flávia é reconhecida pelos `wa_ids` da `ia_resposta`; o resto saiu
+direto do celular ou do WhatsApp Web — o ERP não tem como saber quem
+digitou ali, e o balão diz isso (só nas mensagens depois de 05/11, quando
+o autor passou a ser gravado). O "Meu dia" ganhou "Mandou mensagem para
+X (N mensagens)", uma linha por cliente (`?recurso=wa_enviadas`).
+
 **Os grupos entram no WhatsApp do adm, e a caixa manda arquivo (0104,
 03/11/2026).** O Derek: *"o whats do ADM tenha acesso aos grupos pra
 mandar comprovantes, CRLV… e também poder acessar, baixar, ouvir áudios,

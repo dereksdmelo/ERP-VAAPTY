@@ -10436,6 +10436,15 @@ function Balao({ m, primeiro = true }) {
         {!meu && m.autor && (
           <div className="mb-0.5 text-[12px] font-semibold" style={{ color: "#06CF9C" }}>{m.autor}</div>
         )}
+        {/* QUEM DA LOJA MANDOU (0112): o login de quem escreveu pelo ERP,
+            ou a Flávia. Sem isso, saiu direto do celular / WhatsApp Web —
+            e só dá para dizer isso das mensagens depois de 05/11/2026,
+            quando o autor passou a ser gravado. */}
+        {meu && (m.quem_mandou || String(m.quando) >= "2026-11-05T20:00") && (
+          <div className="mb-0.5 text-[11.5px] font-semibold" style={{ color: m.quem_mandou ? "#7B3FA0" : WA.mute }}>
+            {m.quem_mandou || "pelo celular / WhatsApp Web"}
+          </div>
+        )}
         {m.tipo === "midia" && (
           <div className="mb-1">
             {url && (
@@ -24317,8 +24326,10 @@ const TIPOS_AGENDA = [
   ["pausa", "Pausa", "#8A8394"],
   ["outro", "Outro", "#6B6478"],
 ];
-const rotTipo = (v) => (TIPOS_AGENDA.filter((x) => x[0] === v)[0] || [0, "Outro"])[1];
-const corTipo = (v) => (TIPOS_AGENDA.filter((x) => x[0] === v)[0] || [0, 0, "#6B6478"])[2];
+// "whatsapp" não se escolhe à mão: é a mensagem que a pessoa mandou pela
+// caixa de Conversas (0112), lida na hora de desenhar o dia.
+const rotTipo = (v) => (v === "whatsapp" ? "WhatsApp" : (TIPOS_AGENDA.filter((x) => x[0] === v)[0] || [0, "Outro"])[1]);
+const corTipo = (v) => (v === "whatsapp" ? "#128C7E" : (TIPOS_AGENDA.filter((x) => x[0] === v)[0] || [0, 0, "#6B6478"])[2]);
 
 // As faixas do dia da loja, de meia em meia hora. É a régua da
 // agenda: fora dela o registro não some, aparece embaixo.
@@ -24560,6 +24571,7 @@ function TelaMeuDia({ perfil }) {
   const [semana, setSemana] = useState([]);
   const [ats, setAts] = useState([]);
   const [retornos, setRetornos] = useState({ leads: [], inds: [] });
+  const [zaps, setZaps] = useState([]);
   const [erro, setErro] = useState("");
   const [indo, setIndo] = useState(false);
 
@@ -24595,6 +24607,9 @@ function TelaMeuDia({ perfil }) {
     lerRetornosDoDia(dia)
       .then((r) => { if (vivo) setRetornos(r); })
       .catch(() => {});
+    // As mensagens que a pessoa mandou pelo ERP no dia (0112).
+    fetchAut(`/api/atendimento?${comoQuery({ recurso: "wa_enviadas", dia, perfil_id: alvoId || undefined })}`)
+      .then((r) => r.json()).then((d) => { if (vivo) setZaps((d && d.enviadas) || []); }).catch(() => {});
     return () => { vivo = false; };
   };
   useEffect(carregar, [dia, seg, quem]);
@@ -24639,7 +24654,15 @@ function TelaMeuDia({ perfil }) {
         feito: false, minha: false,
       })));
 
-    return doDia.concat(dosAts).concat(dosRetornos).sort((x, y) => {
+    // Uma linha por cliente: "Mandou mensagem para JOÃO (3)".
+    const dosZaps = zaps.map((z) => ({
+      id: `wa-${z.conversa_id}-${z.perfil_id}`, hora: horaSP(z.primeira), fim: z.n > 1 && horaSP(z.ultima) !== horaSP(z.primeira) ? horaSP(z.ultima) : "",
+      tipo: "whatsapp",
+      titulo: `Mandou mensagem ${z.grupo ? "no grupo" : "para"} ${z.cliente}${z.n > 1 ? ` (${z.n} mensagens)` : ""}${z.canal ? ` · pelo número ${z.canal}` : ""}`,
+      feito: true, minha: false, quem: equipe ? (z.quem || "") : "",
+    }));
+
+    return doDia.concat(dosAts).concat(dosRetornos).concat(dosZaps).sort((x, y) => {
       // Sem hora vai para o fim: é item do plano que ainda não tem
       // lugar no dia, e no meio da lista ele confundiria a leitura.
       if (!x.hora && !y.hora) return 0;
@@ -24647,7 +24670,7 @@ function TelaMeuDia({ perfil }) {
       if (!y.hora) return -1;
       return x.hora.localeCompare(y.hora);
     });
-  }, [acoes, ats, retornos, quem, pessoas, metas]);
+  }, [acoes, ats, retornos, zaps, quem, pessoas, metas]);
 
   const gravar = async (dados) => {
     setIndo(true); setErro("");

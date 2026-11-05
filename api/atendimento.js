@@ -95,6 +95,21 @@ const rotuloPrazo = (d) => (d < 1
   : `${d} dia${d > 1 ? "s" : ""}`);
 
 // O id do usuário, do miolo do token. Quem valida é o banco.
+/* QUEM MANDOU (0112): o login de quem escreveu na caixa de Conversas vai
+ * na mensagem. Falha calada — a mensagem já saiu para o cliente, e não
+ * saber o autor não é motivo para a tela dizer que não foi. */
+async function marcarAutor(tok, msgId) {
+  if (!msgId) return;
+  try {
+    const eu = donoDoToken(tok);
+    if (!eu) return;
+    const p = (await banco(`${URL_BASE}/rest/v1/perfil?select=nome&id=eq.${eu}&limit=1`, { headers: cabecalhos(tok) }) || [])[0];
+    await banco(`${URL_BASE}/rest/v1/wa_mensagem?id=eq.${msgId}`, {
+      method: "PATCH", headers: json(tok), body: JSON.stringify({ enviado_por: eu, enviado_por_nome: (p && p.nome) || null }),
+    });
+  } catch (e) {}
+}
+
 function donoDoToken(tok) {
   try {
     const meio = String(tok).replace(/^Bearer\s+/, "").split(".")[1];
@@ -3052,6 +3067,7 @@ module.exports = async function handler(req, res) {
             p_eco: true, p_tipo: "texto", p_texto: texto, p_anexo: null, p_quando: new Date(agora).toISOString(), p_anuncio: null }),
         });
       } catch (e) {}
+      await marcarAutor(tok, msgId);
       let conversaId = null;
       if (msgId) {
         try {
@@ -3115,6 +3131,7 @@ module.exports = async function handler(req, res) {
             p_eco: true, p_tipo: "texto", p_texto: texto, p_anexo: null, p_quando: new Date(agora).toISOString(), p_anuncio: null }),
         });
       } catch (e) { /* saiu para o cliente; só não ficou registrada aqui */ }
+      await marcarAutor(tok, msgId);
       if (msgId) {
         try {
           const quando = dataHoraConfirmada(texto, agora);
@@ -3189,8 +3206,18 @@ module.exports = async function handler(req, res) {
     if (RX_UUID.test(id)) {
       const msgs = await banco(
         `${URL_BASE}/rest/v1/wa_mensagem?select=*&conversa_id=eq.${id}&order=quando.asc&limit=500`,
-        { headers: cabecalhos(tok) });
-      return res.status(200).json({ mensagens: msgs || [] });
+        { headers: cabecalhos(tok) }) || [];
+      /* QUEM MANDOU cada mensagem da loja (0112): o login gravado no
+       * envio pelo ERP; a Flávia pelos ids que o WhatsApp deu ao que ela
+       * mandou (`ia_resposta.wa_ids`); o resto saiu direto do aparelho. */
+      const daIA = {};
+      try {
+        const ia = await banco(`${URL_BASE}/rest/v1/ia_resposta?select=wa_ids&conversa_id=eq.${id}&limit=500`, { headers: cabecalhos(tok) }) || [];
+        ia.forEach((r) => (Array.isArray(r.wa_ids) ? r.wa_ids : []).forEach((w) => { daIA[String(w)] = true; }));
+      } catch (e) {}
+      return res.status(200).json({ mensagens: msgs.map((m) => (!m.eco ? m : {
+        ...m, quem_mandou: m.enviado_por_nome || (daIA[String(m.wa_id)] ? "IA Flávia" : null),
+      })) });
     }
 
     const canal = String(req.query.canal || "").replace(/[^\w-]/g, "");
@@ -3519,6 +3546,29 @@ module.exports = async function handler(req, res) {
    * Contada aqui, não em cima da lista: a lista tem teto de 100–200 e um
    * mês passa disso (decisão 12). Conversão é fechados ÷ atendimentos, a
    * mesma do funil e da remuneração. Respeita o negociador escolhido. */
+  /* AS MENSAGENS QUE A PESSOA MANDOU NO DIA (0112), para o "Meu dia":
+   * uma linha por cliente, com a hora da primeira e quantas foram. Sem
+   * `perfil_id`, a equipe inteira (a tela só oferece isso ao gerente). */
+  if (String(req.query.recurso || "") === "wa_enviadas") {
+    try {
+      const dia = data(req.query.dia) || hojeAqui();
+      const pid = String(req.query.perfil_id || "");
+      const de = new Date(`${dia}T00:00:00-03:00`).toISOString(), ate = new Date(`${dia}T23:59:59-03:00`).toISOString();
+      const ls = await banco(`${URL_BASE}/rest/v1/wa_mensagem?select=conversa_id,quando,enviado_por,enviado_por_nome,` +
+        `wa_conversa(nome,telefone,grupo,wa_canal(nome))&enviado_por=${RX_UUID.test(pid) ? `eq.${pid}` : "not.is.null"}` +
+        `&quando=gte.${de}&quando=lte.${ate}&order=quando.asc&limit=2000`, { headers: cabecalhos(tok) }) || [];
+      const por = {};
+      ls.forEach((m) => {
+        const k = `${m.conversa_id}|${m.enviado_por}`;
+        const cv = m.wa_conversa || {};
+        if (!por[k]) por[k] = { conversa_id: m.conversa_id, perfil_id: m.enviado_por, quem: m.enviado_por_nome, primeira: m.quando, n: 0,
+          cliente: cv.nome || cv.telefone || "cliente", grupo: !!cv.grupo, canal: cv.wa_canal ? cv.wa_canal.nome : "" };
+        por[k].n += 1; por[k].ultima = m.quando;
+      });
+      return res.status(200).json({ enviadas: Object.values(por) });
+    } catch (e) { return res.status(e.status || 502).json({ erro: limpar(e.message) }); }
+  }
+
   if (String(req.query.recurso || "") === "conversao") {
     try {
       const de = data(req.query.de), ate = data(req.query.ate) || de;
