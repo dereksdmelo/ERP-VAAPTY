@@ -5232,6 +5232,14 @@ gravação — dizem por que o carro entrou em *avaliação* em vez de
 precisa ler para resolver. O 422 mostra a lista de campos recusados;
 engoli-la obrigaria a abrir o log da Vercel com o cliente esperando.
 
+**Venda para lojistas é uma vitrine de cartões** (05/11/2026, o Derek:
+*"cards em formato de carta, 4 por linha, com a foto… similar ao
+Shinkai"*): a capa do carro (`/api/foto?capas=`), dias no pátio e
+anunciado em cima da foto, FIPE, custo, margem, preço pedido e os quatro
+botões. Vender e "para um lojista" abrem por cima. O estado da chave do
+Shinkai chamava `zap` e escondia a função `zap()` do link do WhatsApp —
+"mandar para um lojista" quebrava ao abrir; virou `chaveShinkai`.
+
 **O botão nasceu no lugar errado, e isso demorou a aparecer.** Ele
 ficava só na Venda para lojistas, que é o carro **já comprado**. Mas o
 momento em que o carro precisa chegar à rede é o **Lançamento**, com o

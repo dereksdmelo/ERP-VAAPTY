@@ -17946,9 +17946,11 @@ function TelaVendaLojistas({ perfil }) {
   const [compradores, setCompradores] = useState([]);
   const [vendendo, setVendendo] = useState(null);
   const [ordem, setOrdem] = useState("patio");
-  const [zap, setZap] = useState(null);          // chave do Shinkai configurada?
+  const [chaveShinkai, setChaveShinkai] = useState(null);          // chave do Shinkai configurada?
   const [indoShinkai, setIndoShinkai] = useState("");
   const [respShinkai, setRespShinkai] = useState({});
+  // A foto de capa de cada carro, numa ida só (`/api/foto?capas=`).
+  const [capas, setCapas] = useState({});
 
   const carregar = () => {
     setErro("");
@@ -17959,7 +17961,7 @@ function TelaVendaLojistas({ perfil }) {
     listarCompradores().then(setCompradores).catch(() => {});
     // Saber ANTES se a chave existe: descobrir que ela não subiu no
     // meio do envio seria errar com o carro já no pátio.
-    shinkaiConfigurado().then(setZap).catch(() => setZap(false));
+    shinkaiConfigurado().then(setZap).catch(() => setChaveShinkai(false));
   }, []);
 
   const mandarShinkai = async (e) => {
@@ -17995,6 +17997,13 @@ function TelaVendaLojistas({ perfil }) {
     setCopiado(marca); setTimeout(() => setCopiado(""), 2000);
   };
 
+  const idsCapa = (lista || []).map((e) => e.veiculo_id).filter(Boolean).slice(0, 150).join(",");
+  useEffect(() => {
+    if (!idsCapa) return;
+    let vivo = true;
+    fetchAut(`/api/foto?capas=${idsCapa}`).then((r) => r.json()).then((d) => { if (vivo && d && d.capas) setCapas(d.capas); }).catch(() => {});
+    return () => { vivo = false; };
+  }, [idsCapa]);
   const carros = (lista || []).slice().sort((a, b) =>
     ordem === "patio" ? String(a.entrou_em).localeCompare(String(b.entrou_em))
       : (Number(b.preco_pedido || 0) - Number(a.preco_pedido || 0)));
@@ -18028,7 +18037,13 @@ function TelaVendaLojistas({ perfil }) {
         </div>
       )}
 
-      <div className="grid gap-2">
+      {/* OS CARROS EM CARTÕES, COM A FOTO (05/11/2026, o Derek: "cards em
+          formato de carta mesmo, 4 por linha, mostrando a foto do carro,
+          os botões… similar ao Shinkai"). Quem vende olha o carro antes
+          do número; a lista de texto escondia isso. Vender e mandar para
+          um lojista abrem por cima — dentro de um cartão estreito, o
+          formulário da venda não cabe. */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
         {carros.map((e) => {
           const v = e.veiculo || {};
           const c = contaDoEstoque(e);
@@ -18037,137 +18052,134 @@ function TelaVendaLojistas({ perfil }) {
           const fotos = ((v.foto) || []).length;
           const pedido = Number(e.preco_pedido) || 0;
           const margem = pedido ? pedido - c.atual : null;
-          // Trinta dias é quando o carro deixa de ser estoque e vira
-          // dinheiro parado. A cor é o único aviso que a tela dá.
           const corDias = dias == null ? C.mute : dias >= 60 ? C.laranja : dias >= 30 ? AMARELO.texto : C.mute;
+          const capa = capas[e.veiculo_id];
           return (
-            <div key={e.id} className="rounded-xl p-3.5" style={{ background: C.paper, border: `1px solid ${e.anunciado_em ? C.line : C.roxo}` }}>
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-[15px] font-semibold">
-                    {v.placa || "sem placa"} <span style={{ color: C.mute, fontWeight: 400 }}>· {v.marca_modelo || "—"}{v.ano_modelo ? ` ${v.ano_modelo}` : ""}</span>
-                  </div>
-                  <div className="mt-0.5 text-[12px]" style={{ color: C.mute }}>
-                    {[v.cor, v.km_atual ? `${Number(v.km_atual).toLocaleString("pt-BR")} km` : null, v.cambio,
-                      v.fipe_valor ? `FIPE ${brl(v.fipe_valor)}` : null, `${fotos} foto${fotos === 1 ? "" : "s"}`].filter(Boolean).join(" · ")}
-                  </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
-                    <span style={{ color: corDias, fontWeight: dias >= 30 ? 700 : 400 }}>
-                      {dias == null ? "" : `${dias} dia${dias === 1 ? "" : "s"} no pátio`}
-                    </span>
-                    <span style={{ color: C.mute }}>custo {brl(c.atual)}</span>
-                    {margem != null && (
-                      <span style={{ color: margem >= 0 ? C.verde : C.laranja, fontWeight: 600 }}>margem prevista {brl(margem)}</span>
-                    )}
-                    {!!(e.precos || []).length && <span style={{ color: AMARELO.texto }}>preço mudou {(e.precos || []).length}×</span>}
-                  </div>
+            <div key={e.id} className="flex flex-col overflow-hidden rounded-xl" style={{ background: C.paper, border: `1px solid ${e.anunciado_em ? C.line : C.roxo}` }}>
+              <div className="relative" style={{ aspectRatio: "4 / 3", background: C.bg }}>
+                {capa && capa.url
+                  ? <img src={capa.url} alt={v.marca_modelo || "carro"} loading="lazy" className="h-full w-full object-cover" />
+                  : <div className="grid h-full place-items-center text-[12px]" style={{ color: "#B3ACBC" }}>sem foto</div>}
+                {dias != null && (
+                  <span className="absolute left-2 top-2 rounded-full px-2 py-0.5 text-[11px] font-bold"
+                    style={{ background: dias >= 30 ? corDias : "rgba(24,18,33,0.7)", color: "#fff" }}>{dias} dia{dias === 1 ? "" : "s"} no pátio</span>
+                )}
+                <span className="absolute right-2 top-2 rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                  style={{ background: e.anunciado_em ? "rgba(29,127,88,0.9)" : "rgba(225,82,31,0.92)", color: "#fff" }}>
+                  {e.anunciado_em ? `anunciado ${diaBR(e.anunciado_em).slice(0, 5)}` : "não anunciado"}
+                </span>
+                <span className="absolute bottom-2 right-2 rounded px-1.5 text-[11px] text-white" style={{ background: "rgba(24,18,33,0.6)" }}>📷 {(capa && capa.fotos) || fotos}</span>
+              </div>
+              <div className="flex flex-1 flex-col p-3">
+                <div className="text-[14.5px] font-bold leading-tight">{v.marca_modelo || "—"}{v.ano_modelo ? <span style={{ color: C.mute, fontWeight: 500 }}> {v.ano_modelo}</span> : null}</div>
+                <div className="mt-0.5 text-[12px]" style={{ color: "#57515F" }}>
+                  <b style={{ fontFamily: F.mono, color: C.ink }}>{v.placa || "sem placa"}</b>
+                  {[v.cor, v.km_atual ? `${Number(v.km_atual).toLocaleString("pt-BR")} km` : null, v.cambio].filter(Boolean).map((x) => ` · ${x}`).join("")}
                 </div>
-                <label className="shrink-0 text-right">
-                  <span className="block text-[10px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Preço pedido</span>
-                  <input className="mt-[2px] w-32 rounded-lg border px-2 py-1.5 text-right text-[15px] outline-none"
+                <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-0.5 text-[12px]">
+                  <span style={{ color: C.mute }}>FIPE</span><span className="text-right" style={{ fontVariantNumeric: "tabular-nums" }}>{v.fipe_valor ? brl(v.fipe_valor) : "—"}</span>
+                  <span style={{ color: C.mute }}>Custo</span><span className="text-right" style={{ fontVariantNumeric: "tabular-nums" }}>{Number(e.valor_compra) > 0 || c.atual > 0 ? brl(c.atual) : <span style={{ color: C.laranja }}>sem valor</span>}</span>
+                  {margem != null && <><span style={{ color: C.mute }}>Margem prevista</span><span className="text-right font-semibold" style={{ color: margem >= 0 ? C.verde : C.laranja }}>{brl(margem)}</span></>}
+                </div>
+                <label className="mt-2 block">
+                  <span className="block text-[10px] font-semibold uppercase tracking-[0.08em]" style={{ color: ROTULO_COR }}>Preço pedido{(e.precos || []).length ? ` · mudou ${(e.precos || []).length}×` : ""}</span>
+                  <input className="mt-[2px] w-full rounded-lg border px-2 py-1.5 text-right text-[16px] outline-none"
                     style={{ ...inputSty, fontFamily: F.mono, fontWeight: 700, borderColor: pedido ? C.line : C.laranja }}
                     inputMode="decimal" placeholder="—"
                     defaultValue={pedido ? centavosBR(pedido) : ""}
-                    onBlur={(ev) => {
-                      const n = numeroBR(ev.target.value);
-                      if (n !== pedido) mexer(e, { preco_pedido: n || null });
-                    }} />
+                    onBlur={(ev) => { const n = numeroBR(ev.target.value); if (n !== pedido) mexer(e, { preco_pedido: n || null }); }} />
                 </label>
-              </div>
-
-              <div className="mt-2.5 flex flex-wrap items-center gap-2 text-[13px]">
-                <button onClick={() => copiar(gerarDescritivo(f, fotos), `d${e.id}`)}
-                  className="rounded-lg px-3 py-2 font-semibold" style={{ border: `1px solid ${C.verde}`, color: C.verde }}>
-                  {copiado === `d${e.id}` ? "descritivo copiado" : "Copiar descritivo"}
-                </button>
-                {/* Com a chave configurada o carro vai por API: um POST
-                    por carro, e reenviar a mesma placa atualiza lá em vez
-                    de duplicar. Sem a chave, sobra o caminho antigo —
-                    copiar o JSON e colar no painel —, e o botão diz isso
-                    em vez de falhar em silêncio. */}
-                {zap === false ? (
-                  <button onClick={async () => {
-                      await copiar(JSON.stringify(payloadShinkai(f, fotos), null, 2), `s${e.id}`);
-                      window.open(SHINKAI_PAINEL, "_blank", "noopener");
-                      if (!e.anunciado_em) mexer(e, { anunciado_em: true });
-                    }}
-                    className="rounded-lg px-3 py-2 font-semibold" style={{ background: C.roxo, color: "#fff" }}>
-                    {copiado === `s${e.id}` ? "JSON copiado · Shinkai aberto" : "Copiar JSON do Shinkai"}
-                  </button>
-                ) : (
-                  <button onClick={() => mandarShinkai(e)} disabled={indoShinkai === e.id || zap === null}
-                    className="rounded-lg px-3 py-2 font-semibold"
-                    style={{ background: indoShinkai === e.id || zap === null ? C.line : C.roxo, color: "#fff" }}>
-                    {indoShinkai === e.id ? "Enviando…"
-                      : zap === null ? "Conferindo a chave…"
-                      : e.shinkai_em ? "Reenviar ao Shinkai" : "Enviar ao Shinkai"}
-                  </button>
-                )}
-                <button onClick={() => setEnviando(enviando === e.id ? null : e.id)} style={{ color: C.roxo, fontWeight: 600 }}>
-                  mandar para um lojista
-                </button>
-                {e.anunciado_em ? (
-                  <span className="text-[12px]" style={{ color: C.verde }}>anunciado {diaBR(e.anunciado_em)}</span>
-                ) : (
-                  <span className="text-[12px]" style={{ color: C.laranja, fontWeight: 600 }}>ainda não anunciado</span>
-                )}
                 {e.shinkai_em && (
-                  <span className="text-[12px]" style={{ color: e.shinkai_status === "disponivel" ? C.verde : AMARELO.texto }}>
+                  <div className="mt-1.5 text-[11.5px]" style={{ color: e.shinkai_status === "disponivel" ? C.verde : AMARELO.texto }}>
                     no Shinkai {diaBR(e.shinkai_em)}{e.shinkai_status ? ` · ${e.shinkai_status}` : ""}
-                  </span>
+                  </div>
                 )}
-                {/* JÁ SAIU (0110, o Derek: "aqui tem um monte de carro que
-                    já tinha sido vendido"). Os da planilha antiga que nunca
-                    tiveram a venda marcada: saem daqui e do pátio sem
-                    contar na rentabilidade. Em lote, pelo Estoque. */}
-                {perfil && perfil.papel === "gerente" && (
-                  <button onClick={async () => {
-                    if (!confirm(`${(e.veiculo && e.veiculo.placa) || "Este carro"} já saiu do pátio? Ele vai para "Baixados" e não conta na rentabilidade.`)) return;
-                    try { await atualizarEstoque(e.id, { situacao: "baixado" }); carregar(); } catch (ex) { setErro(ex.message); }
-                  }} className="text-[12px] underline" style={{ color: C.mute }}>já saiu — baixar</button>
-                )}
-                <button onClick={() => setVendendo(vendendo === e.id ? null : e.id)}
-                  className="ml-auto rounded-lg px-4 py-2 font-semibold" style={{ background: C.verde, color: "#fff" }}>
-                  Vender
-                </button>
-              </div>
-
-              {/* A resposta do Shinkai, na própria linha do carro. Os
-                  `avisos` não impedem a gravação — dizem por que o carro
-                  entrou em avaliação em vez de disponível, e é isso que
-                  alguém precisa ler para resolver. */}
-              {respShinkai[e.id] && (
-                <div className="mt-2 rounded-lg px-3 py-2 text-[12px]"
-                  style={{ background: respShinkai[e.id].erro ? "#FDEDE6" : C.bg,
-                           border: `1px solid ${respShinkai[e.id].erro ? C.laranja : C.line}` }}>
-                  {respShinkai[e.id].erro ? (
-                    <span style={{ color: C.laranja }}>{respShinkai[e.id].erro}</span>
-                  ) : (
-                    <>
-                      <span style={{ color: respShinkai[e.id].status === "disponivel" ? C.verde : AMARELO.texto, fontWeight: 600 }}>
-                        {respShinkai[e.id].acao === "criado" ? "Criado" : "Atualizado"} no Shinkai
-                        {respShinkai[e.id].status ? ` · ${respShinkai[e.id].status}` : ""}
-                        {` · ${respShinkai[e.id].fotos_enviadas} foto${respShinkai[e.id].fotos_enviadas === 1 ? "" : "s"} enviada${respShinkai[e.id].fotos_enviadas === 1 ? "" : "s"}`}
-                        {typeof respShinkai[e.id].fotos === "number" ? ` · o Shinkai registrou ${respShinkai[e.id].fotos}` : ""}
-                      </span>
-                      {typeof respShinkai[e.id].fotos === "number" && respShinkai[e.id].fotos < (respShinkai[e.id].fotos_enviadas || 0) && (
-                        <span className="mt-0.5 block" style={{ color: AMARELO.texto }}>
-                          O Shinkai não ficou com todas as fotos{respShinkai[e.id].acao === "atualizado"
-                            ? " — o reenvio não acrescenta foto a um carro que já existe lá; as que faltam entram pelo painel deles, em Editar → Adicionar foto."
-                            : "."}
+                {respShinkai[e.id] && (
+                  <div className="mt-2 rounded-lg px-3 py-2 text-[12px]"
+                    style={{ background: respShinkai[e.id].erro ? "#FDEDE6" : C.bg,
+                             border: `1px solid ${respShinkai[e.id].erro ? C.laranja : C.line}` }}>
+                    {respShinkai[e.id].erro ? (
+                      <span style={{ color: C.laranja }}>{respShinkai[e.id].erro}</span>
+                    ) : (
+                      <>
+                        <span style={{ color: respShinkai[e.id].status === "disponivel" ? C.verde : AMARELO.texto, fontWeight: 600 }}>
+                          {respShinkai[e.id].acao === "criado" ? "Criado" : "Atualizado"} no Shinkai
+                          {respShinkai[e.id].status ? ` · ${respShinkai[e.id].status}` : ""}
+                          {` · ${respShinkai[e.id].fotos_enviadas} foto${respShinkai[e.id].fotos_enviadas === 1 ? "" : "s"} enviada${respShinkai[e.id].fotos_enviadas === 1 ? "" : "s"}`}
+                          {typeof respShinkai[e.id].fotos === "number" ? ` · o Shinkai registrou ${respShinkai[e.id].fotos}` : ""}
                         </span>
-                      )}
-                      {(respShinkai[e.id].avisos || []).map((av, k) => (
-                        <span key={k} className="mt-0.5 block" style={{ color: AMARELO.texto }}>{av}</span>
-                      ))}
-                    </>
+                        {typeof respShinkai[e.id].fotos === "number" && respShinkai[e.id].fotos < (respShinkai[e.id].fotos_enviadas || 0) && (
+                          <span className="mt-0.5 block" style={{ color: AMARELO.texto }}>
+                            O Shinkai não ficou com todas as fotos{respShinkai[e.id].acao === "atualizado"
+                              ? " — o reenvio não acrescenta foto a um carro que já existe lá; as que faltam entram pelo painel deles, em Editar → Adicionar foto."
+                              : "."}
+                          </span>
+                        )}
+                        {(respShinkai[e.id].avisos || []).map((av, k) => (
+                          <span key={k} className="mt-0.5 block" style={{ color: AMARELO.texto }}>{av}</span>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                )}
+                <div className="mt-auto pt-2.5">
+                  <div className="grid grid-cols-2 gap-1.5 text-[12.5px]">
+                    <button onClick={() => copiar(gerarDescritivo(f, fotos), `d${e.id}`)}
+                      className="rounded-lg px-2 py-2 font-semibold" style={{ border: `1px solid ${C.verde}`, color: C.verde }}>
+                      {copiado === `d${e.id}` ? "copiado" : "Descritivo"}
+                    </button>
+                    {chaveShinkai === false ? (
+                      <button onClick={async () => {
+                          await copiar(JSON.stringify(payloadShinkai(f, fotos), null, 2), `s${e.id}`);
+                          window.open(SHINKAI_PAINEL, "_blank", "noopener");
+                          if (!e.anunciado_em) mexer(e, { anunciado_em: true });
+                        }}
+                        className="rounded-lg px-2 py-2 font-semibold" style={{ background: C.roxo, color: "#fff" }}>
+                        {copiado === `s${e.id}` ? "JSON copiado" : "JSON Shinkai"}
+                      </button>
+                    ) : (
+                      <button onClick={() => mandarShinkai(e)} disabled={indoShinkai === e.id || chaveShinkai === null}
+                        className="rounded-lg px-2 py-2 font-semibold"
+                        style={{ background: indoShinkai === e.id || chaveShinkai === null ? C.line : C.roxo, color: "#fff" }}>
+                        {indoShinkai === e.id ? "Enviando…" : chaveShinkai === null ? "…" : e.shinkai_em ? "Reenviar Shinkai" : "Enviar Shinkai"}
+                      </button>
+                    )}
+                    <button onClick={() => setEnviando(e.id)} className="rounded-lg px-2 py-2 font-semibold" style={{ border: `1px solid ${C.line}`, color: C.roxo }}>
+                      Para um lojista
+                    </button>
+                    <button onClick={() => setVendendo(e.id)} className="rounded-lg px-2 py-2 font-semibold" style={{ background: C.verde, color: "#fff" }}>
+                      Vender
+                    </button>
+                  </div>
+                  {/* JÁ SAIU (0110): os da planilha antiga que nunca tiveram a
+                      venda marcada saem daqui sem contar na rentabilidade. */}
+                  {perfil && perfil.papel === "gerente" && (
+                    <button onClick={async () => {
+                      if (!confirm(`${(e.veiculo && e.veiculo.placa) || "Este carro"} já saiu do pátio? Ele vai para "Baixados" e não conta na rentabilidade.`)) return;
+                      try { await atualizarEstoque(e.id, { situacao: "baixado" }); carregar(); } catch (ex) { setErro(ex.message); }
+                    }} className="mt-1.5 text-[11px] underline" style={{ color: C.mute }}>já saiu — baixar</button>
                   )}
                 </div>
-              )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
-              {/* ---- mandar para um lojista do cadastro ---- */}
-              {enviando === e.id && (
-                <div className="mt-2 rounded-lg p-2.5" style={{ background: C.bg }}>
+      {/* ---- mandar para um lojista do cadastro ---- */}
+      {enviando && (() => {
+        const e = carros.find((x) => x.id === enviando);
+        if (!e) return null;
+        const f = fichaDoEstoque(e);
+        const fotos = (((e.veiculo || {}).foto) || []).length;
+        return (
+          <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: "rgba(24,18,33,0.45)" }} onClick={() => setEnviando(null)}>
+            <div className="w-full max-w-lg rounded-xl p-4" style={{ background: C.paper }} onClick={(ev) => ev.stopPropagation()}>
+              <div className="mb-2 flex items-baseline justify-between">
+                <b className="text-[15px]">Mandar {(e.veiculo && e.veiculo.placa) || "o carro"} para um lojista</b>
+                <button onClick={() => setEnviando(null)} className="text-[13px]" style={{ color: C.mute }}>fechar</button>
+              </div>
+              <div className="mt-2 rounded-lg p-2.5" style={{ background: C.bg }}>
                   {compradores.length ? (
                     <>
                       <div className="text-[11px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Abrir o WhatsApp com o descritivo pronto</div>
@@ -18189,11 +18201,18 @@ function TelaVendaLojistas({ perfil }) {
                     <p className="text-[12px]" style={{ color: C.mute }}>Nenhum lojista cadastrado ainda. Eles entram no cadastro quando você registra a primeira venda.</p>
                   )}
                 </div>
-              )}
+            </div>
+          </div>
+        );
+      })()}
 
-              {vendendo === e.id && (
-                <div className="mt-2">
-                  <VenderCarro e={e} aoFechar={() => setVendendo(null)}
+      {vendendo && (() => {
+        const e = carros.find((x) => x.id === vendendo);
+        if (!e) return null;
+        return (
+          <div className="fixed inset-0 z-50 flex items-end justify-center lg:items-center" style={{ background: "rgba(24,18,33,0.45)" }} onClick={() => setVendendo(null)}>
+            <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-t-2xl p-4 lg:rounded-2xl" style={{ background: C.paper }} onClick={(ev) => ev.stopPropagation()}>
+              <VenderCarro e={e} aoFechar={() => setVendendo(null)}
                     aoVender={async (dados) => {
                       try {
                         const r = await venderEMandar(e, dados); setVendendo(null);
@@ -18202,12 +18221,10 @@ function TelaVendaLojistas({ perfil }) {
                       }
                       catch (ex) { setErro(ex.message); }
                     }} />
-                </div>
-              )}
             </div>
-          );
-        })}
-      </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
