@@ -823,12 +823,31 @@ async function transferencia(req, res, tok) {
     const duts = placas.length ? await fetch(`${URL_BASE}/rest/v1/dut_pedido?select=placa,situacao,protocolo,criado_em&placa=in.(${placas.slice(0, 400).map((p) => encodeURIComponent(p)).join(",")})&order=criado_em.desc`,
       { headers: cabecalhos(tok) }).then((r) => r.json()).catch(() => []) : [];
     const porAviso = {}; (Array.isArray(avisos) ? avisos : []).forEach((a) => { (porAviso[a.estoque_id] = porAviso[a.estoque_id] || []).push(a); });
-    const porDut = {}; (Array.isArray(duts) ? duts : []).forEach((d) => { if (!porDut[d.placa]) porDut[d.placa] = d; });
+    const porPlaca = {}; (Array.isArray(duts) ? duts : []).forEach((d) => { (porPlaca[d.placa] = porPlaca[d.placa] || []).push(d); });
+    /* A ETAPA DA TRANSFERÊNCIA, sozinha (05/11/2026, o Derek: "os carros
+     * aguardando transferência reconhecem automaticamente quando entra
+     * solicitação de DUT dos lojistas e é feito cartório e comunicado de
+     * venda?"). O pedido de DUT da placa entra na conta — mas só o feito
+     * DEPOIS desta venda (uma semana de folga): o mesmo carro vendido de
+     * novo não pode herdar o DUT da venda anterior. O cancelado não conta. */
+    const dutDe = (c, base) => {
+      const ds = (c.veiculo && porPlaca[c.veiculo.placa]) || [];
+      const desde = base ? new Date(Date.parse(`${base}T00:00:00-03:00`) - 7 * 86400000).toISOString() : "";
+      return ds.find((d) => d.situacao !== "cancelado" && (!desde || String(d.criado_em) >= desde)) || null;
+    };
+    const etapaDe = (c, dut) => {
+      if (c.transferido_em) return "transferido";
+      if (dut && dut.situacao === "entregue" && c.comunicado_em) return "concluido";
+      if (c.comunicado_em) return "comunicado";
+      if (dut) return `dut_${dut.situacao}`;
+      return "sem_dut";
+    };
     return res.status(200).json({
       carros: lista.map((c) => {
         const base = c.vendido_em || c.entrou_em || null;
+        const dut = dutDe(c, base);
         return { ...c, base, estimada: !c.vendido_em, prazo: base ? LOJ.prazoDe(base) : null,
-          avisos: porAviso[c.id] || [], dut: c.veiculo && porDut[c.veiculo.placa] || null };
+          avisos: porAviso[c.id] || [], dut, etapa: etapaDe(c, dut) };
       }),
       config: cfg, eu: { gerente: eu.gerente, adm: eu.adm },
     });

@@ -5058,6 +5058,20 @@ vem do cadastro, não da tela). **O link leva o carro junto**:
 e telefone do lojista não viajam na URL. "Abrir no WhatsApp deste
 computador" continua ali, para quando a ponte estiver fora.
 
+**A etapa de cada carro é calculada sozinha (0113, 05/11/2026, o Derek:
+*"reconhecem automaticamente quando entra solicitação de DUT e é feito
+cartório e comunicado de venda?"*).** Antes a coluna só mostrava o DUT
+mais recente da placa — inclusive de uma venda anterior do mesmo carro.
+Agora vale só o pedido feito depois desta venda (uma semana de folga),
+cancelado não conta, e a etapa sai dele e do comunicado: "lojista não
+pediu o DUT" → DUT a preencher / falta algo / no cartório / pronto →
+"DUT entregue · falta o comunicado" → "DUT entregue e comunicado feito"
+→ transferido. Filtros "Lojista não pediu o DUT" e "Falta o comunicado".
+**O lembrete de prazo para** (0113) quando o lojista já pediu o DUT
+depois da venda ou o comunicado foi feito: cobrar dele a demora do nosso
+cartório seria injusto. A transferência em si continua marcada à mão —
+ela acontece no Detran, e nada chega até nós.
+
 **"Comunicado de venda" na linha (0093, o Derek no mesmo dia).** É o
 que a Vaapty faz no Detran quando o lojista não transfere, e tira da
 loja a responsabilidade pelo carro dali em diante. Fica registrado com
