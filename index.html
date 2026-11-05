@@ -22812,6 +22812,24 @@ function ContratoDoLojista({ e, valor, aoFechar }) {
   const [zap, setZap] = useState(null);
   const [querReenviar, setQuerReenviar] = useState(false);
   const [copiou, setCopiou] = useState(false);
+  const [prazoT, setPrazoT] = useState(e.prazo_transferencia_dias == null ? null : e.prazo_transferencia_dias);
+  const [recadoPrazo, setRecadoPrazo] = useState("");
+  const mudarPrazo = async (dias) => {
+    setIndo("prazo"); setRecadoPrazo("");
+    try {
+      await atualizarEstoque(e.id, { prazo_transferencia_dias: dias });
+      setPrazoT(dias);
+      let msg = dias === 0 ? "Prazo: transferência imediata." : dias == null ? "Prazo: 90 dias (padrão)." : `Prazo: ${dias} dias.`;
+      if (dias === 0 && e.situacao === "vendido") {
+        const r = await fetchAut("/api/checklist?recurso=transferencia&acao=imediata", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ estoque_id: e.id }) });
+        const d = await r.json().catch(() => ({}));
+        if (d.imediata) msg += d.imediata.enviado ? " O lojista recebeu o pedido dos dados pelo WhatsApp do adm." : ` O pedido ao lojista não saiu: ${d.imediata.erro}.`;
+        else if (d.ja) msg += " O lojista já tinha recebido o pedido dos dados.";
+      }
+      setRecadoPrazo(msg);
+    } catch (x) { setRecadoPrazo(`Não gravou: ${x.message}`); }
+    setIndo("");
+  };
   const lerZap = () => fetchAut(`/api/documento?recurso=zapsign&estoque_id=${e.id}`)
     .then((r) => r.json()).then((d) => setZap(d && !d.erro ? d : { enviado: false })).catch(() => setZap({ enviado: false }));
   useEffect(() => { lerZap(); }, []);
@@ -22928,6 +22946,14 @@ function ContratoDoLojista({ e, valor, aoFechar }) {
         <button onClick={guardarCadastro} disabled={!!indo} className="mt-2 text-[12.5px] font-semibold underline" style={{ color: C.roxo }}>
           {indo === "cadastro" ? "guardando…" : "Guardar no cadastro do lojista (para os próximos carros)"}
         </button>
+        {L.id && <div className="mt-2"><ContatoAdmLojista comprador={L} aoSalvar={(c) => setL({ ...L, ...c })} /></div>}
+
+        {/* O PRAZO DE TRANSFERÊNCIA (0115): grava no carro na hora. Mudar
+            para imediata depois da venda manda ao lojista o pedido dos
+            dados (se as boas-vindas já tinham ido com o prazo normal). */}
+        <div className="mt-3 text-[11px] font-bold uppercase tracking-[0.1em]" style={{ color: C.roxo }}>Transferência</div>
+        <div className="mt-1"><PrazoTransferenciaSel valor={prazoT} desligado={indo === "prazo"} aoMudar={mudarPrazo} /></div>
+        {recadoPrazo && <p className="mt-1 text-[12px]" style={{ color: /não|falh/i.test(recadoPrazo) ? C.laranja : C.verde }}>{recadoPrazo}</p>}
 
         <div className="mt-3 text-[11px] font-bold uppercase tracking-[0.1em]" style={{ color: C.roxo }}>O veículo</div>
         <div className="mt-1 grid grid-cols-2 gap-2 md:grid-cols-3">
@@ -23005,6 +23031,71 @@ function ContratoDoLojista({ e, valor, aoFechar }) {
   );
 }
 
+/* O PRAZO DE TRANSFERÊNCIA DA VENDA (0115, 05/11/2026, o Derek:
+ * "dependendo da negociação, pode ser obrigatória a transferência…
+ * selecionar qual o prazo, sendo o padrão de 90 dias, mas podendo não ter
+ * prazo também, com transferência imediata"). Vazio = padrão (3 meses);
+ * 0 = imediata: a mensagem ao lojista já pede os dados para transferir. */
+function PrazoTransferenciaSel({ valor, aoMudar, desligado }) {
+  const v = valor === "" || valor == null ? null : Number(valor);
+  const outro = v != null && v !== 0 && [60, 30, 15].indexOf(v) < 0;
+  const chip = (rot, alvo, cor) => {
+    const ativo = alvo === null ? v === null : v === alvo;
+    return (
+      <button key={rot} type="button" disabled={desligado} onClick={() => aoMudar(alvo)} className="rounded-full border px-2.5 py-1 text-[12.5px] font-semibold"
+        style={{ borderColor: ativo ? (cor || C.roxo) : C.line, background: ativo ? (cor || C.roxo) : "#fff", color: ativo ? "#fff" : C.ink }}>{rot}</button>
+    );
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {chip("90 dias (padrão)", null)}{chip("60 dias", 60)}{chip("30 dias", 30)}{chip("15 dias", 15)}
+      {chip("Imediata", 0, C.laranja)}
+      <label className="flex items-center gap-1 text-[12px]" style={{ color: C.mute }}>
+        outro:
+        <input type="number" min="1" max="365" defaultValue={outro ? v : ""} disabled={desligado} placeholder="dias"
+          onBlur={(ev) => { const n = Math.trunc(Number(ev.target.value)); if (n > 0 && n !== v) aoMudar(Math.min(365, n)); }}
+          className="w-16 rounded border px-1.5 py-0.5 text-[12.5px] outline-none" style={{ ...inputSty, borderColor: outro ? C.roxo : C.line }} />
+      </label>
+      {v === 0 && <span className="w-full text-[11.5px]" style={{ color: C.laranja }}>Transferência imediata: a mensagem ao lojista já pede os dados para transferir, e ele é cobrado em 2 dias.</span>}
+    </div>
+  );
+}
+
+/* O CONTATO DO ADM DO LOJISTA (0115, o Derek: "alguns lojistas indicam um
+ * número do ADM pra mandar as questões de documentação"). O telefone do
+ * cadastro continua o principal — é com quem se negocia —; com este
+ * preenchido, DUT, CRLV, prazo e lembretes vão para ele. Trocar depois
+ * vale a partir da próxima mensagem. */
+function ContatoAdmLojista({ comprador, aoSalvar }) {
+  const [n, setN] = useState((comprador && comprador.adm_nome) || "");
+  const [t, setT] = useState((comprador && comprador.adm_telefone) || "");
+  const [estado, setEstado] = useState("");
+  useEffect(() => { setN((comprador && comprador.adm_nome) || ""); setT((comprador && comprador.adm_telefone) || ""); }, [comprador && comprador.id]);
+  if (!comprador || !comprador.id) return null;
+  const mudou = n !== (comprador.adm_nome || "") || t !== (comprador.adm_telefone || "");
+  const digitos = t.replace(/\D/g, "").length;
+  const salvar = async () => {
+    if (t && digitos < 10) { setEstado("O WhatsApp do ADM precisa do DDD."); return; }
+    setEstado("salvando…");
+    try { const c = await atualizarComprador(comprador.id, { adm_nome: n, adm_telefone: t }); setEstado("salvo"); if (aoSalvar) aoSalvar(c || { ...comprador, adm_nome: n, adm_telefone: t }); }
+    catch (e) { setEstado(e.message); }
+  };
+  return (
+    <div className="rounded-lg p-2.5" style={{ background: C.bg }}>
+      <div className="text-[11px] font-semibold uppercase tracking-[0.06em]" style={{ color: ROTULO_COR }}>Contato do ADM do lojista (documentação) — opcional</div>
+      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+        <input value={n} onChange={(e) => setN(e.target.value)} placeholder="Nome" className="min-w-[120px] flex-1 rounded border px-2 py-1 text-[13px] outline-none" style={inputSty} />
+        <input value={t} onChange={(e) => setT(e.target.value)} placeholder="WhatsApp com DDD" inputMode="tel" className="w-44 rounded border px-2 py-1 text-[13px] outline-none" style={inputSty} />
+        <button type="button" onClick={salvar} disabled={!mudou} className="rounded-md px-3 py-1 text-[12.5px] font-semibold text-white" style={{ background: mudou ? C.roxo : C.line }}>Salvar</button>
+        {estado && <span className="text-[12px]" style={{ color: estado === "salvo" ? C.verde : estado === "salvando…" ? C.mute : C.laranja }}>{estado}</span>}
+      </div>
+      <div className="mt-1 text-[11px]" style={{ color: C.mute }}>
+        {digitos >= 10 ? "DUT, CRLV, prazo e lembretes vão para este número." : `Sem ele, vão para o do lojista${comprador.telefone ? ` (${comprador.telefone})` : ""}.`}
+      </div>
+    </div>
+  );
+}
+
 function VenderCarro({ e, aoVender, aoFechar }) {
   const [busca, setBusca] = useState("");
   const [achados, setAchados] = useState([]);
@@ -23013,6 +23104,7 @@ function VenderCarro({ e, aoVender, aoFechar }) {
   const [valor, setValor] = useState("");
   const [quando, setQuando] = useState(hojeEmSP());
   const [nota, setNota] = useState("");
+  const [prazoDias, setPrazoDias] = useState(e.prazo_transferencia_dias == null ? null : e.prazo_transferencia_dias);
   const [erro, setErro] = useState("");
   const c = contaDoEstoque(e);
 
@@ -23131,6 +23223,18 @@ function VenderCarro({ e, aoVender, aoFechar }) {
         <TelefoneParaShinkai comprador={escolhido} aoSalvar={(novo) => setEscolhido({ ...escolhido, ...novo })} />
       )}
 
+      {/* O prazo de transferência e o contato do ADM (0115): a mensagem de
+          boas-vindas sai ao confirmar, já com este prazo e para este número. */}
+      {escolhido && e.natureza !== "indicacao" && (
+        <div className="mt-3 space-y-2">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.06em]" style={{ color: ROTULO_COR }}>Prazo para o lojista transferir</div>
+            <div className="mt-1"><PrazoTransferenciaSel valor={prazoDias} aoMudar={setPrazoDias} /></div>
+          </div>
+          <ContatoAdmLojista comprador={escolhido} aoSalvar={(c) => setEscolhido({ ...escolhido, ...c })} />
+        </div>
+      )}
+
       {/* A margem aparece ANTES de confirmar, e é de propósito: é a
           última chance de ver que o carro está saindo no prejuízo. */}
       <div className="mt-2 rounded-md px-2.5 py-2 text-[13px]"
@@ -23148,7 +23252,7 @@ function VenderCarro({ e, aoVender, aoFechar }) {
       <button disabled={!pronto}
         onClick={() => aoVender({
           situacao: "vendido", comprador_id: escolhido.id,
-          valor_venda: valor, vendido_em: quando, nota_venda: nota,
+          valor_venda: valor, vendido_em: quando, nota_venda: nota, prazo_transferencia_dias: prazoDias,
         })}
         className="mt-3 w-full rounded-md py-3 text-[15px] font-semibold"
         style={{ background: pronto ? C.roxo : C.line, color: pronto ? "#fff" : C.mute }}>
@@ -23678,6 +23782,7 @@ function TelaTransferencias() {
   const [recado, setRecado] = useState({});
   const [q, setQ] = useState("");
   const [escrevendo, setEscrevendo] = useState(null);   // { c, texto, indo, erro }
+  const [editAdm, setEditAdm] = useState(null);
   const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
   /* A MENSAGEM PRÉ-PRONTA (28/10/2026, o Derek): sai pelo WhatsApp do
    * adm, não pelo WhatsApp do computador, e leva o link do formulário do
@@ -23799,13 +23904,15 @@ function TelaTransferencias() {
           <div className="w-full max-w-lg rounded-xl p-4" style={{ background: C.paper }}>
             <div className="mb-1 text-[16px] font-bold">Mensagem pelo WhatsApp do adm</div>
             <div className="mb-3 text-[12.5px]" style={{ color: C.mute }}>
-              Para {(escrevendo.c.comprador && escrevendo.c.comprador.nome) || "o lojista"} · {escrevendo.c.comprador && escrevendo.c.comprador.telefone}
+              Para {(escrevendo.c.comprador && escrevendo.c.comprador.adm_telefone)
+                ? `${escrevendo.c.comprador.adm_nome || "o ADM"} (ADM de ${escrevendo.c.comprador.nome || "lojista"}) · ${escrevendo.c.comprador.adm_telefone}`
+                : `${(escrevendo.c.comprador && escrevendo.c.comprador.nome) || "o lojista"} · ${(escrevendo.c.comprador && escrevendo.c.comprador.telefone) || ""}`}
             </div>
             <textarea value={escrevendo.texto} onChange={(ev) => setEscrevendo({ ...escrevendo, texto: ev.target.value })} rows={7}
               className="w-full rounded-lg border px-3 py-2 text-[14px]" style={{ borderColor: C.line }} />
             {escrevendo.erro && <p className="mt-1 text-[12.5px]" style={{ color: C.laranja }}>{escrevendo.erro}</p>}
             <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-              <a href={zap(escrevendo.c.comprador && escrevendo.c.comprador.telefone, escrevendo.texto)} target="_blank" rel="noopener noreferrer"
+              <a href={zap(escrevendo.c.comprador && (escrevendo.c.comprador.adm_telefone || escrevendo.c.comprador.telefone), escrevendo.texto)} target="_blank" rel="noopener noreferrer"
                 className="mr-auto text-[12px] underline" style={{ color: C.mute }}>abrir no WhatsApp deste computador</a>
               <button onClick={() => setEscrevendo(null)} disabled={escrevendo.indo} className="rounded-md px-3 py-2 text-[13px]" style={{ color: C.mute }}>cancelar</button>
               <button onClick={mandarEscrita} disabled={escrevendo.indo || !escrevendo.texto.trim()}
@@ -23842,9 +23949,28 @@ function TelaTransferencias() {
                     <td className="px-2.5 py-2">
                       <div>{(c.comprador && c.comprador.nome) || "—"}</div>
                       <div className="text-[11.5px]" style={{ color: fone ? C.mute : C.laranja }}>{fone || "sem WhatsApp no cadastro"}</div>
+                      {c.comprador && c.comprador.adm_telefone && (
+                        <div className="text-[11.5px]" style={{ color: C.roxo }} title="Os avisos de documentação vão para este número">ADM: {c.comprador.adm_nome || "—"} · {c.comprador.adm_telefone}</div>
+                      )}
+                      <button onClick={() => setEditAdm(editAdm === c.id ? null : c.id)} className="text-[11px] underline" style={{ color: C.mute }}>
+                        {c.comprador && c.comprador.adm_telefone ? "trocar contato do ADM" : "+ contato do ADM"}
+                      </button>
+                      {editAdm === c.id && <div className="mt-1 min-w-[300px]"><ContatoAdmLojista comprador={c.comprador} aoSalvar={() => { setEditAdm(null); carregar(); }} /></div>}
                     </td>
                     <td className="px-2.5 py-2">{c.base ? diaBR(c.base) : "—"}{c.estimada && <div className="text-[11px]" style={{ color: C.mute }}>≈ pela compra</div>}</td>
-                    <td className="px-2.5 py-2">{c.prazo ? diaBR(c.prazo) : "—"}</td>
+                    <td className="px-2.5 py-2">
+                      {c.prazo_transferencia_dias === 0 ? <b style={{ color: C.laranja }}>imediata</b> : c.prazo ? diaBR(c.prazo) : "—"}
+                      <select value={c.prazo_transferencia_dias == null ? "" : String(c.prazo_transferencia_dias)} title="Prazo para o lojista transferir"
+                        onChange={async (ev) => { const v = ev.target.value === "" ? null : Number(ev.target.value);
+                          try { await atualizarEstoque(c.id, { prazo_transferencia_dias: v });
+                            if (v === 0) await post("imediata", { estoque_id: c.id }).catch(() => {});
+                            carregar(); } catch (e) { setErro(e.message); } }}
+                        className="mt-0.5 block rounded border px-1 text-[11px] outline-none" style={{ borderColor: C.line, color: C.mute }}>
+                        <option value="">90 dias (padrão)</option><option value="60">60 dias</option><option value="30">30 dias</option>
+                        <option value="15">15 dias</option><option value="0">imediata</option>
+                        {c.prazo_transferencia_dias != null && [0, 15, 30, 60].indexOf(c.prazo_transferencia_dias) < 0 && <option value={String(c.prazo_transferencia_dias)}>{c.prazo_transferencia_dias} dias</option>}
+                      </select>
+                    </td>
                     <td className="px-2.5 py-2 font-semibold" style={{ color: c.transferido_em ? C.verde : venceu ? "#C62828" : perto ? C.laranja : C.ink }}>
                       {c.transferido_em ? `transferido ${diaBR(c.transferido_em)}` : resta == null ? "—" : venceu ? `venceu há ${-resta} dia${resta === -1 ? "" : "s"}` : resta === 0 ? "vence hoje" : `faltam ${resta} dia${resta === 1 ? "" : "s"}`}
                       {c.transferido_obs && <div className="text-[11px] font-normal" style={{ color: C.mute }}>{c.transferido_obs}</div>}

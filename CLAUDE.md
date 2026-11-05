@@ -5082,6 +5082,30 @@ nas mensagens vai com a placa e o carro (`textoLojista`). A busca das
 Conversas aceita telefone com espaço e traço (procura pelos oito últimos
 dígitos).
 
+**O prazo de transferência é da venda (0115, 05/11/2026, o Derek:
+*"dependendo da negociação pode ser obrigatória a transferência… o
+padrão de 90 dias, mas podendo não ter prazo, com transferência
+imediata"*).** `estoque.prazo_transferencia_dias`: vazio = 3 meses (o de
+sempre), N = a venda + N dias, 0 = IMEDIATA. Escolhe-se no "Confirmar a
+venda", no contrato do lojista e na linha de Transferências. A imediata
+manda boas-vindas que já pedem os dados (ou, escolhida depois, a mensagem
+`imediata`), cobra em 2 dias (`imediata_cobra`) e "venceu" em 7; os
+lembretes de 1 e 2 meses só saem em prazo que tem esse tamanho. **O
+contrato da casa não ganhou cláusula de prazo** — texto jurídico não muda
+sem o jurídico (decisão 7); o prazo é do processo, não do papel.
+
+**O contato do ADM do lojista (0115):** `comprador.adm_nome` e
+`adm_telefone`. O telefone de sempre continua o principal (é com quem se
+negocia); com o do ADM preenchido, boas-vindas, CRLV, prazo, lembretes e a
+mensagem da tela vão para ele (`foneDoc`, e o mesmo na função dos
+lembretes). Edita-se na venda, no contrato e na linha de Transferências, e
+vale a partir da próxima mensagem.
+
+**O carro que entra ao fechar puxa o check list preenchido depois**
+(`puxarDoChecklist`, chamado a cada gravação do check list): o valor ao
+cliente, se a compra estiver vazia, e o previsto, se não houver linha do
+fechamento. Era por isso que entravam com R$ 0,00.
+
 **"Comunicado de venda" na linha (0093, o Derek no mesmo dia).** É o
 que a Vaapty faz no Detran quando o lojista não transfere, e tira da
 loja a responsabilidade pelo carro dali em diante. Fica registrado com
