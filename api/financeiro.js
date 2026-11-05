@@ -1204,42 +1204,49 @@ async function titulo(req, res, tok) {
     if (!id) return res.status(400).json({ erro: "id inválido." });
     const c = await corpoDe(req) || {};
     const ids = (Array.isArray(c.titulos) ? c.titulos : []).map(idOuNulo).filter(Boolean);
-    if (!ids.length) return res.status(400).json({ erro: "Escolha ao menos um título." });
+    // Os pedaços digitados: quando o que está somado não tem título
+    // cadastrado (o caso comum), cada pedaço vira um lançamento próprio.
+    const partes = (Array.isArray(c.partes) ? c.partes : [])
+      .map((x) => ({ descricao: texto(x && x.descricao), valor: Math.abs(decimal(x && x.valor) || 0) }))
+      .filter((x) => x.valor > 0);
+    if (!ids.length && !partes.length) return res.status(400).json({ erro: "Escolha um título ou digite ao menos um pedaço." });
     const l = um(await supa(`${base("fin_lancamento")}?select=*,fin_rateio(id)&id=eq.${id}`, { headers: cab(tok) }));
     if (!l || l.situacao !== "efetivado" || l.extrato_id) return res.status(409).json({ erro: "Só se divide uma linha do banco já lançada." });
     if ((l.fin_rateio || []).length) return res.status(409).json({ erro: "Esta linha está repartida em categorias. Desfaça a repartição antes de dividir em títulos." });
     const deb = Number(l.debito) || 0, cred = Number(l.credito) || 0;
     const total = deb || cred;
-    const ts = await supa(`${base("fin_lancamento")}?select=id,debito,credito&situacao=eq.aberto&id=in.(${ids.join(",")})`, { headers: cab(tok) }) || [];
+    const ts = ids.length ? await supa(`${base("fin_lancamento")}?select=id,debito,credito&situacao=eq.aberto&id=in.(${ids.join(",")})`, { headers: cab(tok) }) || [] : [];
     if (ts.length !== ids.length) return res.status(409).json({ erro: "Algum título não está mais em aberto. Recarregue a lista." });
     if (ts.some((t) => (deb ? !(Number(t.debito) > 0) : !(Number(t.credito) > 0)))) {
       return res.status(400).json({ erro: deb ? "Esta linha é uma saída: só títulos a pagar." : "Esta linha é uma entrada: só títulos a receber." });
     }
-    const soma = Math.round(ts.reduce((t, x) => t + (Number(x.debito) || 0) + (Number(x.credito) || 0), 0) * 100) / 100;
-    if (soma > total + 0.005) return res.status(400).json({ erro: `Os títulos somam ${soma.toFixed(2).replace(".", ",")}, mais que a linha do banco (${total.toFixed(2).replace(".", ",")}).` });
+    const soma = Math.round((ts.reduce((t, x) => t + (Number(x.debito) || 0) + (Number(x.credito) || 0), 0)
+      + partes.reduce((t, x) => t + x.valor, 0)) * 100) / 100;
+    if (soma > total + 0.005) return res.status(400).json({ erro: `Os pedaços somam ${soma.toFixed(2).replace(".", ",")}, mais que a linha do banco (${total.toFixed(2).replace(".", ",")}).` });
 
-    await supa(`${base("fin_lancamento")}?id=in.(${ids.join(",")})&situacao=eq.aberto`, {
-      method: "PATCH", headers: cab(tok),
-      body: JSON.stringify({ situacao: "efetivado", conta_id: l.conta_id, data: l.data, conciliado: true, revisar: false, extrato_id: l.id }),
-    });
-    const resto = Math.round((total - soma) * 100) / 100;
-    if (resto > 0.005) {
-      await supa(base("fin_lancamento"), {
-        method: "POST", headers: cab(tok),
-        body: JSON.stringify({
-          conta_id: l.conta_id, data: l.data, competencia: l.competencia, categoria_id: l.categoria_id,
-          descricao: `${l.descricao || "Movimento do banco"} (resto da divisão)`,
-          debito: deb ? resto : 0, credito: cred ? resto : 0,
-          favorecido_id: l.favorecido_id, estoque_id: l.estoque_id, tipo_negociacao: l.tipo_negociacao,
-          funcionario_id: l.funcionario_id, observacao: l.observacao,
-          situacao: "efetivado", conciliado: true, origem: "divisao", extrato_id: l.id,
-        }),
+    if (ids.length) {
+      await supa(`${base("fin_lancamento")}?id=in.(${ids.join(",")})&situacao=eq.aberto`, {
+        method: "PATCH", headers: cab(tok),
+        body: JSON.stringify({ situacao: "efetivado", conta_id: l.conta_id, data: l.data, conciliado: true, revisar: false, extrato_id: l.id }),
       });
     }
+    // Pedaços e resto nascem com a categoria e o carro da linha do banco
+    // e se corrigem na lista, como qualquer lançamento.
+    const pedaco = (descricao, v) => ({
+      conta_id: l.conta_id, data: l.data, competencia: l.competencia, categoria_id: l.categoria_id,
+      descricao, debito: deb ? v : 0, credito: cred ? v : 0,
+      favorecido_id: l.favorecido_id, estoque_id: l.estoque_id, tipo_negociacao: l.tipo_negociacao,
+      funcionario_id: l.funcionario_id,
+      situacao: "efetivado", conciliado: true, origem: "divisao", extrato_id: l.id,
+    });
+    const novos = partes.map((x, i) => pedaco(x.descricao || `${l.descricao || "Movimento do banco"} (parte ${i + 1})`, x.valor));
+    const resto = Math.round((total - soma) * 100) / 100;
+    if (resto > 0.005) novos.push({ ...pedaco(`${l.descricao || "Movimento do banco"} (resto da divisão)`, resto), observacao: l.observacao });
+    if (novos.length) await supa(base("fin_lancamento"), { method: "POST", headers: cab(tok), body: JSON.stringify(novos) });
     await supa(`${base("fin_lancamento")}?id=eq.${l.id}`, {
       method: "PATCH", headers: cab(tok), body: JSON.stringify({ situacao: "cancelado", dividido_em: new Date().toISOString() }),
     });
-    return res.status(200).json({ ok: true, titulos: ts.length, resto });
+    return res.status(200).json({ ok: true, titulos: ts.length, partes: partes.length, resto });
   }
   if (req.method === "POST" && String(req.query.acao || "") === "desfazer_divisao") {
     const id = idOuNulo(req.query.id);

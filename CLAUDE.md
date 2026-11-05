@@ -4372,8 +4372,11 @@ casam nenhum** — chutar qual é seria pior que deixar para a pessoa.
 
 **Uma linha do banco que soma vários títulos se divide (0111).** O banco
 às vezes manda um movimento só com a soma de vários ("BOLETOS RECEBIDOS
-30/10"), e o casamento por valor exato não baixa nenhum. "Dividir em
-títulos", na linha: os títulos escolhidos viram efetivados na conta e na
+30/10"), e o casamento por valor exato não baixa nenhum. "Dividir", na
+linha: digitam-se os pedaços (descrição e valor — cada um vira um
+lançamento com a categoria e o carro da linha, corrigíveis na lista), e/ou
+escolhem-se títulos em aberto (em 05/11/2026 não havia nenhum: os pedaços
+digitados são o caso comum). Os títulos escolhidos viram efetivados na conta e na
 data dela (`extrato_id` aponta para a linha), o que sobrar vira uma linha
 "resto" (origem `divisao`) com a categoria dela, e a linha do banco fica
 `cancelado` com `dividido_em` — **não é apagada**: a chave do extrato

@@ -18515,6 +18515,9 @@ function DividirEmTitulos({ l, aoFechar, aoFeito }) {
   const [q, setQ] = useState("");
   const [erro, setErro] = useState("");
   const [indo, setIndo] = useState(false);
+  // Os pedaços digitados: o que está somado e não tem título cadastrado.
+  const [partes, setPartes] = useState([{ descricao: "", valor: "" }, { descricao: "", valor: "" }]);
+  const mexerParte = (i, mud) => setPartes((xs) => xs.map((x, j) => (j === i ? { ...x, ...mud } : x)));
   useEffect(() => {
     fin("titulo").then((d) => setLista((d.titulos || []).filter((t) => (saida ? Number(t.debito) > 0 : Number(t.credito) > 0))))
       .catch((e) => setErro(e.message));
@@ -18528,26 +18531,47 @@ function DividirEmTitulos({ l, aoFechar, aoFeito }) {
     const h = semAcento(`${t.descricao || ""} ${nome(t)} ${centavosBR(valor(t))} ${valor(t)}`).toLowerCase();
     return termos.every((x) => h.indexOf(x) >= 0);
   }).sort((a, b) => (sel[b.id] ? 1 : 0) - (sel[a.id] ? 1 : 0) || dist(a) - dist(b));
-  const soma = Math.round((lista || []).filter((t) => sel[t.id]).reduce((x, t) => x + valor(t), 0) * 100) / 100;
+  const partesOk = partes.filter((x) => numeroBR(x.valor) > 0);
+  const soma = Math.round(((lista || []).filter((t) => sel[t.id]).reduce((x, t) => x + valor(t), 0)
+    + partesOk.reduce((x, p) => x + numeroBR(p.valor), 0)) * 100) / 100;
   const sobra = Math.round((total - soma) * 100) / 100;
-  const n = Object.keys(sel).filter((k) => sel[k]).length;
+  const n = Object.keys(sel).filter((k) => sel[k]).length + partesOk.length;
   const dividir = async () => {
     setErro(""); setIndo(true);
     try {
-      await fin("titulo", { acao: "dividir", id: l.id }, finJson("POST", { titulos: Object.keys(sel).filter((k) => sel[k]) }));
+      await fin("titulo", { acao: "dividir", id: l.id }, finJson("POST", {
+        titulos: Object.keys(sel).filter((k) => sel[k]),
+        partes: partesOk.map((p) => ({ descricao: p.descricao, valor: numeroBR(p.valor) })),
+      }));
       aoFeito();
     } catch (e) { setErro(e.message); setIndo(false); }
   };
   return (
     <div className="mt-2 rounded-xl p-3" style={{ background: C.bg, border: `1px solid ${C.roxo}` }}>
       <div className="flex flex-wrap items-baseline gap-2">
-        <span className="text-[13px] font-semibold">Dividir {rs2(total)} em títulos {saida ? "a pagar" : "a receber"}</span>
-        <span className="text-[11.5px]" style={{ color: C.mute }}>Marque os títulos que estão somados nesta linha do banco. O que sobrar fica como "resto", na categoria desta linha.</span>
+        <span className="text-[13px] font-semibold">Dividir esta linha do banco ({rs2(total)})</span>
+        <span className="text-[11.5px]" style={{ color: C.mute }}>Digite o que está somado nela — cada pedaço vira um lançamento, e aí cada um ganha a sua categoria, carro e observação na lista. O que sobrar fica como "resto".</span>
         <button onClick={aoFechar} className="ml-auto text-[12px]" style={{ color: C.mute }}>fechar</button>
       </div>
-      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Procurar por descrição, favorecido ou valor"
-        className="mt-2 w-full rounded border px-2 py-1.5 text-[13px] outline-none" style={inputSty} />
-      <div className="mt-2 max-h-[300px] overflow-y-auto rounded-lg" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
+      <div className="mt-2 space-y-1.5">
+        {partes.map((p, i) => (
+          <div key={i} className="flex items-center gap-1.5">
+            <input value={p.descricao} onChange={(e) => mexerParte(i, { descricao: e.target.value })} placeholder={`Pedaço ${i + 1} — de quem ou do quê`}
+              className="min-w-0 flex-1 rounded border px-2 py-1.5 text-[13px] outline-none" style={inputSty} />
+            <input value={p.valor} onChange={(e) => mexerParte(i, { valor: e.target.value })} inputMode="decimal" placeholder="Valor"
+              className="w-32 rounded border px-2 py-1.5 text-right text-[13px] outline-none" style={{ ...inputSty, fontFamily: F.mono }} />
+            <button onClick={() => setPartes((xs) => xs.filter((_, j) => j !== i))} className="text-[11px]" style={{ color: C.mute }}>tirar</button>
+          </div>
+        ))}
+        <button onClick={() => setPartes((xs) => xs.concat([{ descricao: "", valor: sobra > 0 ? centavosBR(sobra) : "" }]))}
+          className="text-[12px] font-semibold" style={{ color: C.roxo }}>+ pedaço{sobra > 0 ? ` (com os ${rs2(sobra)} que faltam)` : ""}</button>
+      </div>
+      <div className="mt-3 text-[11px] font-semibold uppercase tracking-[0.06em]" style={{ color: ROTULO_COR }}>
+        Ou títulos {saida ? "a pagar" : "a receber"} já cadastrados nesta soma {lista ? `(${lista.length} em aberto)` : ""}
+      </div>
+      {lista && lista.length > 0 && <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Procurar por descrição, favorecido ou valor"
+        className="mt-1 w-full rounded border px-2 py-1.5 text-[13px] outline-none" style={inputSty} />}
+      <div className="mt-1 max-h-[240px] overflow-y-auto rounded-lg" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
         {!lista && !erro && <p className="px-3 py-2 text-[12px]" style={{ color: C.mute }}>Carregando os títulos…</p>}
         {lista && !vistos.length && <p className="px-3 py-2 text-[12px]" style={{ color: C.mute }}>Nenhum título {saida ? "a pagar" : "a receber"} em aberto{q ? ` com "${q}"` : ""}.</p>}
         {vistos.slice(0, 120).map((t) => (
@@ -18561,7 +18585,7 @@ function DividirEmTitulos({ l, aoFechar, aoFeito }) {
         ))}
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-3 text-[12.5px]">
-        <span>{n} título{n === 1 ? "" : "s"} · <b>{rs2(soma)}</b></span>
+        <span>{n} pedaço{n === 1 ? "" : "s"} · <b>{rs2(soma)}</b></span>
         <span style={{ color: sobra < -0.004 ? C.laranja : C.mute }}>
           {Math.abs(sobra) < 0.005 ? "bate com a linha do banco" : sobra > 0 ? <>sobra <b style={{ color: C.ink }}>{rs2(sobra)}</b> como resto</> : <>passou {rs2(-sobra)} do valor do banco</>}
         </span>
@@ -19024,7 +19048,7 @@ function FinLancamentos({ comp }) {
                       {/* Pedaço de uma linha do banco dividida em títulos (0111). */}
                       {l.extrato_id && (
                         <span className="mt-0.5 block text-[10.5px]" style={{ color: C.roxo }}>
-                          {l.origem === "divisao" ? "resto de" : "título baixado por"} uma linha do banco dividida ·{" "}
+                          {l.origem === "divisao" ? "pedaço de" : "título baixado por"} uma linha do banco dividida ·{" "}
                           <button className="underline" onClick={async () => {
                             if (!window.confirm("Desfazer a divisão? Os títulos voltam para A pagar / receber e a linha do banco volta inteira.")) return;
                             try { await fin("titulo", { acao: "desfazer_divisao", id: l.extrato_id }, finJson("POST", {})); carregar(true); }
@@ -19078,7 +19102,7 @@ function FinLancamentos({ comp }) {
                       <button onClick={() => setRepartindo(repartindo === l.id ? "" : l.id)} className="ml-2 text-[11px]" style={{ color: C.roxo, fontWeight: 600 }}>repartir</button>
                       {!l.extrato_id && !temRateio && (
                         <button onClick={() => setDividindo(dividindo === l.id ? "" : l.id)} className="ml-2 text-[11px]" style={{ color: C.roxo, fontWeight: 600 }}
-                          title="O banco somou vários títulos nesta linha: escolha quais">dividir em títulos</button>
+                          title="O banco somou vários lançamentos nesta linha: divida em pedaços">dividir</button>
                       )}
                       <button onClick={() => setHistorico(historico === l.id ? "" : l.id)} className="ml-2 text-[11px]" style={{ color: C.mute }}>histórico</button>
                       <button onClick={() => apagar(l)} className="ml-2 text-[11px]" style={{ color: C.mute }}>apagar</button>
