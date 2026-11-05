@@ -4370,6 +4370,18 @@ digitou. A janela é de sete dias, porque boleto pago no dia seguinte é
 regra e não exceção. **Dois títulos do mesmo valor na mesma semana não
 casam nenhum** — chutar qual é seria pior que deixar para a pessoa.
 
+**Uma linha do banco que soma vários títulos se divide (0111).** O banco
+às vezes manda um movimento só com a soma de vários ("BOLETOS RECEBIDOS
+30/10"), e o casamento por valor exato não baixa nenhum. "Dividir em
+títulos", na linha: os títulos escolhidos viram efetivados na conta e na
+data dela (`extrato_id` aponta para a linha), o que sobrar vira uma linha
+"resto" (origem `divisao`) com a categoria dela, e a linha do banco fica
+`cancelado` com `dividido_em` — **não é apagada**: a chave do extrato
+barra a reentrada, e a rede 2 da importação conta a linha dividida pelo
+valor dela e ignora os pedaços (senão consumiriam outra linha de mesmo
+dia e valor). "Desfazer" devolve tudo. É diferente de repartir: repartir
+divide em CATEGORIAS (decisão 26), dividir casa com TÍTULOS.
+
 **`revisar` é o que o acerto automático deixa aceso.** Casei este
 movimento com aquele título; confira. Sem esse sinalizador, conciliação
 automática vira conciliação invisível — e é o tipo de coisa que só se

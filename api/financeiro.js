@@ -585,10 +585,15 @@ async function importar(req, res, tok) {
   const datas = linhas.map((l) => dataISO(l.data)).filter(Boolean).sort();
   const jaLa = {};
   if (datas.length) {
+    /* A linha do banco que foi DIVIDIDA em títulos (0111) está
+     * `cancelado`, mas o movimento existe: conta pelo valor dela. E os
+     * pedaços (os títulos baixados por ela e o resto) NÃO contam — o
+     * valor deles não é um movimento do banco, e consumiria por engano
+     * outra linha de mesmo dia e valor. */
     const antigos = await supa(
-      `${base("fin_lancamento")}?select=data,debito,credito&situacao=eq.efetivado&conta_id=eq.${contaId}` +
+      `${base("fin_lancamento")}?select=data,debito,credito,extrato_id&or=(situacao.eq.efetivado,dividido_em.not.is.null)&conta_id=eq.${contaId}` +
       `&data=gte.${datas[0]}&data=lte.${datas[datas.length - 1]}&limit=20000`, { headers: cab(tok) });
-    (antigos || []).forEach((x) => {
+    (antigos || []).filter((x) => !x.extrato_id).forEach((x) => {
       const k = `${x.data}|${Number(x.debito) || 0}|${Number(x.credito) || 0}`;
       jaLa[k] = (jaLa[k] || 0) + 1;
     });
@@ -1186,6 +1191,76 @@ async function titulo(req, res, tok) {
     if (dividir) { if (Number(base0.debito) > 0) mud.debito = cada; else mud.credito = cada; }
     await supa(`${base("fin_lancamento")}?id=eq.${id}`, { method: "PATCH", headers: cab(tok), body: JSON.stringify(mud) });
     return res.status(201).json({ ok: true, criados: (r || []).length });
+  }
+
+  /* DIVIDIR UMA LINHA DO BANCO EM TÍTULOS (0111). O banco às vezes manda
+   * um movimento só com a soma de vários ("BOLETOS RECEBIDOS 30/10").
+   * Os títulos escolhidos viram efetivados na conta e na data dela, o que
+   * sobrar vira uma linha "resto" com a categoria dela, e a linha do
+   * banco fica cancelada com `dividido_em` (não apagada: a chave do
+   * extrato continua barrando a reentrada). Desfazer devolve tudo. */
+  if (req.method === "POST" && String(req.query.acao || "") === "dividir") {
+    const id = idOuNulo(req.query.id);
+    if (!id) return res.status(400).json({ erro: "id inválido." });
+    const c = await corpoDe(req) || {};
+    const ids = (Array.isArray(c.titulos) ? c.titulos : []).map(idOuNulo).filter(Boolean);
+    if (!ids.length) return res.status(400).json({ erro: "Escolha ao menos um título." });
+    const l = um(await supa(`${base("fin_lancamento")}?select=*,fin_rateio(id)&id=eq.${id}`, { headers: cab(tok) }));
+    if (!l || l.situacao !== "efetivado" || l.extrato_id) return res.status(409).json({ erro: "Só se divide uma linha do banco já lançada." });
+    if ((l.fin_rateio || []).length) return res.status(409).json({ erro: "Esta linha está repartida em categorias. Desfaça a repartição antes de dividir em títulos." });
+    const deb = Number(l.debito) || 0, cred = Number(l.credito) || 0;
+    const total = deb || cred;
+    const ts = await supa(`${base("fin_lancamento")}?select=id,debito,credito&situacao=eq.aberto&id=in.(${ids.join(",")})`, { headers: cab(tok) }) || [];
+    if (ts.length !== ids.length) return res.status(409).json({ erro: "Algum título não está mais em aberto. Recarregue a lista." });
+    if (ts.some((t) => (deb ? !(Number(t.debito) > 0) : !(Number(t.credito) > 0)))) {
+      return res.status(400).json({ erro: deb ? "Esta linha é uma saída: só títulos a pagar." : "Esta linha é uma entrada: só títulos a receber." });
+    }
+    const soma = Math.round(ts.reduce((t, x) => t + (Number(x.debito) || 0) + (Number(x.credito) || 0), 0) * 100) / 100;
+    if (soma > total + 0.005) return res.status(400).json({ erro: `Os títulos somam ${soma.toFixed(2).replace(".", ",")}, mais que a linha do banco (${total.toFixed(2).replace(".", ",")}).` });
+
+    await supa(`${base("fin_lancamento")}?id=in.(${ids.join(",")})&situacao=eq.aberto`, {
+      method: "PATCH", headers: cab(tok),
+      body: JSON.stringify({ situacao: "efetivado", conta_id: l.conta_id, data: l.data, conciliado: true, revisar: false, extrato_id: l.id }),
+    });
+    const resto = Math.round((total - soma) * 100) / 100;
+    if (resto > 0.005) {
+      await supa(base("fin_lancamento"), {
+        method: "POST", headers: cab(tok),
+        body: JSON.stringify({
+          conta_id: l.conta_id, data: l.data, competencia: l.competencia, categoria_id: l.categoria_id,
+          descricao: `${l.descricao || "Movimento do banco"} (resto da divisão)`,
+          debito: deb ? resto : 0, credito: cred ? resto : 0,
+          favorecido_id: l.favorecido_id, estoque_id: l.estoque_id, tipo_negociacao: l.tipo_negociacao,
+          funcionario_id: l.funcionario_id, observacao: l.observacao,
+          situacao: "efetivado", conciliado: true, origem: "divisao", extrato_id: l.id,
+        }),
+      });
+    }
+    await supa(`${base("fin_lancamento")}?id=eq.${l.id}`, {
+      method: "PATCH", headers: cab(tok), body: JSON.stringify({ situacao: "cancelado", dividido_em: new Date().toISOString() }),
+    });
+    return res.status(200).json({ ok: true, titulos: ts.length, resto });
+  }
+  if (req.method === "POST" && String(req.query.acao || "") === "desfazer_divisao") {
+    const id = idOuNulo(req.query.id);
+    if (!id) return res.status(400).json({ erro: "id inválido." });
+    const l = um(await supa(`${base("fin_lancamento")}?select=id,dividido_em&id=eq.${id}`, { headers: cab(tok) }));
+    if (!l || !l.dividido_em) return res.status(409).json({ erro: "Esta linha não está dividida." });
+    const pedacos = await supa(`${base("fin_lancamento")}?select=id,origem,vencimento,data&extrato_id=eq.${id}`, { headers: cab(tok) }) || [];
+    for (const p of pedacos) {
+      if (p.origem === "divisao") {
+        await supa(`${base("fin_lancamento")}?id=eq.${p.id}`, { method: "DELETE", headers: cab(tok) });
+      } else {
+        await supa(`${base("fin_lancamento")}?id=eq.${p.id}`, {
+          method: "PATCH", headers: cab(tok),
+          body: JSON.stringify({ situacao: "aberto", data: p.vencimento || p.data, conciliado: false, extrato_id: null }),
+        });
+      }
+    }
+    await supa(`${base("fin_lancamento")}?id=eq.${id}`, {
+      method: "PATCH", headers: cab(tok), body: JSON.stringify({ situacao: "efetivado", dividido_em: null }),
+    });
+    return res.status(200).json({ ok: true });
   }
 
   if (req.method === "POST" && String(req.query.acao || "") === "baixar") {
