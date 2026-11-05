@@ -18751,6 +18751,7 @@ function FinLancamentos({ comp }) {
                       {l.fin_favorecido ? <b>{l.fin_favorecido.nome}</b> : null}
                       {l.fin_favorecido ? <span className="block text-[10px]" style={{ color: C.mute }}>{l.descricao}</span> : l.descricao}
                       {l.tipo_negociacao && <span className="ml-1 text-[10px]" style={{ color: C.mute }}>· {TIPOS_NEG_ROT[l.tipo_negociacao]}</span>}
+                      <ObsLancamento valor={l.observacao} aoGravar={(t) => mudar(l, { observacao: t })} />
                       {/* Casou com um título em aberto sozinho: fica
                           aceso até alguém conferir. */}
                       {l.revisar && (
@@ -19833,6 +19834,42 @@ function FinDRE({ comp }) {
 const numBR = (v) => Number(String(v == null ? "" : v).replace(/\./g, "").replace(",", ".")) || 0;
 const pctDe = (a, b) => (b ? (a / b) * 100 : 0);
 const fmtF = (v, inteiro) => (inteiro ? String(Math.round(v)) : rs2(v));
+
+/* A OBSERVAÇÃO DO LANÇAMENTO (05/11/2026, o Derek: "colocar OBS no
+ * lançamento"). A coluna `observacao` existe desde a 0025 e só os
+ * títulos a pagar a mostravam. Aqui fica embaixo da descrição: "+ obs"
+ * abre o campo, Enter ou sair do campo grava, Esc desiste. Declarado
+ * fora da tela pelo mesmo motivo do FechPrev — dentro dela, o campo
+ * remontaria a cada tecla. */
+function ObsLancamento({ valor, aoGravar }) {
+  const [editando, setEditando] = useState(false);
+  const [t, setT] = useState(valor || "");
+  useEffect(() => { if (!editando) setT(valor || ""); }, [valor, editando]);
+  const gravar = () => {
+    setEditando(false);
+    if ((t || "").trim() !== (valor || "").trim()) aoGravar((t || "").trim() || null);
+  };
+  if (editando) {
+    return (
+      <textarea autoFocus rows={2} value={t} onChange={(e) => setT(e.target.value)} onBlur={gravar}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); gravar(); }
+          if (e.key === "Escape") { e.preventDefault(); setT(valor || ""); setEditando(false); }
+        }}
+        placeholder="Observação deste lançamento"
+        className="mt-1 block w-full min-w-[180px] rounded border px-1.5 py-1 text-[11px] outline-none"
+        style={{ borderColor: C.roxo, color: C.ink, background: "#fff" }} />
+    );
+  }
+  return valor ? (
+    <button onClick={() => setEditando(true)} className="mt-0.5 block whitespace-pre-wrap text-left text-[11px]"
+      style={{ color: C.ink, background: AMARELO.fundo, borderRadius: 4, padding: "1px 5px" }} title="editar a observação">
+      <b style={{ color: AMARELO.texto }}>OBS</b> {valor}
+    </button>
+  ) : (
+    <button onClick={() => setEditando(true)} className="mt-0.5 block text-[10px]" style={{ color: C.mute }}>+ obs</button>
+  );
+}
 
 /**
  * A célula de previsto. **Declarada aqui fora, não dentro do

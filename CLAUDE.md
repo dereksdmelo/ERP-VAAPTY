@@ -3104,6 +3104,11 @@ corte. O que veio antes continua na lista, sem saldo, e o mês anterior
 de cada extrato colado trocava o saldo inicial da conta pelo de um dia
 qualquer; agora só preenche conta que ainda não tem abertura.
 
+**A linha tem observação** (05/11/2026, o Derek: *"colocar OBS no
+lançamento"*): "+ obs" embaixo da descrição, na coluna `observacao` que
+existe desde a 0025 (`ObsLancamento`). É texto da equipe, não do banco:
+a importação do extrato não a toca.
+
 **E a lista não some mais a cada alteração.** Escolher uma categoria
 recarregava tudo, a tabela virava "Carregando…" e a rolagem voltava ao
 topo — *"página carrega a cada atualização, ruim pq se perde"*. A linha
