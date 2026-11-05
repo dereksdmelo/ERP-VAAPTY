@@ -23675,7 +23675,6 @@ function TelaTransferencias() {
   const [recado, setRecado] = useState({});
   const [q, setQ] = useState("");
   const [escrevendo, setEscrevendo] = useState(null);   // { c, texto, indo, erro }
-  const [lote, setLote] = useState(null);               // { feitos, total, falhas }
   const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
   /* A MENSAGEM PRÉ-PRONTA (28/10/2026, o Derek): sai pelo WhatsApp do
    * adm, não pelo WhatsApp do computador, e leva o link do formulário do
@@ -23745,32 +23744,8 @@ function TelaTransferencias() {
       carregar();
     } catch (e) { setRecado((r) => ({ ...r, [c.id]: e.message })); }
   };
-  /* AS BOAS-VINDAS DE QUEM NUNCA RECEBEU (05/11/2026, o Derek: "não era
-   * pra ter mandado mensagem pro lojista avisando do prazo e enviando o
-   * CRLV?"). A automação só dispara no "Confirmar a venda"; o carro
-   * vendido antes de ela ser ligada nunca recebeu nada. Este botão manda
-   * a mesma mensagem (prazo + link do DUT já com o carro + CRLV, se
-   * anexado) a cada um, UM DE CADA VEZ e com intervalo — rajada pelo
-   * número do adm é o que o WhatsApp bane. Quem já recebeu é pulado. */
-  const semBoasVindas = faltam.filter((c) => c.comprador && c.comprador.telefone && !(c.avisos || []).some((a) => a.tipo === "boas_vindas" && a.estado === "enviado"));
-  const mandarLote = async () => {
-    const alvos = semBoasVindas;
-    if (!alvos.length) return;
-    if (!window.confirm(`Mandar a mensagem de boas-vindas (prazo de 3 meses + link do DUT já com o carro + CRLV, se anexado) para ${alvos.length} lojista${alvos.length === 1 ? "" : "s"}, pelo WhatsApp do adm?\n\nSai uma a cada 8 segundos.`)) return;
-    setLote({ feitos: 0, total: alvos.length, falhas: [] });
-    for (let i = 0; i < alvos.length; i++) {
-      const c = alvos[i];
-      try {
-        const x = await post("boas-vindas", { estoque_id: c.id, auto: true });
-        if (x.boas_vindas && !x.boas_vindas.enviado) throw new Error(x.boas_vindas.erro || "não foi");
-      } catch (e) { setLote((l) => ({ ...l, falhas: l.falhas.concat(`${(c.veiculo && c.veiculo.placa) || "—"}: ${e.message}`) })); }
-      setLote((l) => ({ ...l, feitos: i + 1 }));
-      if (i < alvos.length - 1) await new Promise((r) => setTimeout(r, 8000));
-    }
-    carregar();
-  };
   const AUTOS = [
-    ["lojista_lembretes", "Lembretes de prazo", "faltando 2 meses, 1 mês, 2 semanas, 1 semana e no vencimento"],
+    ["lojista_lembretes", "Lembretes de prazo", "faltando 2 meses, 1 mês, 2 semanas, 1 semana e no vencimento — só para quem recebeu as boas-vindas (as vendas novas)"],
     ["lojista_boas_vindas", "Boas-vindas na venda", "com o link do DUT e o prazo de 3 meses"],
     ["lojista_crlv", "CRLV junto", "o arquivo anexado no item CRLV do check list de documentações"],
   ];
@@ -23794,26 +23769,6 @@ function TelaTransferencias() {
           Só carro com data de venda e lojista com WhatsApp com DDD. {gerente ? "" : "Quem liga e desliga é o gerente."}
         </p>
       </div>
-
-      {d && (semBoasVindas.length > 0 || lote) && (
-        <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg px-3 py-2.5" style={{ background: AMARELO.fundo, border: `1px solid ${AMARELO.borda}` }}>
-          {lote ? (
-            <span className="text-[13px]" style={{ color: AMARELO.texto }}>
-              {lote.feitos < lote.total ? `Mandando… ${lote.feitos} de ${lote.total}` : `Pronto: ${lote.total - lote.falhas.length} enviada(s)`}
-              {!!lote.falhas.length && <span className="block text-[12px]">Não foram: {lote.falhas.join(" · ")}</span>}
-            </span>
-          ) : (
-            <>
-              <span className="text-[13px]" style={{ color: AMARELO.texto }}>
-                <b>{semBoasVindas.length} lojista{semBoasVindas.length === 1 ? " nunca recebeu" : "s nunca receberam"}</b> a mensagem com o prazo, o link do DUT e o CRLV — o carro foi vendido antes de a automação ser ligada.
-              </span>
-              <button onClick={mandarLote} className="ml-auto rounded-md px-3 py-1.5 text-[13px] font-semibold text-white" style={{ background: "#25A244" }}>
-                Mandar para os {semBoasVindas.length}
-              </button>
-            </>
-          )}
-        </div>
-      )}
 
       <div className="mb-3 flex flex-wrap items-center gap-1.5">
         {[["faltam", `Faltam transferir ${faltam.length}`], ["sem_dut", `Lojista não pediu o DUT ${faltam.filter((c) => c.etapa === "sem_dut").length}`],

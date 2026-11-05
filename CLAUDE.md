@@ -5072,11 +5072,12 @@ depois da venda ou o comunicado foi feito: cobrar dele a demora do nosso
 cartório seria injusto. A transferência em si continua marcada à mão —
 ela acontece no Detran, e nada chega até nós.
 
-**As boas-vindas só disparam no "Confirmar a venda"** — o carro vendido
-antes de a automação ser ligada nunca recebeu nada (05/11/2026, o Derek
-achou que tinha ido para todos). A tela conta quem nunca recebeu e manda
-para eles num botão, com confirmação, UM A CADA 8 s (rajada pelo número
-do adm é o que o WhatsApp bane), pulando quem já recebeu. O link do DUT
+**O protocolo vale só para as vendas novas (0114, 05/11/2026, o Derek:
+*"o passado é passado, só quero que os novos sigam o protocolo"*).** As
+boas-vindas saem no "Confirmar a venda" (ficha do carro e Venda para
+lojistas, os dois por `venderEMandar`), e os lembretes de prazo só saem
+para o carro cujas boas-vindas foram enviadas — o vendido antes de a
+automação existir nunca recebe "venceu" de surpresa. O link do DUT
 nas mensagens vai com a placa e o carro (`textoLojista`). A busca das
 Conversas aceita telefone com espaço e traço (procura pelos oito últimos
 dígitos).
