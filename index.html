@@ -4895,9 +4895,9 @@ function ResumoAtendimento({ f, cliente, statusAtual, voltaEm, fotos, irParaCamp
   const pneusOk = (f.pneus || []).filter(Boolean).length;
   const secoes = [
     ["Cliente", [
-      ["Nome", cliente.cliente_nome, "Nome completo do cliente", "T"],
+      ["Nome", cliente.cliente_nome, "Nome completo", "T"],
       ["Telefone", cliente.cliente_telefone, null, null],
-      ["CPF", cliente.cliente_cpf, "CPF do cliente", "T"],
+      ["CPF", cliente.cliente_cpf, "CPF", "T"],
       ["Cidade", [cliente.cliente_cidade, cliente.cliente_uf].filter(Boolean).join(" / "), "Cidade", "T"],
       ["Chegou às", f.chegada, "Chegou às", "A"],
       ["Negociador", f.negociador, "Negociador", "A"],
