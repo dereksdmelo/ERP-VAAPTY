@@ -597,6 +597,12 @@ async function estoque(req, res, tok) {
       mud.semana_venda = d ? (d <= 8 ? 1 : d <= 15 ? 2 : d <= 22 ? 3 : 4) : null;
     }
     if (c.nota_venda !== undefined) mud.nota_venda = texto(c.nota_venda);
+    // O prazo de transferência desta venda (0115): vazio é o padrão de
+    // 3 meses, 0 é imediata.
+    if (c.prazo_transferencia_dias !== undefined) {
+      const n = c.prazo_transferencia_dias === null || c.prazo_transferencia_dias === "" ? null : Math.trunc(Number(c.prazo_transferencia_dias));
+      mud.prazo_transferencia_dias = n == null || !Number.isFinite(n) ? null : Math.max(0, Math.min(365, n));
+    }
     if (c.observacoes !== undefined) mud.observacoes = texto(c.observacoes);
     if (c.comprador_id !== undefined) {
       mud.comprador_id = RX_ID.test(String(c.comprador_id || "")) ? c.comprador_id : null;
@@ -791,7 +797,10 @@ async function comprador(req, res, tok) {
     // representante legal.
     ["nome", "documento", "telefone", "email", "cidade", "rg_ie", "endereco", "bairro", "cep",
      "rep_nome", "rep_cpf", "rep_rg", "rep_endereco", "rep_bairro", "rep_cidade", "rep_uf", "rep_cep",
-     "rep_contato", "rep_email", "rep_especie"].forEach((k) => {
+     "rep_contato", "rep_email", "rep_especie",
+     // O contato do ADM do lojista (0115): para onde vão os avisos de
+     // documentação, quando o lojista indica outro número.
+     "adm_nome", "adm_telefone"].forEach((k) => {
       if (c[k] !== undefined) mud[k] = texto(c[k]);
     });
     if (c.uf !== undefined) mud.uf = texto(c.uf) ? String(c.uf).toUpperCase().slice(0, 2) : null;
@@ -929,6 +938,53 @@ module.exports = async function handler(req, res) {
  *   - a mesma PLACA já está no pátio, por outro atendimento.
  * Falha não derruba o status: o carro continua na fila para o botão.
  */
+/* O previsto do fechamento: quitação, cautelar, débitos linha a linha e
+ * os "entre outros" — a comissão nunca é custo (decisão 23). Um lugar só,
+ * para a entrada ao fechar e para o "puxar do check list". */
+function previstoDoChecklist(cl, estoqueId) {
+  const num = (x) => decimal(x) || 0;
+  const itensDeb = (Array.isArray(cl.debitos_itens) ? cl.debitos_itens : []).filter((x) => x && (x.descricao || num(x.valor)));
+  const extras = (Array.isArray(cl.descontos_extras) ? cl.descontos_extras : []).filter((x) => x && x.custo !== false && num(x.valor));
+  return [
+    { tipo: "quitacao", descricao: "Quitação do financiamento", previsto: cl.valor_quitacao },
+    { tipo: "cautelar", descricao: "Perícia cautelar", previsto: cl.valor_cautelar },
+  ].concat(itensDeb.length
+    ? itensDeb.map((x) => ({ tipo: "debitos", descricao: x.descricao || "Débito do veículo", previsto: x.valor }))
+    : [{ tipo: "debitos", descricao: "Débitos do veículo", previsto: cl.valor_debitos }])
+    .concat(extras.map((x) => ({ tipo: "outro", descricao: x.descricao || "Outro desconto", previsto: x.valor })))
+    .map((x) => ({ estoque_id: estoqueId, tipo: TIPOS_CUSTO.indexOf(x.tipo) >= 0 ? x.tipo : "outro",
+      descricao: texto(x.descricao) || "Custo do fechamento", previsto: num(x.previsto), do_fechamento: true }))
+    .filter((x) => x.previsto > 0);
+}
+
+/* O CHECK LIST PREENCHIDO DEPOIS chega ao estoque (05/11/2026, o Derek:
+ * "por que esses últimos carros estão entrando no estoque com valor
+ * zerado?"). O carro entra ao fechar (decisão 23), muitas vezes antes de
+ * alguém preencher o check list — e entrava com compra vazia e sem custo
+ * nenhum, que a lista mostrava como R$ 0,00. Agora, a cada gravação do
+ * check list, o carro daquele atendimento ainda no pátio recebe o valor
+ * ao cliente (se estiver vazio) e o previsto (se não tiver nenhuma linha
+ * do fechamento). Nada que alguém digitou no estoque é trocado. */
+async function puxarDoChecklist(tok, atendimentoId) {
+  const cab = { headers: cabecalhos(tok) };
+  const e = ((await supa(`${base("estoque")}?select=id,valor_compra,situacao,estoque_custo(id,do_fechamento)` +
+    `&atendimento_id=eq.${atendimentoId}&order=entrou_em.desc&limit=1`, cab)) || [])[0];
+  if (!e) return { ok: true, nada: true };
+  const cl = ((await supa(`${base("checklist")}?select=*&atendimento_id=eq.${atendimentoId}&limit=1`, cab)) || [])[0];
+  if (!cl) return { ok: true, sem_checklist: true };
+  const feito = {};
+  if (!(Number(e.valor_compra) > 0) && decimal(cl.valor_cliente)) {
+    await supa(`${base("estoque")}?id=eq.${e.id}`, { method: "PATCH", headers: cabecalhos(tok), body: JSON.stringify({ valor_compra: decimal(cl.valor_cliente) }) });
+    feito.valor_compra = decimal(cl.valor_cliente);
+  }
+  if (!(e.estoque_custo || []).some((x) => x.do_fechamento)) {
+    const linhas = previstoDoChecklist(cl, e.id);
+    if (linhas.length) { await supa(base("estoque_custo"), { method: "POST", headers: cabecalhos(tok), body: JSON.stringify(linhas) }); feito.custos = linhas.length; }
+  }
+  return { ok: true, ...feito };
+}
+module.exports.puxarDoChecklist = puxarDoChecklist;
+
 async function entrarAoFechar(tok, atendimentoId) {
   const cab = { headers: cabecalhos(tok) };
   const at = ((await supa(`${base("atendimento")}?select=id,valor_fechado,negociador_nome,origem,prospec,` +
@@ -944,18 +1000,6 @@ async function entrarAoFechar(tok, atendimentoId) {
     if ((mesmaPlaca || []).length) return { ok: true, ja: true, id: mesmaPlaca[0].id, mesma_placa: true };
   }
   const cl = (Array.isArray(at.checklist) ? at.checklist[0] : at.checklist) || {};
-  const num = (x) => decimal(x) || 0;
-  const itensDeb = (Array.isArray(cl.debitos_itens) ? cl.debitos_itens : []).filter((x) => x && (x.descricao || num(x.valor)));
-  const extras = (Array.isArray(cl.descontos_extras) ? cl.descontos_extras : []).filter((x) => x && x.custo !== false && num(x.valor));
-  // O mesmo previsto do botão "pôr no estoque": quitação, cautelar,
-  // débitos linha a linha e os "entre outros" — a comissão nunca é custo.
-  const custos = [
-    { tipo: "quitacao", descricao: "Quitação do financiamento", previsto: cl.valor_quitacao },
-    { tipo: "cautelar", descricao: "Perícia cautelar", previsto: cl.valor_cautelar },
-  ].concat(itensDeb.length
-    ? itensDeb.map((x) => ({ tipo: "debitos", descricao: x.descricao || "Débito do veículo", previsto: x.valor }))
-    : [{ tipo: "debitos", descricao: "Débitos do veículo", previsto: cl.valor_debitos }])
-    .concat(extras.map((x) => ({ tipo: "outro", descricao: x.descricao || "Outro desconto", previsto: x.valor })));
   const criado = await supa(base("estoque"), {
     method: "POST", headers: cabecalhos(tok, { Prefer: "return=representation" }),
     body: JSON.stringify({
@@ -967,9 +1011,7 @@ async function entrarAoFechar(tok, atendimentoId) {
   });
   const novo = (Array.isArray(criado) ? criado[0] : criado) || null;
   if (!novo) return { ok: false, motivo: "o banco recusou" };
-  const linhas = custos.map((x) => ({ estoque_id: novo.id, tipo: TIPOS_CUSTO.indexOf(x.tipo) >= 0 ? x.tipo : "outro",
-    descricao: texto(x.descricao) || "Custo do fechamento", previsto: num(x.previsto), do_fechamento: true }))
-    .filter((x) => x.previsto > 0);
+  const linhas = previstoDoChecklist(cl, novo.id);
   if (linhas.length) await supa(base("estoque_custo"), { method: "POST", headers: cabecalhos(tok), body: JSON.stringify(linhas) }).catch(() => {});
   return { ok: true, id: novo.id };
 }

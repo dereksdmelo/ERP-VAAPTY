@@ -801,6 +801,15 @@ async function mandarPeloAdm(req, tok, telefone, conteudo, textoNaConversa) {
  * A lista é do adm e do gerente; os interruptores das automações, do
  * gerente. O prazo é de 3 meses da venda (`regras/lojista.js`). */
 const LOJ = require("../regras/lojista.js");
+/* PARA QUEM VAI O AVISO DE DOCUMENTAÇÃO (0115, 05/11/2026, o Derek:
+ * "alguns lojistas indicam um número do ADM pra mandar as questões de
+ * documentação"). O telefone do lojista é o principal (é com quem se
+ * negocia); havendo contato do ADM no cadastro, DUT, CRLV, prazo e
+ * lembretes vão para ele. Trocar o contato depois passa a valer na
+ * mensagem seguinte. */
+const foneDoc = (comp) => (comp && (String(comp.adm_telefone || "").replace(/\D/g, "").length >= 10 ? comp.adm_telefone : comp.telefone)) || null;
+const nomeDoc = (comp) => (comp && (String(comp.adm_telefone || "").replace(/\D/g, "").length >= 10 && comp.adm_nome ? comp.adm_nome : comp.nome)) || "";
+
 async function transferencia(req, res, tok) {
   const eu = await quemSou(tok);
   if (!eu || !eu.adm) return res.status(403).json({ erro: "As transferências são do administrativo." });
@@ -809,8 +818,8 @@ async function transferencia(req, res, tok) {
 
   if (req.method === "GET") {
     const [carros, cfg] = await Promise.all([
-      fetch(`${RE}?select=id,atendimento_id,vendido_em,entrou_em,semana_venda,transferido_em,transferido_obs,comunicado_em,comunicado_obs,natureza,` +
-        `veiculo(placa,marca_modelo),comprador(id,nome,telefone)&situacao=eq.vendido&natureza=neq.indicacao&order=vendido_em.desc.nullslast,entrou_em.desc&limit=1000`,
+      fetch(`${RE}?select=id,atendimento_id,vendido_em,entrou_em,semana_venda,transferido_em,transferido_obs,comunicado_em,comunicado_obs,natureza,prazo_transferencia_dias,` +
+        `veiculo(placa,marca_modelo),comprador(id,nome,telefone,adm_nome,adm_telefone)&situacao=eq.vendido&natureza=neq.indicacao&order=vendido_em.desc.nullslast,entrou_em.desc&limit=1000`,
         { headers: cabecalhos(tok) }).then((r) => r.json()).catch(() => []),
       fetch(`${URL_BASE}/rest/v1/config_loja?select=lojista_lembretes,lojista_boas_vindas,lojista_crlv&id=eq.1`, { headers: cabecalhos(tok) })
         .then((r) => r.json()).then((x) => (Array.isArray(x) && x[0]) || {}).catch(() => ({})),
@@ -846,7 +855,7 @@ async function transferencia(req, res, tok) {
       carros: lista.map((c) => {
         const base = c.vendido_em || c.entrou_em || null;
         const dut = dutDe(c, base);
-        return { ...c, base, estimada: !c.vendido_em, prazo: base ? LOJ.prazoDe(base) : null,
+        return { ...c, base, estimada: !c.vendido_em, prazo: base ? LOJ.prazoDe(base, c.prazo_transferencia_dias) : null,
           avisos: porAviso[c.id] || [], dut, etapa: etapaDe(c, dut) };
       }),
       config: cfg, eu: { gerente: eu.gerente, adm: eu.adm },
@@ -900,26 +909,51 @@ async function transferencia(req, res, tok) {
     const txt = String(c.texto || "").replace(/\r/g, "").trim();
     if (!txt) return res.status(400).json({ erro: "Escreva a mensagem." });
     if (txt.length > 2000) return res.status(400).json({ erro: "Mensagem longa demais." });
-    const car = ((await fetch(`${RE}?select=id,comprador(telefone)&id=eq.${eid}`, { headers: cabecalhos(tok) })
+    const car = ((await fetch(`${RE}?select=id,comprador(telefone,adm_telefone,adm_nome,nome)&id=eq.${eid}`, { headers: cabecalhos(tok) })
       .then((r) => r.json()).catch(() => [])) || [])[0];
     if (!car) return res.status(404).json({ erro: "Carro não encontrado no estoque." });
-    const r = await mandarPeloAdm(req, tok, car.comprador && car.comprador.telefone, { type: "text", text: { body: txt } }, txt);
+    const r = await mandarPeloAdm(req, tok, foneDoc(car.comprador), { type: "text", text: { body: txt } }, txt);
     return r.enviado ? res.status(200).json(r) : res.status(502).json({ erro: `Não foi: ${r.erro}.` });
+  }
+
+  /* TRANSFERÊNCIA IMEDIATA escolhida DEPOIS da venda (0115) — no
+   * contrato do lojista, por exemplo. Se as boas-vindas já saíram com o
+   * prazo normal, sai agora a mensagem que pede os dados para transferir;
+   * se ainda não saíram, elas mesmas já vão na versão imediata. Uma vez
+   * por carro. */
+  if (acao === "imediata") {
+    const car = ((await fetch(`${RE}?select=id,situacao,vendido_em,prazo_transferencia_dias,veiculo(placa,marca_modelo),comprador(nome,telefone,adm_nome,adm_telefone)&id=eq.${eid}`,
+      { headers: cabecalhos(tok) }).then((r) => r.json()).catch(() => [])) || [])[0];
+    if (!car) return res.status(404).json({ erro: "Carro não encontrado no estoque." });
+    if (car.situacao !== "vendido" || car.prazo_transferencia_dias !== 0) return res.status(200).json({ nada: true });
+    const ja = ((await fetch(`${URL_BASE}/rest/v1/aviso_lojista?select=tipo,texto&estoque_id=eq.${eid}&estado=eq.enviado`, { headers: cabecalhos(tok) })
+      .then((r) => r.json()).catch(() => [])) || []);
+    if (ja.some((a) => a.tipo === "imediata" || (a.tipo === "boas_vindas" && /IMEDIATA/.test(a.texto || "")))) return res.status(200).json({ ja: true });
+    if (!ja.some((a) => a.tipo === "boas_vindas")) return res.status(200).json({ espera_boas_vindas: true });
+    const x = { nome: nomeDoc(car.comprador), carro: car.veiculo && car.veiculo.marca_modelo, placa: car.veiculo && car.veiculo.placa, vendido_em: car.vendido_em, dias: 0 };
+    const txt = LOJ.textoLojista("imediata", x, site);
+    const r = await mandarPeloAdm(req, tok, foneDoc(car.comprador), { type: "text", text: { body: txt } }, txt);
+    await fetch(`${URL_BASE}/rest/v1/aviso_lojista?on_conflict=estoque_id,tipo`, {
+      method: "POST", headers: json(tok, { Prefer: "resolution=merge-duplicates,return=minimal" }),
+      body: JSON.stringify({ estoque_id: eid, tipo: "imediata", estado: r.enviado ? "enviado" : "falhou", telefone: r.fone || null, texto: txt, erro: r.erro || null, wa_id: r.id || null, criado_em: new Date().toISOString() }),
+    }).catch(() => {});
+    return res.status(200).json({ imediata: r });
   }
 
   /* BOAS-VINDAS E CRLV. Do clique de quem confirmou a venda (com
    * `auto`, obedecem aos interruptores e saem uma vez por carro) ou do
    * botão da tela (sem `auto`, mandam de novo se a pessoa pediu). */
   if (acao === "boas-vindas" || acao === "crlv") {
-    const car = ((await fetch(`${RE}?select=id,atendimento_id,vendido_em,veiculo(placa,marca_modelo),comprador(nome,telefone)&id=eq.${eid}`,
+    const car = ((await fetch(`${RE}?select=id,atendimento_id,vendido_em,prazo_transferencia_dias,veiculo(placa,marca_modelo),comprador(nome,telefone,adm_nome,adm_telefone)&id=eq.${eid}`,
       { headers: cabecalhos(tok) }).then((r) => r.json()).catch(() => [])) || [])[0];
     if (!car) return res.status(404).json({ erro: "Carro não encontrado no estoque." });
     const cfg = c.auto ? ((await fetch(`${URL_BASE}/rest/v1/config_loja?select=lojista_boas_vindas,lojista_crlv&id=eq.1`, { headers: cabecalhos(tok) })
       .then((r) => r.json()).catch(() => [])) || [])[0] || {} : { lojista_boas_vindas: true, lojista_crlv: true };
     const jaFoi = c.auto ? ((await fetch(`${URL_BASE}/rest/v1/aviso_lojista?select=tipo&estoque_id=eq.${eid}&estado=eq.enviado`, { headers: cabecalhos(tok) })
       .then((r) => r.json()).catch(() => [])) || []).map((a) => a.tipo) : [];
-    const x = { nome: car.comprador && car.comprador.nome, carro: car.veiculo && car.veiculo.marca_modelo, placa: car.veiculo && car.veiculo.placa, vendido_em: car.vendido_em };
-    const fone = car.comprador && car.comprador.telefone;
+    const x = { nome: nomeDoc(car.comprador), carro: car.veiculo && car.veiculo.marca_modelo, placa: car.veiculo && car.veiculo.placa,
+      vendido_em: car.vendido_em, dias: car.prazo_transferencia_dias };
+    const fone = foneDoc(car.comprador);
     const gravar = (tipo, r, txt) => fetch(`${URL_BASE}/rest/v1/aviso_lojista?on_conflict=estoque_id,tipo`, {
       method: "POST", headers: json(tok, { Prefer: "resolution=merge-duplicates,return=minimal" }),
       body: JSON.stringify({ estoque_id: eid, tipo, estado: r.enviado ? "enviado" : "falhou", telefone: r.fone || null, texto: txt, erro: r.erro || null, wa_id: r.id || null, criado_em: new Date().toISOString() }),
@@ -1149,6 +1183,11 @@ module.exports = async function handler(req, res) {
       });
       const salvo = Array.isArray(r) ? r[0] : r;
       if (!salvo) return res.status(403).json({ erro: "Sem permissão para gravar este check list." });
+      // O carro que já entrou no estoque recebe o que o check list traz
+      // agora (valor ao cliente e o previsto), se ainda estiver vazio.
+      if (VALORES.some((k) => linha[k] !== undefined) || linha.debitos_itens || linha.descontos_extras) {
+        try { await require("./veiculo.js").puxarDoChecklist(tok, aid); } catch (e) {}
+      }
       return res.status(200).json({ ok: true, checklist: salvo });
     }
 

@@ -13,9 +13,18 @@ const dataBR = (iso) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ""));
   return m ? `${m[3]}/${m[2]}/${m[1]}` : "";
 };
-function prazoDe(vendidoEm) {
+/* O PRAZO DE CADA CARRO (0115, 05/11/2026, o Derek: "dependendo da
+ * negociação pode ser obrigatória a transferência… selecionar qual o
+ * prazo, sendo o padrão de 90 dias, mas podendo não ter prazo também, com
+ * transferência imediata"). `dias` vazio é o padrão de sempre — 3 meses,
+ * a mesma conta do Postgres —; um número é a venda + N dias; 0 é
+ * IMEDIATA (o prazo é o próprio dia da venda). */
+function prazoDe(vendidoEm, dias) {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(vendidoEm || ""));
   if (!m) return "";
+  if (dias != null && dias !== "" && Number.isFinite(Number(dias))) {
+    return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + Number(dias))).toISOString().slice(0, 10);
+  }
   // Como o `+ interval '3 months'` do Postgres: dia que não existe no
   // mês de chegada vira o último dia dele (30/11 → 28/02), e não
   // transborda para o mês seguinte, como faria o Date.
@@ -32,24 +41,47 @@ const FALTA = { d2m: "Faltam 2 meses", d1m: "Falta 1 mês", d2s: "Faltam 2 seman
 function textoLojista(tipo, x, site) {
   const ola = primeiroNome(x.nome) ? `Olá, ${primeiroNome(x.nome)}!` : "Olá!";
   const carro = [String(x.carro || "").trim(), x.placa ? `placa ${x.placa}` : ""].filter(Boolean).join(", ");
-  const prazo = dataBR(x.prazo || prazoDe(x.vendido_em));
+  const dias = x.dias == null || x.dias === "" ? null : Number(x.dias);
+  const imediata = dias === 0;
+  const prazo = dataBR(x.prazo || prazoDe(x.vendido_em, dias));
+  const prazoTexto = dias == null ? "de 3 meses" : `de ${dias} dias`;
   const venda = dataBR(x.vendido_em);
   // O link já leva a placa e o carro (05/11/2026): o lojista só confere
   // e preenche o resto — a mesma URL do botão "WhatsApp" da tela.
   const qs = [x.placa ? `placa=${encodeURIComponent(x.placa)}` : "", x.carro ? `veiculo=${encodeURIComponent(String(x.carro).trim())}` : ""].filter(Boolean).join("&");
   const link = site ? `${site}/dut.html${qs ? `?${qs}` : ""}` : "";
+  /* TRANSFERÊNCIA IMEDIATA: a mesma apresentação, mas já pedindo os
+   * dados — "nesses casos já manda a mensagem pedindo os dados pra
+   * transferir direto" (o Derek). */
+  if ((tipo === "boas_vindas" && imediata) || tipo === "imediata") {
+    return [
+      `${ola} Aqui é o administrativo da Vaapty. Obrigado pela compra${carro ? ` do ${carro}` : ""}.`,
+      "Por este número você fala direto com o administrativo: DUT, documentos e qualquer dúvida.",
+      "Neste negócio a transferência é IMEDIATA. Para fazermos já, precisamos dos dados de quem vai ficar com o carro.",
+      link ? `Preencha agora por este link: ${link}` : "Me mande aqui os dados de quem vai ficar com o carro (nome, CPF/CNPJ e endereço).",
+    ].filter(Boolean).join("\n\n");
+  }
+  if (tipo === "imediata_cobra") {
+    return [
+      `${ola} A transferência${carro ? ` do ${carro}` : ""} é imediata, e ainda não recebemos os dados para fazê-la.`,
+      link ? `Consegue preencher hoje por aqui? ${link}` : "Consegue me mandar hoje os dados de quem vai ficar com o carro?",
+      "Se já transferiu, me manda o comprovante que eu atualizo.",
+    ].filter(Boolean).join("\n\n");
+  }
   if (tipo === "boas_vindas") {
     return [
       `${ola} Aqui é o administrativo da Vaapty. Obrigado pela compra${carro ? ` do ${carro}` : ""}.`,
       "Por este número você fala direto com o administrativo: DUT, documentos e qualquer dúvida.",
       link ? `Quando quiser pedir o preenchimento do DUT, é por aqui: ${link}` : "",
-      prazo ? `O prazo para a transferência é de 3 meses, até ${prazo}.` : "O prazo para a transferência é de 3 meses.",
+      prazo ? `O prazo para a transferência é ${prazoTexto}, até ${prazo}.` : `O prazo para a transferência é ${prazoTexto}.`,
     ].filter(Boolean).join("\n\n");
   }
   if (tipo === "crlv") return `CRLV${carro ? ` do ${carro}` : ""}.`;
   if (tipo === "venceu") {
     return [
-      `${ola} O prazo de 3 meses para a transferência${carro ? ` do ${carro}` : ""}${venda ? `, comprado em ${venda},` : ""} venceu${prazo ? ` em ${prazo}` : ""}.`,
+      imediata
+        ? `${ola} A transferência${carro ? ` do ${carro}` : ""}${venda ? `, comprado em ${venda},` : ""} era imediata e ainda não foi feita.`
+        : `${ola} O prazo ${prazoTexto} para a transferência${carro ? ` do ${carro}` : ""}${venda ? `, comprado em ${venda},` : ""} venceu${prazo ? ` em ${prazo}` : ""}.`,
       "Precisamos que a transferência seja feita o quanto antes. Se já transferiu, me manda o comprovante por aqui que eu atualizo.",
       link ? `Se precisar do DUT, é por aqui: ${link}` : "",
     ].filter(Boolean).join("\n\n");

@@ -14415,7 +14415,10 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
                 {dias == null ? "—" : `${dias}d`}
               </span>
               <span className="w-[92px] shrink-0 text-right text-[13px]" style={{ fontFamily: F.mono, fontWeight: 700 }}>
-                {brl(c.atual)}
+                {/* Sem valor de compra é check list não preenchido, não carro
+                    de graça: R$ 0,00 ali enganava (05/11/2026). */}
+                {Number(e.valor_compra) > 0 || c.atual > 0 ? brl(c.atual)
+                  : <span className="text-[11px] font-semibold" style={{ color: C.laranja, fontFamily: F.body }} title="Preencha o check list do negócio — o valor vem de lá">sem valor</span>}
               </span>
               <span className="hidden w-[108px] shrink-0 text-right text-[11px] sm:block">
                 {!!c.aberto && <span style={{ color: AMARELO.texto }}>{c.aberto} em aberto</span>}
