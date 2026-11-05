@@ -4161,9 +4161,10 @@ não é a ordem em que alguém procura.
 ```
           Meu dia
 PRÉ-VENDAS    Pré-vendas · Conversas · Leads de indicação
-NEGOCIAÇÃO    Atendimentos · Extrato · Estoque · Venda para lojistas
+NEGOCIAÇÃO    Atendimentos · Fila da vez · Extrato
 GESTÃO        Painel do gestor · Painel do mês · Rentabilidade ·
-              Equipe e metas · Financeiro
+              Estoque · Venda para lojistas · Equipe e metas
+              (Estoque e Venda para lojistas mudaram para cá em 05/11/2026)
 ADMINISTRATIVO  Administrativo · Números do WhatsApp
 ```
 

@@ -25550,10 +25550,6 @@ function destinosPara(perfil) {
     // Ferramenta, não destino de todo dia. Todo mundo vê — é uma
     // calculadora, não mostra dado de cliente nenhum.
     { id: "extrato", rot: "Extrato de ofertas", curto: "Extrato", area: "negociacao" },
-    { id: "estoque", rot: "Estoque", curto: "Estoque", area: "negociacao" },
-    // Margem e custo por carro é conversa de gestão, não de quem está
-    // com o cliente na mesa.
-    gestao ? { id: "lojistas", rot: "Venda para lojistas", curto: "Lojistas", area: "negociacao" } : null,
 
     // ---- medir ----
     // O painel do gestor não existe para quem não é gerente, e não por
@@ -25561,6 +25557,12 @@ function destinosPara(perfil) {
     gerente ? { id: "gestor", rot: "Painel do gestor", curto: "Gestor", area: "gestao" } : null,
     { id: "painel", rot: "Painel do mês", curto: "Painel", area: "gestao" },
     gestao ? { id: "rentabilidade", rot: "Rentabilidade", curto: "Rentab.", area: "gestao" } : null,
+    // O carro depois de comprado mora em Gestão desde 05/11/2026 (o
+    // Derek: "estoque e venda pra lojistas coloca na gestão"): pátio,
+    // custo e margem são conversa de gestão, não de quem está com o
+    // cliente na mesa.
+    { id: "estoque", rot: "Estoque", curto: "Estoque", area: "gestao" },
+    gestao ? { id: "lojistas", rot: "Venda para lojistas", curto: "Lojistas", area: "gestao" } : null,
     gerente ? { id: "gestao", rot: "Equipe", curto: "Equipe", area: "gestao" } : null,
     // O combinado pronto para mais de uma pessoa (0082). A RLS é do
     // financeiro e do gerente, como a ficha.
