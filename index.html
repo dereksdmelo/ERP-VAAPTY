@@ -26695,6 +26695,82 @@ function FeedbackDoGestor({ atendimentoId, revisao, aoSalvar }) {
  * decide. Para quem não é gerente, a consulta volta com a própria
  * negociação e mais nada.
  */
+/* O CARTÃO DE UMA MESA no Painel do gestor (05/11/2026, o Derek: "tá
+ * muito confuso esse painel"). Eram duas pílulas cinza e roxa lado a lado
+ * (status e etapa, que ele já tinha lido uma pela outra), rodadas em
+ * código ("1ª R$ 4.500 → R$ 8.200") e um "agora" que ninguém sabia de
+ * quê. Agora são três faixas rotuladas, sempre no mesmo lugar:
+ *   1. quem e o quê — cliente, carro, negociador, há quanto tempo na loja,
+ *      e o STATUS com a cor da lista de Atendimentos;
+ *   2. onde está no APONTE — as oito etapas em trilha, feitas em verde e
+ *      a atual em roxo, com o nome dela escrito;
+ *   3. os números — FIPE, o que o cliente quer, a última rodada por
+ *      extenso (ofertamos / cliente pediu) e o fechamento. */
+function CartaoMesa({ n, emFoco, aoClicar }) {
+  const a = n.atendimento || {};
+  const v = (a.veiculo || [])[0] || {};
+  const rodadas = Array.isArray(n.rodadas) ? n.rodadas : [];
+  const ultima = rodadas[rodadas.length - 1];
+  const feitas = Array.isArray(n.etapas_ok) ? n.etapas_ok : [];
+  const atual = ETAPAS.find((e) => e.id === n.etapa);
+  const desde = a.chegada_em || a.criado_em;
+  const pretensao = a.pretensao || numeroBR(n.pretensao) || null;
+  const cor = corStatus(a.status);
+  const parado = Date.now() - Date.parse(n.atualizado_em) > 15 * 60000;
+  const rot = (t) => <span className="text-[10px] font-semibold uppercase tracking-[0.08em]" style={{ color: ROTULO_COR }}>{t}</span>;
+  return (
+    <button onClick={aoClicar} className="w-full rounded-xl px-4 py-3 text-left"
+      style={{ background: C.paper, border: `1.5px solid ${emFoco ? C.roxo : C.line}` }}>
+      {/* 1. quem e o quê */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="text-[16px] font-bold">{a.cliente_nome || "Sem nome"}</span>
+        <span className="text-[13px]" style={{ color: C.ink }}>{v.marca_modelo || a.carro_descricao || "carro não informado"}{v.placa ? ` · ${v.placa}` : ""}</span>
+        <span className="ml-auto flex items-center gap-2">
+          {!!n.nao_lidas && <span className="rounded-full px-2 py-0.5 text-[11px] font-bold text-white" style={{ background: C.laranja }} title="recados não lidos">{n.nao_lidas} recado{n.nao_lidas > 1 ? "s" : ""}</span>}
+          <span className="rounded-full px-2.5 py-0.5 text-[11.5px] font-bold text-white" style={{ background: cor }} title="Status do atendimento">{rotuloStatus(a.status)}</span>
+        </span>
+      </div>
+      <div className="mt-0.5 flex flex-wrap items-center gap-x-4 gap-y-0.5 text-[12.5px]" style={{ color: "#57515F" }}>
+        <span>Negociador <b style={{ color: C.ink }}>{a.negociador_nome || "—"}</b></span>
+        {desde && <span>Na loja desde <b style={{ color: C.ink }}>{horaSP(desde)}</b> ({hamin(desde).replace("há ", "")})</span>}
+        {n.escuta_ok && <span style={{ color: C.verde, fontWeight: 600 }}>● escuta ligada</span>}
+        <span style={{ color: parado ? AMARELO.texto : "#57515F" }} title="Última vez que o aparelho do negociador mandou dados">
+          {parado ? "aparelho parado — " : "aparelho atualizado "}{hamin(n.atualizado_em)}
+        </span>
+      </div>
+
+      {/* 2. onde está no APONTE */}
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        {rot("Etapa")}
+        <span className="flex items-center gap-1">
+          {ETAPAS.map((e) => {
+            const ok = feitas.indexOf(e.id) >= 0, agora = e.id === n.etapa;
+            return (
+              <span key={e.id} title={e.nome} className="grid h-6 w-6 place-items-center rounded-full text-[10.5px] font-bold"
+                style={{ background: agora ? C.roxo : ok ? C.verde : C.bg, color: agora || ok ? "#fff" : "#9B94A6",
+                         border: `1px solid ${agora ? C.roxo : ok ? C.verde : C.line}` }}>{ok && !agora ? "✓" : e.letra}</span>
+            );
+          })}
+        </span>
+        <span className="text-[13px] font-semibold" style={{ color: C.roxo }}>{atual ? atual.nome : "—"}</span>
+      </div>
+
+      {/* 3. os números */}
+      <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1 text-[13px]">
+        {rot("Valores")}
+        <span>FIPE <b>{v.fipe_valor ? brl(v.fipe_valor) : "—"}</b></span>
+        <span>Cliente quer <b>{pretensao ? brl(pretensao) : "—"}</b></span>
+        {ultima ? (
+          <span>{rodadas.length}ª rodada: ofertamos <b>{brl(ultima.impresso)}</b>
+            {ultima.contra ? <> · cliente pediu <b style={{ color: C.laranja }}>{brl(ultima.contra)}</b></> : " · sem resposta do cliente ainda"}</span>
+        ) : <span style={{ color: n.etapa === "N" ? AMARELO.texto : C.mute }}>{n.etapa === "N" ? "na negociação, sem extrato impresso" : "ainda sem rodada"}</span>}
+        {n.valor_fechado ? <span className="rounded-md px-2 py-0.5 font-bold" style={{ background: "#E8F3EE", color: C.verde }}>fechou {brl(n.valor_fechado)}</span> : null}
+        {n.objecao && !n.valor_fechado ? <span style={{ color: "#57515F" }}>objeção: <b style={{ color: C.ink }}>{n.objecao}</b></span> : null}
+      </div>
+    </button>
+  );
+}
+
 function PainelGestor({ perfil, comp }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
@@ -26791,7 +26867,7 @@ function PainelGestor({ perfil, comp }) {
     <div>
       <Cabecalho titulo="Painel do gestor"
         sub={aba === "agora"
-          ? "Quem está na loja sendo atendido agora — etapa, rodadas e a conversa."
+          ? "Quem está sendo atendido agora. Clique numa mesa para ver a conversa e mandar recado."
           : `Todo atendimento passa por aqui: o gestor revisa e devolve um retorno. ${rotuloMes(comp || competenciaDe(hojeEmSP()))}.`} />
 
       <div className="mb-3 flex flex-wrap items-center gap-1.5">
@@ -26813,7 +26889,8 @@ function PainelGestor({ perfil, comp }) {
         ))}
         {aba === "agora" && (
           <span className="ml-2 flex gap-1.5 text-[13px]">
-            {[[3, "Agora"], [6, "6 h"], [12, "12 h"]].map(([n, r]) => (
+            <span className="self-center text-[11px]" style={{ color: C.mute }}>mexidos nas últimas</span>
+            {[[3, "3 h"], [6, "6 h"], [12, "12 h"]].map(([n, r]) => (
               <button key={n} onClick={() => setHoras(n)} className="rounded-full px-3 py-1 font-semibold"
                 style={{ background: horas === n ? C.roxoFraco : "transparent", color: horas === n ? C.roxo : C.mute }}>{r}</button>
             ))}
@@ -26842,75 +26919,10 @@ function PainelGestor({ perfil, comp }) {
 
       <div className="grid gap-3 lg:grid-cols-[1fr_360px]">
         <div className="space-y-2">
-          {aba === "agora" && emAndamento.map((n) => {
-            const a = n.atendimento || {};
-            const v = (a.veiculo || [])[0] || {};
-            const rodadas = Array.isArray(n.rodadas) ? n.rodadas : [];
-            const ultima = rodadas[rodadas.length - 1];
-            const emFoco = n.atendimento_id === foco;
-            return (
-              <button key={n.atendimento_id} onClick={() => setFoco(emFoco ? null : n.atendimento_id)}
-                className="w-full rounded-xl px-3.5 py-3 text-left"
-                style={{ background: C.paper, border: `1px solid ${emFoco ? C.roxo : C.line}` }}>
-                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                  <span className="text-[15px] font-semibold">{a.cliente_nome || "Sem nome"}</span>
-                  <span className="text-[12px]" style={{ color: C.mute }}>
-                    {v.marca_modelo || a.carro_descricao || "—"}{v.placa ? ` · ${v.placa}` : ""}
-                  </span>
-                  {/* Etapa e status são coisas diferentes, e o Derek
-                      leu uma pela outra: a etapa é onde ele está no
-                      APONTE, o status é o que decide se o negócio saiu
-                      desta lista. Os dois aparecem, rotulados. */}
-                  <span className="ml-auto rounded-full px-2.5 py-0.5 text-[11px]"
-                    style={{ background: C.bg, color: C.mute }}>
-                    {rotuloStatus(a.status)}
-                  </span>
-                  <span className="rounded-full px-2.5 py-0.5 text-[11px] font-bold"
-                    style={{ background: C.roxoFraco, color: C.roxo }}>
-                    etapa {ROT_ETAPA[n.etapa] || n.etapa || "—"}
-                  </span>
-                  {!!n.nao_lidas && (
-                    <span className="rounded-full px-2 py-0.5 text-[11px] font-bold" style={{ background: C.laranja, color: "#fff" }}>
-                      {n.nao_lidas}
-                    </span>
-                  )}
-                </div>
-
-                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]" style={{ color: C.mute }}>
-                  <span>{a.negociador_nome || "sem negociador"}</span>
-                  <span style={{ fontFamily: F.mono }}>{hamin(n.atualizado_em)}</span>
-                  {n.escuta_ok && (
-                    <span style={{ color: C.verde, fontWeight: 600 }}>
-                      escuta ligada{n.transcricao ? ` · ${Math.round(String(n.transcricao).length / 5)} palavras` : ""}
-                    </span>
-                  )}
-                  {!!v.fipe_valor && <span style={{ fontFamily: F.mono }}>FIPE {brl(v.fipe_valor)}</span>}
-                </div>
-
-                {/* As rodadas, na linha: é o que o gestor quer ver de
-                    relance — quanto saiu e o que o cliente devolveu. */}
-                {!!rodadas.length && (
-                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                    {rodadas.map((r, i) => (
-                      <span key={i} className="rounded-lg px-2 py-0.5 text-[11px]" style={{ background: C.bg, fontFamily: F.mono }}>
-                        {i + 1}ª {brl(r.impresso)}
-                        {r.contra ? <span style={{ color: C.laranja }}> → {brl(r.contra)}</span> : null}
-                      </span>
-                    ))}
-                    {n.valor_fechado ? (
-                      <span className="rounded-lg px-2 py-0.5 text-[11px] font-bold"
-                        style={{ background: "#E8F3EE", color: C.verde, fontFamily: F.mono }}>
-                        fechou {brl(n.valor_fechado)}
-                      </span>
-                    ) : null}
-                  </div>
-                )}
-                {!rodadas.length && ultima === undefined && n.etapa === "N" && (
-                  <p className="mt-1.5 text-[11px]" style={{ color: AMARELO.texto }}>Na negociação e ainda sem extrato impresso.</p>
-                )}
-              </button>
-            );
-          })}
+          {aba === "agora" && emAndamento.map((n) => (
+            <CartaoMesa key={n.atendimento_id} n={n} emFoco={n.atendimento_id === foco}
+              aoClicar={() => setFoco(n.atendimento_id === foco ? null : n.atendimento_id)} />
+          ))}
 
           {/* ---- a fila de revisão ---- */}
           {aba === "revisar" && filaOrdenada.map((x, i) => {

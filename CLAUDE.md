@@ -1719,6 +1719,15 @@ verdade num celular** — se o `SpeechRecognition` e o `getUserMedia`
 dividem o aparelho. No Android costumam; no iPhone é instável, e nesse
 caso vira escolha entre transcrever e ouvir.
 
+**O cartão do painel virou três faixas rotuladas** (05/11/2026, o Derek:
+*"tá muito confuso esse painel do gestor"*; `CartaoMesa`): quem e o quê
+(cliente, carro, negociador, desde quando na loja, status na cor da lista
+de Atendimentos), a trilha das oito etapas (feitas em verde, a atual em
+roxo e escrita), e os valores por extenso (FIPE, cliente quer, "Nª
+rodada: ofertamos X · cliente pediu Y", fechou). **E a lista deixou de
+trazer a transcrição e a ficha** de cada mesa a cada 20 s — era o maior
+gasto de tráfego do Supabase; elas vêm só ao abrir o cartão.
+
 **O texto sim, e já estava quase pronto.** A transcrição sobe do
 aparelho do negociador a cada cinco segundos desde a 0050; o que
 faltava era o painel seguir. Quando o gestor abre um cartão na aba

@@ -2202,8 +2202,15 @@ async function viva(req, res, tok) {
     // em lista de arquivo, que é o que ele existe para não ser.
     const horas = Math.min(12, Math.max(1, Number(req.query.horas) || 3));
     const desde = new Date(Date.now() - horas * 3600000).toISOString();
+    /* SÓ O QUE O CARTÃO MOSTRA (05/11/2026). Era `select=*`: a
+     * transcrição inteira (até 100 KB por conversa) e a ficha de cada
+     * mesa, de 20 em 20 s, em cada tela de gestor aberta — o maior gasto
+     * de tráfego do Supabase. A conversa e a ficha vêm quando o gestor
+     * ABRE um cartão (`?recurso=viva&atendimento_id=`). */
     const linhas = await banco(
-      `${REST_V}?select=*&atualizado_em=gte.${desde}&order=atualizado_em.desc&limit=200`,
+      `${REST_V}?select=atendimento_id,etapa,etapas_ok,rodadas,valor_fechado,objecao,escuta_ok,escuta_em,escuta_versao,atualizado_em,` +
+      `pretensao:ficha->>pretensao,chegada:ficha->>chegada` +
+      `&atualizado_em=gte.${desde}&order=atualizado_em.desc&limit=200`,
       { headers: cabecalhos(tok) }) || [];
 
     if (!linhas.length) return res.status(200).json({ negociacoes: [] });
@@ -2212,7 +2219,7 @@ async function viva(req, res, tok) {
     // lidas noutra. Duas idas ao banco em vez de duas por linha.
     const ids = linhas.map((x) => x.atendimento_id);
     const [ats, recados] = await Promise.all([
-      banco(`${REST("atendimento")}?select=id,cliente_nome,cliente_telefone,carro_descricao,status,negociador_nome,data,` +
+      banco(`${REST("atendimento")}?select=id,cliente_nome,cliente_telefone,carro_descricao,status,negociador_nome,data,pretensao,chegada_em,criado_em,atendimento_fim_em,` +
             `veiculo(placa,marca_modelo,fipe_valor,valor_por)&id=in.(${ids.join(",")})`, { headers: cabecalhos(tok) }),
       banco(`${REST("mensagem")}?select=atendimento_id,de,criado_em,lida_em&atendimento_id=in.(${ids.join(",")})` +
             `&order=criado_em.desc&limit=500`, { headers: cabecalhos(tok) }),
