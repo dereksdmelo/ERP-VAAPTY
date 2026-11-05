@@ -158,8 +158,12 @@ const TIPOS_DOC = {
   "image/webp": "webp",
 };
 
+// Os tipos que a tela oferece (`ROTULOS_ATENDIMENTO`). As CNHs separadas e
+// o dossiê entraram na tela em 03/11/2026 e só aqui em 05/11 — até lá
+// caíam como "Outro". **Quem acrescentar tipo na tela acrescenta aqui.**
 const ROTULOS = [
-  "CRLV", "CNH", "Identidade", "Comprovante de residência",
+  "CRLV", "CNH", "CNH do contratante", "CNH do proprietário", "CNH (contratante e proprietário)",
+  "Identidade", "Comprovante de residência", "Dossiê do Detran",
   "Laudo cautelar", "Comprovante de pagamento", "Contrato assinado", "Outro",
 ];
 
@@ -915,8 +919,13 @@ async function anexos(req, res, tok) {
       throw e;
     }
 
+    // CRLV anexado depois da venda: vai para o lojista na hora (05/11/2026).
+    let crlv = null;
+    if (/crlv/i.test(String((linha && linha.rotulo) || ""))) {
+      try { crlv = await require("./checklist.js").crlvPendente(req, tok, aid); } catch (e) {}
+    }
     const urls = await assinarDoc([caminho]);
-    return res.status(201).json({ ok: true, anexo: { ...linha, url: urls[caminho] || null } });
+    return res.status(201).json({ ok: true, anexo: { ...linha, url: urls[caminho] || null }, crlv });
   }
 
   if (req.method === "DELETE") {
@@ -947,7 +956,11 @@ async function anexos(req, res, tok) {
       method: "PATCH", headers: json(tok, { Prefer: "return=representation" }), body: JSON.stringify({ rotulo }),
     });
     if (!Array.isArray(r) || !r.length) return res.status(404).json({ erro: "Anexo não encontrado." });
-    return res.status(200).json({ ok: true, anexo: r[0] });
+    let crlv = null;
+    if (/crlv/i.test(rotulo) && r[0].atendimento_id) {
+      try { crlv = await require("./checklist.js").crlvPendente(req, tok, r[0].atendimento_id); } catch (e) {}
+    }
+    return res.status(200).json({ ok: true, anexo: r[0], crlv });
   }
 
   res.setHeader("Allow", "GET, POST, PATCH, DELETE");

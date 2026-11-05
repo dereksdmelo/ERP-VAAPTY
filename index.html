@@ -23113,6 +23113,39 @@ function ContatoAdmLojista({ comprador, aoSalvar }) {
   );
 }
 
+/* O CRLV NA HORA DA VENDA (05/11/2026, o Derek: "muuuito importante…
+ * logo que fecha a venda manda o CRLV no WhatsApp do lojista"). Ele vai
+ * junto das boas-vindas se estiver anexado no atendimento do carro; aqui
+ * a venda mostra se está, e deixa anexar antes de confirmar. Anexado
+ * depois, o servidor manda sozinho (`crlvPendente`). */
+function CrlvDaVenda({ atendimentoId }) {
+  const [tem, setTem] = useState(null);
+  const [indo, setIndo] = useState(false);
+  const [erro, setErro] = useState("");
+  const ler = () => listarAnexos(atendimentoId).then((l) => setTem((l || []).some((a) => /crlv/i.test(a.rotulo || "")))).catch(() => setTem(false));
+  useEffect(() => { if (atendimentoId) ler(); }, [atendimentoId]);
+  if (!atendimentoId) {
+    return <p className="rounded-lg px-2.5 py-2 text-[12px]" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>Este carro não tem atendimento ligado: o CRLV não tem onde estar anexado e não vai ao lojista.</p>;
+  }
+  if (tem === null) return <p className="text-[12px]" style={{ color: C.mute }}>Conferindo o CRLV…</p>;
+  if (tem) return <p className="rounded-lg px-2.5 py-2 text-[12.5px] font-semibold" style={{ background: "#E8F3EE", color: C.verde }}>✓ CRLV anexado — vai para o lojista pelo WhatsApp do adm junto das boas-vindas.</p>;
+  return (
+    <div className="rounded-lg px-2.5 py-2" style={{ background: "#FDECE6", border: `1px solid ${C.laranja}` }}>
+      <div className="text-[12.5px] font-semibold" style={{ color: C.laranja }}>O CRLV não está anexado — sem ele, o lojista não recebe o documento.</div>
+      <label className="mt-1.5 inline-block cursor-pointer rounded-md px-3 py-1.5 text-[12.5px] font-semibold text-white" style={{ background: C.laranja }}>
+        {indo ? "anexando…" : "Anexar o CRLV agora"}
+        <input type="file" accept="application/pdf,image/*" className="hidden" disabled={indo}
+          onChange={async (ev) => { const f = ev.target.files && ev.target.files[0]; ev.target.value = ""; if (!f) return;
+            setIndo(true); setErro("");
+            try { await enviarAnexo(atendimentoId, f, "CRLV"); await ler(); } catch (x) { setErro(x.message); }
+            setIndo(false); }} />
+      </label>
+      <span className="ml-2 text-[11.5px]" style={{ color: C.mute }}>Se anexar depois da venda, ele vai sozinho na hora.</span>
+      {erro && <p className="mt-1 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+    </div>
+  );
+}
+
 function VenderCarro({ e, aoVender, aoFechar }) {
   const [busca, setBusca] = useState("");
   const [achados, setAchados] = useState([]);
@@ -23249,6 +23282,7 @@ function VenderCarro({ e, aoVender, aoFechar }) {
             <div className="mt-1"><PrazoTransferenciaSel valor={prazoDias} aoMudar={setPrazoDias} /></div>
           </div>
           <ContatoAdmLojista comprador={escolhido} aoSalvar={(c) => setEscolhido({ ...escolhido, ...c })} />
+          <CrlvDaVenda atendimentoId={e.atendimento_id} />
         </div>
       )}
 
@@ -23775,7 +23809,7 @@ const quando = (t) => (t ? new Date(t).toLocaleString("pt-BR", { timeZone: "Amer
  * a data estimada pela compra, ele encheria o vermelho de carro que
  * provavelmente já foi transferido. A automação só fala de data que
  * existe (o banco garante, em `lojista_aviso_proximo`). */
-const ROT_AVISO_LOJ = { boas_vindas: "boas-vindas", crlv: "CRLV", d2m: "faltam 2 meses", d1m: "falta 1 mês", d2s: "faltam 2 semanas", d1s: "falta 1 semana", venceu: "venceu" };
+const ROT_AVISO_LOJ = { boas_vindas: "boas-vindas", crlv: "CRLV", imediata: "pedido dos dados (imediata)", imediata_cobra: "cobrança (imediata)", d2m: "faltam 2 meses", d1m: "falta 1 mês", d2s: "faltam 2 semanas", d1s: "falta 1 semana", venceu: "venceu" };
 // A etapa de cada carro vendido, calculada no servidor (05/11/2026).
 const ETAPA_TRANSF = {
   sem_dut:         { rot: "lojista não pediu o DUT", cor: "#C62828" },
@@ -24006,6 +24040,9 @@ function TelaTransferencias() {
                     </td>
                     <td className="px-2.5 py-2 text-[12px]" style={{ color: C.mute }}>
                       {ultimo ? <>{ROT_AVISO_LOJ[ultimo.tipo] || ultimo.tipo} · {diaBR(ultimo.criado_em)}{ultimo.estado === "falhou" && <span style={{ color: C.laranja }}> (falhou)</span>}</> : "—"}
+                      {(c.avisos || []).some((a) => a.tipo === "boas_vindas" && a.estado === "enviado") && !(c.avisos || []).some((a) => a.tipo === "crlv" && a.estado === "enviado") && (
+                        <div className="text-[11px] font-semibold" style={{ color: C.laranja }} title="Anexe o CRLV no atendimento do carro: ele sai sozinho para o lojista">CRLV não foi — falta anexar</div>
+                      )}
                       {recado[c.id] && <div style={{ color: C.ink }}>{recado[c.id]}</div>}
                     </td>
                     <td className="px-2.5 py-2">

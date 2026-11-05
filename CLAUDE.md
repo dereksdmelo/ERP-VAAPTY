@@ -5094,6 +5094,17 @@ lembretes de 1 e 2 meses só saem em prazo que tem esse tamanho. **O
 contrato da casa não ganhou cláusula de prazo** — texto jurídico não muda
 sem o jurídico (decisão 7); o prazo é do processo, não do papel.
 
+**O CRLV vai ao lojista assim que fecha** (05/11/2026, o Derek: *"muuuito
+importante"*). Na venda ele sai junto das boas-vindas se estiver anexado
+no atendimento do carro — e o "Confirmar a venda" mostra se está, com
+"Anexar o CRLV agora" (`CrlvDaVenda`). Anexado depois da venda (pela
+negociação ou pelo item CRLV do check list), sai sozinho na hora
+(`crlvPendente`, chamado pelo `api/foto.js` ao anexar ou trocar o tipo),
+uma vez por carro. Transferências marca "CRLV não foi — falta anexar".
+**A lista de tipos de anexo do servidor (`ROTULOS`) não tinha as CNHs
+separadas nem o dossiê** que a tela oferecia desde 03/11: caíam como
+"Outro". Quem acrescentar tipo na tela acrescenta lá.
+
 **O contato do ADM do lojista (0115):** `comprador.adm_nome` e
 `adm_telefone`. O telefone de sempre continua o principal (é com quem se
 negocia); com o do ADM preenchido, boas-vindas, CRLV, prazo, lembretes e a

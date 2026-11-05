@@ -1197,3 +1197,37 @@ module.exports = async function handler(req, res) {
     return res.status(e.status || 500).json({ erro: String(e.message) || "Falha no check list." });
   }
 };
+
+/* O CRLV QUE CHEGA DEPOIS DA VENDA (05/11/2026, o Derek: "muuuito
+ * importante… logo que fecha a venda manda o CRLV no WhatsApp do
+ * lojista"). Na venda ele vai junto das boas-vindas; mas, se ainda não
+ * estava anexado, nada mais o mandava. Agora, quando um anexo de CRLV
+ * entra num atendimento cujo carro já foi vendido (e cujo lojista já
+ * recebeu as boas-vindas), ele sai na hora pelo WhatsApp do adm — uma vez
+ * por carro, com o interruptor "CRLV junto" ligado. Chamado pelo
+ * `api/foto.js` ao anexar ou trocar o tipo de um anexo. */
+async function crlvPendente(req, tok, atendimentoId) {
+  if (!RX_UUID.test(String(atendimentoId || ""))) return null;
+  const cfg = ((await fetch(`${URL_BASE}/rest/v1/config_loja?select=lojista_crlv&id=eq.1`, { headers: cabecalhos(tok) })
+    .then((r) => r.json()).catch(() => [])) || [])[0] || {};
+  if (!cfg.lojista_crlv) return { pulado: "CRLV junto desligado" };
+  const car = ((await fetch(`${URL_BASE}/rest/v1/estoque?select=id,atendimento_id,vendido_em,prazo_transferencia_dias,natureza,` +
+    `veiculo(placa,marca_modelo),comprador(nome,telefone,adm_nome,adm_telefone)&atendimento_id=eq.${atendimentoId}&situacao=eq.vendido&limit=1`,
+    { headers: cabecalhos(tok) }).then((r) => r.json()).catch(() => [])) || [])[0];
+  if (!car || car.natureza === "indicacao") return null;
+  const avisos = ((await fetch(`${URL_BASE}/rest/v1/aviso_lojista?select=tipo&estoque_id=eq.${car.id}&estado=eq.enviado`, { headers: cabecalhos(tok) })
+    .then((r) => r.json()).catch(() => [])) || []).map((a) => a.tipo);
+  if (avisos.indexOf("crlv") >= 0 || avisos.indexOf("boas_vindas") < 0) return null;
+  const arq = await require("./foto.js").crlvParaLojista(tok, atendimentoId);
+  if (!arq) return null;
+  const x = { nome: nomeDoc(car.comprador), carro: car.veiculo && car.veiculo.marca_modelo, placa: car.veiculo && car.veiculo.placa, vendido_em: car.vendido_em };
+  const leg = LOJ.textoLojista("crlv", x, "");
+  const r = await mandarPeloAdm(req, tok, foneDoc(car.comprador),
+    { type: "document", document: { link: arq.url, filename: `CRLV ${x.placa || ""}.pdf`.replace(/\s+\.pdf$/, ".pdf"), mime_type: arq.tipo, caption: leg } }, leg);
+  await fetch(`${URL_BASE}/rest/v1/aviso_lojista?on_conflict=estoque_id,tipo`, {
+    method: "POST", headers: json(tok, { Prefer: "resolution=merge-duplicates,return=minimal" }),
+    body: JSON.stringify({ estoque_id: car.id, tipo: "crlv", estado: r.enviado ? "enviado" : "falhou", telefone: r.fone || null, texto: leg, erro: r.erro || null, wa_id: r.id || null, criado_em: new Date().toISOString() }),
+  }).catch(() => {});
+  return { crlv: r };
+}
+module.exports.crlvPendente = crlvPendente;
