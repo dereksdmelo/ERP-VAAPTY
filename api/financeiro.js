@@ -2184,9 +2184,22 @@ async function saldos(req, res, tok) {
   return res.status(200).json({ hoje, saldos: out });
 }
 
+/* Os carros para o seletor dos lançamentos. INTEIRO, não os 400 mais
+ * recentes: o estoque passou de 560 carros e o pagamento de um carro
+ * antigo não tinha onde ser casado. Com ano e comprador, que é por onde
+ * o financeiro procura (05/11/2026, o Derek: "pesquisar a placa, ou o
+ * modelo do carro e ano"). */
 async function estoqueLista(req, res, tok) {
-  const lista = await supa(`${base("estoque")}?select=id,situacao,veiculo(placa,marca_modelo)&order=entrou_em.desc&limit=400`, { headers: cab(tok) });
-  return res.status(200).json({ estoque: (lista || []).map((e) => ({ id: e.id, situacao: e.situacao, placa: e.veiculo && e.veiculo.placa, carro: e.veiculo && e.veiculo.marca_modelo })) });
+  const lista = await supa(`${base("estoque")}?select=id,situacao,natureza,entrou_em,vendido_em,` +
+    `veiculo(placa,marca_modelo,ano_fabricacao,ano_modelo),comprador(nome)&order=entrou_em.desc&limit=3000`, { headers: cab(tok) });
+  return res.status(200).json({ estoque: (lista || []).map((e) => {
+    const v = e.veiculo || {};
+    return {
+      id: e.id, situacao: e.situacao, natureza: e.natureza, placa: v.placa, carro: v.marca_modelo,
+      ano: [v.ano_fabricacao, v.ano_modelo].filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).join("/"),
+      comprador: e.comprador && e.comprador.nome, entrou_em: e.entrou_em, vendido_em: e.vendido_em,
+    };
+  }) });
 }
 
 /**

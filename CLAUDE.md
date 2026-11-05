@@ -3104,6 +3104,15 @@ corte. O que veio antes continua na lista, sem saldo, e o mês anterior
 de cada extrato colado trocava o saldo inicial da conta pelo de um dia
 qualquer; agora só preenche conta que ainda não tem abertura.
 
+**O carro do lançamento se procura** (05/11/2026, o Derek: *"pesquisar
+a placa, ou o modelo do carro e ano — no dropdown"*). `SeletorCarro`
+troca o `<select>` de 400 carros na ordem de entrada: busca por placa,
+modelo, ano e comprador, em ordem de placa, e a lista vem inteira
+(`?recurso=estoque` tinha teto de 400 com 560 carros). Pagamento de
+vários carros numa transação é a repartição (decisão 26) — o seletor
+oferece "mais de um carro → repartir"; vários pagamentos do mesmo carro
+são linhas com o mesmo carro, e o "lançado" da conferência soma todas.
+
 **A linha tem observação** (05/11/2026, o Derek: *"colocar OBS no
 lançamento"*): "+ obs" embaixo da descrição, na coluna `observacao` que
 existe desde a 0025 (`ObsLancamento`). É texto da equipe, não do banco:

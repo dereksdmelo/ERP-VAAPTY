@@ -18301,6 +18301,78 @@ function FinPendencias({ aoIr }) {
  * entra. A sobra continua na categoria do cabeçalho, e a tela mostra
  * quanto é, para ninguém achar que rateou tudo quando não rateou.
  */
+/* O CARRO DE UM LANÇAMENTO, com busca (05/11/2026, o Derek: "tô
+ * tendo que procurar manualmente e não está nem em ordem alfabética…
+ * preciso poder pesquisar a placa, ou o modelo do carro e ano"). Era um
+ * <select> com 400 carros na ordem de entrada. Agora: digita-se placa,
+ * modelo, ano ou comprador (todas as palavras precisam casar, em
+ * qualquer ordem), a lista vem em ordem de placa, e Enter escolhe o
+ * primeiro. A janela é `fixed`, presa ao botão: dentro da tabela, que
+ * rola de lado, uma lista absoluta seria cortada.
+ * `aoVarios`: o pagamento que cobre mais de um carro abre a repartição. */
+function SeletorCarro({ valor, carros, aoMudar, aoVarios, largura, alerta }) {
+  const [aberto, setAberto] = useState(false);
+  const [q, setQ] = useState("");
+  const [pos, setPos] = useState(null);
+  const bt = useRef(null);
+  const atual = carros.find((c) => c.id === valor);
+  const rot = (c) => `${c.placa || "sem placa"} · ${String(c.carro || "").slice(0, 22)}${c.ano ? ` ${c.ano}` : ""}`;
+  const ordenados = useMemo(() => carros.slice().sort((a, b) => String(a.placa || "").localeCompare(String(b.placa || ""))), [carros]);
+  const termos = semAcento(q).toLowerCase().split(/\s+/).filter(Boolean);
+  const achados = ordenados.filter((c) => {
+    if (!termos.length) return true;
+    const h = semAcento(`${c.placa || ""} ${c.carro || ""} ${c.ano || ""} ${c.comprador || ""}`).toLowerCase();
+    const hp = h.replace(/[^a-z0-9 ]/g, "");
+    return termos.every((t) => h.indexOf(t) >= 0 || hp.indexOf(t.replace(/[^a-z0-9]/g, "")) >= 0);
+  });
+  const abrir = () => {
+    const r = bt.current && bt.current.getBoundingClientRect();
+    if (r) {
+      const alto = Math.min(380, window.innerHeight - 24);
+      const top = r.bottom + 4 + alto > window.innerHeight ? Math.max(8, r.top - 4 - alto) : r.bottom + 4;
+      setPos({ left: Math.min(r.left, window.innerWidth - 340), top, alto });
+    }
+    setQ(""); setAberto(true);
+  };
+  const escolher = (id) => { setAberto(false); if (id !== valor) aoMudar(id); };
+  return (
+    <>
+      <button ref={bt} type="button" onClick={abrir} title={atual ? `${rot(atual)}${atual.comprador ? ` · ${atual.comprador}` : ""}` : "escolher o carro"}
+        className="truncate rounded border px-1.5 py-0.5 text-left text-[11px] outline-none"
+        style={{ ...inputSty, maxWidth: largura || 150, borderColor: valor ? C.line : (alerta === false ? C.line : C.laranja), background: "#fff" }}>
+        {atual ? rot(atual) : "— carro —"} ▾
+      </button>
+      {aberto && pos && (
+        <div className="fixed inset-0 z-50" onClick={() => setAberto(false)}>
+          <div className="fixed flex flex-col rounded-lg shadow-lg" onClick={(e) => e.stopPropagation()}
+            style={{ left: pos.left, top: pos.top, width: 330, maxHeight: pos.alto, background: "#fff", border: `1px solid ${C.line}` }}>
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && achados[0]) escolher(achados[0].id); }}
+              placeholder="Placa, modelo, ano ou comprador"
+              className="m-2 rounded border px-2 py-1.5 text-[13px] outline-none" style={{ ...inputSty, borderColor: C.roxo }} />
+            <div className="flex-1 overflow-y-auto pb-1">
+              {valor && <button onClick={() => escolher(null)} className="block w-full px-3 py-1.5 text-left text-[12px]" style={{ color: C.mute }}>— sem carro —</button>}
+              {aoVarios && <button onClick={() => { setAberto(false); aoVarios(); }} className="block w-full px-3 py-1.5 text-left text-[12px] font-semibold" style={{ color: C.roxo }}>Mais de um carro neste pagamento → repartir</button>}
+              {achados.slice(0, 80).map((c) => (
+                <button key={c.id} onClick={() => escolher(c.id)} className="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-[#F3EEF8]"
+                  style={{ background: c.id === valor ? C.roxoFraco : undefined }}>
+                  <b style={{ fontFamily: F.mono }}>{c.placa || "sem placa"}</b> · {c.carro || "—"}{c.ano ? ` · ${c.ano}` : ""}
+                  <span className="block text-[10px]" style={{ color: C.mute }}>
+                    {c.situacao === "vendido" ? `vendido${c.comprador ? ` a ${c.comprador}` : ""}${c.vendido_em ? ` em ${diaBR(c.vendido_em)}` : ""}`
+                      : c.situacao === "em_estoque" ? "no pátio" : c.situacao}{c.natureza === "indicacao" ? " · comissão de indicação" : ""}
+                  </span>
+                </button>
+              ))}
+              {!achados.length && <p className="px-3 py-2 text-[12px]" style={{ color: C.mute }}>Nenhum carro com "{q}".</p>}
+              {achados.length > 80 && <p className="px-3 py-2 text-[11px]" style={{ color: C.mute }}>Mais {achados.length - 80} — digite mais para filtrar.</p>}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function EditorRateio({ l, cats, carros, funcs, aoFechar, aoSalvar }) {
   const total = (Number(l.debito) || 0) + (Number(l.credito) || 0);
   const [itens, setItens] = useState(() =>
@@ -18337,11 +18409,8 @@ function EditorRateio({ l, cats, carros, funcs, aoFechar, aoSalvar }) {
               </select>
               {c && c.grupo === "negociacao" && (
                 <>
-                  <select className="max-w-[150px] rounded border px-1 py-1 text-[12px] outline-none" style={inputSty}
-                    value={x.estoque_id || ""} onChange={(e) => mexer(i, { estoque_id: e.target.value })}>
-                    <option value="">— carro —</option>
-                    {carros.map((k) => <option key={k.id} value={k.id}>{k.placa} {k.carro ? `· ${String(k.carro).slice(0, 14)}` : ""}</option>)}
-                  </select>
+                  <SeletorCarro valor={x.estoque_id || null} carros={carros} largura={200}
+                    aoMudar={(id) => mexer(i, { estoque_id: id || "" })} />
                   <select className="rounded border px-1 py-1 text-[12px] outline-none" style={inputSty}
                     value={x.tipo_negociacao || ""} onChange={(e) => mexer(i, { tipo_negociacao: e.target.value })}>
                     <option value="">— parte —</option>
@@ -18768,11 +18837,9 @@ function FinLancamentos({ comp }) {
                         <span style={{ color: C.roxo, fontWeight: 600 }}>repartido em {l.fin_rateio.length}</span>
                       ) : cat && cat.grupo === "negociacao" ? (
                         <span className="flex items-center gap-1">
-                          <select value={l.estoque_id || ""} onChange={(e) => mudar(l, { estoque_id: e.target.value || null })}
-                            className="max-w-[110px] rounded border px-1 py-0.5 text-[11px] outline-none" style={{ ...inputSty, borderColor: l.estoque_id ? C.line : C.laranja }}>
-                            <option value="">— carro —</option>
-                            {carros.map((c) => <option key={c.id} value={c.id}>{c.placa} {c.carro ? `· ${String(c.carro).slice(0, 14)}` : ""}</option>)}
-                          </select>
+                          <SeletorCarro valor={l.estoque_id || null} carros={carros}
+                            aoMudar={(id) => mudar(l, { estoque_id: id || null })}
+                            aoVarios={() => setRepartindo(l.id)} />
                           {/* Qual parte do negócio: é o que a conferência
                               compara contra o combinado daquele carro. */}
                           <select value={l.tipo_negociacao || ""} onChange={(e) => mudar(l, { tipo_negociacao: e.target.value || null })}
