@@ -5072,6 +5072,15 @@ depois da venda ou o comunicado foi feito: cobrar dele a demora do nosso
 cartório seria injusto. A transferência em si continua marcada à mão —
 ela acontece no Detran, e nada chega até nós.
 
+**As boas-vindas só disparam no "Confirmar a venda"** — o carro vendido
+antes de a automação ser ligada nunca recebeu nada (05/11/2026, o Derek
+achou que tinha ido para todos). A tela conta quem nunca recebeu e manda
+para eles num botão, com confirmação, UM A CADA 8 s (rajada pelo número
+do adm é o que o WhatsApp bane), pulando quem já recebeu. O link do DUT
+nas mensagens vai com a placa e o carro (`textoLojista`). A busca das
+Conversas aceita telefone com espaço e traço (procura pelos oito últimos
+dígitos).
+
 **"Comunicado de venda" na linha (0093, o Derek no mesmo dia).** É o
 que a Vaapty faz no Detran quando o lojista não transfere, e tira da
 loja a responsabilidade pelo carro dali em diante. Fica registrado com

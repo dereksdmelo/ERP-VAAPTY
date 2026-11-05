@@ -34,7 +34,10 @@ function textoLojista(tipo, x, site) {
   const carro = [String(x.carro || "").trim(), x.placa ? `placa ${x.placa}` : ""].filter(Boolean).join(", ");
   const prazo = dataBR(x.prazo || prazoDe(x.vendido_em));
   const venda = dataBR(x.vendido_em);
-  const link = site ? `${site}/dut.html` : "";
+  // O link já leva a placa e o carro (05/11/2026): o lojista só confere
+  // e preenche o resto — a mesma URL do botão "WhatsApp" da tela.
+  const qs = [x.placa ? `placa=${encodeURIComponent(x.placa)}` : "", x.carro ? `veiculo=${encodeURIComponent(String(x.carro).trim())}` : ""].filter(Boolean).join("&");
+  const link = site ? `${site}/dut.html${qs ? `?${qs}` : ""}` : "";
   if (tipo === "boas_vindas") {
     return [
       `${ola} Aqui é o administrativo da Vaapty. Obrigado pela compra${carro ? ` do ${carro}` : ""}.`,

@@ -3245,7 +3245,14 @@ module.exports = async function handler(req, res) {
       // com vírgula quebraria a consulta inteira (mesma lição da
       // decisão 10).
       const b = busca.replace(/[(),]/g, " ");
-      partes.push(`or=(nome.ilike.*${encodeURIComponent(b)}*,telefone.ilike.*${encodeURIComponent(b)}*)`);
+      /* Telefone colado com espaço, traço ou parêntese ("47 99187-7855")
+       * não achava nada: a conversa guarda só dígitos, com o 55. Quando a
+       * busca é número, procura pelos dígitos — os oito últimos, que
+       * atravessam o 55 e o nono dígito (a chave do `chaveFone`). */
+      const dig = busca.replace(/\D/g, "");
+      const ehFone = dig.length >= 8 && dig.length >= busca.replace(/[\s().+-]/g, "").length;
+      if (ehFone) partes.push(`telefone=ilike.*${dig.slice(-8)}*`);
+      else partes.push(`or=(nome.ilike.*${encodeURIComponent(b)}*,telefone.ilike.*${encodeURIComponent(b)}*)`);
     }
     const linhas = await banco(`${REST_CV}?${partes.join("&")}`, { headers: cabecalhos(tok) });
 
