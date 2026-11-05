@@ -1728,6 +1728,15 @@ rodada: ofertamos X · cliente pediu Y", fechou). **E a lista deixou de
 trazer a transcrição e a ficha** de cada mesa a cada 20 s — era o maior
 gasto de tráfego do Supabase; elas vêm só ao abrir o cartão.
 
+**"Prometeram voltar" diz o que aconteceu e resolve** (05/11/2026, o
+Derek: *"muito rasa… quando foi que o cliente veio? devia ter alguma
+função quando clicar no card"*; `CartaoVolta`, `PainelVolta`): o dia e a
+hora da visita, quando prometeu voltar (com "volta HOJE", "em N d" ou
+"devia ter voltado há N d"), FIPE, quanto quer, a última rodada, a
+objeção e o motivo. Clicar abre: marcar a data (chips ou calendário),
+mudar o status (voltou, fechou, vendeu fora…), WhatsApp, abrir o
+atendimento, o resumo e o recado ao negociador.
+
 **O texto sim, e já estava quase pronto.** A transcrição sobe do
 aparelho do negociador a cada cinco segundos desde a 0050; o que
 faltava era o painel seguir. Quando o gestor abre um cartão na aba

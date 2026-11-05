@@ -2268,10 +2268,21 @@ async function viva(req, res, tok) {
  */
 async function voltas(req, res, tok) {
   const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
-  const linhas = await banco(
-    `${REST("atendimento")}?select=id,cliente_nome,cliente_telefone,carro_descricao,volta_em,status,negociador_nome,` +
-    `veiculo(placa,marca_modelo)&status=eq.vai_voltar&order=volta_em.asc.nullslast&limit=200`,
-    { headers: cabecalhos(tok) }) || [];
+  /* A VISITA E A NEGOCIAÇÃO JUNTO (05/11/2026, o Derek: "muito rasa a
+   * função desse vai voltar… quando foi que o cliente veio?"). O dia e a
+   * hora em que ele esteve na loja, o carro com FIPE, quanto ele quer e
+   * a última rodada (da `negociacao_viva`, que só o dono e o gerente
+   * leem — sem ela, cai na consulta de antes). */
+  const base0 = "id,cliente_nome,cliente_telefone,carro_descricao,volta_em,status,negociador_nome,data,criado_em,chegada_em,pretensao,observacoes,origem," +
+    "veiculo(placa,marca_modelo,fipe_valor)";
+  const filtro = "&status=eq.vai_voltar&order=volta_em.asc.nullslast&limit=200";
+  let linhas;
+  try {
+    linhas = await banco(`${REST("atendimento")}?select=${base0},negociacao_viva(rodadas,valor_fechado,objecao,etapa,motivo:ficha->>motivo,pretensao_ficha:ficha->>pretensao)${filtro}`,
+      { headers: cabecalhos(tok) }) || [];
+  } catch (e) {
+    linhas = await banco(`${REST("atendimento")}?select=${base0}${filtro}`, { headers: cabecalhos(tok) }) || [];
+  }
   return res.status(200).json({
     hoje,
     voltas: linhas.map((a) => ({

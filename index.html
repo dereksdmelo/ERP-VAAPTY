@@ -26771,7 +26771,101 @@ function CartaoMesa({ n, emFoco, aoClicar }) {
   );
 }
 
-function PainelGestor({ perfil, comp }) {
+/* QUEM PROMETEU VOLTAR, com o que aconteceu na visita (05/11/2026, o
+ * Derek: "muito rasa a função desse vai voltar… quando foi que o cliente
+ * veio? devia ter alguma função quando clicar no card"). O cartão diz
+ * quando ele esteve na loja, quando prometeu voltar, e onde a negociação
+ * parou; clicar abre `PainelVolta`, onde o retorno se resolve. */
+const vivaDe = (v) => (Array.isArray(v.negociacao_viva) ? v.negociacao_viva[0] : v.negociacao_viva) || {};
+const diasAte = (iso) => Math.round((Date.parse(`${iso}T12:00:00Z`) - Date.parse(`${hojeEmSP()}T12:00:00Z`)) / 86400000);
+function CartaoVolta({ v, emFoco, aoClicar }) {
+  const veic = (v.veiculo || [])[0] || {};
+  const w = vivaDe(v);
+  const rodadas = Array.isArray(w.rodadas) ? w.rodadas : [];
+  const ultima = rodadas[rodadas.length - 1];
+  const pretensao = v.pretensao || numeroBR(w.pretensao_ficha) || null;
+  const alerta = v.atrasada || v.sem_data;
+  const quando = v.chegada_em || v.criado_em;
+  const dVolta = v.volta_em ? diasAte(v.volta_em) : null;
+  const rot = (t) => <span className="text-[10px] font-semibold uppercase tracking-[0.08em]" style={{ color: ROTULO_COR }}>{t}</span>;
+  return (
+    <button onClick={aoClicar} className="w-full rounded-xl px-4 py-3 text-left"
+      style={{ background: C.paper, border: `1.5px solid ${emFoco ? C.roxo : alerta ? C.laranja : C.line}` }}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="text-[16px] font-bold">{v.cliente_nome || "Sem nome"}</span>
+        <span className="text-[13px]">{veic.marca_modelo || v.carro_descricao || "carro não informado"}{veic.placa ? ` · ${veic.placa}` : ""}</span>
+        <span className="ml-auto rounded-full px-2.5 py-0.5 text-[12px] font-bold"
+          style={{ background: alerta ? "#FDECE6" : "#E8F3EE", color: alerta ? C.laranja : C.verde }}>
+          {v.sem_data ? "sem data para voltar" : v.atrasada ? `devia ter voltado ${diaBR(v.volta_em).slice(0, 5)} (há ${-dVolta} d)`
+            : dVolta === 0 ? "volta HOJE" : dVolta === 1 ? `volta amanhã (${diaBR(v.volta_em).slice(0, 5)})` : `volta ${diaBR(v.volta_em).slice(0, 5)} (em ${dVolta} d)`}
+        </span>
+      </div>
+      <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-0.5 text-[12.5px]" style={{ color: "#57515F" }}>
+        <span>Veio <b style={{ color: C.ink }}>{diaBR(v.data)}{quando ? ` às ${horaSP(quando)}` : ""}</b> ({hamin(`${v.data}T12:00:00`).replace("há ", "há ")})</span>
+        <span>Negociador <b style={{ color: C.ink }}>{v.negociador_nome || "—"}</b></span>
+        {v.cliente_telefone && <span>{v.cliente_telefone}</span>}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1 text-[13px]">
+        {rot("Onde parou")}
+        <span>FIPE <b>{veic.fipe_valor ? brl(veic.fipe_valor) : "—"}</b></span>
+        <span>Cliente quer <b>{pretensao ? brl(pretensao) : "—"}</b></span>
+        {ultima ? (
+          <span>{rodadas.length}ª rodada: ofertamos <b>{brl(ultima.impresso)}</b>{ultima.contra ? <> · cliente pediu <b style={{ color: C.laranja }}>{brl(ultima.contra)}</b></> : ""}</span>
+        ) : <span style={{ color: C.mute }}>sem rodada impressa</span>}
+        {w.objecao ? <span>objeção: <b>{w.objecao}</b></span> : null}
+        {w.motivo ? <span>vende para: <b>{w.motivo}</b></span> : null}
+      </div>
+      {v.sem_data && <p className="mt-1.5 text-[12px]" style={{ color: C.laranja }}>Ninguém combinou quando ele volta — clique e marque a data com o negociador.</p>}
+    </button>
+  );
+}
+
+/* O que se faz com quem prometeu voltar: marcar ou mudar a data, mudar o
+ * status (voltou e fechou, vendeu fora, perdido…), chamar no WhatsApp,
+ * abrir o atendimento e mandar recado ao negociador. */
+function PainelVolta({ v, aoMudou, aoAbrir }) {
+  const [erro, setErro] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  const mexer = async (dados, msg) => {
+    setErro(""); setSalvando(true);
+    try { await atualizarAtendimento(v.id, dados); aoMudou(); }
+    catch (e) { setErro(e.message); }
+    setSalvando(false);
+  };
+  const dia = (n) => new Date(Date.parse(`${hojeEmSP()}T12:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
+  const nome = String(v.cliente_nome || "").split(" ")[0];
+  return (
+    <div className="rounded-xl p-3.5" style={{ background: C.paper, border: `1px solid ${C.roxo}` }}>
+      <div className="text-[10.5px] font-semibold uppercase tracking-[0.1em]" style={{ color: C.roxo }}>Resolver o retorno de {nome || "cliente"}</div>
+      <div className="mt-2 text-[12.5px] font-semibold" style={{ color: ROTULO_COR }}>Quando ele volta</div>
+      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+        {[["amanhã", 1], ["em 3 dias", 3], ["em 7 dias", 7]].map(([r, n]) => (
+          <button key={r} disabled={salvando} onClick={() => mexer({ volta_em: dia(n) })} className="rounded-full px-2.5 py-1 text-[12px] font-semibold"
+            style={{ background: "#fff", color: C.roxo, border: `1px solid ${C.line}` }}>{r}</button>
+        ))}
+        <input type="date" defaultValue={v.volta_em || ""} onBlur={(e) => { if (e.target.value && e.target.value !== v.volta_em) mexer({ volta_em: e.target.value }); }}
+          className="rounded-md border px-2 py-1 text-[12.5px] outline-none" style={inputSty} />
+      </div>
+      <div className="mt-3 text-[12.5px] font-semibold" style={{ color: ROTULO_COR }}>O que aconteceu</div>
+      <div className="mt-1 flex flex-wrap gap-1.5">
+        {[["cliente_na_loja", "Voltou — está na loja"], ["fechado", "Voltou e fechou"], ["vendeu_fora", "Vendeu fora"], ["perseguir", "Perseguir"], ["baixar_expectativa", "Baixar expectativa"]].map(([st, r]) => (
+          <button key={st} disabled={salvando} onClick={() => { if (window.confirm(`Mudar o status de ${nome || "cliente"} para "${rotuloStatus(st)}"? Ele sai desta lista.`)) mexer({ status: st }); }}
+            className="rounded-md px-2.5 py-1 text-[12px] font-semibold text-white" style={{ background: corStatus(st) }}>{r}</button>
+        ))}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {v.cliente_telefone && (
+          <a href={zap(v.cliente_telefone, `Oi ${nome}, tudo bem? Aqui é da Vaapty.`)} target="_blank" rel="noreferrer"
+            className="rounded-md px-3 py-1.5 text-[12.5px] font-semibold text-white" style={{ background: C.verde }}>Chamar no WhatsApp</a>
+        )}
+        {aoAbrir && <button onClick={() => aoAbrir(v.id)} className="rounded-md border px-3 py-1.5 text-[12.5px] font-semibold" style={{ borderColor: C.roxo, color: C.roxo }}>Abrir o atendimento</button>}
+      </div>
+      {erro && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+    </div>
+  );
+}
+
+function PainelGestor({ perfil, comp, aoAbrir }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
   // Horas, não dias: o painel é o que está na mesa agora.
@@ -26781,7 +26875,10 @@ function PainelGestor({ perfil, comp }) {
   const [fila, setFila] = useState(null);
   const [voltas, setVoltas] = useState(null);
 
-  const carregar = () => listarNegociacoesVivas(horas).then(setLista).catch((e) => setErro(e.message));
+  // A lista é relida de 20 em 20 s: uma falha de rede no meio não pode
+  // deixar "Failed to fetch" pregado na tela depois que a rede voltou.
+  const carregar = () => listarNegociacoesVivas(horas).then((l) => { setLista(l); setErro(""); })
+    .catch((e) => setErro(/fetch/i.test(e.message) ? "Sem conexão agora — tentando de novo." : e.message));
   const carregarFila = () => {
     const { de, ate } = faixaDoMes(comp || competenciaDe(hojeEmSP()));
     return lerFilaRevisao(de, ate).then(setFila).catch((e) => setErro(e.message));
@@ -26802,6 +26899,7 @@ function PainelGestor({ perfil, comp }) {
     // aba, e o gestor precisa ver o atraso sem ter que procurar.
     lerVoltas().then(setVoltas).catch(() => {});
   }, [aba]);
+  const recarregarVoltas = () => lerVoltas().then(setVoltas).catch(() => {});
   const atrasadas = (voltas || []).filter((v) => v.atrasada || v.sem_data).length;
 
   // Negócio já fechado não está "em andamento" — foi a primeira coisa
@@ -26811,6 +26909,7 @@ function PainelGestor({ perfil, comp }) {
 
   const aberto = aba === "agora"
     ? emAndamento.filter((n) => n.atendimento_id === foco)[0]
+    : aba === "voltas" ? (voltas || []).filter((x) => x.id === foco)[0]
     : (fila || []).filter((x) => x.atendimento.id === foco)[0];
   const pendentes = (fila || []).filter((x) => !x.revisao).length;
 
@@ -26830,6 +26929,11 @@ function PainelGestor({ perfil, comp }) {
   const [aoVivo, setAoVivo] = useState(null);
   useEffect(() => {
     setAoVivo(null);
+    if (aba === "voltas" && foco) {
+      // Quem prometeu voltar não está na mesa: uma leitura basta.
+      lerNegociacaoViva(foco).then((d) => { if (d && d.viva) setAoVivo(d.viva); }).catch(() => {});
+      return;
+    }
     if (aba !== "agora" || !foco) return;
     let vivo = true;
     const puxar = () => {
@@ -26986,38 +27090,9 @@ function PainelGestor({ perfil, comp }) {
           })}
 
           {/* ---- quem prometeu voltar ---- */}
-          {aba === "voltas" && (voltas || []).map((v) => {
-            const veic = (v.veiculo || [])[0] || {};
-            const alerta = v.atrasada || v.sem_data;
-            return (
-              <div key={v.id} className="rounded-xl px-3.5 py-3"
-                style={{ background: C.paper, border: `1px solid ${alerta ? C.laranja : C.line}` }}>
-                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                  <span className="text-[15px] font-semibold">{v.cliente_nome || "Sem nome"}</span>
-                  <span className="text-[12px]" style={{ color: C.mute }}>
-                    {veic.marca_modelo || v.carro_descricao || "—"}{veic.placa ? ` · ${veic.placa}` : ""}
-                  </span>
-                  <span className="ml-auto text-[12px] font-semibold"
-                    style={{ color: alerta ? C.laranja : C.verde, fontFamily: F.mono }}>
-                    {v.sem_data ? "sem data" : v.atrasada ? `passou · ${diaBR(v.volta_em)}` : diaBR(v.volta_em)}
-                  </span>
-                </div>
-                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]" style={{ color: C.mute }}>
-                  <span>{v.negociador_nome || "sem negociador"}</span>
-                  {v.cliente_telefone && (
-                    <a href={zap(v.cliente_telefone, `Oi ${String(v.cliente_nome || "").split(" ")[0]}, tudo bem? Aqui é da Vaapty.`)}
-                      target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
-                      className="font-semibold" style={{ color: C.verde }}>WhatsApp</a>
-                  )}
-                </div>
-                {v.sem_data && (
-                  <p className="mt-1 text-[11px]" style={{ color: C.laranja }}>
-                    Marcado como "vai voltar" e ninguém combinou quando — peça a data ao negociador.
-                  </p>
-                )}
-              </div>
-            );
-          })}
+          {aba === "voltas" && (voltas || []).map((v) => (
+            <CartaoVolta key={v.id} v={v} emFoco={v.id === foco} aoClicar={() => setFoco(v.id === foco ? null : v.id)} />
+          ))}
 
           {aba === "voltas" && voltas && !voltas.length && (
             <div className="rounded-xl px-4 py-8 text-center" style={{ background: C.paper, border: `1px dashed ${C.line}` }}>
@@ -27040,17 +27115,19 @@ function PainelGestor({ perfil, comp }) {
         {aberto && (() => {
           // As duas abas trazem a linha com formatos diferentes; daqui
           // para baixo é tudo igual, então normaliza uma vez.
-          const at = aba === "agora" ? aberto.atendimento : aberto.atendimento;
-          const aid = aba === "agora" ? aberto.atendimento_id : aberto.atendimento.id;
+          const at = aba === "voltas" ? aberto : aberto.atendimento;
+          const aid = aba === "agora" ? aberto.atendimento_id : aba === "voltas" ? aberto.id : aberto.atendimento.id;
           // A linha puxada de perto manda sobre a da lista, que pode
           // ter até vinte segundos. Sem a conferência do id, trocar de
           // cartão mostraria a conversa do anterior por um instante.
           const vivaX = aba === "agora"
             ? ((aoVivo && aoVivo.atendimento_id === aberto.atendimento_id) ? aoVivo : aberto)
+            : aba === "voltas" ? ((aoVivo && aoVivo.atendimento_id === aberto.id) ? aoVivo : vivaDe(aberto))
             : aberto.viva;
           const revX = aba === "agora" ? null : aberto.revisao;
           return (
           <div className="space-y-3 lg:sticky lg:top-4 lg:self-start">
+            {aba === "voltas" && <PainelVolta v={aberto} aoAbrir={aoAbrir} aoMudou={() => { recarregarVoltas(); }} />}
             <ResumoDoNegocio viva={vivaX} atendimento={at} />
 
             {aba === "revisar" && (
@@ -28656,7 +28733,7 @@ function App() {
       {tela === "painel" && <Funil perfil={perfil} comp={compOuAtual} mes={mes} />}
       {tela === "leads" && <LeadsIndicacao />}
       {tela === "extrato" && <TelaExtratoAvulso perfil={perfil} />}
-      {tela === "gestor" && <PainelGestor perfil={perfil} comp={compOuAtual} />}
+      {tela === "gestor" && <PainelGestor perfil={perfil} comp={compOuAtual} aoAbrir={abrir} />}
       {MODO_ADM[tela] && <TelaADM perfil={perfil} comp={compOuAtual} mes={mes} modo={MODO_ADM[tela]} />}
       {tela === "gestao" && <TelaGestao perfil={perfil} comp={compOuAtual} />}
       {tela === "remuneracao" && <TelaPerfisRemuneracao />}
