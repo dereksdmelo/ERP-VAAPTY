@@ -17961,7 +17961,7 @@ function TelaVendaLojistas({ perfil }) {
     listarCompradores().then(setCompradores).catch(() => {});
     // Saber ANTES se a chave existe: descobrir que ela não subiu no
     // meio do envio seria errar com o carro já no pátio.
-    shinkaiConfigurado().then(setZap).catch(() => setChaveShinkai(false));
+    shinkaiConfigurado().then(setChaveShinkai).catch(() => setChaveShinkai(false));
   }, []);
 
   const mandarShinkai = async (e) => {
