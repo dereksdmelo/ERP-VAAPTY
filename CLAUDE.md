@@ -430,7 +430,10 @@ tentativa.
 
 **Uma diferença em relação ao arquivo:** o `brl()` de lá virou
 `brlDoc()` aqui. Os dois existiam com regras diferentes — o do
-`index.html` corta os centavos, o do documento imprime
+`index.html` cortava os centavos (desde 05/11/2026 não corta mais: o
+Derek, *"não está levando em conta os centavos, não pode"*; o banco
+sempre os guardou, era a tela que arredondava, e os campos de custo e de
+preço pedido abriam o valor arredondado), o do documento imprime
 `____________` quando não há valor — e duas declarações do mesmo nome no
 mesmo escopo do Babel derrubam a aplicação inteira, não só o documento.
 
@@ -4030,7 +4033,12 @@ no `estoque` — o contrato é do carro vendido, não do atendimento. O
 webhook marca as duas pontas: `marcar_contrato_assinado` (cliente) e
 `marcar_contrato_lojista_assinado` (lojista). Assina quem é o
 representante legal, quando há; senão o próprio lojista, por e-mail ou
-pelo contato. **A ficha do carro vendido diz sempre onde está a
+pelo contato. **A via assinada entra sozinha no item "Contrato Lojista"** do check
+list (05/11/2026, o Derek: *"sem necessidade do adm anexar"*):
+`?recurso=anexo&acao=contrato-lojista-assinado` no `api/foto.js` (a
+chave só no Storage, decisão 9), chamado ao abrir o check list e a
+ficha do carro vendido, idempotente. A ponte é `estoque.atendimento_id`
+— carro importado sem atendimento não tem check list onde cair. **A ficha do carro vendido diz sempre onde está a
 assinatura** (`SituacaoContratoLojista`): enviado e aguardando, assinado
 (com a via), ou — nos mandados antes do ZapSign pelo link próprio — se o
 link foi usado ou venceu. O Derek: *"depois que sair já não consigo mais
@@ -4628,7 +4636,11 @@ Sim/Não da coluna de quem olha (gerência para o gerente, adm para o
 administrativo, financeiro para o financeiro). Marcar pula para o
 próximo papel cujo item ainda não tem esse visto — os outros papéis do
 mesmo item ficam para trás, porque o visto é do item. "Conferir
-documentos" começa do primeiro pendente. **E o clique não tem atraso nem mexe a
+documentos" começa do primeiro pendente. **A fila do visor tem TODOS os papéis do check list** (05/11/2026,
+o Derek: *"abre um item do total de todos os documentos, e não aquele
+que cliquei"*). Para o revisor ela só tinha os itens de três vistos, e
+clicar num papel de item só do adm caía no primeiro da lista. Agora os
+dois entram; o de fora do escopo dele abre sem o Sim/Não. **E o clique não tem atraso nem mexe a
 tela** (o Derek: *"dá um lagzinho"*): o visto acende na hora, já com o
 nome e o dia de quem marcou, e o servidor só é relido se a gravação
 falhar — antes, cada clique relia o check list inteiro, e em "Só o que
@@ -4886,6 +4898,13 @@ trecho chamava `lerCorpo`, que não existia no arquivo. Em 28/10/2026 a
 `checklist_doc` tinha zero linhas desde a 0027. As duas coisas foram
 consertadas junto, porque a revisão depende dela.
 
+- **Arquivar só com TODOS os documentos anexados** (05/11/2026): todo
+  item que pede papel, de qualquer grupo, tem o papel — anexo do item,
+  da negociação que cai nele ou documento emitido pelo sistema (as
+  tabelas `ANEXO_DE_ITEM`/`DOC_DE_ITEM`, repetidas em
+  `api/checklist.js`) —, salvo o marcado "Não" (não existe para este
+  carro). PJ só conta em negócio PJ. O grupo Arquivamento continua
+  respondido inteiro.
 - **Arquivar** (0094, o Derek no mesmo dia: *"depois de pagamento a
   realizar, o card vai para a aba de arquivamento, ali o adm termina de
   adicionar todos os comprovantes e arquiva"*): pago e não arquivado é

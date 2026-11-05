@@ -298,19 +298,43 @@ async function esteira(req, res, tok) {
     if (c.desfazer) { await gravarCl({ arquivado_em: null, arquivado_por: null }); return res.status(200).json({ ok: true }); }
     const cl = umaLinha(await banco(`${REST}?select=pago_em&atendimento_id=eq.${aid}&limit=1`, { headers: cabecalhos(tok) }));
     if (!cl || !cl.pago_em) return res.status(409).json({ erro: "Só se arquiva depois do pagamento." });
-    const itens = (await itensDoc(tok)).filter((i) => i[2] === "arquivamento");
-    const [marcas, anexos] = await Promise.all([
+    /* TODOS OS DOCUMENTOS ANEXADOS (05/11/2026, o Derek: "uma
+     * negociação só pode ser arquivada com todos os documentos
+     * anexados"). Até aqui a trava olhava só o grupo Arquivamento. Agora:
+     *  - o grupo Arquivamento continua com todo item respondido;
+     *  - TODO item que pede papel, de qualquer grupo, precisa do papel —
+     *    a não ser que o adm tenha respondido "Não" (não existe para este
+     *    carro: sem financiamento não há quitação; decisão 1, o gate tem
+     *    de ter resposta honesta). Os de pessoa jurídica só contam quando
+     *    o negócio é PJ (a mesma régua da revisão).
+     * "Papel" é o que o check list mostra no item: anexo com o rótulo
+     * dele, o da negociação que cai nele (`ANEXO_DE_ITEM`, a mesma tabela
+     * da tela) e o documento que o próprio sistema emitiu (`DOC_DE_ITEM`). */
+    const todos = await itensDoc(tok);
+    const [marcas, anexos, veics] = await Promise.all([
       banco(`${URL_BASE}/rest/v1/checklist_doc?select=item,adm&atendimento_id=eq.${aid}`, { headers: cabecalhos(tok) }),
-      banco(`${URL_BASE}/rest/v1/anexo?select=rotulo&atendimento_id=eq.${aid}&rotulo=like.doc:*`, { headers: cabecalhos(tok) }),
+      banco(`${URL_BASE}/rest/v1/anexo?select=rotulo&atendimento_id=eq.${aid}`, { headers: cabecalhos(tok) }),
+      banco(`${URL_BASE}/rest/v1/veiculo?select=id&atendimento_id=eq.${aid}`, { headers: cabecalhos(tok) }),
     ]);
+    const vids = (veics || []).map((v) => v.id);
+    const docs = vids.length
+      ? await banco(`${URL_BASE}/rest/v1/documento?select=tipo&veiculo_id=in.(${vids.join(",")})`, { headers: cabecalhos(tok) }) : [];
     const m = {}; (marcas || []).forEach((x) => { m[x.item] = x; });
-    const temPapel = new Set((anexos || []).map((a) => String(a.rotulo || "").slice(4)));
-    const faltam = itens.filter((i) => {
-      const v = m[i[0]] && m[i[0]].adm;
-      if (v === null || v === undefined) return true;
-      return v === true && i[4] && !temPapel.has(i[0]);
-    }).map((i) => (m[i[0]] && m[i[0]].adm === true ? `${i[1]} (marcado, sem o arquivo)` : i[1]));
-    if (faltam.length) return res.status(409).json({ erro: `Falta${faltam.length === 1 ? "" : "m"} ${faltam.length} comprovante${faltam.length === 1 ? "" : "s"} do arquivamento.`, faltam });
+    const temPapel = new Set();
+    (anexos || []).forEach((a) => {
+      const r = String(a.rotulo || "");
+      if (r.slice(0, 4) === "doc:") temPapel.add(r.slice(4));
+      [].concat(ANEXO_DE_ITEM[r] || []).forEach((c2) => temPapel.add(c2));
+    });
+    (docs || []).forEach((d2) => { if (DOC_DE_ITEM[d2.tipo]) temPapel.add(DOC_DE_ITEM[d2.tipo]); });
+    const adm = (cod) => (m[cod] ? m[cod].adm : null);
+    const pj = todos.filter((i) => i[2] === "pj").some((i) => adm(i[0]) !== null && adm(i[0]) !== undefined);
+    const faltam = todos.filter((i) => i[2] !== "pj" || pj).filter((i) => {
+      const v = adm(i[0]);
+      if (i[2] === "arquivamento" && (v === null || v === undefined)) return true;
+      return i[4] && v !== false && !temPapel.has(i[0]);
+    }).map((i) => (adm(i[0]) === true ? `${i[1]} (marcado, sem o arquivo)` : `${i[1]} (sem o arquivo)`));
+    if (faltam.length) return res.status(409).json({ erro: `Falta${faltam.length === 1 ? "" : "m"} ${faltam.length} documento${faltam.length === 1 ? "" : "s"} para arquivar.`, faltam });
     await gravarCl({ arquivado_em: agora, arquivado_por: eu.id });
     return res.status(200).json({ ok: true });
   }
@@ -388,6 +412,20 @@ const ITENS_DOC = [
   ["transf_procuracao", "Cópia Procuração", "transferencia", "um", true],
   ["transf_comunicado_venda", "Comunicado Venda", "transferencia", "um", true],
 ];
+
+/* O PAPEL QUE CAI NO ITEM: as mesmas duas tabelas do index.html
+ * (`ANEXO_DE_ITEM`, `DOC_DE_ITEM`). **Quem mexer numa mexe na outra** —
+ * divergindo, a tela mostra o papel e o arquivar diz que ele falta. */
+const ANEXO_DE_ITEM = {
+  "CNH": "cnh_contratante", "CNH do contratante": "cnh_contratante", "CNH do proprietário": "cnh_proprietario",
+  "CNH (contratante e proprietário)": ["cnh_contratante", "cnh_proprietario"],
+  "Dossiê do Detran": "dossie_detran", "Comprovante de residência": "comprovante_residencia",
+  "Laudo cautelar": "cautelar", "Contrato assinado": "contrato", "CRLV": "crlv",
+};
+const DOC_DE_ITEM = {
+  contrato_lojista: "arq_contrato_lojista", contrato_final: "contrato", pre_contrato: "pre_contrato",
+  check_list: "fechamento", autorizacao_cautelar: "cautelar",
+};
 
 /* A LISTA MORA NO BANCO DESDE A 0091 (28/10/2026, o Derek: "lista de
  * documentos exigidos editável"). `ITENS_DOC` acima continua como o

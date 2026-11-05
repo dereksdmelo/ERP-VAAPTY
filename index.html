@@ -57,9 +57,16 @@ const F = {
   mono: "ui-monospace, 'SF Mono', Menlo, Consolas, monospace",
 };
 
+/* SEMPRE COM CENTAVOS (05/11/2026, o Derek: "o sistema está
+ * arredondando os números, não está levando em conta os centavos, não
+ * pode"). Até aqui `brl` cortava os centavos de propósito, para a tela
+ * ficar curta — e R$ 66.393,93 aparecia R$ 66.394 na conta do carro.
+ * O banco sempre guardou os centavos; era a tela que mentia. */
 const brl = (n) =>
   n === "" || n == null || isNaN(n) ? "—"
-    : Number(n).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+    : Number(n).toLocaleString("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// O valor dentro de um campo editável: com centavos, no jeito brasileiro.
+const centavosBR = (n) => (Number(n) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 const PNEU = ["Novo", "Bom", "Médio", "Fraco"];
 const CAMBIO = ["", "Manual", "Automático", "Automatizado", "CVT"];
@@ -1288,6 +1295,17 @@ async function guardarContratoAssinado(atendimentoId) {
   if (!r.ok) throw new Error(d.erro || "Não consegui guardar o contrato assinado.");
   return d;
 }
+// A via assinada do lojista (0109) vai sozinha para o item "Contrato
+// Lojista" do check list — chamada ao abrir o check list e a ficha do
+// carro vendido. Silenciosa: sem contrato ou sem assinatura, não faz nada.
+async function guardarContratoLojistaAssinado(ids) {
+  const r = await fetchAut("/api/foto?recurso=anexo&acao=contrato-lojista-assinado", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(ids),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui guardar o contrato do lojista assinado.");
+  return d;
+}
 async function mudarRotuloAnexo(id, rotulo) {
   const r = await fetchAut(`/api/foto?recurso=anexo&id=${encodeURIComponent(id)}`, {
     method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rotulo }),
@@ -2209,7 +2227,7 @@ function Desvalorizometro({ chave, modelo, compacto }) {
   const em3 = d.atual.valor - 3 * porMes, em6 = d.atual.valor - 6 * porMes;
   const nome = modelo || [d.marca, d.modelo].filter(Boolean).join(" ");
   const tom = caiu ? VERMELHO_DESVAL : { fundo: "#E6F4EC", borda: "#A9D9BC", forte: C.verde, texto: "#14593E" };
-  const rs = (v) => brl(Math.round(v));
+  const rs = (v) => brl(v);
 
   const seletor = opcoes.length > 1 && (
     <div className="flex gap-1">
@@ -5130,7 +5148,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     setVarios({
       placa: achado.placa, modelo: `${achado.marca} ${v.nome}`,
       ano: `${achado.anoFabricacao || ""}/${v.anoModelo || achado.anoModelo || ""}`,
-      fipe: String(Math.round(v.valor)), fipeCodigo: v.codigoFipe,
+      fipe: String(v.valor), fipeCodigo: v.codigoFipe,
       fipeDesval: v.desvalorizometro || "",
       marca: achado.marca || "",
       modeloCurto: String(achado.modeloAbreviado || "").split(/\s+/)[0] || "",
@@ -14477,9 +14495,9 @@ function LinhaCusto({ l, eGerente, aoSalvar, aoAnexar, aoApagar }) {
           <span className="block text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Previsto</span>
           <input className="mt-[2px] w-full rounded-md border px-2 py-1 text-right text-[13px] outline-none"
             style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal"
-            defaultValue={Number(l.previsto) ? Math.round(l.previsto) : ""}
+            defaultValue={Number(l.previsto) ? centavosBR(l.previsto) : ""}
             onBlur={(ev) => {
-              const n = Number(String(ev.target.value).replace(/\./g, "").replace(",", ".")) || 0;
+              const n = numeroBR(ev.target.value);
               if (n !== (Number(l.previsto) || 0)) aoSalvar({ previsto: ev.target.value });
             }} />
         </label>
@@ -14487,11 +14505,11 @@ function LinhaCusto({ l, eGerente, aoSalvar, aoAnexar, aoApagar }) {
           <span className="block text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Pago</span>
           <input className="mt-[2px] w-full rounded-md border px-2 py-1 text-right text-[13px] outline-none"
             style={{ ...inputSty, fontFamily: F.mono, background: pago ? "#fff" : "#FBFAFC" }} inputMode="decimal"
-            placeholder="—" defaultValue={pago ? Math.round(l.realizado) : ""}
+            placeholder="—" defaultValue={pago ? centavosBR(l.realizado) : ""}
             onBlur={(ev) => {
               const bruto = String(ev.target.value).trim();
               const antes = pago ? Number(l.realizado) || 0 : null;
-              const agora = bruto === "" ? null : Number(bruto.replace(/\./g, "").replace(",", ".")) || 0;
+              const agora = bruto === "" ? null : numeroBR(bruto);
               if (agora !== antes) {
                 // Quem informa o valor pago sem data ganha a data de
                 // hoje: sem ela a conta some do contas a pagar futuro.
@@ -17717,9 +17735,9 @@ function TelaVendaLojistas({ perfil }) {
                   <input className="mt-[2px] w-32 rounded-lg border px-2 py-1.5 text-right text-[15px] outline-none"
                     style={{ ...inputSty, fontFamily: F.mono, fontWeight: 700, borderColor: pedido ? C.line : C.laranja }}
                     inputMode="decimal" placeholder="—"
-                    defaultValue={pedido ? Math.round(pedido) : ""}
+                    defaultValue={pedido ? centavosBR(pedido) : ""}
                     onBlur={(ev) => {
-                      const n = Number(String(ev.target.value).replace(/\./g, "").replace(",", ".")) || 0;
+                      const n = numeroBR(ev.target.value);
                       if (n !== pedido) mexer(e, { preco_pedido: n || null });
                     }} />
                 </label>
@@ -20082,7 +20100,7 @@ function FinAno({ comp, aoIr }) {
     if (v == null || v === "") return "";
     if (tipo === "pct") return `${(Number(v) || 0).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
     if (tipo === "int") return (Number(v) || 0).toLocaleString("pt-BR", { maximumFractionDigits: 0 });
-    return (Number(v) || 0).toLocaleString("pt-BR", { maximumFractionDigits: 0 });
+    return (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
   const celula = { fontVariantNumeric: "tabular-nums" };
   const Linha = ({ rot, o, tipo, forte, fundo, total, med, cor }) => {
@@ -20782,7 +20800,7 @@ function VisorAnexos({ anexos, inicio, aoFechar, conferencia }) {
   return (
     <div className="fixed inset-0 z-50 flex flex-col" style={{ background: "rgba(24,18,33,0.92)" }} onClick={aoFechar}>
       <div className="flex items-center gap-3 px-4 py-2.5 text-[13px]" style={{ color: "#fff" }} onClick={(e) => e.stopPropagation()}>
-        {conferencia && a._item ? (
+        {conferencia && a._item && (!conferencia.pode || conferencia.pode(a._item)) ? (
           <span className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
             <b className="truncate text-[14px]">{a._rot}</b>
             <span className="truncate" style={{ opacity: 0.7 }}>{a.nome || "documento"}</span>
@@ -20801,7 +20819,7 @@ function VisorAnexos({ anexos, inicio, aoFechar, conferencia }) {
             })()}
             {acabou && <span className="rounded-md px-2 py-0.5 text-[12px] font-semibold" style={{ background: C.verde }}>tudo conferido na sua coluna</span>}
           </span>
-        ) : <span className="min-w-0 flex-1 truncate">{a.nome || "documento"}</span>}
+        ) : <span className="min-w-0 flex-1 truncate">{a._rot ? <b className="mr-2">{a._rot}</b> : null}{a.nome || "documento"}</span>}
         <span style={{ opacity: 0.7 }}>{i + 1} de {anexos.length}</span>
         {doc
           ? <button onClick={imprimir} disabled={!html || !!erroDoc} className="font-semibold" style={{ color: "#fff", textDecoration: "underline", opacity: html && !erroDoc ? 1 : 0.4 }}>imprimir</button>
@@ -20924,6 +20942,7 @@ async function removerItemDoc(atendimentoId, item) {
  * `doc:<código>`, então a CNH que subiu na Negociação ficava invisível
  * aqui e o administrativo pedia de novo o que já estava no sistema.
  */
+// Repetida em api/checklist.js (a trava do arquivar): mexeu aqui, mexe lá.
 const ANEXO_DE_ITEM = {
   // "CNH" sozinha é a de antes de 03/11/2026, quando só havia uma.
   "CNH": "cnh_contratante",
@@ -21708,6 +21727,11 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
     carregarAnexos();
   };
   useEffect(() => { carregar(); }, [atendimentoId]);
+  // O contrato do lojista assinado entra sozinho no item dele.
+  useEffect(() => {
+    guardarContratoLojistaAssinado({ atendimento_id: atendimentoId })
+      .then((d) => { if (d && d.guardado) carregarAnexos(); }).catch(() => {});
+  }, [atendimentoId]);
   // Os documentos gerados pendem do veículo, não do atendimento — são
   // duas voltas, e por isso ficam num efeito à parte: a lista do check
   // list não pode esperar por eles para aparecer.
@@ -21836,12 +21860,26 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
     return null;
   };
   const meuVisto = revisor ? "gerencia" : podeVisto ? "adm" : "financeiro";
-  const estadoMeu = (cod) => { const c = colunaMinha(cod); return c ? marcaDe(cod)[c] : true; };
-  const fila = d.itens.filter((it) => it[4] && (it[3] === "tres" || !revisor))
+  /* O ESCOPO de quem confere: o revisor só vê os itens de três vistos;
+   * os que são só do adm continuam NA FILA do visor (é clicando neles
+   * que se abre o papel), mas contam como feitos para ele e não mostram
+   * o Sim/Não. Até 05/11/2026 eles ficavam fora da fila, e clicar num
+   * papel desses abria o PRIMEIRO da lista — o Derek: "abre um item do
+   * total de todos os documentos, e não aquele que cliquei". */
+  const doMeuEscopo = (cod) => { const it = d.itens.find((x) => x[0] === cod); return !!it && (it[3] === "tres" || !revisor); };
+  const estadoMeu = (cod) => { if (!doMeuEscopo(cod)) return true; const c = colunaMinha(cod); return c ? marcaDe(cod)[c] : true; };
+  const fila = d.itens.filter((it) => it[4])
     .flatMap((it) => geradosDoItem(it[0]).map(comoItem).concat(doItem(it[0])).map((a) => ({ ...a, _item: it[0], _rot: it[1], _k: `${it[0]}:${a.id}` })));
   const abrirNaFila = (cod, id) => {
     const i = fila.findIndex((x) => x._item === cod && x.id === id);
-    setVisor({ lista: fila, i: Math.max(0, i), conferir: true });
+    if (i < 0) {
+      // Papel que não está na fila (não deveria acontecer): abre ELE,
+      // sozinho, em vez de cair no primeiro da lista.
+      const a = doItem(cod).concat(geradosDoItem(cod).map(comoItem)).find((x) => x.id === id);
+      if (a) setVisor({ lista: [a], i: 0, conferir: false });
+      return;
+    }
+    setVisor({ lista: fila, i, conferir: true });
   };
   const comecarConferencia = () => {
     const i = fila.findIndex((x) => estadoMeu(x._item) == null);
@@ -22083,6 +22121,7 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
 
       {visor && <VisorAnexos anexos={visor.lista} inicio={visor.i} aoFechar={() => setVisor(null)}
         conferencia={visor.conferir ? {
+          pode: (cod) => doMeuEscopo(cod) && !!colunaMinha(cod),
           rot: (cod) => { const c = colunaMinha(cod); return c ? VISTO_ROT[c] : "já tem os dois revisores"; },
           estado: estadoMeu,
           aoMarcar: (cod, v) => { const c = colunaMinha(cod); if (c) marcar(cod, c, v); },
@@ -22165,7 +22204,11 @@ function SituacaoContratoLojista({ e, recarga }) {
   const [proprios, setProprios] = useState([]);
   useEffect(() => {
     fetchAut(`/api/documento?recurso=zapsign&estoque_id=${e.id}`).then((r) => r.json())
-      .then((d) => setZap(d && !d.erro ? d : null)).catch(() => {});
+      .then((d) => {
+        setZap(d && !d.erro ? d : null);
+        // Assinado: a via vai para o check list do atendimento sem o adm anexar.
+        if (d && d.assinado_em) guardarContratoLojistaAssinado({ estoque_id: e.id }).catch(() => {});
+      }).catch(() => {});
     listarDocumentos(e.veiculo_id).then(async (ls) => {
       const docs = (ls || []).filter((x) => x.tipo === "contrato_lojista");
       const est = docs.length ? await lerEstadosAssinatura(docs.map((x) => x.id)).catch(() => ({})) : {};
@@ -23477,7 +23520,7 @@ function TelaADM({ perfil, comp, mes, modo = "revisar" }) {
               {foco.etapa === "arquivar" && (eu.adm ? (
                 <>
                   <p style={{ color: C.mute }}>
-                    Anexe os comprovantes do grupo <b>Arquivamento</b> na aba "Check list de documentações" (Sim com o arquivo, ou Não) e arquive.
+                    Só arquiva com <b>todos os documentos anexados</b> no "Check list de documentações": todo item que pede papel tem o arquivo (ou está marcado Não, quando não existe para este carro), e o grupo Arquivamento respondido inteiro.
                   </p>
                   <button onClick={() => agir("arquivado", {})} disabled={indo}
                     className="rounded-md px-4 py-2 text-[13px] font-semibold text-white" style={{ background: indo ? C.line : "#8A6100" }}>

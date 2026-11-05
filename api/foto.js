@@ -716,6 +716,66 @@ async function anexos(req, res, tok) {
     if (typeof corpo === "string") { try { corpo = JSON.parse(corpo); } catch (e) { corpo = null; } }
     if (!corpo || typeof corpo !== "object") return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
 
+    /* A VIA ASSINADA DO LOJISTA vai sozinha para o item "Contrato
+     * Lojista" do check list (05/11/2026, o Derek: "quando o lojista
+     * assina … já tem que ficar automaticamente anexado, sem necessidade
+     * do adm anexar"). O contrato é do carro vendido (0109), o check list
+     * é do atendimento: a ponte é `estoque.atendimento_id`. A tela chama
+     * isto ao abrir o check list e a ficha do carro vendido — quem chega
+     * primeiro guarda, e repetir não empilha vias. Barato quando não há o
+     * que fazer: o ZapSign só é consultado com contrato enviado e sem a
+     * via guardada. */
+    if (String(req.query.acao || "") === "contrato-lojista-assinado") {
+      const eidL = String(corpo.estoque_id || ""), aidL = String(corpo.atendimento_id || "");
+      if (!RX_UUID.test(eidL) && !RX_UUID.test(aidL)) return res.status(400).json({ erro: "estoque_id ou atendimento_id inválido." });
+      const filtro = RX_UUID.test(eidL) ? `id=eq.${eidL}` : `atendimento_id=eq.${aidL}&lojista_zapsign_token=not.is.null`;
+      const es = (await banco(`${REST("estoque")}?select=id,atendimento_id,lojista_zapsign_token,lojista_assinado_em&${filtro}&order=lojista_enviado_em.desc.nullslast&limit=1`,
+        { headers: cabecalhos(tok) }) || [])[0];
+      if (!es || !es.lojista_zapsign_token) return res.status(200).json({ ok: true, nada: true });
+      if (!es.atendimento_id) return res.status(200).json({ ok: true, sem_atendimento: true });
+      const ROT = "doc:arq_contrato_lojista", NOME = "contrato-lojista-assinado.pdf";
+      const jaTemL = await banco(`${REST("anexo")}?select=id&atendimento_id=eq.${es.atendimento_id}&rotulo=eq.${encodeURIComponent(ROT)}&nome=eq.${NOME}&limit=1`,
+        { headers: cabecalhos(tok) });
+      if (Array.isArray(jaTemL) && jaTemL[0]) return res.status(200).json({ ok: true, ja_guardado: true });
+      if (!ZAP_TOKEN) return res.status(200).json({ ok: true, sem_chave: true });
+
+      let docL;
+      try {
+        const r = await fetch(`${ZAPSIGN}/docs/${encodeURIComponent(es.lojista_zapsign_token)}/`, { headers: { Authorization: `Bearer ${ZAP_TOKEN}` } });
+        if (!r.ok) return res.status(502).json({ erro: "O ZapSign não devolveu o contrato do lojista." });
+        docL = await r.json();
+      } catch (e) { return res.status(502).json({ erro: "Não consegui falar com o ZapSign." }); }
+      if (String(docL.status || "").toLowerCase() !== "signed") return res.status(200).json({ ok: true, ainda: true });
+      if (!es.lojista_assinado_em) {
+        await banco(`${REST("estoque")}?id=eq.${es.id}`, { method: "PATCH", headers: json(tok), body: JSON.stringify({ lojista_assinado_em: new Date().toISOString() }) }).catch(() => {});
+      }
+      const urlL = docL.signed_file || docL.original_file;
+      if (!urlL) return res.status(502).json({ erro: "O ZapSign não devolveu o arquivo assinado." });
+      let pdfL;
+      try {
+        const r = await fetch(urlL);
+        if (!r.ok) throw new Error("download");
+        pdfL = Buffer.from(await r.arrayBuffer());
+      } catch (e) { return res.status(502).json({ erro: "Não consegui baixar o contrato assinado do lojista." }); }
+      if (!pdfL.length || pdfL.length > MAX_DOC) return res.status(413).json({ erro: "Arquivo assinado vazio ou maior que 10 MB." });
+
+      const caminhoL = `${es.atendimento_id}/${Date.now()}-${sufixo()}.pdf`;
+      await arquivos(`${STORAGE()}/object/${BUCKET_DOC}/${paraURL(caminhoL)}`, {
+        method: "POST",
+        headers: hArquivo({ "Content-Type": "application/pdf", "Cache-Control": "3600", "x-upsert": "false" }),
+        body: pdfL,
+      });
+      let salvoL;
+      try {
+        const r = await banco(REST("anexo"), {
+          method: "POST", headers: json(tok, { Prefer: "return=representation" }),
+          body: JSON.stringify({ atendimento_id: es.atendimento_id, caminho: caminhoL, tipo: "application/pdf", bytes: pdfL.length, nome: NOME, rotulo: ROT }),
+        });
+        salvoL = Array.isArray(r) ? r[0] : r;
+      } catch (e) { await apagarDoc(caminhoL); throw e; }
+      return res.status(201).json({ ok: true, guardado: true, anexo: salvoL });
+    }
+
     const aid = String(corpo.atendimento_id || "");
     if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
 
