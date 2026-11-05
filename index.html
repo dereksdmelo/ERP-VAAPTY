@@ -2491,8 +2491,12 @@ const papelRot = (p) => PAPEL_ROT[p] || p || "";
 const inputCls = "w-full rounded-lg border px-3 py-2 text-[16px] outline-none lg:rounded-md lg:px-2.5 lg:py-1.5 lg:text-[13.5px]";
 const inputSty = { borderColor: C.line, background: "#fff", color: C.ink };
 
+// Mais escuro e em 600 desde 05/11/2026 (o Derek: "subtítulos estão
+// muito apagados"): o cinza de nota (C.mute) em 10,5 px maiúsculo sumia
+// na tela do atendimento. Nota continua em C.mute; rótulo de campo não.
+const ROTULO_COR = "#45404F";
 const Rotulo = ({ children, req }) => (
-  <span className="block text-[10.5px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>
+  <span className="block text-[10.5px] font-semibold uppercase tracking-[0.08em]" style={{ color: ROTULO_COR }}>
     {children}{req && <span style={{ color: C.laranja }}> *</span>}
   </span>
 );
@@ -2524,7 +2528,7 @@ const Bloco = ({ titulo, sub, children }) => (
         Antes ele competia com o botão que a pessoa tem que apertar.
         Mais enxuto desde 24/10/2026, com o cabeçalho das páginas. */}
     <h3 className="text-[15px] leading-tight" style={{ color: C.ink, fontFamily: F.disp, fontWeight: 700 }}>{titulo}</h3>
-    {sub && <p className="mt-0.5 text-[12px] leading-snug" style={{ color: C.mute }}>{sub}</p>}
+    {sub && <p className="mt-0.5 text-[12.5px] leading-snug" style={{ color: "#57515F" }}>{sub}</p>}
     <div className="mt-2">{children}</div>
   </section>
 );
@@ -4946,19 +4950,19 @@ function ResumoAtendimento({ f, cliente, statusAtual, voltaEm, fotos, irParaCamp
       <div className="text-[10px] font-semibold uppercase tracking-[0.12em]" style={{ color: C.roxo }}>O que já sabemos</div>
       {secoes.map(([titulo, linhas]) => (
         <div key={titulo} className="mt-3">
-          <div className="text-[10px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>{titulo}</div>
+          <div className="border-b pb-0.5 text-[10.5px] font-bold uppercase tracking-[0.1em]" style={{ color: C.ink, borderColor: C.line }}>{titulo}</div>
           <dl className="mt-1 space-y-1">
             {linhas.map(([rot, valor, alvo, etapa]) => {
               const tem = valor != null && String(valor).trim() !== "";
               const ir = alvo ? () => irParaCampo(alvo, etapa) : etapa ? () => irPara(etapa) : null;
               return (
                 <div key={rot} className="group flex items-baseline gap-1.5 text-[12px] leading-snug">
-                  <dt className="w-[78px] shrink-0 text-[11px]" style={{ color: C.mute }}>{rot}</dt>
-                  <dd className="min-w-0 flex-1 break-words" style={{ color: tem ? C.ink : C.line, fontWeight: tem ? 600 : 400 }}>
+                  <dt className="w-[78px] shrink-0 text-[11px]" style={{ color: "#57515F" }}>{rot}</dt>
+                  <dd className="min-w-0 flex-1 break-words" style={{ color: tem ? C.ink : "#B3ACBC", fontWeight: tem ? 600 : 400 }}>
                     {tem ? valor : "—"}
                   </dd>
                   {ir && (
-                    <button onClick={ir} className="shrink-0 text-[10.5px] font-semibold opacity-60 group-hover:opacity-100"
+                    <button onClick={ir} className="shrink-0 text-[10.5px] font-semibold opacity-80 group-hover:opacity-100"
                       style={{ color: C.roxo }} title={`Ir para ${rot.toLowerCase()}`}>{tem ? "editar" : "preencher"}</button>
                   )}
                 </div>
