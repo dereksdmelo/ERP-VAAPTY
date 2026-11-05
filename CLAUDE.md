@@ -4050,6 +4050,12 @@ dela aparecia como "fora do estoque". **O gerente tira do estoque** o que
 entrou repetido ou por engano (só carro no pátio; as linhas de custo
 saem junto).
 
+**As fotos do carro aparecem no Estoque** (05/11/2026, o Derek): a
+ficha do carro tem a galeria (`FotosDoCarro`) com "+ Adicionar fotos",
+capa e apagar — as MESMAS fotos do atendimento, que pendem do veículo
+(decisão 6), pelo mesmo `comprimir()` e `api/foto.js`. A linha do pátio
+mostra a capa, numa consulta só para a lista (`/api/foto?capas=`).
+
 **Um carro entra uma vez** — índice único em `estoque (veiculo_id)`. Sem
 ele, dois cliques no botão criariam duas fichas de custo para o mesmo
 carro e o total dobraria.

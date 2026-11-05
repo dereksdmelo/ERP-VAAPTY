@@ -1409,6 +1409,25 @@ module.exports = async function handler(req, res) {
 
   try {
     /* ---------- GET: fotos do veículo, em ordem ---------- */
+    /* A CAPA DE VÁRIOS CARROS de uma vez (05/11/2026, o Derek: "aparecer
+     * a foto principal ao lado na linha" do Estoque). A capa é a menor
+     * ordem (decisão 6). Uma consulta e uma assinatura para a lista
+     * inteira, em vez de uma por carro. A leitura vai pelo token do
+     * usuário antes de a chave tocar o Storage (decisão 9). */
+    if (req.method === "GET" && req.query.capas) {
+      const ids = String(req.query.capas).split(",").filter((x) => RX_UUID.test(x)).slice(0, 150);
+      if (!ids.length) return res.status(200).json({ capas: {} });
+      const linhas = await banco(
+        `${REST("foto")}?select=veiculo_id,caminho,ordem&veiculo_id=in.(${ids.join(",")})&order=ordem.asc&limit=2000`,
+        { headers: cabecalhos(tok) }) || [];
+      const capa = {}, n = {};
+      linhas.forEach((l) => { n[l.veiculo_id] = (n[l.veiculo_id] || 0) + 1; if (!capa[l.veiculo_id]) capa[l.veiculo_id] = l.caminho; });
+      const links = await assinar(Object.values(capa));
+      const out = {};
+      Object.keys(capa).forEach((v) => { out[v] = { url: links[capa[v]] || null, fotos: n[v] }; });
+      return res.status(200).json({ capas: out });
+    }
+
     if (req.method === "GET") {
       const vid = String(req.query.veiculo_id || "");
       if (!RX_UUID.test(vid)) return res.status(400).json({ erro: "veiculo_id inválido." });

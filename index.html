@@ -14150,6 +14150,17 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
     setEntrando("");
   };
 
+  // A foto principal de cada carro da lista (05/11/2026): uma ida só.
+  const [capas, setCapas] = useState({});
+  const idsCapa = (lista || []).filter((e) => (filtro === "em_estoque" || filtro === "baixado") && e.situacao === filtro && e.veiculo_id)
+    .map((e) => e.veiculo_id).slice(0, 150).join(",");
+  useEffect(() => {
+    if (!idsCapa || abrindo) return;
+    let vivo = true;
+    fetchAut(`/api/foto?capas=${idsCapa}`).then((r) => r.json()).then((d) => { if (vivo && d && d.capas) setCapas(d.capas); }).catch(() => {});
+    return () => { vivo = false; };
+  }, [idsCapa, abrindo]);
+
   if (abrindo) {
     return <FichaEstoque id={abrindo} perfil={perfil}
       aoVoltar={() => { setAbrindo(null); carregar(); }} />;
@@ -14361,6 +14372,7 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
       )}
       <div className="rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
         {(filtro === "em_estoque" || filtro === "baixado") && visivel.map((e, i) => {
+          const capaDe = capas[e.veiculo_id];
           const v = e.veiculo || {};
           const c = contaDoEstoque(e);
           const dias = diasNoPatio(e);
@@ -14374,6 +14386,12 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
               className="flex w-full items-center gap-3 px-3 py-2 text-left"
               style={{ borderTop: i ? `1px solid ${C.line}` : "none", background: limpando && marcados[e.id] ? "#FFF1EB" : "transparent" }}>
               {limpando && <input type="checkbox" readOnly checked={!!marcados[e.id]} className="shrink-0" />}
+              {/* A foto principal na linha (05/11/2026). */}
+              <span className="grid h-[42px] w-[56px] shrink-0 place-items-center overflow-hidden rounded" style={{ background: C.bg }}>
+                {capaDe && capaDe.url
+                  ? <img src={capaDe.url} alt="" loading="lazy" className="h-full w-full object-cover" />
+                  : <span className="text-[9.5px]" style={{ color: "#B3ACBC" }}>sem foto</span>}
+              </span>
               <span className="w-[86px] shrink-0 text-[13px] font-bold" style={{ fontFamily: F.mono }}>
                 {v.placa || "—"}
               </span>
@@ -14402,6 +14420,75 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/* AS FOTOS DO CARRO NO ESTOQUE (05/11/2026, o Derek: "aqui podia
+ * mostrar as fotos do carro também, e permitir cadastrar as fotos de
+ * igual forma"). As mesmas fotos do atendimento — pendem do VEÍCULO
+ * (decisão 6) —, com o mesmo caminho: `comprimir()` (1280 px, JPEG) e
+ * `api/foto.js`, que põe a recusada depois da última se a posição
+ * estiver ocupada. Tocar abre o visor; "capa" põe na frente. */
+function FotosDoCarro({ veiculoId, aoMudar }) {
+  const [fotos, setFotos] = useState(null);
+  const [erro, setErro] = useState("");
+  const [subindo, setSubindo] = useState(0);
+  const [visor, setVisor] = useState(null);
+  const ler = () => listarFotos(veiculoId).then((l) => { setFotos(l); setErro(""); }).catch((e) => setErro(e.message));
+  useEffect(() => { if (veiculoId) ler(); }, [veiculoId]);
+  const enviar = async (arquivos) => {
+    const lista = Array.from(arquivos || []);
+    if (!lista.length) return;
+    setErro("");
+    let ordem = (fotos || []).reduce((m, f) => Math.max(m, Number(f.ordem) || 0), -1) + 1;
+    setSubindo(lista.length);
+    for (const arq of lista) {
+      try {
+        const c = await comprimir(arq);
+        await subirFoto(veiculoId, { local: c.src, largura: c.largura, altura: c.altura }, ordem++);
+      } catch (e) { setErro(`${arq.name}: ${e.message}`); }
+      setSubindo((n) => n - 1);
+    }
+    await ler(); if (aoMudar) aoMudar();
+  };
+  const capa = async (id) => { try { await fotoParaCapa(id); await ler(); if (aoMudar) aoMudar(); } catch (e) { setErro(e.message); } };
+  const apagar = async (id) => {
+    if (!window.confirm("Apagar esta foto? Ela sai também da ficha do atendimento.")) return;
+    try { await apagarFotoServidor(id); await ler(); if (aoMudar) aoMudar(); } catch (e) { setErro(e.message); }
+  };
+  if (!veiculoId) return null;
+  return (
+    <div className="rounded-lg p-3.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[15px] font-semibold">Fotos</span>
+        <span className="text-[12px]" style={{ color: C.mute }}>{fotos ? `${fotos.length} foto${fotos.length === 1 ? "" : "s"}` : "carregando…"}{subindo ? ` · enviando ${subindo}…` : ""}</span>
+        <label className="ml-auto cursor-pointer rounded-md px-3 py-1.5 text-[12.5px] font-semibold text-white" style={{ background: C.roxo }}>
+          + Adicionar fotos
+          <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { enviar(e.target.files); e.target.value = ""; }} />
+        </label>
+      </div>
+      {erro && <p className="mt-1 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+      {fotos && !fotos.length && !subindo && <p className="mt-2 text-[12.5px]" style={{ color: C.mute }}>Nenhuma foto deste carro ainda.</p>}
+      {!!(fotos && fotos.length) && (
+        <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-5 lg:grid-cols-6">
+          {fotos.map((f, i) => (
+            <div key={f.id} className="group relative overflow-hidden rounded-md" style={{ aspectRatio: "4 / 3", background: C.bg }}>
+              {f.url && <img src={f.url} alt={`Foto ${i + 1}`} loading="lazy" className="h-full w-full cursor-pointer object-cover"
+                onClick={() => setVisor(i)} />}
+              {i === 0 && <span className="absolute left-1 top-1 rounded px-1.5 text-[10px] font-bold text-white" style={{ background: C.roxo }}>CAPA</span>}
+              <span className="absolute bottom-1 right-1 hidden gap-1 group-hover:flex">
+                {i > 0 && <button onClick={() => capa(f.id)} className="rounded bg-white px-1.5 text-[10.5px] font-semibold" style={{ color: C.roxo }}>capa</button>}
+                <button onClick={() => apagar(f.id)} className="rounded bg-white px-1.5 text-[10.5px]" style={{ color: C.laranja }}>apagar</button>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      {visor != null && fotos && (
+        <VisorAnexos anexos={fotos.map((f, i) => ({ id: f.id, url: f.url, nome: `Foto ${i + 1} do carro`, tipo: "image/jpeg" }))}
+          inicio={visor} aoFechar={() => setVisor(null)} />
+      )}
     </div>
   );
 }
@@ -14511,6 +14598,8 @@ function FichaEstoque({ id, perfil, aoVoltar }) {
       <Cabecalho titulo={v.placa || "Carro"} sub={`${v.marca_modelo || "—"}${v.ano_modelo ? ` ${v.ano_modelo}` : ""}`} />
 
       {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+
+      <FotosDoCarro veiculoId={e.veiculo_id} />
 
       <div className="rounded-lg p-3.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
         <div className="text-[15px] font-semibold">{v.marca_modelo || "—"}{v.ano_modelo ? ` ${v.ano_modelo}` : ""}</div>
