@@ -4509,6 +4509,21 @@ valor dela e ignora os pedaços (senão consumiriam outra linha de mesmo
 dia e valor). "Desfazer" devolve tudo. É diferente de repartir: repartir
 divide em CATEGORIAS (decisão 26), dividir casa com TÍTULOS.
 
+**Ligar à mão a linha do banco ao título (07/11/2026, o Derek: *"como
+eu faço pra ligar os títulos das previsões com os títulos do
+extrato?"*).** O automático só casa valor exato; a conta fixa que varia
+(prevista 1.100, paga 1.087) e o pagamento em outra data ficavam com o
+título aberto ao lado do lançamento real — e a projeção do DRE contava
+os dois. Em Lançamentos, "título" na linha abre os títulos em aberto do
+mesmo lado, os de valor mais parecido primeiro; "é este" faz a LINHA DO
+BANCO herdar do título categoria, competência, conta fixa, favorecido,
+pessoa e carro (ela fica: tem a chave do extrato e o valor que saiu), e
+o título vira `cancelado` com `extrato_id` apontando a linha.
+"Desfazer" devolve o título aberto. A conta fixa sai do título antes de
+ir para a linha — o índice único (conta fixa, competência) da 0096 não
+aceita os dois vivos. Diferente de dividir: dividir é uma linha do
+banco que soma vários; ligar é uma linha que é um título.
+
 **`revisar` é o que o acerto automático deixa aceso.** Casei este
 movimento com aquele título; confira. Sem esse sinalizador, conciliação
 automática vira conciliação invisível — e é o tipo de coisa que só se

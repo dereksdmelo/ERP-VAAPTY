@@ -1381,6 +1381,65 @@ async function titulo(req, res, tok) {
     });
     return res.status(200).json({ ok: true, titulos: ts.length, partes: partes.length, resto });
   }
+  /* LIGAR UMA LINHA DO BANCO A UM TÍTULO (07/11/2026, o Derek: "como eu
+   * faço pra ligar os títulos das previsões com os títulos do extrato?").
+   * O casamento automático da importação só pega valor exato (decisão 26);
+   * a conta fixa que varia (a luz de R$ 1.100 prevista paga R$ 1.087) e o
+   * pagamento feito em outra data ficavam com o título aberto ao lado do
+   * lançamento real — e a projeção do DRE contava os dois.
+   *
+   * O título e o movimento são a MESMA coisa (decisão 26): a linha do
+   * banco fica (é ela que tem a chave do extrato e o valor que saiu) e
+   * herda do título o que ele sabia — categoria, competência, conta fixa,
+   * favorecido, pessoa, carro. O título sai de cena como `cancelado`, com
+   * `extrato_id` apontando a linha, e "desligar" o devolve aberto. */
+  if (req.method === "POST" && String(req.query.acao || "") === "ligar") {
+    const id = idOuNulo(req.query.id);
+    const c = await corpoDe(req) || {};
+    const tid = idOuNulo(c.titulo_id);
+    if (!id || !tid) return res.status(400).json({ erro: "Escolha a linha do banco e o título." });
+    const [l, t] = await Promise.all([
+      supa(`${base("fin_lancamento")}?select=*,fin_rateio(id)&id=eq.${id}`, { headers: cab(tok) }).then(um),
+      supa(`${base("fin_lancamento")}?select=*&id=eq.${tid}`, { headers: cab(tok) }).then(um),
+    ]);
+    if (!l || l.situacao !== "efetivado" || l.dividido_em) return res.status(409).json({ erro: "Só se liga uma linha do banco já lançada." });
+    if (!t || t.situacao !== "aberto") return res.status(409).json({ erro: "Esse título não está mais em aberto. Recarregue." });
+    const saida = Number(l.debito) > 0;
+    if (saida ? !(Number(t.debito) > 0) : !(Number(t.credito) > 0)) {
+      return res.status(400).json({ erro: saida ? "Esta linha é uma saída: só título a pagar." : "Esta linha é uma entrada: só título a receber." });
+    }
+    const mud = { conciliado: true, revisar: false };
+    if (t.competencia) mud.competencia = t.competencia;
+    if (t.conta_fixa_id) mud.conta_fixa_id = t.conta_fixa_id;
+    if (!(l.fin_rateio || []).length) {
+      ["categoria_id", "estoque_id", "tipo_negociacao", "funcionario_id"].forEach((k) => { if (t[k]) mud[k] = t[k]; });
+    }
+    ["favorecido_id", "favorecido"].forEach((k) => { if (t[k] && !l[k]) mud[k] = t[k]; });
+    if (t.observacao && !l.observacao) mud.observacao = t.observacao;
+    await supa(`${base("fin_lancamento")}?id=eq.${tid}&situacao=eq.aberto`, { method: "PATCH", headers: cab(tok),
+      body: JSON.stringify({ situacao: "cancelado", extrato_id: l.id, conta_fixa_id: null }) });
+    const r = await supa(`${base("fin_lancamento")}?id=eq.${id}`, { method: "PATCH", headers: cab(tok, REP), body: JSON.stringify(mud) });
+    if (!um(r)) return recusado(res);
+    const diferenca = Math.round(((Number(l.debito) || Number(l.credito) || 0) - (Number(t.debito) || Number(t.credito) || 0)) * 100) / 100;
+    return res.status(200).json({ ok: true, diferenca });
+  }
+  if (req.method === "POST" && String(req.query.acao || "") === "desligar") {
+    const id = idOuNulo(req.query.id);
+    if (!id) return res.status(400).json({ erro: "id inválido." });
+    const ts = await supa(`${base("fin_lancamento")}?select=id,conta_fixa_id&extrato_id=eq.${id}&situacao=eq.cancelado`, { headers: cab(tok) }) || [];
+    if (!ts.length) return res.status(409).json({ erro: "Esta linha não está ligada a título." });
+    const l = um(await supa(`${base("fin_lancamento")}?select=conta_fixa_id&id=eq.${id}`, { headers: cab(tok) }));
+    // A conta fixa sai da linha ANTES de voltar ao título: o índice único
+    // (conta fixa, competência) não aceita os dois vivos ao mesmo tempo.
+    await supa(`${base("fin_lancamento")}?id=eq.${id}`, { method: "PATCH", headers: cab(tok), body: JSON.stringify({ conta_fixa_id: null }) });
+    let devolvida = false;
+    for (const t of ts) {
+      await supa(`${base("fin_lancamento")}?id=eq.${t.id}`, { method: "PATCH", headers: cab(tok),
+        body: JSON.stringify({ situacao: "aberto", extrato_id: null, conta_fixa_id: !devolvida && l && l.conta_fixa_id ? l.conta_fixa_id : null }) });
+      devolvida = true;
+    }
+    return res.status(200).json({ ok: true });
+  }
   if (req.method === "POST" && String(req.query.acao || "") === "desfazer_divisao") {
     const id = idOuNulo(req.query.id);
     if (!id) return res.status(400).json({ erro: "id inválido." });

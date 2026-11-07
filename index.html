@@ -19050,6 +19050,94 @@ function SeletorCarro({ valor, carros, aoMudar, aoVarios, largura, alerta }) {
  * de vencimento mais perto da data da linha primeiro, com busca. O que
  * os escolhidos não cobrirem fica numa linha "resto", com a categoria da
  * linha do banco. Declarado fora da tela pelo mesmo motivo do FechPrev. */
+/* LIGAR A LINHA DO BANCO AO TÍTULO (07/11/2026, o Derek: "como eu faço
+ * pra ligar os títulos das previsões com os títulos do extrato?"). O
+ * automático da importação só casa valor exato; a conta fixa que varia e
+ * o pagamento em outra data ficavam com o título aberto ao lado. Aqui a
+ * lista dos títulos em aberto do mesmo lado, os mais parecidos primeiro
+ * (valor, depois data); "é este" faz a linha herdar categoria,
+ * competência e conta fixa, e o título sai da lista de abertos. */
+function LigarTitulo({ l, aoFechar, aoFeito }) {
+  const total = (Number(l.debito) || 0) + (Number(l.credito) || 0);
+  const saida = Number(l.debito) > 0;
+  const [lista, setLista] = useState(null);
+  const [q, setQ] = useState("");
+  const [erro, setErro] = useState("");
+  const [indo, setIndo] = useState("");
+  useEffect(() => {
+    fin("titulo").then((d) => setLista((d.titulos || []).filter((t) => (saida ? Number(t.debito) > 0 : Number(t.credito) > 0))))
+      .catch((e) => setErro(e.message));
+  }, [l.id]);
+  const valor = (t) => (Number(t.debito) || 0) + (Number(t.credito) || 0);
+  const dias = (t) => Math.round(Math.abs(Date.parse(t.vencimento || t.data || l.data) - Date.parse(l.data)) / 86400000);
+  const nome = (t) => (t.fin_favorecido && t.fin_favorecido.nome) || t.favorecido || "";
+  const termos = semAcento(q).toLowerCase().split(/\s+/).filter(Boolean);
+  const vistos = (lista || []).filter((t) => {
+    if (!termos.length) return true;
+    const h = semAcento(`${t.descricao || ""} ${nome(t)} ${t.fin_categoria ? t.fin_categoria.nome : ""} ${centavosBR(valor(t))}`).toLowerCase();
+    return termos.every((x) => h.indexOf(x) >= 0);
+  }).sort((a, b) => {
+    // Parecido = diferença de valor relativa, com a data desempatando.
+    const pa = Math.abs(valor(a) - total) / Math.max(total, 1), pb = Math.abs(valor(b) - total) / Math.max(total, 1);
+    return pa - pb || dias(a) - dias(b);
+  }).slice(0, 40);
+  const ligar = async (t) => {
+    setErro(""); setIndo(t.id);
+    try { await fin("titulo", { acao: "ligar", id: l.id }, finJson("POST", { titulo_id: t.id })); aoFeito(); }
+    catch (e) { setErro(e.message); setIndo(""); }
+  };
+  const desligar = async () => {
+    setErro(""); setIndo("desligar");
+    try { await fin("titulo", { acao: "desligar", id: l.id }, finJson("POST", {})); aoFeito(); }
+    catch (e) { setErro(e.message); setIndo(""); }
+  };
+  return (
+    <div className="mt-2 rounded-xl p-3" style={{ background: C.bg, border: `1px solid ${C.roxo}` }}>
+      <div className="flex flex-wrap items-baseline gap-2">
+        <span className="text-[13px] font-semibold">Qual título é esta linha do banco ({rs2(total)} em {diaBR(l.data)})?</span>
+        <span className="text-[11.5px]" style={{ color: C.mute }}>A linha fica com o valor do banco e herda do título a categoria, o mês e a conta fixa; o título sai dos abertos.</span>
+        <button onClick={aoFechar} className="ml-auto text-[12px]" style={{ color: C.mute }}>fechar</button>
+      </div>
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Procurar por descrição, favorecido, categoria ou valor"
+        className="mt-2 w-full rounded border px-2 py-1.5 text-[13px] outline-none" style={inputSty} />
+      {lista === null ? <p className="mt-2 text-[12.5px]" style={{ color: C.mute }}>Carregando os títulos…</p> : !vistos.length ? (
+        <p className="mt-2 text-[12.5px]" style={{ color: C.mute }}>Nenhum título {saida ? "a pagar" : "a receber"} em aberto{termos.length ? " com isso" : ""}.</p>
+      ) : (
+        <div className="mt-2 max-h-[320px] overflow-y-auto rounded-lg" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+          {vistos.map((t, i) => {
+            const dif = Math.round((total - valor(t)) * 100) / 100;
+            return (
+              <div key={t.id} className="flex items-center gap-2 px-2.5 py-1.5 text-[12.5px]" style={{ borderTop: i ? `1px solid ${C.line}` : "none" }}>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">{t.descricao || "—"}{nome(t) ? <span style={{ color: C.mute }}> · {nome(t)}</span> : null}</span>
+                  <span className="block text-[11px]" style={{ color: C.mute }}>
+                    {t.vencimento ? `vence ${diaBR(t.vencimento)}` : "sem vencimento"}
+                    {t.fin_categoria ? ` · ${t.fin_categoria.nome}` : ""}
+                    {t.conta_fixa_id ? " · conta fixa" : ""}
+                    {t.competencia ? ` · ${rotuloMes(t.competencia)}` : ""}
+                  </span>
+                </span>
+                <span className="shrink-0 text-right" style={{ fontVariantNumeric: "tabular-nums" }}>
+                  <b>{rs2(valor(t))}</b>
+                  <span className="block text-[10.5px]" style={{ color: Math.abs(dif) < 0.01 ? C.verde : AMARELO.texto }}>
+                    {Math.abs(dif) < 0.01 ? "valor igual" : `banco ${dif > 0 ? "+" : "−"}${rs2(Math.abs(dif))}`}
+                  </span>
+                </span>
+                <button disabled={!!indo} onClick={() => ligar(t)} className="shrink-0 rounded-md px-2.5 py-1 text-[12px] font-semibold text-white"
+                  style={{ background: C.roxo, opacity: indo && indo !== t.id ? 0.5 : 1 }}>{indo === t.id ? "ligando…" : "é este"}</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <div className="mt-2 flex items-center gap-3 text-[12px]">
+        <button disabled={!!indo} onClick={desligar} style={{ color: C.mute }} title="Se esta linha já foi ligada a um título, devolve o título para os abertos">desfazer uma ligação desta linha</button>
+        {erro && <span style={{ color: C.laranja }}>{erro}</span>}
+      </div>
+    </div>
+  );
+}
+
 function DividirEmTitulos({ l, aoFechar, aoFeito }) {
   const total = (Number(l.debito) || 0) + (Number(l.credito) || 0);
   const saida = Number(l.debito) > 0;
@@ -19335,6 +19423,7 @@ function FinLancamentos({ comp }) {
   const [funcs, setFuncs] = useState([]);
   const [repartindo, setRepartindo] = useState("");
   const [dividindo, setDividindo] = useState("");
+  const [ligando, setLigando] = useState("");
   const [reciboIndo, setReciboIndo] = useState("");
   const [reciboErro, setReciboErro] = useState("");
 
@@ -19642,6 +19731,10 @@ function FinLancamentos({ comp }) {
                         {reciboIndo === l.id ? "emitindo…" : "recibo"}
                       </button>
                       <button onClick={() => setRepartindo(repartindo === l.id ? "" : l.id)} className="ml-2 text-[11px]" style={{ color: C.roxo, fontWeight: 600 }}>repartir</button>
+                      {!l.extrato_id && (
+                        <button onClick={() => setLigando(ligando === l.id ? "" : l.id)} className="ml-2 text-[11px]" style={{ color: C.roxo, fontWeight: 600 }}
+                          title="Esta linha é o pagamento de um título previsto (conta fixa, a pagar/receber): ligue os dois">título</button>
+                      )}
                       {!l.extrato_id && !temRateio && (
                         <button onClick={() => setDividindo(dividindo === l.id ? "" : l.id)} className="ml-2 text-[11px]" style={{ color: C.roxo, fontWeight: 600 }}
                           title="O banco somou vários lançamentos nesta linha: divida em pedaços">dividir</button>
@@ -19686,6 +19779,15 @@ function FinLancamentos({ comp }) {
                   linhas.push(
                     <tr key={`${l.id}-hist`} style={{ borderBottom: `1px solid ${C.line}` }}>
                       <td colSpan={9} className="px-2 pb-2"><HistoricoLanc id={l.id} aoFechar={() => setHistorico("")} /></td>
+                    </tr>
+                  );
+                }
+                if (ligando === l.id) {
+                  linhas.push(
+                    <tr key={`${l.id}-ligar`} style={{ borderBottom: `1px solid ${C.line}` }}>
+                      <td colSpan={9} className="px-2 pb-2">
+                        <LigarTitulo l={l} aoFechar={() => setLigando("")} aoFeito={() => { setLigando(""); carregar(true); }} />
+                      </td>
                     </tr>
                   );
                 }
