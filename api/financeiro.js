@@ -896,8 +896,45 @@ async function dreMeses(req, res, tok, comp, n) {
   return res.status(200).json({ meses, linhas, total_despesas: totais, rentabilidade: rent, lucro });
 }
 
+/* O QUE COMPÕE CADA LINHA DO DRE (07/11/2026, o Derek: "preciso ao
+ * clicar na conta abrir e mostrar os títulos que totalizam aquele valor
+ * pra conferência e correção"). Os lançamentos da competência cuja PARTE
+ * cai na categoria — pela mesma `partesDe` do DRE, então a soma do que
+ * vem aqui é o número da linha. Os em aberto vêm junto, marcados (eles
+ * não estão na linha, estão na projeção), e as contas fixas da categoria
+ * que ainda não viraram título. `categoria_id=sem` é "Sem categoria". */
+async function dreDetalhe(req, res, tok, comp) {
+  const cid = String(req.query.categoria_id || "");
+  const sem = cid === "sem";
+  if (!sem && !idOuNulo(cid)) return res.status(400).json({ erro: "categoria_id inválido." });
+  const [lanc, fixas] = await Promise.all([
+    supa(`${base("fin_lancamento")}?select=id,data,vencimento,competencia,descricao,debito,credito,situacao,categoria_id,observacao,` +
+      `fin_conta(nome),fin_favorecido(nome),fin_funcionario(nome),fin_rateio(valor,categoria_id,estoque_id,tipo_negociacao,funcionario_id)` +
+      `&situacao=in.(aberto,efetivado)&competencia=eq.${comp}&order=data.asc.nullslast&limit=10000`, { headers: cab(tok) }),
+    sem ? Promise.resolve(null) : fixasDoMes(tok, comp).catch(() => null),
+  ]);
+  const itens = [];
+  (lanc || []).forEach((l) => {
+    const partes = partesDe(l).filter((p) => (sem ? !p.categoria_id : p.categoria_id === cid));
+    if (!partes.length) return;
+    const valor = Math.round(partes.reduce((t, p) => t + p.valor, 0) * 100) / 100;
+    itens.push({ id: l.id, data: l.data || l.vencimento, competencia: l.competencia, descricao: l.descricao, observacao: l.observacao,
+      situacao: l.situacao, valor, total: (Number(l.credito) || 0) - (Number(l.debito) || 0),
+      repartido: Array.isArray(l.fin_rateio) && l.fin_rateio.length > 0, categoria_id: l.categoria_id,
+      conta: l.fin_conta ? l.fin_conta.nome : null, favorecido: l.fin_favorecido ? l.fin_favorecido.nome : null,
+      funcionario: l.fin_funcionario ? l.fin_funcionario.nome : null });
+  });
+  const efetivado = itens.filter((x) => x.situacao === "efetivado").reduce((t, x) => t + x.valor, 0);
+  const aberto = itens.filter((x) => x.situacao === "aberto").reduce((t, x) => t + x.valor, 0);
+  const fixasSem = fixas ? fixas.contas.filter((x) => x.ativo && !x.titulo && x.categoria_id === cid)
+    .map((x) => ({ id: x.id, nome: x.nome, previsto: x.previsto })) : [];
+  return res.status(200).json({ competencia: comp, itens, efetivado: Math.round(efetivado * 100) / 100,
+    aberto: Math.round(aberto * 100) / 100, fixas_sem_titulo: fixasSem });
+}
+
 async function dre(req, res, tok) {
   const comp = competenciaDe(req.query.competencia) || competenciaDe(hojeAqui());
+  if (String(req.query.acao || "") === "detalhe") return dreDetalhe(req, res, tok, comp);
   const n = Math.min(24, Math.max(0, Number(req.query.meses) || 0));
   if (n > 1) return dreMeses(req, res, tok, comp, n);
   const d = await dreDoMes(tok, comp);
@@ -914,9 +951,21 @@ async function dre(req, res, tok) {
       folhaDoMes(tok, comp).catch(() => null),
       fixasDoMes(tok, comp).catch(() => null),
       supa(`${base("fin_config")}?select=*&id=eq.1`, { headers: cab(tok) }).then(um).catch(() => null),
-      supa(`${base("fin_categoria")}?select=id,nome`, { headers: cab(tok) }).catch(() => []),
+      supa(`${base("fin_categoria")}?select=id,nome,pede_funcionario`, { headers: cab(tok) }).catch(() => []),
     ]);
     const nomeCat = {}; (cats || []).forEach((c) => { nomeCat[c.id] = c.nome; });
+    /* AS CONTAS FIXAS E A FOLHA NÃO SE SOMAM (07/11/2026, o Derek: "as
+     * prévias estão conflitando… temos as prévias dos salários e as
+     * prévias das contas fixas… ele não tá ligando uma com a outra").
+     * Salário cadastrado como conta fixa entrava duas vezes: como "conta
+     * fixa sem título" e dentro da folha prevista da mesma categoria.
+     * Agora, numa categoria da folha, a conta fixa ainda sem título conta
+     * como parte da folha prevista: sai dela o que a folha ainda não
+     * cobriu, e não os dois. */
+    const fixasPorCat = {};
+    ((fixas && fixas.contas) || []).filter((x) => x.ativo && !x.titulo).forEach((x) => {
+      const k = x.categoria_id || "sem"; fixasPorCat[k] = (fixasPorCat[k] || 0) + (Number(x.previsto) || 0);
+    });
     /* A FOLHA POR PARTE (0097, o Derek: "uma parte é categorizada como
      * prestação de serviços, outra como comissão e outra como
      * bonificação"). A prevista é a da aba Folha: a linha salva manda;
@@ -929,20 +978,34 @@ async function dre(req, res, tok) {
     });
     ((folha && folha.so_combinado) || []).forEach((p) => { ["salario", "comissao", "bonificacao"].forEach((k) => { prev[k] += Number(p[k]) || 0; }); });
     const catDe = { salario: cfg && cfg.folha_cat_salario, comissao: cfg && cfg.folha_cat_comissao, bonificacao: cfg && cfg.folha_cat_bonificacao };
+    // Duas partes na mesma categoria dividem a conta fixa dela uma vez só.
+    const fixaUsada = {};
     const partesFolha = ["salario", "comissao", "bonificacao"].map((k) => {
       const cat = catDe[k];
       const lancado = cat ? (d.lancado_por_cat[cat] || 0) : 0;
+      const falta = Math.max(0, prev[k] - lancado);
+      const fixaCat = cat ? Math.max(0, (fixasPorCat[cat] || 0) - (fixaUsada[cat] || 0)) : 0;
+      const daFixa = Math.min(falta, fixaCat);
+      if (cat) fixaUsada[cat] = (fixaUsada[cat] || 0) + daFixa;
       return { parte: k, categoria_id: cat || null, categoria: cat ? nomeCat[cat] || "" : null,
         prevista: Math.round(prev[k] * 100) / 100, lancado: Math.round(lancado * 100) / 100,
-        a_lancar: Math.max(0, Math.round((prev[k] - lancado) * 100) / 100) };
+        nas_fixas: Math.round(daFixa * 100) / 100,
+        a_lancar: Math.round((falta - daFixa) * 100) / 100 };
     });
     // Sem categoria configurada, a régua antiga: tudo que pede a pessoa.
     const semConfig = !partesFolha.some((x) => x.categoria_id);
     const folhaPrevista = partesFolha.reduce((t, x) => t + x.prevista, 0);
-    const folhaALancar = semConfig ? Math.max(0, folhaPrevista - (d.folha_lancada || 0)) : partesFolha.reduce((t, x) => t + x.a_lancar, 0);
-    const fixasNaoGeradas = fixas ? fixas.contas.filter((x) => x.ativo && !x.titulo).reduce((t, x) => t + x.previsto, 0) : 0;
+    let folhaALancar = partesFolha.reduce((t, x) => t + x.a_lancar, 0);
+    if (semConfig) {
+      const fixasFolha = (cats || []).filter((c) => c.pede_funcionario).reduce((t, c) => t + (fixasPorCat[c.id] || 0), 0);
+      folhaALancar = Math.max(0, folhaPrevista - (d.folha_lancada || 0) - fixasFolha);
+    }
+    const fixasNaoGeradas = Object.keys(fixasPorCat).reduce((t, k) => t + fixasPorCat[k], 0);
+    const fixasLista = Object.keys(fixasPorCat).map((k) => ({ categoria_id: k === "sem" ? null : k, categoria: k === "sem" ? "Sem categoria" : nomeCat[k] || "—",
+      valor: Math.round(fixasPorCat[k] * 100) / 100, folha: partesFolha.some((x) => x.categoria_id === k) }))
+      .sort((a, b) => b.valor - a.valor);
     d.projecao = {
-      em_aberto: d.em_aberto, fixas_nao_geradas: fixasNaoGeradas,
+      em_aberto: d.em_aberto, fixas_nao_geradas: fixasNaoGeradas, fixas_por_cat: fixasLista,
       folha_prevista: folhaPrevista, folha_lancada: semConfig ? (d.folha_lancada || 0) : partesFolha.reduce((t, x) => t + x.lancado, 0),
       folha_a_lancar: folhaALancar, folha_partes: semConfig ? null : partesFolha,
       lucro_projetado: d.lucro + d.em_aberto - fixasNaoGeradas - folhaALancar,

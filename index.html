@@ -20577,11 +20577,117 @@ function FolhaProjetada({ comp }) {
   );
 }
 
+/* O QUE COMPÕE A LINHA DO DRE (07/11/2026, o Derek: "preciso ao clicar
+ * na conta abrir e mostrar os títulos que totalizam aquele valor pra
+ * conferência e correção"). Uma janela com os lançamentos da
+ * competência que caem naquela categoria — a soma dos efetivados é o
+ * número da linha —, os em aberto à parte e as contas fixas que ainda
+ * não viraram título. Corrige-se ali: categoria, competência e a
+ * observação; o lançamento repartido diz que a correção é em Lançamentos. */
+function DetalheDRE({ comp, linha, aoFechar, aoMudou }) {
+  const [d, setD] = useState(null); const [erro, setErro] = useState("");
+  const [cats] = useCategoriasFin(true);
+  const [mexido, setMexido] = useState({});
+  const ler = () => fin("dre", { competencia: comp, acao: "detalhe", categoria_id: linha.id || "sem" })
+    .then((x) => { setD(x); setErro(""); }).catch((e) => setErro(e.message));
+  useEffect(() => { ler(); }, [comp, linha.id]);
+  const mudar = async (it, mud) => {
+    try {
+      await fin("lancamento", { id: it.id }, finJson("PATCH", mud));
+      setMexido((m) => ({ ...m, [it.id]: true }));
+      aoMudou && aoMudou();
+      ler();
+    } catch (e) { setErro(e.message); }
+  };
+  const efet = d ? d.itens.filter((x) => x.situacao === "efetivado") : [];
+  const abertos = d ? d.itens.filter((x) => x.situacao === "aberto") : [];
+  const tabela = (lista) => (
+    <table className="w-full" style={{ borderCollapse: "collapse" }}>
+      <tbody>
+        {lista.map((it) => (
+          <tr key={it.id} style={{ borderBottom: `1px solid ${C.line}`, background: mexido[it.id] ? "#F3F7F4" : undefined }}>
+            <td className="whitespace-nowrap px-2 py-1.5 align-top text-[12px]" style={{ color: C.mute }}>{it.data ? diaBR(it.data) : "—"}</td>
+            <td className="px-2 py-1.5 align-top text-[12.5px]">
+              <div>{it.descricao || "—"}</div>
+              <div className="text-[11px]" style={{ color: C.mute }}>
+                {[it.favorecido, it.funcionario, it.conta].filter(Boolean).join(" · ")}
+                {it.repartido && <span style={{ color: AMARELO.texto }}> · repartido: só esta parte (R$ {rs2(Math.abs(it.valor))} de {rs2(Math.abs(it.total))}) — corrija em Lançamentos</span>}
+                {it.observacao && <span> · obs: {it.observacao}</span>}
+              </div>
+              {!it.repartido && (
+                <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11.5px]">
+                  <select className="rounded border px-1 py-0.5 outline-none" style={inputSty} value={it.categoria_id || ""}
+                    onChange={(e) => mudar(it, { categoria_id: e.target.value || null })} title="Mudar a categoria">
+                    <option value="">sem categoria</option>
+                    {cats.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                  </select>
+                  <input type="month" className="rounded border px-1 py-0.5 outline-none" style={inputSty} defaultValue={String(it.competencia || "").slice(0, 7)}
+                    title="Competência: o mês a que a despesa pertence"
+                    onBlur={(e) => { const v = e.target.value; if (v && v !== String(it.competencia || "").slice(0, 7)) mudar(it, { competencia: `${v}-01` }); }} />
+                </div>
+              )}
+            </td>
+            <td className="whitespace-nowrap px-2 py-1.5 text-right align-top text-[12.5px] font-semibold" style={{ fontVariantNumeric: "tabular-nums", color: it.valor < 0 ? C.laranja : C.verde }}>{rs2(it.valor)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-3 lg:p-8" style={{ background: "rgba(24,18,33,0.45)" }} onClick={aoFechar}>
+      <div className="w-full max-w-3xl rounded-xl p-4" style={{ background: C.paper }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-baseline justify-between gap-3">
+          <div>
+            <div className="text-[17px] font-bold">{linha.nome}</div>
+            <div className="text-[12px]" style={{ color: C.mute }}>{rotuloMes(comp)} · na linha do DRE: <b>{rs2(linha.valor)}</b></div>
+          </div>
+          <button onClick={aoFechar} className="text-[13px]" style={{ color: C.mute }}>fechar</button>
+        </div>
+        {erro && <p className="mt-2 text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
+        {!d ? <p className="mt-3 text-[13px]" style={{ color: C.mute }}>Carregando…</p> : (
+          <div className="mt-3 space-y-4">
+            <section>
+              <div className="mb-1 flex items-baseline justify-between text-[11px] font-bold uppercase tracking-[0.06em]" style={{ color: C.mute }}>
+                <span>Passou no banco ({efet.length})</span><span style={{ fontVariantNumeric: "tabular-nums" }}>{rs2(d.efetivado)}</span>
+              </div>
+              {efet.length ? tabela(efet) : <p className="text-[12.5px]" style={{ color: C.mute }}>Nada efetivado nesta categoria no mês.</p>}
+            </section>
+            {!!abertos.length && (
+              <section>
+                <div className="mb-1 flex items-baseline justify-between text-[11px] font-bold uppercase tracking-[0.06em]" style={{ color: AMARELO.texto }}>
+                  <span>Títulos em aberto ({abertos.length}) — fora da linha, entram na projeção</span><span style={{ fontVariantNumeric: "tabular-nums" }}>{rs2(d.aberto)}</span>
+                </div>
+                {tabela(abertos)}
+              </section>
+            )}
+            {!!(d.fixas_sem_titulo || []).length && (
+              <section>
+                <div className="mb-1 text-[11px] font-bold uppercase tracking-[0.06em]" style={{ color: C.mute }}>Contas fixas desta categoria ainda sem título</div>
+                {d.fixas_sem_titulo.map((x) => (
+                  <div key={x.id} className="flex justify-between px-2 py-1 text-[12.5px]" style={{ borderBottom: `1px solid ${C.line}` }}>
+                    <span>{x.nome}</span><span style={{ fontVariantNumeric: "tabular-nums" }}>{rs2(-x.previsto)}</span>
+                  </div>
+                ))}
+              </section>
+            )}
+            {Math.abs(d.efetivado - linha.valor) >= 0.01 && !Object.keys(mexido).length && (
+              <p className="text-[11.5px]" style={{ color: AMARELO.texto }}>A soma ({rs2(d.efetivado)}) não bate com a linha ({rs2(linha.valor)}) — recarregue o DRE.</p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function FinDRE({ comp }) {
   const [d, setD] = useState(null); const [erro, setErro] = useState("");
   const [meses, setMeses] = useState(1);
   const [mm, setMm] = useState(null);
-  useEffect(() => { setD(null); fin("dre", { competencia: comp }).then(setD).catch((e) => setErro(e.message)); }, [comp]);
+  const [abrir, setAbrir] = useState(null);
+  const [vers, setVers] = useState(0);
+  // Corrigir na janela relê o DRE por baixo, sem apagar a tela.
+  useEffect(() => { if (!vers) setD(null); fin("dre", { competencia: comp }).then(setD).catch((e) => setErro(e.message)); }, [comp, vers]);
   useEffect(() => {
     if (meses === 1) { setMm(null); return; }
     setMm(null); fin("dre", { competencia: comp, meses }).then(setMm).catch((e) => setErro(e.message));
@@ -20621,8 +20727,13 @@ function FinDRE({ comp }) {
     );
   }
   if (!d) return <div>{seletor}<p className="text-[13px]" style={{ color: C.mute }}>Calculando…</p></div>;
-  const linha = (rot, v, forte, cor) => (
-    <div className="flex items-baseline justify-between gap-3 px-3 py-1.5 text-[13px]" style={{ borderBottom: `1px solid ${C.line}`, fontWeight: forte ? 700 : 400 }}>
+  const linha = (rot, v, forte, cor, abrirCom) => abrirCom ? (
+    <button key={rot} onClick={() => setAbrir(abrirCom)} title="Ver os lançamentos que somam este valor"
+      className="flex w-full items-baseline justify-between gap-3 px-3 py-1.5 text-left text-[13px] hover:bg-[#F7F4FA]" style={{ borderBottom: `1px solid ${C.line}`, fontWeight: forte ? 700 : 400 }}>
+      <span>{rot} <span className="text-[11px]" style={{ color: C.mute }}>›</span></span><span style={{ fontVariantNumeric: "tabular-nums", color: cor || (v < 0 ? C.laranja : C.ink) }}>{rs2(v)}</span>
+    </button>
+  ) : (
+    <div key={rot} className="flex items-baseline justify-between gap-3 px-3 py-1.5 text-[13px]" style={{ borderBottom: `1px solid ${C.line}`, fontWeight: forte ? 700 : 400 }}>
       <span>{rot}</span><span style={{ fontVariantNumeric: "tabular-nums", color: cor || (v < 0 ? C.laranja : C.ink) }}>{rs2(v)}</span>
     </div>
   );
@@ -20631,8 +20742,8 @@ function FinDRE({ comp }) {
     <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
       <div className="rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
         <div className="px-3 py-2 text-[12px] font-semibold uppercase tracking-[0.06em]" style={{ color: C.mute, borderBottom: `1px solid ${C.line}` }}>Despesas por categoria · {rotuloMes(comp)}</div>
-        {d.linhas.map((l) => linha(l.nome, l.valor))}
-        {!!d.sem_categoria && linha("Sem categoria", d.sem_categoria, false, C.laranja)}
+        {d.linhas.map((l) => linha(l.nome, l.valor, false, null, l))}
+        {!!d.sem_categoria && linha("Sem categoria", d.sem_categoria, false, C.laranja, { id: null, nome: "Sem categoria", valor: d.sem_categoria })}
         {!d.linhas.length && <p className="px-3 py-6 text-center text-[13px]" style={{ color: C.mute }}>Nenhum lançamento nesta competência.</p>}
         {linha("Total de despesas", d.total_despesas, true)}
       </div>
@@ -20657,13 +20768,17 @@ function FinDRE({ comp }) {
             <div className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: C.mute }}>Projetado até o fim do mês</div>
             {[["Títulos em aberto", d.projecao.em_aberto],
               ["Contas fixas ainda sem título", -d.projecao.fixas_nao_geradas]].concat(
+              // De onde vêm as contas fixas: por categoria, e as da folha
+              // marcadas — elas já cobrem parte da folha prevista abaixo.
+              (d.projecao.fixas_por_cat || []).map((x) => [`   ${x.categoria}${x.folha ? " (conta como folha)" : ""}`, -x.valor, true])
+            ).concat(
               d.projecao.folha_partes
                 ? d.projecao.folha_partes.filter((x) => x.prevista || x.lancado).map((x) => [
-                    `${x.categoria || x.parte} (folha: prevista ${rs2(x.prevista)} − lançada ${rs2(x.lancado)})`, -x.a_lancar])
+                    `${x.categoria || x.parte} (folha: prevista ${rs2(x.prevista)} − lançada ${rs2(x.lancado)}${x.nas_fixas ? ` − nas contas fixas ${rs2(x.nas_fixas)}` : ""})`, -x.a_lancar])
                 : [[`Folha ainda a lançar (prevista ${rs2(d.projecao.folha_prevista)} − lançada ${rs2(d.projecao.folha_lancada)})`, -d.projecao.folha_a_lancar]]
-            ).map(([r, v]) => (
-              <div key={r} className="mt-1 flex items-baseline justify-between gap-2 text-[12px]">
-                <span style={{ color: C.mute }}>{r}</span><span style={{ fontVariantNumeric: "tabular-nums", color: v < 0 ? C.laranja : C.ink }}>{rs2(v)}</span>
+            ).map(([r, v, sub]) => (
+              <div key={r} className={`flex items-baseline justify-between gap-2 ${sub ? "pl-3 text-[11px]" : "mt-1 text-[12px]"}`}>
+                <span style={{ color: C.mute }}>{sub ? `· ${r.trim()}` : r}</span><span style={{ fontVariantNumeric: "tabular-nums", color: sub ? C.mute : v < 0 ? C.laranja : C.ink }}>{rs2(v)}</span>
               </div>
             ))}
             <div className="mt-2 flex items-baseline justify-between gap-2">
@@ -20677,6 +20792,7 @@ function FinDRE({ comp }) {
       </div>
     </div>
     <FolhaProjetada comp={comp} />
+    {abrir && <DetalheDRE comp={comp} linha={abrir} aoFechar={() => setAbrir(null)} aoMudou={() => setVers((x) => x + 1)} />}
     </div>
   );
 }
