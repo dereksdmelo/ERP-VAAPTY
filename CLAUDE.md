@@ -402,7 +402,9 @@ prazo de 25 s (pendurado não segura a fila; 90 s era espera demais, o
 Derek), a foto que falha tenta de novo sozinha até quatro vezes, a 3, 6
 e 9 s, e muitas fotos são comprimidas e enviadas
 uma de cada vez (`createObjectURL` em vez de ler tudo na memória). As
-repetidas de antes continuam lá — apagar é decisão de quem olha.
+repetidas de antes foram apagadas no mesmo dia, a pedido do Derek: 49
+cópias em 17 carros, achadas pelo MD5 do arquivo no Storage (o `eTag`
+de `storage.objects`), ficando em cada grupo a de menor ordem (a capa).
 
 **Nada fica órfão:** se a linha na tabela `foto` falhar depois do
 upload, `api/foto.js` apaga o arquivo do bucket antes de devolver erro.
