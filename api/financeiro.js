@@ -186,8 +186,59 @@ const tipoCusto = (v) => (TIPOS_CUSTO.indexOf(String(v)) >= 0 ? String(v) : "fix
 const categoria = cadastro("fin_categoria",
   [["nome", texto], ["grupo", grupo], ["no_dre", bool], ["ordem", inteiro], ["ativa", bool],
    ["pede_funcionario", bool], ["tipo_custo", tipoCusto]], "ordem.asc,nome.asc");
-const funcionario = cadastro("fin_funcionario",
+const funcionarioCad = cadastro("fin_funcionario",
   [["nome", texto], ["salario_base", (v) => decimal(v) || 0], ["negociador_id", idOuNulo], ["ativo", bool]], "nome.asc");
+/* JUNTAR E TIRAR PESSOA DA FOLHA (0117, 07/11/2026, o Derek: "duplicou
+ * tudo as pessoas… e não dá pra excluir, não dá pra arrumar").
+ * POST ?acao=juntar {fica, sai}: tudo que aponta para quem sai passa para
+ * quem fica (lançamento, rateio, vale, folha, ficha) e quem sai é apagado
+ * — pela `fin_juntar_funcionario`, que confere o financeiro no banco.
+ * DELETE ?id=: só apaga quem não tem nada pendurado; com lançamento,
+ * vale ou folha, a resposta manda juntar ou desativar. */
+async function funcionario(req, res, tok) {
+  const acao = String(req.query.acao || "");
+  if (req.method === "POST" && acao === "juntar") {
+    const c = await corpoDe(req);
+    const fica = idOuNulo(c && c.fica), sai = idOuNulo(c && c.sai);
+    if (!fica || !sai || fica === sai) return res.status(400).json({ erro: "Escolha as duas pessoas: a que fica e a que sai." });
+    try {
+      const r = await supa(`${URL_BASE}/rest/v1/rpc/fin_juntar_funcionario`, { method: "POST", headers: cab(tok),
+        body: JSON.stringify({ p_fica: fica, p_sai: sai }) });
+      return res.status(200).json({ ok: true, movidos: r });
+    } catch (e) {
+      const m = String(e.message || e);
+      if (/fin_funcionario_nome|duplicate/i.test(m)) return res.status(409).json({ erro: "Já existe outra pessoa na folha com esse nome." });
+      return res.status(/financeiro/i.test(m) ? 403 : 400).json({ erro: m.slice(0, 200) });
+    }
+  }
+  if (req.method === "DELETE") {
+    const id = idOuNulo(req.query.id);
+    if (!id) return res.status(400).json({ erro: "id inválido." });
+    const conta = async (t) => {
+      const r = await fetch(`${base(t)}?select=id&funcionario_id=eq.${id}&limit=1`, { headers: cab(tok) });
+      const l = await r.json().catch(() => []);
+      return Array.isArray(l) ? l.length : 0;
+    };
+    const [l, v, f, ra] = await Promise.all([conta("fin_lancamento"), conta("fin_vale"), conta("fin_folha"), conta("fin_rateio")]);
+    if (l || v || f || ra) {
+      return res.status(409).json({ erro: "Essa pessoa tem lançamento, vale ou folha gravada. Use \"juntar com\" (se for a mesma pessoa de outra linha) ou desative." });
+    }
+    await supa(`${base("colaborador")}?fin_funcionario_id=eq.${id}`, { method: "PATCH", headers: cab(tok, { Prefer: "return=minimal" }),
+      body: JSON.stringify({ fin_funcionario_id: null }) }).catch(() => null);
+    const r = await supa(`${base("fin_funcionario")}?id=eq.${id}`, { method: "DELETE", headers: cab(tok, REP) });
+    if (!um(r)) return recusado(res);
+    return res.status(200).json({ ok: true });
+  }
+  if (req.method === "PATCH" && req.query.id) {
+    // Renomear para um nome já usado bate no índice único (0021): diga isso.
+    try { return await funcionarioCad(req, res, tok); }
+    catch (e) {
+      if (/fin_funcionario_nome|duplicate/i.test(String(e.message || ""))) return res.status(409).json({ erro: "Já existe outra pessoa na folha com esse nome — use \"juntar com\"." });
+      throw e;
+    }
+  }
+  return funcionarioCad(req, res, tok);
+}
 
 /* ------------------ lançamentos ------------------ */
 

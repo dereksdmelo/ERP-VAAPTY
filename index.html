@@ -21348,6 +21348,8 @@ function FinFolha({ comp }) {
   // Recado de "pôr na folha" (quem não entrou e por quê) — declarado aqui
   // em cima, antes dos retornos antecipados: hook depois deles quebra a tela.
   const [aviso, setAviso] = useState("");
+  // A linha da folha que está sendo arrumada (renomear, juntar, tirar).
+  const [arrumando, setArrumando] = useState(null);
   // Em que categoria do DRE entra cada parte da folha (0097).
   const [cfgFolha, setCfgFolha] = useState(null); const [catsFolha, setCatsFolha] = useCategoriasFin(true);
   useEffect(() => {
@@ -21384,6 +21386,46 @@ function FinFolha({ comp }) {
       carregar();
     } catch (e) { setAviso(e.message); }
   };
+  /* ARRUMAR A FOLHA (0117, 07/11/2026, o Derek: "duplicou tudo as
+   * pessoas… e não dá pra excluir, não dá pra arrumar"). Cada linha tem
+   * "arrumar": renomear, juntar com outra linha (tudo dela — lançamentos,
+   * vales, folhas, a ficha — passa para a que fica) e tirar da folha. */
+  const juntar = async (fica, sai) => {
+    setAviso("");
+    try {
+      await fin("funcionario", { acao: "juntar" }, finJson("POST", { fica: fica.funcionario_id, sai: sai.funcionario_id }));
+      // O nome mais completo vence: a cópia nasceu do nome completo da ficha.
+      if (String(sai.nome || "").length > String(fica.nome || "").length && !/\(\d\)$/.test(sai.nome)) {
+        await fin("funcionario", { id: fica.funcionario_id }, finJson("PATCH", { nome: sai.nome })).catch(() => {});
+      }
+      setArrumando(null); carregar();
+    } catch (e) { setAviso(e.message); }
+  };
+  const renomear = async (l, nome) => {
+    if (!String(nome || "").trim() || nome.trim() === l.nome) { setArrumando(null); return; }
+    try { await fin("funcionario", { id: l.funcionario_id }, finJson("PATCH", { nome: nome.trim() })); setArrumando(null); carregar(); }
+    catch (e) { setAviso(e.message); }
+  };
+  const tirar = async (l) => {
+    if (!window.confirm(`Tirar ${l.nome} da folha?`)) return;
+    try { await fin("funcionario", { id: l.funcionario_id }, { method: "DELETE" }); setArrumando(null); carregar(); }
+    catch (e) {
+      if (window.confirm(`${e.message}\n\nDesativar ${l.nome}? Sai da folha dos próximos meses e o histórico fica.`)) {
+        try { await fin("funcionario", { id: l.funcionario_id }, finJson("PATCH", { ativo: false })); setArrumando(null); carregar(); }
+        catch (x) { setAviso(x.message); }
+      }
+    }
+  };
+  // A cópia provável: linha sem ficha e sem folha gravada cujo primeiro
+  // nome é o de outra linha que tem ficha ou histórico. É sugestão — o
+  // clique é que junta.
+  const primeiro = (n) => semAcento(String(n || "")).toUpperCase().split(/\s+/)[0];
+  const copias = (d ? d.folha : []).filter((l) => !l.colaborador_id && !l.gravada).map((l) => {
+    const par = d.folha.filter((o) => o.funcionario_id !== l.funcionario_id && (o.colaborador_id || o.gravada)
+      && primeiro(o.nome) === primeiro(l.nome)
+      && (!o.negociador_id || !l.negociador_id || o.negociador_id === l.negociador_id));
+    return par.length === 1 ? { sai: l, fica: par[0] } : null;
+  }).filter(Boolean);
   /* A FOLHA PUXA O COMBINADO (28/10/2026, o Derek: "essa folha aqui
    * deveria puxar o que cadastramos no perfil de cada colaborador").
    * Linha não salva mostra a conta do combinado da ficha (0081) — o fixo
@@ -21420,6 +21462,17 @@ function FinFolha({ comp }) {
           <button onClick={incluir} className="rounded-md px-3 py-1 text-[12.5px] font-semibold text-white" style={{ background: C.roxo }}>pôr na folha</button>
         </div>
       )}
+      {!!copias.length && (
+        <div className="space-y-1.5 rounded-lg px-3 py-2 text-[13px]" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
+          <div><b>Parece repetido na folha</b> — a mesma pessoa em duas linhas. Juntar passa tudo para a linha que já tinha histórico e fica com o nome completo.</div>
+          {copias.map(({ sai, fica }) => (
+            <div key={sai.funcionario_id} className="flex flex-wrap items-center gap-2">
+              <span><b>{sai.nome}</b> é <b>{fica.nome}</b>?</span>
+              <button onClick={() => juntar(fica, sai)} className="rounded-md px-2.5 py-0.5 text-[12px] font-semibold text-white" style={{ background: C.roxo }}>juntar</button>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="rolar overflow-x-auto rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
         <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 760 }}>
           <thead><tr>{["Funcionário", "Salário", "Comissão", "Bonificação", "Vales", "Líquido", "Pago em"].map((h, i) => (
@@ -21437,6 +21490,22 @@ function FinFolha({ comp }) {
                       title={(l.combinado.linhas || []).map((x) => `${x.rotulo}: ${rs2(x.valor)}${x.conta ? ` (${x.conta})` : ""}`).join("\n")}>
                       combinado{l.combinado.perfil ? ` · ${l.combinado.perfil}` : ""}: {rs2(l.combinado.total)}{d.aberto ? ` até hoje · ${rs2(l.combinado.ritmo)} no ritmo` : ""}
                       {!l.gravada && <button onClick={() => gravar(l, {})} className="ml-2 font-semibold underline" style={{ color: C.roxo }}>salvar</button>}
+                    </div>
+                  )}
+                  {arrumando !== l.funcionario_id ? (
+                    <button onClick={() => setArrumando(l.funcionario_id)} className="block text-[11px] font-normal" style={{ color: C.mute }}>arrumar</button>
+                  ) : (
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px] font-normal">
+                      <input defaultValue={l.nome} id={`nome-${l.funcionario_id}`} className="w-[190px] rounded border px-1.5 py-0.5 outline-none" style={inputSty}
+                        onKeyDown={(e) => { if (e.key === "Enter") renomear(l, e.target.value); }} />
+                      <button onClick={() => renomear(l, (document.getElementById(`nome-${l.funcionario_id}`) || {}).value)} className="font-semibold" style={{ color: C.roxo }}>renomear</button>
+                      <select className="rounded border px-1 py-0.5 outline-none" style={inputSty} value=""
+                        onChange={(e) => { const o = d.folha.filter((x) => x.funcionario_id === e.target.value)[0]; if (o && window.confirm(`Juntar ${l.nome} em ${o.nome}?\n\nTudo de ${l.nome} (lançamentos, vales, folhas, a ficha) passa para ${o.nome}, e a linha ${l.nome} sai.`)) juntar(o, l); }}>
+                        <option value="">juntar com…</option>
+                        {d.folha.filter((x) => x.funcionario_id !== l.funcionario_id).map((x) => <option key={x.funcionario_id} value={x.funcionario_id}>{x.nome}</option>)}
+                      </select>
+                      <button onClick={() => tirar(l)} style={{ color: C.laranja }}>tirar da folha</button>
+                      <button onClick={() => setArrumando(null)} style={{ color: C.mute }}>fechar</button>
                     </div>
                   )}
                 </td>
@@ -28719,6 +28788,15 @@ function FichaColaborador({ pe, aoFechar, tirarAcessoEMeta }) {
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.erro || "Não consegui salvar a ficha.");
       setF(d.colaborador); setAviso("Ficha salva."); setVersaoSalva((x) => x + 1);
+      // O nome da folha acompanha o nome completo da ficha (07/11/2026):
+      // trocar o nome aqui não pode deixar a folha com o nome velho.
+      const fid = d.colaborador && d.colaborador.fin_funcionario_id;
+      const pf = fid && (folha || []).filter((x) => x.id === fid)[0];
+      const nc = String((d.colaborador && d.colaborador.nome_completo) || "").trim();
+      if (pf && nc && pf.nome !== nc) {
+        fetchAut(`/api/financeiro?recurso=funcionario&id=${fid}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nome: nc }) })
+          .then((r) => { if (r.ok) setFolha((l) => (l || []).map((x) => (x.id === fid ? { ...x, nome: nc } : x))); }).catch(() => {});
+      }
     } catch (e) { setErro(e.message); }
     setSalvando(false);
   };
@@ -28741,6 +28819,28 @@ function FichaColaborador({ pe, aoFechar, tirarAcessoEMeta }) {
     catch (e) { setErro(e.message); }
   };
   const criarNaFolha = async () => {
+    /* A MESMA PESSOA NÃO NASCE DUAS VEZES (07/11/2026). O Derek trocou os
+     * nomes da equipe pelos completos e apertou "pôr na folha": nasceram
+     * CARLOS TAMBOSI, DIMAS FERNANDO… ao lado de CARLOS e DIMAS, que já
+     * tinham lançamentos. Antes de criar, procura quem já está na folha
+     * pelo mesmo cadastro de meta ou pelo nome curto, liga a ficha a ela e
+     * troca o nome pelo completo. */
+    const completo = String((f && f.nome_completo) || nome || "").trim();
+    const curto = String((n && n.nome) || (a && a.nome) || nome || "").trim();
+    const ja = (folha || []).filter((x) => (n && x.negociador_id === n.id)
+      || nomeChave(x.nome) === nomeChave(completo) || (curto && nomeChave(x.nome) === nomeChave(curto)));
+    if (ja.length === 1) {
+      set("fin_funcionario_id", ja[0].id);
+      if (completo && ja[0].nome !== completo) {
+        try {
+          await fetchAut(`/api/financeiro?recurso=funcionario&id=${ja[0].id}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ nome: completo, ...(n && !ja[0].negociador_id ? { negociador_id: n.id } : {}) }) });
+          setFolha((l) => (l || []).map((x) => (x.id === ja[0].id ? { ...x, nome: completo } : x)));
+        } catch (e) {}
+      }
+      setAviso(`Já estava na folha como ${ja[0].nome} — ligado. Salve a ficha.`);
+      return;
+    }
     try {
       const r = await fetchAut("/api/financeiro?recurso=funcionario", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ nome: (f && f.nome_completo) || nome, negociador_id: n ? n.id : null, ativo: true }) });
