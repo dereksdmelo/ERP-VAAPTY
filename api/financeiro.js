@@ -966,6 +966,22 @@ async function dre(req, res, tok) {
     ((fixas && fixas.contas) || []).filter((x) => x.ativo && !x.titulo).forEach((x) => {
       const k = x.categoria_id || "sem"; fixasPorCat[k] = (fixasPorCat[k] || 0) + (Number(x.previsto) || 0);
     });
+    /* E O QUE JÁ SAIU NA CATEGORIA ABATE A CONTA FIXA. O aluguel pago
+     * pelo PIX, categorizado em Aluguel mas sem gerar o título da conta
+     * fixa, aparecia no DRE (real) E na projeção (conta fixa sem título).
+     * Agora o que já entrou na categoria neste mês — fora os títulos das
+     * próprias contas fixas — é descontado da previsão dela. */
+    const tituloFixaPorCat = {};
+    ((fixas && fixas.contas) || []).filter((x) => x.ativo && x.titulo && x.categoria_id).forEach((x) => {
+      tituloFixaPorCat[x.categoria_id] = (tituloFixaPorCat[x.categoria_id] || 0) + (Number(x.titulo.valor) || 0);
+    });
+    const fixasBruto = {};
+    Object.keys(fixasPorCat).forEach((k) => {
+      fixasBruto[k] = fixasPorCat[k];
+      if (k === "sem") return;
+      const livre = Math.max(0, (d.lancado_por_cat[k] || 0) - (tituloFixaPorCat[k] || 0));
+      fixasPorCat[k] = Math.max(0, fixasPorCat[k] - livre);
+    });
     /* A FOLHA POR PARTE (0097, o Derek: "uma parte é categorizada como
      * prestação de serviços, outra como comissão e outra como
      * bonificação"). A prevista é a da aba Folha: a linha salva manda;
@@ -1002,7 +1018,10 @@ async function dre(req, res, tok) {
     }
     const fixasNaoGeradas = Object.keys(fixasPorCat).reduce((t, k) => t + fixasPorCat[k], 0);
     const fixasLista = Object.keys(fixasPorCat).map((k) => ({ categoria_id: k === "sem" ? null : k, categoria: k === "sem" ? "Sem categoria" : nomeCat[k] || "—",
-      valor: Math.round(fixasPorCat[k] * 100) / 100, folha: partesFolha.some((x) => x.categoria_id === k) }))
+      valor: Math.round(fixasPorCat[k] * 100) / 100, previsto: Math.round(fixasBruto[k] * 100) / 100,
+      ja_lancado: Math.round((fixasBruto[k] - fixasPorCat[k]) * 100) / 100,
+      folha: partesFolha.some((x) => x.categoria_id === k) }))
+      .filter((x) => x.valor > 0 || x.ja_lancado > 0)
       .sort((a, b) => b.valor - a.valor);
     d.projecao = {
       em_aberto: d.em_aberto, fixas_nao_geradas: fixasNaoGeradas, fixas_por_cat: fixasLista,

@@ -391,6 +391,18 @@ estão **no servidor** (`enviadas`), não as que estão no aparelho.
 e mantém o data URL no aparelho, com botão "Tentar". A chave
 `vaapty:fotos` só é apagada quando não sobra nenhuma pendente.
 
+**A mesma foto não entra duas vezes, e foto parada sobe sozinha
+(0116, 07/11/2026).** O relato: *"fica carregando 'aguarda' e não vai…
+seleciona só uma foto e vai várias… seleciona muitas e dá erro"*. Havia
+28 grupos de fotos repetidas no banco. Agora o `api/foto.js` grava o
+SHA-256 da imagem (`foto.hash`, índice único por veículo) e devolve a que
+já existe em vez de criar outra — cobre o duplo clique, a reabertura que
+reenvia e a mesma foto escolhida duas vezes. Na tela: cada envio tem
+prazo de 90 s (pendurado não segura a fila), a foto que falha tenta de
+novo sozinha até três vezes, e muitas fotos são comprimidas e enviadas
+uma de cada vez (`createObjectURL` em vez de ler tudo na memória). As
+repetidas de antes continuam lá — apagar é decisão de quem olha.
+
 **Nada fica órfão:** se a linha na tabela `foto` falhar depois do
 upload, `api/foto.js` apaga o arquivo do bucket antes de devolver erro.
 No DELETE a ordem é inversa — arquivo primeiro, linha depois — para que
@@ -879,6 +891,22 @@ editor de peças, salvo com nome, para usar em mais de uma pessoa. A
 ficha aponta para o perfil (`remuneracao.perfil_id`) e ainda pode ter
 peças só dela; as do perfil entram primeiro na conta. Mudar o perfil
 muda todo mundo que o usa. Desativa-se, não se apaga.
+
+**A folha não cria a mesma pessoa duas vezes, e se arruma (0117,
+07/11/2026).** O Derek trocou os nomes da equipe pelos completos e
+apertou "pôr na folha": nasceram CARLOS TAMBOSI, DIMAS FERNANDO…,
+MARCOS DANILO…, MARCOS ILARIO GRAWE e TIAGO BERNADON… ao lado dos
+registros antigos, que tinham os lançamentos — *"não dá pra excluir,
+não dá pra arrumar"*. Agora o "pôr na folha" da ficha liga a pessoa que
+já está lá (pelo cadastro de meta ou pelo nome curto) e troca o nome pelo
+completo; salvar a ficha leva o nome completo para a folha. Na Folha,
+"arrumar" renomeia, junta com outra linha (`fin_juntar_funcionario`:
+lançamentos, rateios, vales, folhas e a ficha passam para quem fica) e
+tira — só quem não tem nada pendurado sai; o resto se desativa. Uma
+tarja sugere juntar a cópia provável (sem ficha e sem folha, mesmo
+primeiro nome de quem tem). **As cinco cópias de 06/11 não foram
+juntadas por mim** — apagar registro de produção pede o clique de quem
+decide.
 
 **Bônus por período e ticket por faixa (27/10/2026).** O semanal e o da
 1ª quinzena são a mesma faixa medida dentro do período
@@ -3361,6 +3389,10 @@ grupo (que decide se entra no DRE), "no DRE", custo fixo ou variável (o
 Fechamento, decisão 32), "pede a pessoa" (folha), ordem e ativa.
 Desativa-se, não se apaga.
 
+**A categoria nova aparece sem recarregar (07/11/2026).** As telas liam
+a lista uma vez, ao abrir; agora `useCategoriasFin` relê quando o plano
+de contas muda (`vaapty:categorias`) e quando a aba volta a ficar à vista.
+
 **O DRE projetado** fica ao lado do lucro, e o lucro de cima não muda: é
 o que passou no banco, o número que se confere. A projeção soma o que
 ainda vai sair no mês — títulos em aberto, contas fixas que ainda nem
@@ -3382,6 +3414,24 @@ do mês; sem combinado, o salário base; e quem tem combinado mas não está
 na folha), separa por parte e desconta de cada uma o que já entrou na
 categoria dela neste mês (`lancado_por_cat`, pago ou em título). Sem
 categoria escolhida, vale a régua antiga (o que pede a pessoa).
+
+**A linha do DRE abre o que a compõe (07/11/2026, o Derek: *"ao clicar
+na conta abrir e mostrar os títulos que totalizam aquele valor pra
+conferência e correção"*).** `?recurso=dre&acao=detalhe` usa a mesma
+`partesDe` do DRE, então a soma dos efetivados é o número da linha; os
+em aberto vêm à parte, e as contas fixas da categoria ainda sem título.
+Na janela se corrige categoria e competência (o repartido manda para
+Lançamentos).
+
+**Folha e contas fixas não se somam mais na projeção** (o Derek: *"as
+prévias estão conflitando com os reais… as prévias dos salários e das
+contas fixas, ele não tá ligando uma com a outra"*). Duas regras: o que
+já saiu na categoria no mês (fora os títulos das próprias contas fixas)
+abate a previsão da conta fixa; e numa categoria da folha, a conta fixa
+sem título cobre parte da folha prevista — conta o maior dos dois, não a
+soma. A tela mostra as contas fixas por categoria, com o que já foi
+lançado. **Os R$ 62.860 de MKT e R$ 27.455 de Despachante por mês são o
+cadastro das contas fixas** — se não são mais isso, é lá que se corrige.
 
 ### 61. Contas e caixas: o dinheiro da gaveta também é conta
 
@@ -4117,6 +4167,13 @@ está lá para quando o cadastro vier de lá — hoje não vem.
 **A margem aparece antes de confirmar a venda**, e é de propósito: é a
 última chance de ver que o carro está saindo no prejuízo.
 
+**A busca do Estoque (07/11/2026)** procura placa, modelo, ano,
+comprador e negociador no pátio, nos vendidos e nos baixados de uma vez
+— com texto, o filtro sai de cena e cada linha diz onde o carro está. E
+a janela do contrato do lojista quebrava antes de o cadastro chegar
+(`L.rep_nome` com `L` nulo): era o "erro" que o administrativo via. O
+Estoque e a Venda para lojistas sempre estiveram em Gestão para o adm.
+
 **Apagar linha de custo é do gerente.** Linha apagada some com a
 explicação da margem, e isso é conversa de gerente — a RLS da 0019
 separa o `delete` do resto, que é da equipe.
@@ -4303,6 +4360,22 @@ dia. A comissão (`api/financeiro.js`) segue a mesma ordem: o dia primeiro.
 `semana_venda` existe ao lado de `vendido_em`; `semanaDe()` prefere a
 coluna e deriva do dia quando ela falta. E a coluna DATA da planilha é
 a **data da compra**, que bate com a aba 1 — vira `entrou_em`.
+
+**A tabela filtra, pesquisa e ordena (07/11/2026)**: pesquisa por carro,
+placa ou comprador; negociador, semana, meio de alcance e prospector em
+lista; "só prejuízo"; clicar no cabeçalho ordena. O TOTAL e a caixa por
+negociador somam só o que está à vista.
+
+**A previsão de rentabilidade (0118)** — o Derek: *"valores prováveis de
+venda nos carros que estão em estoque… vendendo todos, ou só alguns…
+às vezes já vendemos um e queremos saber quanto vai dar, mas não tem
+contrato ainda"*. Botão "Previsão" na Rentabilidade: cada carro do pátio
+ganha `venda_prevista` e uma nota (no banco, porque quem monta e quem lê
+são pessoas diferentes), a conta é a mesma `rentabilidadeDe` com o
+provável no lugar da venda, e marcar/desmarcar (só na tela) responde "e
+se vender só estes?". Mostra também o mês já vendido + a previsão. **Não
+é venda**: o carro continua no pátio e nada muda na Rentabilidade do mês
+nem no DRE.
 
 **Carro importado não tem atendimento**, então negociador, meio de
 alcance e prospector ficam em texto no `estoque` (como o lead de

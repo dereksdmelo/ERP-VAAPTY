@@ -20770,7 +20770,7 @@ function FinDRE({ comp }) {
               ["Contas fixas ainda sem título", -d.projecao.fixas_nao_geradas]].concat(
               // De onde vêm as contas fixas: por categoria, e as da folha
               // marcadas — elas já cobrem parte da folha prevista abaixo.
-              (d.projecao.fixas_por_cat || []).map((x) => [`   ${x.categoria}${x.folha ? " (conta como folha)" : ""}`, -x.valor, true])
+              (d.projecao.fixas_por_cat || []).map((x) => [`   ${x.categoria}${x.ja_lancado ? ` (prevista ${rs2(x.previsto)} − já lançado ${rs2(x.ja_lancado)})` : ""}${x.folha ? " · conta como folha" : ""}`, -x.valor, true])
             ).concat(
               d.projecao.folha_partes
                 ? d.projecao.folha_partes.filter((x) => x.prevista || x.lancado).map((x) => [
