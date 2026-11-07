@@ -13812,7 +13812,57 @@ function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar, aoMudar }) {
   // botão que abre um pop-up, aí não fica ocupando espaço na lateral"*):
   // a planilha é o assunto, e com a caixa ao lado ela cortava em DÉBITOS.
   const [verNeg, setVerNeg] = useState(false);
-  const linhas = vendidos.map((e) => ({ e, r: rentabilidadeDe(e), semana: semanaDe(e), dias: diasNoPatio(e) }));
+  /* FILTROS E PESQUISA NA TABELA (07/11/2026, o Derek: "permitir fazer
+   * filtros na tabela… e também pesquisa"). Como o filtro da planilha:
+   * pesquisa por carro, placa ou comprador; negociador, semana, meio de
+   * alcance e prospector em lista; "só prejuízo"; e clicar no cabeçalho
+   * ordena. O TOTAL embaixo e a caixa por negociador somam SÓ o que está
+   * à vista — é para isso que se filtra. */
+  const [fBusca, setFBusca] = useState("");
+  const [fNeg, setFNeg] = useState("");
+  const [fSem, setFSem] = useState("");
+  const [fMeio, setFMeio] = useState("");
+  const [fProsp, setFProsp] = useState("");
+  const [fPrej, setFPrej] = useState(false);
+  const [ordem, setOrdem] = useState({ col: "", desc: false });
+  const todas = vendidos.map((e) => ({ e, r: rentabilidadeDe(e), semana: semanaDe(e), dias: diasNoPatio(e) }));
+  const opcoes = (f) => Array.from(new Set(todas.map(f).filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b), "pt-BR"));
+  const negsOp = opcoes(({ e }) => e.negociador_nome && String(e.negociador_nome).toUpperCase());
+  const meiosOp = opcoes(({ e }) => e.meio_alcance);
+  const prospOp = opcoes(({ e }) => e.prospector);
+  const termosR = semAcento(fBusca).toLowerCase().split(/\s+/).filter(Boolean);
+  const filtradas = todas.filter(({ e, r, semana }) => {
+    if (fNeg && String(e.negociador_nome || "").toUpperCase() !== fNeg) return false;
+    if (fSem && String(semana || "") !== fSem) return false;
+    if (fMeio && e.meio_alcance !== fMeio) return false;
+    if (fProsp && e.prospector !== fProsp) return false;
+    if (fPrej && !(r.liquida < 0)) return false;
+    if (termosR.length) {
+      const v = e.veiculo || {};
+      const alvo = semAcento([v.placa, String(v.placa || "").replace(/[^A-Za-z0-9]/g, ""), v.marca_modelo, v.ano_modelo,
+        e.comprador && e.comprador.nome, e.negociador_nome, e.meio_alcance, e.prospector].filter(Boolean).join(" ")).toLowerCase();
+      if (!termosR.every((t) => alvo.indexOf(t) >= 0)) return false;
+    }
+    return true;
+  });
+  const valorCol = {
+    compra: ({ e }) => String(e.entrou_em || ""), venda_dia: ({ e }) => String(e.vendido_em || ""), dias: ({ dias }) => (dias == null ? -1 : dias),
+    carro: ({ e }) => String((e.veiculo && e.veiculo.marca_modelo) || ""), placa: ({ e }) => String((e.veiculo && e.veiculo.placa) || ""),
+    comprador: ({ e }) => String((e.comprador && e.comprador.nome) || ""), venda: ({ r }) => r.venda, cliente: ({ r }) => r.compra,
+    debitos: ({ r }) => r.debitos, quitacao: ({ r }) => r.quitacao, deducoes: ({ r }) => r.deducoes, bruta: ({ r }) => r.bruta,
+    cautelar: ({ r }) => r.cautelar, comissao: ({ r }) => r.comissaoExterna, liquida: ({ r }) => r.liquida,
+    semana: ({ semana }) => semana || 0, negociador: ({ e }) => String(e.negociador_nome || ""),
+    meio: ({ e }) => String(e.meio_alcance || ""), prospector: ({ e }) => String(e.prospector || ""),
+  };
+  const linhas = ordem.col && valorCol[ordem.col]
+    ? filtradas.slice().sort((a, b) => {
+        const x = valorCol[ordem.col](a), y = valorCol[ordem.col](b);
+        const c = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), "pt-BR");
+        return ordem.desc ? -c : c;
+      })
+    : filtradas;
+  const filtrando = !!(termosR.length || fNeg || fSem || fMeio || fProsp || fPrej);
+  const limparFiltros = () => { setFBusca(""); setFNeg(""); setFSem(""); setFMeio(""); setFProsp(""); setFPrej(false); };
 
   const total = linhas.reduce((t, { r }) => ({
     venda: t.venda + r.venda, compra: t.compra + r.compra, debitos: t.debitos + r.debitos,
@@ -13835,6 +13885,16 @@ function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar, aoMudar }) {
     <th className="whitespace-nowrap px-2 py-1.5 text-[11.5px] font-bold uppercase tracking-[0.03em]"
       style={{ background: PLAN.cab, color: PLAN.cabTexto, textAlign: dir || "right", border: `1px solid ${PLAN.cab}`, minWidth: larg,
                position: "sticky", top: 0, zIndex: 1 }}>{t}</th>
+  );
+  // Cabeçalho que ordena: um clique sobe, o segundo desce, o terceiro volta.
+  const thO = (t, col, dir, larg) => (
+    <th onClick={() => setOrdem((o) => (o.col !== col ? { col, desc: false } : !o.desc ? { col, desc: true } : { col: "", desc: false }))}
+      className="cursor-pointer select-none whitespace-nowrap px-2 py-1.5 text-[11.5px] font-bold uppercase tracking-[0.03em]"
+      title="Clique para ordenar"
+      style={{ background: PLAN.cab, color: PLAN.cabTexto, textAlign: dir || "right", border: `1px solid ${PLAN.cab}`, minWidth: larg,
+               position: "sticky", top: 0, zIndex: 1 }}>
+      {t}{ordem.col === col ? (ordem.desc ? " ▼" : " ▲") : ""}
+    </th>
   );
   const td = (v, o) => {
     o = o || {};
@@ -13878,7 +13938,7 @@ function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar, aoMudar }) {
     </div>
   );
 
-  if (!linhas.length) {
+  if (!todas.length) {
     return (
       <div>
         {resumo}
@@ -13892,18 +13952,47 @@ function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar, aoMudar }) {
     );
   }
 
+  const sel = (valor, set, rot, ops, fmt) => (
+    <select value={valor} onChange={(ev) => set(ev.target.value)}
+      className="rounded-md border px-2 py-1 text-[12.5px] outline-none"
+      style={{ ...inputSty, borderColor: valor ? C.roxo : C.line, color: valor ? C.roxo : C.ink, fontWeight: valor ? 600 : 400 }}>
+      <option value="">{rot}</option>
+      {ops.map((o) => <option key={o} value={o}>{fmt ? fmt(o) : o}</option>)}
+    </select>
+  );
   return (
     <div>
       {resumo}
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <input value={fBusca} onChange={(ev) => setFBusca(ev.target.value)} placeholder="Pesquisar carro, placa, comprador…"
+          className="w-[240px] max-w-full rounded-md border px-2.5 py-1 text-[12.5px] outline-none"
+          style={{ ...inputSty, borderColor: fBusca ? C.roxo : C.line }} />
+        {sel(fNeg, setFNeg, "todos os negociadores", negsOp)}
+        {sel(fSem, setFSem, "todas as semanas", ["1", "2", "3", "4"], (n) => `${n}ª semana`)}
+        {!!meiosOp.length && sel(fMeio, setFMeio, "todo meio de alcance", meiosOp)}
+        {!!prospOp.length && sel(fProsp, setFProsp, "todo prospector", prospOp)}
+        <label className="flex items-center gap-1 text-[12.5px]" style={{ color: fPrej ? PLAN.perda : C.mute }}>
+          <input type="checkbox" checked={fPrej} onChange={(ev) => setFPrej(ev.target.checked)} /> só prejuízo
+        </label>
+        {filtrando && (
+          <span className="text-[12px]" style={{ color: C.mute }}>
+            {linhas.length} de {todas.length} carros · o TOTAL soma só estes ·{" "}
+            <button onClick={limparFiltros} className="font-semibold" style={{ color: C.roxo }}>limpar filtros</button>
+          </span>
+        )}
+      </div>
+      {!linhas.length && (
+        <p className="mb-2 text-[13px]" style={{ color: C.mute }}>Nenhum carro com esses filtros.</p>
+      )}
       <div>
         {/* ---- CONTROLE DE VEÍCULOS / CLIENTES ---- */}
         <div className="rolar overflow-auto" style={{ background: C.paper, border: borda, maxHeight: "calc(100dvh - 120px)" }}>
           <table className="w-full" style={{ borderCollapse: "collapse" }}>
             <thead>
               <tr>
-                {th("Compra", "left")}{th("Venda", "left")}{th("Dias")}{th("Carro", "left", 110)}{th("Placa", "left")}{th("Comprador", "left", 160)}
-                {th("Valor de venda")}{th("Valor cliente")}{th("Débitos")}{th("Quitação")}{th("Deduções")}{th("Rent. bruta")}
-                {th("Cautelar")}{th("Comissão ext.")}{th("Rent. líquida")}{th("Sem.")}{th("Negociador", "left")}{th("Meio de alcance", "left")}{th("Prospector", "left")}
+                {thO("Compra", "compra", "left")}{thO("Venda", "venda_dia", "left")}{thO("Dias", "dias")}{thO("Carro", "carro", "left", 110)}{thO("Placa", "placa", "left")}{thO("Comprador", "comprador", "left", 160)}
+                {thO("Valor de venda", "venda")}{thO("Valor cliente", "cliente")}{thO("Débitos", "debitos")}{thO("Quitação", "quitacao")}{thO("Deduções", "deducoes")}{thO("Rent. bruta", "bruta")}
+                {thO("Cautelar", "cautelar")}{thO("Comissão ext.", "comissao")}{thO("Rent. líquida", "liquida")}{thO("Sem.", "semana")}{thO("Negociador", "negociador", "left")}{thO("Meio de alcance", "meio", "left")}{thO("Prospector", "prospector", "left")}
               </tr>
             </thead>
             <tbody>
@@ -14120,6 +14209,12 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
   const [limpando, setLimpando] = useState(false);
   const [marcados, setMarcados] = useState({});
   const [tirando, setTirando] = useState(false);
+  // A BUSCA (07/11/2026, o Derek: "barra de pesquisa no estoque pra
+  // encontrar um carro específico"). Com texto, ela ignora o filtro —
+  // procura no pátio, nos vendidos e nos baixados —, como a busca do
+  // quadro da pré-venda: a resposta é "está em tal lugar", não "está,
+  // mas o filtro o escondeu".
+  const [busca, setBusca] = useState("");
 
   const carregar = async () => {
     setErro("");
@@ -14203,7 +14298,10 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
 
   // A foto principal de cada carro da lista (05/11/2026): uma ida só.
   const [capas, setCapas] = useState({});
-  const idsCapa = (lista || []).filter((e) => (filtro === "em_estoque" || filtro === "baixado") && e.situacao === filtro && e.veiculo_id)
+  const buscando = !!String(busca || "").trim();
+  const idsCapa = (lista || []).filter((e) => e.veiculo_id && (buscando
+      ? (() => { const v = e.veiculo || {}; const q = semAcento(busca).toLowerCase(); return semAcento([v.placa, v.marca_modelo, e.comprador && e.comprador.nome].join(" ")).toLowerCase().indexOf(q.split(/\s+/)[0] || "") >= 0; })()
+      : (filtro === "em_estoque" || filtro === "baixado") && e.situacao === filtro))
     .map((e) => e.veiculo_id).slice(0, 150).join(",");
   useEffect(() => {
     if (!idsCapa || abrindo) return;
@@ -14217,7 +14315,17 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
       aoVoltar={() => { setAbrindo(null); carregar(); }} />;
   }
 
-  const visivel = (lista || []).filter((e) => filtro === "todos" || e.situacao === filtro);
+  const termos = semAcento(busca).toLowerCase().split(/\s+/).filter(Boolean);
+  const casaBusca = (e) => {
+    const v = e.veiculo || {};
+    const alvo = semAcento([v.placa, v.marca_modelo, v.ano_modelo, v.ano_fabricacao, v.cor,
+      e.comprador && e.comprador.nome, e.negociador_nome].filter(Boolean).join(" ")).toLowerCase();
+    const alvoPlaca = String(v.placa || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    return termos.every((t) => alvo.indexOf(t) >= 0 || (t.replace(/[^a-z0-9]/g, "") && alvoPlaca.indexOf(t.replace(/[^a-z0-9]/g, "")) >= 0));
+  };
+  const visivel = termos.length
+    ? (lista || []).filter(casaBusca)
+    : (lista || []).filter((e) => filtro === "todos" || e.situacao === filtro);
   const soma = visivel.reduce((t, e) => {
     const c = contaDoEstoque(e);
     return { custo: t.custo + c.atual, margem: t.margem + (c.margem || 0) };
@@ -14309,7 +14417,21 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
               border: `1px solid ${filtro === v ? C.roxo : C.line}`,
             }}>{r}</button>
         ))}
-        {filtro === "em_estoque" && !!visivel.length && (
+        {!soRentab && (
+          <span className="relative">
+            <input value={busca} onChange={(ev) => setBusca(ev.target.value)}
+              placeholder="Buscar placa, modelo, ano, comprador…"
+              className="w-[260px] max-w-full rounded-full border px-3 py-1 text-[12.5px] outline-none"
+              style={{ borderColor: busca ? C.roxo : C.line, background: "#fff" }} />
+            {busca && <button onClick={() => setBusca("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-[12px]" style={{ color: C.mute }} aria-label="Limpar a busca">✕</button>}
+          </span>
+        )}
+        {buscando && (
+          <span className="text-[11.5px]" style={{ color: C.mute }}>
+            {visivel.length ? `${visivel.length} achado${visivel.length > 1 ? "s" : ""} — no pátio, vendidos e baixados` : "nenhum carro com isso"}
+          </span>
+        )}
+        {!buscando && filtro === "em_estoque" && !!visivel.length && (
           <span className="ml-auto text-[11px]" style={{ color: C.mute }}>
             {visivel.length} carro{visivel.length > 1 ? "s" : ""} · custo {brl(soma.custo)}
           </span>
@@ -14325,7 +14447,7 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
 
       {/* A rentabilidade é a planilha do mês: só carros vendidos, do mês
           escolhido no cabeçalho. Vendido sem data cai no mês de entrada. */}
-      {filtro === "vendido" && lista !== null && (
+      {!buscando && filtro === "vendido" && lista !== null && (
         <Rentabilidade comp={comp} aoAbrir={(id) => setAbrindo(id)} mes={soRentab ? mes : null}
           aoImportar={eGerente && !importando ? () => setImportando(true) : null}
           aoMudar={async (id, dados) => {
@@ -14337,7 +14459,7 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
 
       {lista === null && <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>}
 
-      {lista !== null && filtro === "em_estoque" && !visivel.length && (
+      {lista !== null && !buscando && filtro === "em_estoque" && !visivel.length && (
         <p className="text-[14px] leading-relaxed" style={{ color: C.mute }}>
           Nenhum carro no pátio. O primeiro entra pela fila acima, quando um negócio fecha.
         </p>
@@ -14422,7 +14544,7 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
         </div>
       )}
       <div className="rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-        {(filtro === "em_estoque" || filtro === "baixado") && visivel.map((e, i) => {
+        {(buscando || filtro === "em_estoque" || filtro === "baixado") && visivel.map((e, i) => {
           const capaDe = capas[e.veiculo_id];
           const v = e.veiculo || {};
           const c = contaDoEstoque(e);
@@ -14449,6 +14571,13 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
               <span className="min-w-0 flex-1 truncate text-[13px]">
                 {v.marca_modelo || "—"}
                 {v.ano_modelo ? <span style={{ color: C.mute }}> {v.ano_modelo}</span> : null}
+                {/* Na busca vêm os três lugares juntos: o selo diz onde está. */}
+                {buscando && e.situacao !== "em_estoque" && (
+                  <span className="ml-2 rounded-full px-2 py-0.5 text-[10.5px] font-semibold"
+                    style={{ background: e.situacao === "vendido" ? "#E8F3EE" : C.bg, color: e.situacao === "vendido" ? C.verde : C.mute }}>
+                    {e.situacao === "vendido" ? `vendido${e.comprador && e.comprador.nome ? ` · ${e.comprador.nome}` : ""}${e.vendido_em ? ` · ${diaBR(e.vendido_em)}` : ""}` : "baixado"}
+                  </span>
+                )}
               </span>
               <span className="hidden w-[78px] shrink-0 text-right text-[12px] sm:block" style={{ color: C.mute }}>
                 {diaBR(e.entrou_em)}
@@ -18364,12 +18493,11 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
  * chega: o extrato só baixa título de valor exato (decisão 26). */
 function FinContasFixas({ comp }) {
   const [d, setD] = useState(null); const [erro, setErro] = useState(""); const [aviso, setAviso] = useState("");
-  const [cats, setCats] = useState([]); const [contas, setContas] = useState([]);
+  const [cats, setCats] = useCategoriasFin(true); const [contas, setContas] = useState([]);
   const [nova, setNova] = useState(null); const [indo, setIndo] = useState(false);
   const carregar = () => fin("contas-fixas", { competencia: comp }).then((x) => { setD(x); setErro(""); }).catch((e) => setErro(e.message));
   useEffect(() => { setD(null); carregar(); }, [comp]);
   useEffect(() => {
-    fin("categoria").then((x) => setCats((x.lista || []).filter((c) => c.ativa !== false))).catch(() => {});
     fin("conta").then((x) => setContas((x.lista || []).filter((c) => c.ativa !== false && c.ativo !== false))).catch(() => {});
   }, []);
   const salvar = async (id, mud) => {
@@ -18485,6 +18613,32 @@ function FinContasFixas({ comp }) {
   );
 }
 
+/* AS CATEGORIAS SE RELEEM (07/11/2026, o Derek: "adicionamos uma
+ * categoria no plano de contas e ela não está aparecendo pra selecionar
+ * na conciliação"). Cada tela lia a lista uma vez, ao abrir: a categoria
+ * cadastrada depois só aparecia recarregando a página. Agora o plano de
+ * contas avisa (`vaapty:categorias`) a cada mudança, e a lista também é
+ * relida quando a aba volta a ficar à vista — cadastro feito em outra
+ * aba ou em outro aparelho. */
+function avisarCategorias() { try { window.dispatchEvent(new Event("vaapty:categorias")); } catch (e) {} }
+function useCategoriasFin(soAtivas) {
+  const [cats, setCats] = useState([]);
+  useEffect(() => {
+    let vivo = true;
+    const ler = () => fin("categoria").then((x) => {
+      if (!vivo) return;
+      const l = x.lista || [];
+      setCats(soAtivas ? l.filter((c) => c.ativa !== false) : l);
+    }).catch(() => {});
+    const aoVer = () => { if (document.visibilityState === "visible") ler(); };
+    ler();
+    window.addEventListener("vaapty:categorias", ler);
+    document.addEventListener("visibilitychange", aoVer);
+    return () => { vivo = false; window.removeEventListener("vaapty:categorias", ler); document.removeEventListener("visibilitychange", aoVer); };
+  }, []);
+  return [cats, setCats];
+}
+
 /* O PLANO DE CONTAS (28/10/2026, o Derek: "tem que ter um plano de contas
  * pro DRE… uma aba pra isso… se já tiver precisa estar à disposição, até
  * porque se precisar editar"). Já existia — `fin_categoria` (0021, 0028)
@@ -18501,7 +18655,7 @@ function FinPlanoContas() {
   useEffect(() => { carregar(); }, []);
   const mudar = async (id, mud) => {
     setLista((ls) => ls.map((c) => (c.id === id ? { ...c, ...mud } : c)));
-    try { await fin("categoria", { id }, finJson("PATCH", mud)); } catch (e) { setErro(e.message); carregar(); }
+    try { await fin("categoria", { id }, finJson("PATCH", mud)); avisarCategorias(); } catch (e) { setErro(e.message); carregar(); }
   };
   if (erro && !lista) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
   if (!lista) return <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>;
@@ -18542,7 +18696,7 @@ function FinPlanoContas() {
         </table>
         <div className="flex items-center gap-2 px-3 py-2" style={{ borderTop: `1px solid ${C.line}` }}>
           <input className="flex-1 rounded-lg border px-3 py-1.5 text-[13px] outline-none" style={inputSty} placeholder="Nova categoria" value={novo} onChange={(e) => setNovo(e.target.value)} />
-          <button onClick={async () => { if (!novo.trim()) return; try { await fin("categoria", null, finJson("POST", { nome: novo.trim(), grupo: "despesa", no_dre: true })); setNovo(""); carregar(); } catch (e) { setErro(e.message); } }}
+          <button onClick={async () => { if (!novo.trim()) return; try { await fin("categoria", null, finJson("POST", { nome: novo.trim(), grupo: "despesa", no_dre: true })); setNovo(""); carregar(); avisarCategorias(); } catch (e) { setErro(e.message); } }}
             className="text-[13px] font-semibold" style={{ color: C.roxo }}>cadastrar</button>
         </div>
       </div>
@@ -19044,7 +19198,7 @@ function AberturaConta({ d, comp, conta, aoGravar, aoErro }) {
 function FinLancamentos({ comp }) {
   const [contas, setContas] = useState([]);
   const [conta, setConta] = useState("");
-  const [cats, setCats] = useState([]);
+  const [cats, setCats] = useCategoriasFin(false);
   const [d, setD] = useState(null);
   const [erro, setErro] = useState("");
   const [novo, setNovo] = useState(null);
@@ -19101,7 +19255,6 @@ function FinLancamentos({ comp }) {
       const ini = x.lista.find((c) => c.ativa !== false && c.tipo !== "dinheiro") || x.lista.find((c) => c.ativa !== false) || x.lista[0];
       if (!conta && ini) setConta(ini.id);
     }).catch((e) => setErro(e.message));
-    fin("categoria").then((x) => setCats(x.lista)).catch(() => {});
     fin("estoque").then((x) => setCarros(x.estoque)).catch(() => {});
     fin("funcionario").then((x) => setFuncs(x.lista)).catch(() => {});
   }, []);
@@ -19992,7 +20145,7 @@ function FinCaixas() {
 function FinContas({ comp }) {
   const [d, setD] = useState(null);
   const [erro, setErro] = useState("");
-  const [cats, setCats] = useState([]);
+  const [cats, setCats] = useCategoriasFin(false);
   const [contas, setContas] = useState([]);
   const [novo, setNovo] = useState(null);
   const [baixando, setBaixando] = useState(null);
@@ -20005,7 +20158,6 @@ function FinContas({ comp }) {
   };
   useEffect(() => {
     carregar();
-    fin("categoria").then((x) => setCats(x.lista)).catch(() => {});
     fin("conta").then((x) => setContas(x.lista)).catch(() => {});
     fin("favorecido").then((x) => setFavs(x.lista)).catch(() => {});
   }, []);
@@ -21197,10 +21349,9 @@ function FinFolha({ comp }) {
   // em cima, antes dos retornos antecipados: hook depois deles quebra a tela.
   const [aviso, setAviso] = useState("");
   // Em que categoria do DRE entra cada parte da folha (0097).
-  const [cfgFolha, setCfgFolha] = useState(null); const [catsFolha, setCatsFolha] = useState([]);
+  const [cfgFolha, setCfgFolha] = useState(null); const [catsFolha, setCatsFolha] = useCategoriasFin(true);
   useEffect(() => {
     fin("config-folha").then((x) => setCfgFolha(x.config || {})).catch(() => setCfgFolha({}));
-    fin("categoria").then((x) => setCatsFolha((x.lista || []).filter((c) => c.ativa !== false))).catch(() => {});
   }, []);
   const mudarCfgFolha = async (k, v) => {
     setCfgFolha((c) => ({ ...c, [k]: v || null }));
