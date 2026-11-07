@@ -1493,6 +1493,31 @@ module.exports = async function handler(req, res) {
       const medida = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.trunc(Number(v)) : null);
       const caminho = `${String(placa).replace(/[^A-Za-z0-9]/g, "")}/${Date.now()}-${sufixo()}.jpg`;
 
+      /* A MESMA FOTO NÃO ENTRA DUAS VEZES (0116, 07/11/2026). O hash do
+       * arquivo é a impressão digital: se este carro já tem esta foto, a
+       * resposta é a que existe — nada sobe, nada se grava. Cobre o
+       * celular que reenvia ao reabrir a tela, os dois aparelhos e o
+       * mesmo arquivo escolhido duas vezes. Sem a coluna (antes da 0116),
+       * segue como antes. */
+      let hash = null;
+      try {
+        const d = await globalThis.crypto.subtle.digest("SHA-256", imagem);
+        hash = Array.from(new Uint8Array(d)).map((b) => b.toString(16).padStart(2, "0")).join("");
+      } catch (e) { hash = null; }
+      const jaExiste = async () => {
+        if (!hash) return null;
+        try {
+          const r = await banco(`${REST("foto")}?select=id,caminho,ordem&veiculo_id=eq.${vid}&hash=eq.${hash}&limit=1`, { headers: cabecalhos(tok) });
+          return Array.isArray(r) && r[0] ? r[0] : null;
+        } catch (e) { return null; }
+      };
+      const devolver = async (x) => {
+        const links = await assinar([x.caminho]);
+        return res.status(200).json({ ok: true, repetida: true, id: x.id, caminho: x.caminho, ordem: x.ordem, url: links[x.caminho] || null });
+      };
+      const antes = await jaExiste();
+      if (antes) return devolver(antes);
+
       await arquivos(`${STORAGE()}/object/${BUCKET}/${paraURL(caminho)}`, {
         method: "POST",
         headers: hArquivo({ "Content-Type": "image/jpeg", "Cache-Control": "3600", "x-upsert": "false" }),
@@ -1512,7 +1537,7 @@ module.exports = async function handler(req, res) {
         body: JSON.stringify({
           veiculo_id: vid, caminho, ordem: o,
           largura: medida(corpo.largura), altura: medida(corpo.altura),
-          bytes: imagem.length,
+          bytes: imagem.length, ...(hash ? { hash } : {}),
         }),
       });
       let linha;
@@ -1520,6 +1545,14 @@ module.exports = async function handler(req, res) {
         let r;
         try { r = await gravar(ordem); }
         catch (e) {
+          // Duas cópias da mesma foto chegando juntas: a segunda perde
+          // para o índice do hash e devolve a primeira.
+          if (/foto_hash_unico/i.test(String(e.message || ""))) {
+            await apagarArquivo(caminho);
+            const x = await jaExiste();
+            if (x) return devolver(x);
+            throw e;
+          }
           if (!/duplicate|23505|foto_ordem_unica/i.test(String(e.message || ""))) throw e;
           const ult = await banco(`${REST("foto")}?select=ordem&veiculo_id=eq.${vid}&order=ordem.desc&limit=1`, { headers: cabecalhos(tok) });
           r = await gravar(Math.max(0, ((Array.isArray(ult) && ult[0] && ult[0].ordem) || 0) + 1));

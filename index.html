@@ -520,18 +520,29 @@ async function salvarFicha(ficha) {
   if (!r.ok) throw new Error(d.erro || "Não consegui salvar no banco.");
   return d;
 }
+// Um prazo para cada foto (07/11/2026): no 4G da loja um envio podia
+// ficar pendurado para sempre, e a fila inteira esperava atrás dele em
+// "Aguarda". Passado o prazo, a foto falha e é tentada de novo sozinha.
 async function subirFoto(veiculoId, foto, ordem) {
-  const r = await fetchAut("/api/foto", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      veiculo_id: veiculoId, imagem_base64: foto.local, ordem,
-      largura: foto.largura, altura: foto.altura,
-    }),
-  });
-  const d = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(d.erro || "Não consegui subir a foto.");
-  return d;
+  const ctl = typeof AbortController === "function" ? new AbortController() : null;
+  const prazo = ctl ? setTimeout(() => ctl.abort(), 90000) : null;
+  try {
+    const r = await fetchAut("/api/foto", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      ...(ctl ? { signal: ctl.signal } : {}),
+      body: JSON.stringify({
+        veiculo_id: veiculoId, imagem_base64: foto.local, ordem,
+        largura: foto.largura, altura: foto.altura,
+      }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.erro || "Não consegui subir a foto.");
+    return d;
+  } catch (e) {
+    if (e && e.name === "AbortError") throw new Error("A internet demorou demais — tentando de novo.");
+    throw e;
+  } finally { if (prazo) clearTimeout(prazo); }
 }
 async function listarFotos(veiculoId) {
   const r = await fetchAut(`/api/foto?veiculo_id=${encodeURIComponent(veiculoId)}`);
@@ -2323,22 +2334,40 @@ function Desvalorizometro({ chave, modelo, compacto }) {
 }
 
 /* ===================== fotos ===================== */
+/* LEVE COM MUITAS FOTOS (07/11/2026, o Derek: "quando seleciona muitas
+ * fotos dá erro, como se demorasse pra carregar"). Antes cada arquivo da
+ * galeria (5–10 MB) virava um texto base64 inteiro na memória só para ser
+ * desenhado; com vinte de uma vez o celular engasgava. Agora a imagem é
+ * lida direto do arquivo (`createObjectURL`) e só a versão comprimida, de
+ * 1280 px, vira texto. A orientação continua a do <img>, como antes. */
 function comprimir(file, max = 1280, q = 0.72) {
   return new Promise((res, rej) => {
+    const usaUrl = typeof URL !== "undefined" && typeof URL.createObjectURL === "function";
+    const desenhar = (src, soltar) => {
+      const img = new Image();
+      img.onerror = () => { soltar(); rej(new Error("Arquivo inválido.")); };
+      img.onload = () => {
+        try {
+          const e = Math.min(1, max / Math.max(img.width, img.height));
+          const cv = document.createElement("canvas");
+          cv.width = Math.round(img.width * e); cv.height = Math.round(img.height * e);
+          cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+          const out = cv.toDataURL("image/jpeg", q);
+          cv.width = 0; cv.height = 0;
+          soltar();
+          res({ src: out, largura: Math.round(img.width * e), altura: Math.round(img.height * e) });
+        } catch (x) { soltar(); rej(new Error("Não consegui ler a imagem.")); }
+      };
+      img.src = src;
+    };
+    if (usaUrl) {
+      const u = URL.createObjectURL(file);
+      desenhar(u, () => { try { URL.revokeObjectURL(u); } catch (x) {} });
+      return;
+    }
     const l = new FileReader();
     l.onerror = () => rej(new Error("Não consegui ler a imagem."));
-    l.onload = () => {
-      const img = new Image();
-      img.onerror = () => rej(new Error("Arquivo inválido."));
-      img.onload = () => {
-        const e = Math.min(1, max / Math.max(img.width, img.height));
-        const cv = document.createElement("canvas");
-        cv.width = Math.round(img.width * e); cv.height = Math.round(img.height * e);
-        cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
-        res({ src: cv.toDataURL("image/jpeg", q), largura: cv.width, altura: cv.height });
-      };
-      img.src = l.result;
-    };
+    l.onload = () => desenhar(l.result, () => {});
     l.readAsDataURL(file);
   });
 }
@@ -5067,6 +5096,10 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   const [envioLeads, setEnvioLeads] = useState("");
   const [erroFoto, setErroFoto] = useState("");
   const [veiculoId, setVeiculoId] = useState(null);
+  // O id do veículo visto de dentro de um laço assíncrono (o envio das
+  // fotos uma a uma): a ficha pode nascer no meio dele.
+  const veiculoIdRef = useRef(null);
+  veiculoIdRef.current = veiculoId;
   const [pronto, setPronto] = useState(false);
   /* A PRETENSÃO VAI PARA O ATENDIMENTO (03/11/2026). O campo era só da
    * ficha de trabalho, e a lista, o funil e a linha do CRM leem a coluna
@@ -5280,8 +5313,15 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         ? prev.filter((p) => p.chave !== chave)
         : prev.map((p) => (p.chave === chave ? { ...p, estado: "ok", id: d.id, caminho: d.caminho, url: d.url, local: null, erro: "" } : p)));
     } catch (e) {
-      // A imagem continua no aparelho: "tentar de novo" reaproveita.
-      mudarFoto(chave, { estado: "erro", erro: e.message });
+      // A imagem continua no aparelho. Até três tentativas sozinhas, com
+      // espera crescente (07/11/2026): rede que cai um instante não pode
+      // deixar a foto parada esperando alguém apertar "Tentar".
+      const n = (alvo.tentativas || 0) + 1;
+      mudarFoto(chave, { estado: "erro", erro: e.message, tentativas: n });
+      if (n < 3) setTimeout(() => {
+        const ag = fotosRef.current.find((p) => p.chave === chave);
+        if (ag && ag.estado === "erro") mudarFoto(chave, { estado: "aguardando" });
+      }, 8000 * n);
     }
   };
 
@@ -5294,23 +5334,25 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     // Escolher mais do que cabe descartava o excedente calado — mais uma
     // forma de "selecionei e não foi" (o André, 28/10/2026).
     const sobra = arqs.length - espaco;
-    const novas = [];
+    ev.target.value = "";
+    if (sobra > 0) setErroFoto(`O limite é ${MAX_FOTOS} fotos: ${sobra === 1 ? "1 ficou de fora" : `${sobra} ficaram de fora`}. Exclua alguma para pôr outra.`);
+    /* UMA DE CADA VEZ (07/11/2026): comprime uma, põe na tela, manda, e
+     * só então a próxima. Comprimir todas antes segurava vinte imagens na
+     * memória do celular ao mesmo tempo, e nada aparecia até a última. */
     for (const a of arqs.slice(0, espaco)) {
+      let nova = null;
       try {
         const img = await comprimir(a);
-        novas.push({
+        nova = {
           chave: `n-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           local: img.src, largura: img.largura, altura: img.altura,
           id: null, url: null, estado: "aguardando", erro: "",
-        });
-      } catch (e) { setErroFoto(e.message); }
+        };
+      } catch (e) { setErroFoto(`${a.name || "Uma foto"}: ${e.message}`); }
+      if (!nova) continue;
+      aplicar((prev) => [...prev, nova]);
+      if (veiculoIdRef.current) await enviarFoto(nova.chave, veiculoIdRef.current);
     }
-    if (sobra > 0) setErroFoto(`O limite é ${MAX_FOTOS} fotos: ${sobra === 1 ? "1 ficou de fora" : `${sobra} ficaram de fora`}. Exclua alguma para pôr outra.`);
-    if (novas.length) {
-      aplicar((prev) => [...prev, ...novas]);
-      if (veiculoId) for (const n of novas) await enviarFoto(n.chave, veiculoId);
-    }
-    ev.target.value = "";
   };
 
   const definirCapa = async (i) => {
@@ -22906,7 +22948,10 @@ function ContratoDoLojista({ e, valor, aoFechar }) {
   };
 
   const montar = () => contratoLojista({ lojista: L, veiculo: V, banco: B, forma, valor: val });
-  const quemAssina = { nome: L.rep_nome || L.nome, email: L.rep_email || L.email || "", telefone: L.rep_contato || L.telefone || "" };
+  // `L` chega depois (o cadastro do lojista é lido ao abrir): ler L.rep_nome
+  // antes dele quebrava a janela inteira — "Cannot read properties of null
+  // (reading 'rep_nome')", oito vezes entre 06 e 07/11/2026.
+  const quemAssina = L ? { nome: L.rep_nome || L.nome, email: L.rep_email || L.email || "", telefone: L.rep_contato || L.telefone || "" } : { nome: "", email: "", telefone: "" };
   const enviarZap = async () => {
     setErro(""); setIndo("zap");
     try { localStorage.setItem("vaapty:recebe-lojista", JSON.stringify({ ...B, forma })); } catch (x) {}
