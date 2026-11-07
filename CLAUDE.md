@@ -398,8 +398,9 @@ seleciona só uma foto e vai várias… seleciona muitas e dá erro"*. Havia
 SHA-256 da imagem (`foto.hash`, índice único por veículo) e devolve a que
 já existe em vez de criar outra — cobre o duplo clique, a reabertura que
 reenvia e a mesma foto escolhida duas vezes. Na tela: cada envio tem
-prazo de 90 s (pendurado não segura a fila), a foto que falha tenta de
-novo sozinha até três vezes, e muitas fotos são comprimidas e enviadas
+prazo de 25 s (pendurado não segura a fila; 90 s era espera demais, o
+Derek), a foto que falha tenta de novo sozinha até quatro vezes, a 3, 6
+e 9 s, e muitas fotos são comprimidas e enviadas
 uma de cada vez (`createObjectURL` em vez de ler tudo na memória). As
 repetidas de antes continuam lá — apagar é decisão de quem olha.
 

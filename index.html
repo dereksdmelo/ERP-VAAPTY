@@ -523,9 +523,13 @@ async function salvarFicha(ficha) {
 // Um prazo para cada foto (07/11/2026): no 4G da loja um envio podia
 // ficar pendurado para sempre, e a fila inteira esperava atrás dele em
 // "Aguarda". Passado o prazo, a foto falha e é tentada de novo sozinha.
+// 25 s, não 90 (o Derek: "muito longo pra esperar a foto carregar"): a
+// foto comprimida tem uns 300 KB e sobe em 2 a 5 s no 4G fraco. Cortar
+// cedo não duplica — o servidor reconhece a mesma imagem (0116) e, se a
+// primeira tentativa chegou atrasada, a segunda só recebe a que já está.
 async function subirFoto(veiculoId, foto, ordem) {
   const ctl = typeof AbortController === "function" ? new AbortController() : null;
-  const prazo = ctl ? setTimeout(() => ctl.abort(), 90000) : null;
+  const prazo = ctl ? setTimeout(() => ctl.abort(), 25000) : null;
   try {
     const r = await fetchAut("/api/foto", {
       method: "POST",
@@ -5313,15 +5317,15 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         ? prev.filter((p) => p.chave !== chave)
         : prev.map((p) => (p.chave === chave ? { ...p, estado: "ok", id: d.id, caminho: d.caminho, url: d.url, local: null, erro: "" } : p)));
     } catch (e) {
-      // A imagem continua no aparelho. Até três tentativas sozinhas, com
-      // espera crescente (07/11/2026): rede que cai um instante não pode
+      // A imagem continua no aparelho. Até quatro tentativas sozinhas, com
+      // espera crescente (3, 6 e 9 s) (07/11/2026): rede que cai um instante não pode
       // deixar a foto parada esperando alguém apertar "Tentar".
       const n = (alvo.tentativas || 0) + 1;
       mudarFoto(chave, { estado: "erro", erro: e.message, tentativas: n });
-      if (n < 3) setTimeout(() => {
+      if (n < 4) setTimeout(() => {
         const ag = fotosRef.current.find((p) => p.chave === chave);
         if (ag && ag.estado === "erro") mudarFoto(chave, { estado: "aguardando" });
-      }, 8000 * n);
+      }, 3000 * n);
     }
   };
 
