@@ -604,6 +604,9 @@ async function estoque(req, res, tok) {
       mud.prazo_transferencia_dias = n == null || !Number.isFinite(n) ? null : Math.max(0, Math.min(365, n));
     }
     if (c.observacoes !== undefined) mud.observacoes = texto(c.observacoes);
+    // A previsão de rentabilidade (0118): valor provável e a nota.
+    if (c.venda_prevista !== undefined) mud.venda_prevista = c.venda_prevista === null || c.venda_prevista === "" ? null : decimal(c.venda_prevista);
+    if (c.venda_prevista_nota !== undefined) mud.venda_prevista_nota = texto(c.venda_prevista_nota);
     if (c.comprador_id !== undefined) {
       mud.comprador_id = RX_ID.test(String(c.comprador_id || "")) ? c.comprador_id : null;
     }

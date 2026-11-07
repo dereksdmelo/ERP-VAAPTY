@@ -13806,7 +13806,109 @@ const semanaDe = (e) => {
  * o total colado embaixo — e a tela inteira de largura. */
 const PLAN = { grade: "#D5D9DE", cab: "#2F3B4C", cabTexto: "#FFFFFF", total: "#FFF4CC", conta: "#EAF5EE", contaTexto: "#11683F", perda: "#B42318", zebra: "#FAFBFC" };
 
-function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar, aoMudar }) {
+/* PREVISÃO DE RENTABILIDADE (0118, 07/11/2026, o Derek: "colocamos
+ * valores prováveis de venda nos carros que estão em estoque pra
+ * determinar a possível rentabilidade vendendo todos, ou só alguns…
+ * às vezes já vendemos um e queremos saber quanto vai dar, mas não tem
+ * contrato ainda").
+ *
+ * Um valor provável por carro do pátio (`venda_prevista`, no banco, com
+ * uma nota), e a conta é a MESMA da Rentabilidade — `rentabilidadeDe`
+ * com o provável no lugar da venda. Marcar e desmarcar é só na tela: é
+ * assim que se pergunta "e se vender só estes?". Nada disto é venda:
+ * o carro continua no pátio, e a Rentabilidade do mês e o DRE não mudam. */
+function PrevisaoRentabilidade({ patio, realizadoMes, comp, aoMudar, aoAbrir }) {
+  const rs = (v) => (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const [fora, setFora] = useState({});
+  const [so, setSo] = useState("todos");
+  const linhas = patio.map((e) => {
+    const prev = e.venda_prevista != null && e.venda_prevista !== "" ? Number(e.venda_prevista) : null;
+    const r = prev != null ? rentabilidadeDe({ ...e, valor_venda: prev }) : null;
+    return { e, prev, r, custo: contaDoEstoque(e).atual, dias: diasNoPatio(e) };
+  }).sort((a, b) => (a.prev == null) - (b.prev == null) || (b.dias || 0) - (a.dias || 0));
+  const vis = linhas.filter((l) => so === "todos" || (so === "com" ? l.prev != null : l.prev == null));
+  const contam = linhas.filter((l) => l.prev != null && !fora[l.e.id]);
+  const tot = contam.reduce((t, l) => ({ venda: t.venda + l.prev, custo: t.custo + l.custo, liquida: t.liquida + l.r.liquida }), { venda: 0, custo: 0, liquida: 0 });
+  const semValor = linhas.filter((l) => l.prev == null).length;
+  const cor = (v) => (v >= 0 ? C.verde : C.laranja);
+  const num = (txt) => {
+    const t = String(txt || "").trim();
+    if (!t) return null;
+    const n = Number(t.replace(/[^\d,.-]/g, "").replace(/\.(?=\d{3}(\D|$))/g, "").replace(",", "."));
+    return Number.isFinite(n) ? n : null;
+  };
+  const caixa = (rot, v, o) => (
+    <div className="rounded-lg px-3 py-2" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+      <div className="text-[10.5px] font-bold uppercase tracking-[0.06em]" style={{ color: C.mute }}>{rot}</div>
+      <div className="text-[18px] font-extrabold" style={{ fontVariantNumeric: "tabular-nums", color: (o && o.cor) || C.ink }}>{v}</div>
+      {o && o.sub && <div className="text-[11.5px]" style={{ color: C.mute }}>{o.sub}</div>}
+    </div>
+  );
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+        {caixa("Carros na conta", `${contam.length} de ${linhas.length}`, { sub: semValor ? `${semValor} sem valor provável` : "todos com valor" })}
+        {caixa("Venda provável", `R$ ${rs(tot.venda)}`, { sub: `custo hoje R$ ${rs(tot.custo)}` })}
+        {caixa("Rentabilidade prevista", `R$ ${rs(tot.liquida)}`, { cor: cor(tot.liquida), sub: contam.length ? `R$ ${rs(tot.liquida / contam.length)} por carro` : "" })}
+        {caixa(`${rotuloMes(comp)} + previsão`, `R$ ${rs(realizadoMes + tot.liquida)}`, { cor: cor(realizadoMes + tot.liquida), sub: `já vendido no mês: R$ ${rs(realizadoMes)}` })}
+      </div>
+      <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
+        {[["todos", "Todos do pátio"], ["com", "Com valor provável"], ["sem", "Sem valor"]].map(([v, r]) => (
+          <button key={v} onClick={() => setSo(v)} className="rounded-full px-3 py-1 font-semibold"
+            style={{ background: so === v ? C.roxo : "#fff", color: so === v ? "#fff" : C.mute, border: `1px solid ${so === v ? C.roxo : C.line}` }}>{r}</button>
+        ))}
+        <button onClick={() => setFora({})} style={{ color: C.roxo }}>marcar todos</button>
+        <button onClick={() => { const n = {}; linhas.forEach((l) => { n[l.e.id] = true; }); setFora(n); }} style={{ color: C.mute }}>desmarcar todos</button>
+        <span style={{ color: C.mute }}>Desmarque para ver a conta vendendo só alguns. O valor provável fica gravado; a marcação é só desta tela.</span>
+      </div>
+      <div className="rolar overflow-x-auto rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 900 }}>
+          <thead><tr>{["", "Placa", "Carro", "Dias", "Custo hoje", "Venda provável", "Rent. prevista", "Nota (ex.: vendido ao Fulano, falta contrato)"].map((h, i) => (
+            <th key={i} className="whitespace-nowrap px-2 py-2 text-[11px] font-semibold uppercase tracking-[0.04em]"
+              style={{ color: C.mute, textAlign: i >= 3 && i <= 6 ? "right" : "left", borderBottom: `1px solid ${C.line}` }}>{h}</th>))}</tr></thead>
+          <tbody>
+            {vis.map(({ e, prev, r, custo, dias }) => {
+              const v = e.veiculo || {};
+              const conta = prev != null && !fora[e.id];
+              return (
+                <tr key={e.id} style={{ borderBottom: `1px solid ${C.line}`, opacity: prev != null && fora[e.id] ? 0.5 : 1 }}>
+                  <td className="px-2 py-1.5"><input type="checkbox" disabled={prev == null} checked={conta}
+                    onChange={() => setFora((m) => { const n = { ...m }; if (n[e.id]) delete n[e.id]; else n[e.id] = true; return n; })} /></td>
+                  <td className="whitespace-nowrap px-2 py-1.5 text-[12.5px] font-bold" style={{ fontFamily: F.mono }}>
+                    <button onClick={() => aoAbrir && aoAbrir(e.id)} style={{ color: C.ink }} title="Abrir a ficha do carro">{v.placa || "—"}</button>
+                  </td>
+                  <td className="px-2 py-1.5 text-[12.5px]">{v.marca_modelo || "—"}{v.ano_modelo ? <span style={{ color: C.mute }}> {v.ano_modelo}</span> : null}</td>
+                  <td className="px-2 py-1.5 text-right text-[12px]" style={{ color: dias >= 60 ? C.laranja : dias >= 30 ? AMARELO.texto : C.mute }}>{dias == null ? "—" : `${dias}d`}</td>
+                  <td className="px-2 py-1.5 text-right text-[12.5px]" style={{ fontVariantNumeric: "tabular-nums" }}>{custo > 0 ? rs(custo) : <span style={{ color: C.laranja }}>sem valor</span>}</td>
+                  <td className="px-2 py-1.5 text-right">
+                    <input key={`p-${e.id}-${prev}`} defaultValue={prev != null ? rs(prev) : ""} inputMode="decimal"
+                      placeholder={Number(e.preco_pedido) ? `pedido ${rs(e.preco_pedido)}` : "R$"}
+                      className="w-[120px] rounded border px-1.5 py-1 text-right text-[12.5px] outline-none"
+                      style={{ ...inputSty, fontFamily: F.mono, borderColor: prev != null ? C.line : "#E4DEEB" }}
+                      onKeyDown={(ev) => { if (ev.key === "Enter") ev.target.blur(); }}
+                      onBlur={(ev) => { const n = num(ev.target.value); if (n !== prev) aoMudar(e.id, { venda_prevista: n }); }} />
+                  </td>
+                  <td className="px-2 py-1.5 text-right text-[12.5px] font-bold" style={{ fontVariantNumeric: "tabular-nums", color: r ? cor(r.liquida) : C.mute }}>
+                    {r ? rs(r.liquida) : "—"}
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <input key={`n-${e.id}-${e.venda_prevista_nota || ""}`} defaultValue={e.venda_prevista_nota || ""}
+                      className="w-full min-w-[200px] rounded border px-1.5 py-1 text-[12.5px] outline-none" style={inputSty}
+                      onKeyDown={(ev) => { if (ev.key === "Enter") ev.target.blur(); }}
+                      onBlur={(ev) => { const t = ev.target.value.trim(); if (t !== (e.venda_prevista_nota || "")) aoMudar(e.id, { venda_prevista_nota: t || null }); }} />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {!vis.length && <p className="px-3 py-6 text-center text-[13px]" style={{ color: C.mute }}>Nenhum carro nesta lista.</p>}
+      </div>
+    </div>
+  );
+}
+
+function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar, aoMudar, aoPrever, prevendo, previsao }) {
   const rs = (v) => (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   // TOTAL NEGOCIADORES abre por botão (24/10/2026, o Derek: *"pode ser um
   // botão que abre um pop-up, aí não fica ocupando espaço na lateral"*):
@@ -13927,7 +14029,13 @@ function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar, aoMudar }) {
         <span className="text-[19px]" style={{ fontWeight: 800, color: corDe(total.liquida), fontVariantNumeric: "tabular-nums" }}>{brl(total.liquida)}</span>
       </span>
       <span className="ml-auto flex items-center gap-3">
-        {!!linhas.length && (
+        {aoPrever && (
+          <button onClick={aoPrever} className="rounded-md border px-3 py-1.5 text-[13px] font-semibold"
+            style={{ borderColor: prevendo ? C.roxo : PLAN.cab, background: prevendo ? C.roxo : "#fff", color: prevendo ? "#fff" : PLAN.cab }}>
+            {prevendo ? "Voltar às vendas" : "Previsão"}
+          </button>
+        )}
+        {!prevendo && !!linhas.length && (
           <button onClick={() => setVerNeg(true)} className="rounded-md px-3 py-1.5 text-[13px] font-semibold text-white"
             style={{ background: PLAN.cab }}>Por negociador</button>
         )}
@@ -13938,6 +14046,7 @@ function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar, aoMudar }) {
     </div>
   );
 
+  if (prevendo) return <div>{resumo}{previsao}</div>;
   if (!todas.length) {
     return (
       <div>
@@ -14215,6 +14324,7 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
   // quadro da pré-venda: a resposta é "está em tal lugar", não "está,
   // mas o filtro o escondeu".
   const [busca, setBusca] = useState("");
+  const [prevendo, setPrevendo] = useState(false);
 
   const carregar = async () => {
     setErro("");
@@ -14450,6 +14560,17 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
       {!buscando && filtro === "vendido" && lista !== null && (
         <Rentabilidade comp={comp} aoAbrir={(id) => setAbrindo(id)} mes={soRentab ? mes : null}
           aoImportar={eGerente && !importando ? () => setImportando(true) : null}
+          aoPrever={() => setPrevendo((x) => !x)} prevendo={prevendo}
+          previsao={prevendo ? (
+            <PrevisaoRentabilidade comp={comp} aoAbrir={(id) => setAbrindo(id)}
+              patio={lista.filter((e) => e.situacao === "em_estoque" && e.natureza !== "indicacao")}
+              realizadoMes={lista.filter((e) => e.situacao === "vendido" && String(e.vendido_em || e.entrou_em || "").slice(0, 7) === String(comp).slice(0, 7))
+                .reduce((t, e) => t + rentabilidadeDe(e).liquida, 0)}
+              aoMudar={async (id, dados) => {
+                try { const novo = await atualizarEstoque(id, dados); if (novo) setLista((l) => l.map((x) => (x.id === id ? { ...x, ...novo } : x))); }
+                catch (err) { alert(err.message); }
+              }} />
+          ) : null}
           aoMudar={async (id, dados) => {
             try { const novo = await atualizarEstoque(id, dados); if (novo) setLista((l) => l.map((x) => (x.id === id ? { ...x, ...novo } : x))); }
             catch (err) { alert(err.message); }
