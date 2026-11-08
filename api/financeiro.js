@@ -499,6 +499,9 @@ async function lancamento(req, res, tok) {
   if (req.method === "DELETE") {
     const id = String(req.query.id || "");
     if (!RX_ID.test(id)) return res.status(400).json({ erro: "id inválido." });
+    // Linha do banco que era um título reconhecido: o título volta a aberto antes de a linha sair,
+    // senão ele ficaria cancelado para sempre, sem rastro (varredura de 08/11/2026).
+    try { await soltarTitulos(tok, id); } catch (e) {}
     const r = await supa(`${base("fin_lancamento")}?id=eq.${id}`, { method: "DELETE", headers: cab(tok, REP) });
     if (!um(r)) return recusado(res);
     return res.status(200).json({ ok: true });
@@ -1921,6 +1924,25 @@ async function titulo(req, res, tok) {
     return res.status(200).json({ ok: true });
   }
 
+  /* DESFAZER UMA BAIXA (08/11/2026, o Derek: "excluir baixas também"). O título que foi baixado à
+   * mão volta a aberto, com o vencimento que tinha. Linha que veio do banco não se "desbaixa": ela
+   * existe no extrato — para essa vale excluir, ou "trocar" quando era um título ligado. */
+  if (req.method === "POST" && String(req.query.acao || "") === "desfazer_baixa") {
+    const id = idOuNulo(req.query.id);
+    if (!id) return res.status(400).json({ erro: "id inválido." });
+    const t = um(await supa(`${base("fin_lancamento")}?select=*&id=eq.${id}&situacao=eq.efetivado`, { headers: cab(tok) }));
+    if (!t) return res.status(409).json({ erro: "Esse título não está baixado." });
+    if (["ofx", "planilha", "extrato"].indexOf(String(t.origem || "")) >= 0 || t.extrato_id) {
+      return res.status(409).json({ erro: "Essa linha veio do extrato do banco: exclua a linha, ou use \"trocar\" se ela estava ligada a um título." });
+    }
+    if (t.origem === "parcial") {
+      return res.status(409).json({ erro: "Essa é uma parte paga de um título maior. Exclua a parte e ajuste o valor do título em aberto." });
+    }
+    const r = await supa(`${base("fin_lancamento")}?id=eq.${id}`, { method: "PATCH", headers: cab(tok, REP),
+      body: JSON.stringify({ situacao: "aberto", data: t.vencimento || t.data, conciliado: false, revisar: false }) });
+    if (!um(r)) return recusado(res);
+    return res.status(200).json({ ok: true, lancamento: um(r) });
+  }
   if (req.method === "POST" && String(req.query.acao || "") === "baixar") {
     const id = idOuNulo(req.query.id);
     if (!id) return res.status(400).json({ erro: "id inválido." });

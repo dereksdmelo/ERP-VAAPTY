@@ -21197,8 +21197,29 @@ function TitulosDoMes({ comp, abas }) {
   const [vinculando, setVinculando] = useState("");
   const [editando, setEditando] = useState(null);
   const [criando, setCriando] = useState(false);
+  const [baixando, setBaixando] = useState("");
+  const [contas, setContas] = useState([]);
   const carregar = (manter) => { if (!manter) setD(null); fin("titulo", { todos: 1, competencia: comp }).then(setD).catch((e) => setErro(e.message)); };
   useEffect(() => { carregar(); }, [comp]);
+  useEffect(() => { fin("conta").then((x) => setContas((x.lista || []).filter((c) => c.ativa !== false))).catch(() => {}); }, []);
+  const baixar = async (l, contaId, quando) => {
+    setErro("");
+    try { await fin("titulo", { acao: "baixar", id: l.id }, finJson("POST", { conta_id: contaId, data: quando, conciliado: true })); setBaixando(""); carregar(true); }
+    catch (e) { setErro(e.message); }
+  };
+  const desfazerBaixa = async (l) => {
+    if (!window.confirm(`Desfazer a baixa de "${l.descricao || "título"}" (${rs2(Math.abs((Number(l.credito) || 0) - (Number(l.debito) || 0)))})? Ele volta para os títulos em aberto.`)) return;
+    try { await fin("titulo", { acao: "desfazer_baixa", id: l.id }, finJson("POST", {})); carregar(true); } catch (e) { setErro(e.message); }
+  };
+  const excluir = async (l) => {
+    const baixado = l.situacao !== "aberto";
+    const msg = baixado
+      ? `Excluir a baixa de "${l.descricao || "título"}"? A linha sai do financeiro${(l.titulos_ligados || []).length ? ", e o título que ela substituiu volta para os em aberto" : ""}. Não dá para desfazer.`
+      : `Excluir o título "${l.descricao || l.favorecido || "sem descrição"}" de ${rs2(Math.abs((Number(l.credito) || 0) - (Number(l.debito) || 0)))}? Não dá para desfazer.`;
+    const avisoGerado = l.item_contrato ? "\n\nEste título nasce do contrato do carro: se o item continuar no contrato, ele pode ser gerado de novo." : l.conta_fixa_id ? "\n\nEste título nasce de uma conta fixa: gerar os títulos do mês cria outro. Para sumir de vez, desative a conta fixa." : "";
+    if (!window.confirm(msg + avisoGerado)) return;
+    try { await fin("lancamento", { id: l.id }, { method: "DELETE" }); carregar(true); } catch (e) { setErro(e.message); }
+  };
   const mudar = async (l, mud) => {
     setD((x) => x && { ...x, titulos: x.titulos.map((t) => (t.id === l.id ? { ...t, ...mud, fin_categoria: mud.categoria_id !== undefined ? cats.find((c) => c.id === mud.categoria_id) || null : t.fin_categoria } : t)) });
     try { await fin("lancamento", { id: l.id }, finJson("PATCH", mud)); } catch (e) { setErro(e.message); carregar(true); }
@@ -21273,6 +21294,13 @@ function TitulosDoMes({ comp, abas }) {
                       {l.situacao === "aberto" && (
                         <button onClick={() => setVinculando(vinculando === l.id ? "" : l.id)} className="font-semibold" style={{ color: C.roxo }}>vincular ao extrato</button>
                       )}
+                      {l.situacao === "aberto" && (
+                        <button onClick={() => setBaixando(baixando === l.id ? "" : l.id)} className="font-semibold" style={{ color: C.verde }} title="Pagou ou recebeu por fora do extrato: dar baixa agora">baixar</button>
+                      )}
+                      {e === "mao" && (
+                        <button onClick={() => desfazerBaixa(l)} className="font-semibold" style={{ color: AMARELO.texto }} title="Volta para os títulos em aberto">desfazer baixa</button>
+                      )}
+                      <button onClick={() => excluir(l)} style={{ color: C.laranja }} title={l.situacao === "aberto" ? "Excluir este título" : "Excluir esta baixa"}>excluir</button>
                       {e === "conferir" && (
                         <button onClick={() => mudar(l, { revisar: false })} className="font-semibold" style={{ color: AMARELO.texto }}>está certo</button>
                       )}
@@ -21287,6 +21315,11 @@ function TitulosDoMes({ comp, abas }) {
                     </span>
                   </td>
                 </tr>,
+                baixando === l.id ? (
+                  <tr key={`${l.id}-b`} style={{ borderBottom: `1px solid ${C.line}` }}>
+                    <td colSpan={5} className="px-2 pb-2"><BaixarTitulo l={l} contas={contas} aoFechar={() => setBaixando("")} aoBaixar={baixar} /></td>
+                  </tr>
+                ) : null,
                 vinculando === l.id ? (
                   <tr key={`${l.id}-v`} style={{ borderBottom: `1px solid ${C.line}` }}>
                     <td colSpan={5} className="px-2 pb-2"><VincularLinha titulo={l} aoFechar={() => setVinculando("")} aoFeito={() => { setVinculando(""); carregar(true); }} /></td>
