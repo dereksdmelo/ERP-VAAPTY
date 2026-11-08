@@ -27105,12 +27105,16 @@ function destinosPara(perfil) {
     // Ferramenta, não destino de todo dia. Todo mundo vê — é uma
     // calculadora, não mostra dado de cliente nenhum.
     { id: "extrato", rot: "Extrato de ofertas", curto: "Extrato", area: "negociacao" },
+    // O Painel do mês mora na Negociação desde 08/11/2026 (o Derek: "painel
+    // do mês migrar para negociadores"): é a meta, o ritmo e a conversão de
+    // cada negociador — o placar deles, não um relatório de gestão.
+    { id: "painel", rot: "Painel do mês", curto: "Painel", area: "negociacao" },
 
     // ---- medir ----
     // O painel do gestor não existe para quem não é gerente, e não por
     // cortesia da tela: a RLS da 0033 devolve só a própria negociação.
     gerente ? { id: "gestor", rot: "Painel do gestor", curto: "Gestor", area: "gestao" } : null,
-    { id: "painel", rot: "Painel do mês", curto: "Painel", area: "gestao" },
+
     gestao ? { id: "rentabilidade", rot: "Rentabilidade", curto: "Rentab.", area: "gestao" } : null,
     // O carro depois de comprado mora em Gestão desde 05/11/2026 (o
     // Derek: "estoque e venda pra lojistas coloca na gestão"): pátio,

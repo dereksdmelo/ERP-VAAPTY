@@ -4263,6 +4263,7 @@ NEGOCIAÇÃO    Atendimentos · Fila da vez · Extrato
 GESTÃO        Painel do gestor · Painel do mês · Rentabilidade ·
               Estoque · Venda para lojistas · Equipe e metas
               (Estoque e Venda para lojistas mudaram para cá em 05/11/2026)
+              (o Painel do mês foi para a Negociação em 08/11/2026)
 ADMINISTRATIVO  Administrativo · Números do WhatsApp
 ```
 
