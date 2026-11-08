@@ -831,6 +831,58 @@ const RX_DIA = /^\d{4}-\d{2}-\d{2}$/;
 const RX_HORA = /^([01]\d|2[0-3]):[0-5]\d$/;
 const horaOuNulo = (v) => (RX_HORA.test(String(v || "")) ? String(v) : null);
 
+/* A RECUPERAÇÃO DO NEGOCIADOR (08/11/2026, o Derek: "tem como eles
+ * terem um painel de fazer recuperação que registre automático… um
+ * painel de ações do dia para o negociador"). O André Ricardo colava
+ * cliente por cliente de uma planilha no Meu dia; agora a lista vem do
+ * sistema e o gesto de ligar é o registro.
+ *
+ * Os atendimentos DELE (pelo login ou pelo nome da meta, sem acento) dos
+ * últimos `dias`, que não fecharam e ainda estão em jogo, com o contato
+ * de cada um: quantas vezes ele registrou recuperação naquele
+ * atendimento e quando foi a última — lido da agenda, que é o que o
+ * "Ligar" grava. O gerente escolhe de quem (`negociador=`). */
+const RECUPERAVEIS = ["aberto", "aguardando", "aguardando_propostas", "baixar_expectativa", "vai_voltar", "perseguir",
+  "em_negociacao", "nao_avaliou", "nao_lancado", "falta_proposta", "quitacao_futura", "restricao", "perdido"];
+async function recuperacao(req, res, tok) {
+  const eu = donoDoToken(tok);
+  const semAc = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/\s+/g, " ").trim();
+  const [perf, meta] = await Promise.all([
+    banco(`${URL_BASE}/rest/v1/perfil?select=id,nome,papel&id=eq.${eu}`, { headers: cabecalhos(tok) }).then((r) => (r || [])[0]).catch(() => null),
+    banco(`${URL_BASE}/rest/v1/negociador?select=nome&perfil_id=eq.${eu}`, { headers: cabecalhos(tok) }).then((r) => (r || [])[0]).catch(() => null),
+  ]);
+  const gerente = perf && perf.papel === "gerente";
+  const pedido = String(req.query.negociador || "");
+  const nomes = gerente && pedido ? [pedido] : [perf && perf.nome, meta && meta.nome].filter(Boolean);
+  const chaves = new Set(nomes.map(semAc));
+  const todos = gerente && pedido === "*";
+  const dias = Math.min(365, Math.max(7, Number(req.query.dias) || 90));
+  const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+  const desde = new Date(Date.parse(hoje) - dias * 86400000).toISOString().slice(0, 10);
+  const ats = await banco(`${URL_BASE}/rest/v1/atendimento?select=id,cliente_nome,cliente_telefone,carro_descricao,status,data,volta_em,` +
+    `negociador_nome,negociador_id,veiculo(placa,marca_modelo,ano_modelo,fipe_valor)` +
+    `&status=in.(${RECUPERAVEIS.join(",")})&data=gte.${desde}&order=data.desc&limit=1000`, { headers: cabecalhos(tok) });
+  const dele = (a) => a.negociador_id === eu || chaves.has(semAc(a.negociador_nome));
+  const meus = (ats || []).filter((a) => (todos ? true : gerente && pedido ? chaves.has(semAc(a.negociador_nome)) : dele(a)));
+  // O contato: o que foi registrado na agenda como recuperação, ligado ao
+  // atendimento. A RLS da agenda (0046) mostra o do próprio — e ao gerente,
+  // o de todos.
+  const ids = meus.map((a) => a.id);
+  const contato = {};
+  for (let i = 0; i < ids.length; i += 150) {
+    const fatia = ids.slice(i, i + 150);
+    const ag = await banco(`${URL_BASE}/rest/v1/agenda?select=atendimento_id,criado_em,titulo&tipo=eq.recuperacao&atendimento_id=in.(${fatia.join(",")})&order=criado_em.desc&limit=3000`,
+      { headers: cabecalhos(tok) }).catch(() => []);
+    (ag || []).forEach((x) => {
+      const c = contato[x.atendimento_id] || (contato[x.atendimento_id] = { vezes: 0, ultimo: null, ultimo_titulo: null });
+      c.vezes += 1; if (!c.ultimo) { c.ultimo = x.criado_em; c.ultimo_titulo = x.titulo; }
+    });
+  }
+  const lista = meus.map((a) => ({ ...a, contatos: (contato[a.id] || {}).vezes || 0, ultimo_contato: (contato[a.id] || {}).ultimo || null,
+    ultimo_resultado: (contato[a.id] || {}).ultimo_titulo || null }));
+  return res.status(200).json({ hoje, dias, gerente, nomes, atendimentos: lista });
+}
+
 async function agenda(req, res, tok) {
   const REST_A = `${URL_BASE}/rest/v1/agenda`;
 
@@ -3506,6 +3558,11 @@ module.exports = async function handler(req, res) {
     if (String(req.query.recurso || "") === "tatica") {
     try { return await tatica(req, res, tok); }
     catch (e) { return res.status(502).json({ erro: "Não consegui analisar." }); }
+  }
+
+  if (String(req.query.recurso || "") === "recuperacao") {
+    try { return await recuperacao(req, res, tok); }
+    catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Falhou." }); }
   }
 
   if (String(req.query.recurso || "") === "agenda") {

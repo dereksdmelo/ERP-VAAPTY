@@ -6117,6 +6117,21 @@ a pessoa veio fazer, e um erro ali não pode aparecer como se o
 atendimento não tivesse salvado.
 
 
+**A Recuperação do negociador (08/11/2026, o Derek: "um painel de fazer
+recuperação que registre automático… um painel de ações do dia para o
+negociador").** O André Ricardo colava cliente por cliente de uma
+planilha no "Registrar" do Meu dia (24 linhas em 06/11). `TelaRecuperacao`
+(Negociação → Recuperação, `?recurso=recuperacao` no `api/atendimento.js`)
+lista os atendimentos DELE — pelo login ou pelo nome da meta, sem acento —
+dos últimos 90 dias que não fecharam e ainda estão em jogo
+(`RECUPERAVEIS`), com quantos contatos e o último, lidos da agenda. Três
+listas: prometeu voltar e o dia chegou; para recuperar (sem contato há N
+dias, quem nunca foi procurado primeiro); procurados hoje. **"Ligar" e
+"WhatsApp" são o registro**: criam a linha Recuperação no Meu dia, com a
+hora, ligada ao atendimento; um toque diz como foi (não atendeu, volta em
+tal dia — status vai voltar e `volta_em` —, vendeu fora) e completa a
+linha. O gerente escolhe de quem ver.
+
 ### 42. Assinatura eletrônica própria: o papel some do caminho
 
 O Derek trouxe em 15/09/2026 a especificação do assinador que já roda

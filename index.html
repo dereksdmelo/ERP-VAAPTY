@@ -26878,6 +26878,160 @@ function NotaDaVez({ vez, escolhido, especifico, setEspecifico }) {
   );
 }
 
+/* A RECUPERAÇÃO DO NEGOCIADOR (08/11/2026, o Derek: "tem como eles
+ * terem um painel de fazer recuperação que registre automático… um
+ * painel de ações do dia para o negociador?"). O André Ricardo colava
+ * cliente por cliente de uma planilha no "Registrar" do Meu dia — 24
+ * linhas no dia 06/11. Aqui a lista vem do sistema (os atendimentos dele
+ * que não fecharam e ainda estão em jogo, `?recurso=recuperacao`) e o
+ * gesto de ligar ou mandar WhatsApp É o registro: cria a linha
+ * "Recuperação" no Meu dia, com a hora, ligada ao atendimento. Depois, um
+ * toque diz como foi — e o status do atendimento muda junto.
+ *
+ * Três listas, na ordem em que se trabalha: quem prometeu voltar e o
+ * dia chegou; quem está para recuperar (sem contato há `prazo` dias,
+ * quem nunca foi procurado primeiro); e quem já foi procurado hoje. */
+const hojeSP = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+const agoraSP = () => new Date().toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
+const diaSP = (iso) => (iso ? new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }) : "");
+function TelaRecuperacao({ perfil, aoAbrir }) {
+  const eGerente = !!(perfil && perfil.papel === "gerente");
+  const [quem, setQuem] = useState(eGerente ? "*" : "");
+  const [equipe, setEquipe] = useState([]);
+  const [d, setD] = useState(null); const [erro, setErro] = useState("");
+  const [prazo, setPrazo] = useState(3);
+  const [contato, setContato] = useState({}); // atendimento → { acaoId, titulo }
+  const [verHoje, setVerHoje] = useState(false);
+  const carregar = (manter) => {
+    if (!manter) setD(null);
+    fetchAut(`/api/atendimento?recurso=recuperacao${quem ? `&negociador=${encodeURIComponent(quem)}` : ""}`)
+      .then((r) => r.json().then((x) => { if (!r.ok) throw new Error(x.erro || "Não consegui carregar."); setD(x); setErro(""); }))
+      .catch((e) => setErro(e.message));
+  };
+  useEffect(() => { carregar(); }, [quem]);
+  useEffect(() => { if (eGerente) listarNegociadores().then((l) => setEquipe(l.filter((n) => n.ativo !== false && n.papel !== "prospeccao"))).catch(() => {}); }, []);
+  const hoje = hojeSP();
+  const lista = (d && d.atendimentos) || [];
+  const diasDesde = (iso) => (iso ? Math.round((Date.parse(hoje) - Date.parse(diaSP(iso))) / 86400000) : null);
+  const voltam = lista.filter((a) => a.volta_em && a.volta_em <= hoje && diaSP(a.ultimo_contato) !== hoje)
+    .sort((a, b) => (a.volta_em < b.volta_em ? -1 : 1));
+  const idsVolta = new Set(voltam.map((a) => a.id));
+  const deHoje = lista.filter((a) => diaSP(a.ultimo_contato) === hoje || contato[a.id]);
+  const idsHoje = new Set(deHoje.map((a) => a.id));
+  const recuperar = lista.filter((a) => !idsVolta.has(a.id) && !idsHoje.has(a.id)
+    && !(a.volta_em && a.volta_em > hoje)
+    && (a.ultimo_contato == null || diasDesde(a.ultimo_contato) >= prazo))
+    .sort((a, b) => (a.ultimo_contato == null) !== (b.ultimo_contato == null) ? (a.ultimo_contato == null ? -1 : 1)
+      : String(a.ultimo_contato || "").localeCompare(String(b.ultimo_contato || "")) || String(b.data).localeCompare(String(a.data)));
+  const carroDe = (a) => { const v = a.veiculo || {}; return [v.marca_modelo || a.carro_descricao, v.ano_modelo].filter(Boolean).join(" ") || "carro"; };
+  const primeiro = (n) => String(n || "").trim().split(/\s+/)[0] || "";
+  const registrar = async (a, modo) => {
+    const titulo = `${modo === "ligar" ? "Ligou para" : "WhatsApp para"} ${a.cliente_nome || "cliente"} · ${carroDe(a)}${a.cliente_telefone ? ` · ${a.cliente_telefone}` : ""}`;
+    try {
+      const acao = await criarAcao({ dia: hoje, hora: agoraSP(), tipo: "recuperacao", titulo, atendimento_id: a.id, feito: true });
+      setContato((m) => ({ ...m, [a.id]: { acaoId: acao && acao.id, titulo, hora: agoraSP() } }));
+    } catch (e) { setErro(`Não registrou no Meu dia: ${e.message}`); }
+  };
+  const resultado = async (a, rot, mudAt) => {
+    const c = contato[a.id];
+    try {
+      if (mudAt) await atualizarAtendimento(a.id, mudAt);
+      if (c && c.acaoId) await mexerAcao(c.acaoId, { titulo: `${c.titulo} — ${rot}` });
+      setContato((m) => ({ ...m, [a.id]: { ...(m[a.id] || {}), feito: rot } }));
+      carregar(true);
+    } catch (e) { setErro(e.message); }
+  };
+  const somaDiasSP = (n) => new Date(Date.parse(hoje) + n * 86400000).toISOString().slice(0, 10);
+  const cartao = (a) => {
+    const c = contato[a.id];
+    const tel = soDigitos(a.cliente_telefone);
+    const msg = `Oi ${primeiro(a.cliente_nome)}, tudo bem? Aqui é ${primeiro(perfil && perfil.nome)} da Vaapty. Conseguiu pensar sobre o ${carroDe(a)}?`;
+    const desde = diasDesde(a.ultimo_contato);
+    return (
+      <div key={a.id} className="rounded-lg px-3 py-2.5" style={{ background: C.paper, border: `1px solid ${c ? C.roxo : C.line}` }}>
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <button onClick={() => aoAbrir && aoAbrir(a.id)} className="text-[14px] font-bold hover:underline">{a.cliente_nome || "Sem nome"}</button>
+          <span className="text-[13px]">{carroDe(a)}{a.veiculo && a.veiculo.placa ? <span style={{ color: C.mute, fontFamily: F.mono }}> {a.veiculo.placa}</span> : null}</span>
+          <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ background: C.bg, color: C.mute }}>{rotuloStatus(a.status)}</span>
+          {eGerente && quem === "*" && <span className="text-[11.5px]" style={{ color: C.mute }}>{a.negociador_nome}</span>}
+          <span className="ml-auto text-[11.5px]" style={{ color: C.mute }}>
+            veio {diaBR(a.data)}{a.volta_em ? ` · prometeu voltar ${diaBR(a.volta_em)}` : ""}
+            {" · "}{a.contatos ? `${a.contatos} contato${a.contatos > 1 ? "s" : ""}, o último ${desde === 0 ? "hoje" : desde === 1 ? "ontem" : `há ${desde} d`}` : "nunca procurado"}
+          </span>
+        </div>
+        {a.ultimo_resultado && !c && <div className="mt-0.5 text-[11.5px]" style={{ color: C.mute }}>último: {a.ultimo_resultado}</div>}
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-[12.5px]">
+          {tel ? (
+            <>
+              <a href={`tel:+55${tel.length <= 11 ? tel : tel.slice(-11)}`} onClick={() => registrar(a, "ligar")}
+                className="rounded-md px-3 py-1 font-semibold text-white" style={{ background: C.roxo }}>Ligar</a>
+              <a href={zap(a.cliente_telefone, msg)} target="_blank" rel="noreferrer" onClick={() => registrar(a, "whatsapp")}
+                className="rounded-md px-3 py-1 font-semibold text-white" style={{ background: "#128C7E" }}>WhatsApp</a>
+              <span style={{ color: C.mute }}>{a.cliente_telefone}</span>
+            </>
+          ) : <span style={{ color: AMARELO.texto }}>sem telefone no atendimento</span>}
+          {c && !c.feito && (
+            <span className="flex flex-wrap items-center gap-1.5 rounded-md px-2 py-1" style={{ background: "#F1ECF8" }}>
+              <span style={{ color: C.roxo, fontWeight: 600 }}>Registrado às {c.hora} — como foi?</span>
+              <button onClick={() => resultado(a, "não atendeu")} className="rounded border bg-white px-2 py-0.5" style={{ borderColor: C.line }}>não atendeu</button>
+              {[["amanhã", 1], ["em 2 dias", 2], ["em 1 semana", 7]].map(([r, n]) => (
+                <button key={r} onClick={() => resultado(a, `volta ${diaBR(somaDiasSP(n))}`, { status: "vai_voltar", volta_em: somaDiasSP(n) })}
+                  className="rounded border bg-white px-2 py-0.5" style={{ borderColor: C.line }}>volta {r}</button>
+              ))}
+              <input type="date" min={hoje} className="rounded border px-1 py-0.5" style={inputSty} title="Volta em outro dia"
+                onChange={(e) => e.target.value && resultado(a, `volta ${diaBR(e.target.value)}`, { status: "vai_voltar", volta_em: e.target.value })} />
+              <button onClick={() => resultado(a, "vendeu fora", { status: "vendeu_fora", volta_em: null })} className="rounded border bg-white px-2 py-0.5" style={{ borderColor: C.line, color: C.mute }}>vendeu fora</button>
+            </span>
+          )}
+          {c && c.feito && <span className="font-semibold" style={{ color: C.verde }}>✓ {c.feito} — está no seu Meu dia</span>}
+        </div>
+      </div>
+    );
+  };
+  const secao = (titulo, sub, itens, cor) => (
+    <section className="space-y-2">
+      <div className="flex flex-wrap items-baseline gap-2">
+        <span className="text-[12px] font-bold uppercase tracking-[0.08em]" style={{ color: cor || ROTULO_COR }}>{titulo} ({itens.length})</span>
+        <span className="text-[12px]" style={{ color: C.mute }}>{sub}</span>
+      </div>
+      {itens.length ? itens.map(cartao) : <p className="text-[12.5px]" style={{ color: C.mute }}>Ninguém aqui agora.</p>}
+    </section>
+  );
+  return (
+    <div className="space-y-4">
+      <Cabecalho titulo="Recuperação" sub="Os seus clientes que não fecharam. Ligar ou mandar WhatsApp já registra no Meu dia." />
+      <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
+        {eGerente && (
+          <select value={quem} onChange={(e) => setQuem(e.target.value)} className="rounded-md border px-2 py-1 outline-none" style={{ ...inputSty, fontWeight: 600 }}>
+            <option value="*">toda a equipe</option>
+            {equipe.map((n) => <option key={n.id} value={n.nome}>{n.nome}</option>)}
+          </select>
+        )}
+        <label className="flex items-center gap-1.5" style={{ color: C.mute }}>
+          procurar de novo quem está sem contato há
+          <select value={prazo} onChange={(e) => setPrazo(Number(e.target.value))} className="rounded border px-1 py-0.5 outline-none" style={inputSty}>
+            {[1, 2, 3, 5, 7, 14].map((n) => <option key={n} value={n}>{n} dia{n > 1 ? "s" : ""}</option>)}
+          </select>
+        </label>
+        {d && <span className="ml-auto" style={{ color: C.mute }}>atendimentos dos últimos {d.dias} dias que não fecharam</span>}
+      </div>
+      {erro && <p className="text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
+      {!d ? <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p> : (
+        <>
+          {!!voltam.length && secao("Prometeu voltar — o dia chegou", "ligue hoje: foi o combinado", voltam, C.laranja)}
+          {secao("Para recuperar", `sem contato há ${prazo} dia${prazo > 1 ? "s" : ""} ou mais — quem nunca foi procurado vem primeiro`, recuperar)}
+          <section>
+            <button onClick={() => setVerHoje(!verHoje)} className="text-[12px] font-bold uppercase tracking-[0.08em]" style={{ color: C.verde }}>
+              {verHoje ? "▾" : "▸"} Procurados hoje ({deHoje.length})
+            </button>
+            {verHoje && <div className="mt-2 space-y-2">{deHoje.map(cartao)}</div>}
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
+
 function TelaFilaDaVez({ perfil, aoAbrir }) {
   const [d, setD] = useState(null);
   const [erro, setErro] = useState("");
@@ -27102,6 +27256,9 @@ function destinosPara(perfil) {
     // Quem atende o próximo cliente (0085). Todo mundo vê: é a ordem da
     // casa, e cada um precisa saber quando é a vez dele.
     { id: "vez", rot: "Fila da vez", curto: "Vez", area: "negociacao", icone: "meudia" },
+    // As ações do dia do negociador (08/11/2026): a recuperação, com o
+    // registro automático no Meu dia.
+    { id: "recuperacao", rot: "Recuperação", curto: "Recup.", area: "negociacao", icone: "meudia" },
     // Ferramenta, não destino de todo dia. Todo mundo vê — é uma
     // calculadora, não mostra dado de cliente nenhum.
     { id: "extrato", rot: "Extrato de ofertas", curto: "Extrato", area: "negociacao" },
@@ -30407,6 +30564,7 @@ function App() {
         aoVerConversa={verConversa} mes={mes} comp={compOuAtual} />}
       {tela === "atendimentos" && <CRM perfil={perfil} aoAbrir={abrir} mes={{ ...mes, todos: true }} />}
       {tela === "vez" && <TelaFilaDaVez perfil={perfil} aoAbrir={abrir} />}
+      {tela === "recuperacao" && <TelaRecuperacao perfil={perfil} aoAbrir={abrir} />}
       {tela === "estoque" && <TelaEstoque perfil={perfil} comp={compOuAtual} mes={mes} />}
       {/* A rota confere de novo: esconder o item do menu é conveniência,
           não controle. Quem chegar aqui por outro caminho não passa. */}
