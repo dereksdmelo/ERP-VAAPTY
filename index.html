@@ -19445,6 +19445,7 @@ function FinLancamentos({ comp }) {
   const [importando, setImportando] = useState(false);
   const [filtroCat, setFiltroCat] = useState("");
   const [soPendentes, setSoPendentes] = useState(false);
+  const [conciAberta, setConciAberta] = useState(true);
   const [fech, setFech] = useState(null);
   const [carros, setCarros] = useState([]);
   const [funcs, setFuncs] = useState([]);
@@ -19560,7 +19561,20 @@ function FinLancamentos({ comp }) {
   };
   const aoEnter = (e) => { if (e.key === "Enter") { e.preventDefault(); gravarNovo(); } };
 
-  const lista = (d ? d.lancamentos : []).filter((l) => (!filtroCat || (l.fin_categoria && l.fin_categoria.id === filtroCat)) && (!soPendentes || !l.categoria_id || !l.conciliado));
+  /* O QUE FALTA CONCILIAR EM CIMA, O CONCILIADO EMBAIXO (07/11/2026, o
+   * Derek: "o que já foi vinculado a um título desce lá embaixo em uma
+   * segunda lista, ficando claro o que ainda falta conciliar — parecido
+   * com a conciliação do Camisetas Já"). Lá a linha do extrato é
+   * Pendente até virar título; aqui também: pendente é a linha sem
+   * categoria (ainda não diz o que é) ou a que o sistema ligou sozinho e
+   * ninguém conferiu. Ligada a um título ou lançada com categoria, desce.
+   * O saldo corrido é o da ordem do banco, calculado antes de separar. */
+  const pendente = (l) => !l.categoria_id || !!l.revisar;
+  const saldoPor = {};
+  { let s0 = d && d.saldo_anterior != null ? d.saldo_anterior : 0; (d ? d.lancamentos : []).forEach((l) => { s0 += (Number(l.credito) || 0) - (Number(l.debito) || 0); saldoPor[l.id] = s0; }); }
+  const lista = (d ? d.lancamentos : []).filter((l) => (!filtroCat || (l.fin_categoria && l.fin_categoria.id === filtroCat)) && (!soPendentes || pendente(l)));
+  const listaPend = lista.filter(pendente);
+  const listaConc = lista.filter((l) => !pendente(l));
   const sug = (d && d.sugestoes) || {};
   const comSugestao = (d ? d.lancamentos : []).filter((l) => !l.categoria_id && sug[l.id]);
   const semCategoria = (d ? d.lancamentos : []).filter((l) => !l.categoria_id).length;
@@ -19670,8 +19684,25 @@ function FinLancamentos({ comp }) {
             </tr></thead>
             <tbody>
               <AberturaConta d={d} comp={comp} conta={conta} aoGravar={() => carregar(true)} aoErro={setErro} />
-              {lista.map((l) => {
-                saldo += (Number(l.credito) || 0) - (Number(l.debito) || 0);
+              {listaPend.length === 0 && !!listaConc.length && (
+                <tr><td colSpan={9} className="px-3 py-3 text-[13px] font-semibold" style={{ color: C.verde, background: "#F3F7F4" }}>
+                  ✓ Nada falta conciliar em {rotuloMes(comp)} — toda linha do extrato já é um título.
+                </td></tr>
+              )}
+              {listaPend.length > 0 && (
+                <tr><td colSpan={9} className="px-3 py-2 text-[11px] font-bold uppercase tracking-[0.06em]" style={{ color: AMARELO.texto, background: AMARELO.fundo }}>
+                  Falta conciliar ({listaPend.length}) — sem categoria, ou ligado sozinho e ainda não conferido
+                </td></tr>
+              )}
+              {listaPend.concat(listaConc.length ? [null] : [], conciAberta ? listaConc : []).map((l) => {
+                if (l === null) return (
+                  <tr key="sep-conc"><td colSpan={9} className="px-3 py-2" style={{ background: "#F1ECF8", borderTop: `2px solid ${C.roxo}` }}>
+                    <button onClick={() => setConciAberta(!conciAberta)} className="text-[11px] font-bold uppercase tracking-[0.06em]" style={{ color: C.roxo }}>
+                      {conciAberta ? "▾" : "▸"} Conciliados ({listaConc.length}) — já são títulos
+                    </button>
+                  </td></tr>
+                );
+                const saldo = saldoPor[l.id];
                 const v = l.estoque && l.estoque.veiculo;
                 const cat = l.fin_categoria;
                 const temRateio = !!(l.fin_rateio && l.fin_rateio.length);
