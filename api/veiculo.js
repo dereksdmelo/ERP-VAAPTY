@@ -583,6 +583,10 @@ async function estoque(req, res, tok) {
     const atual = ((await supa(`${base("estoque")}?select=situacao&id=eq.${id}`, { headers: cab })) || [])[0];
     if (!atual) return res.status(404).json({ erro: "Carro não encontrado no estoque." });
     if (atual.situacao !== "em_estoque") return res.status(409).json({ erro: "Só sai do estoque carro que está no pátio — vendido tem a venda pendurada." });
+    // Os títulos em aberto do contrato deste carro saem antes (0119): o
+    // `on delete set null` deixaria título solto, sem carro, para pagar.
+    await supa(`${base("fin_lancamento")}?estoque_id=eq.${id}&situacao=eq.aberto&item_contrato=not.is.null`, {
+      method: "PATCH", headers: cabecalhos(tok), body: JSON.stringify({ situacao: "cancelado" }) }).catch(() => null);
     const apagado = await supa(`${base("estoque")}?id=eq.${id}`, { method: "DELETE", headers: cabecalhos(tok, { Prefer: "return=representation" }) });
     if (!(Array.isArray(apagado) && apagado.length)) return res.status(403).json({ erro: "Só o gerente tira carro do estoque." });
     return res.status(200).json({ ok: true });

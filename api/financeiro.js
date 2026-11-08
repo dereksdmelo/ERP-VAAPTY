@@ -1133,7 +1133,10 @@ async function sincronizarTitulosDoCarro(tok, estoqueId, forcar) {
   const comp = (d) => competenciaDe(d) || competenciaDe(hojeAqui());
   const TIPO = { quitacao: "quitacao", debitos: "debitos" };
   const quer = [];
-  if (doCorteCompra && e.natureza !== "indicacao") {
+  // Baixado (0110) saiu do pátio sem venda — repetido, teste, coisa antiga:
+  // não deve nada nem a recebe nada; os títulos em aberto dele saem.
+  const baixado = e.situacao === "baixado";
+  if (!baixado && doCorteCompra && e.natureza !== "indicacao") {
     if (Number(e.valor_compra) > 0) quer.push({ item: "compra:cliente", debito: Number(e.valor_compra), tipo: "pagto_cliente",
       descricao: `Pagar ao cliente${cliente ? ` ${cliente}` : ""} · ${carro}`, favorecido: cliente || null, data: entrou });
     (e.estoque_custo || []).forEach((c) => {
@@ -1198,7 +1201,7 @@ async function sincronizarTitulosDoCarro(tok, estoqueId, forcar) {
   for (const x of existentes) {
     if (String(x.item_contrato).indexOf("#") >= 0) continue;
     if (querPor[x.item_contrato] || x.situacao !== "aberto") continue;
-    if (!doCorteCompra && x.item_contrato !== "venda:lojista") continue;
+    if (!baixado && !doCorteCompra && x.item_contrato !== "venda:lojista") continue;
     await supa(`${base("fin_lancamento")}?id=eq.${x.id}&situacao=eq.aberto`, { method: "PATCH", headers: cab(tok), body: JSON.stringify({ situacao: "cancelado" }) });
     feito.cancelados += 1;
   }
