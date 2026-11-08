@@ -79,6 +79,22 @@ const tokenDe = (req) => {
   return /^Bearer\s+\S+/.test(h) ? h : null;
 };
 
+const sessoesOk = new Map();   // token -> até quando vale a conferência
+async function sessaoValida(tok) {
+  const URL_B = (process.env.SUPABASE_URL || "").replace(/\/+$/, "");
+  const ate = sessoesOk.get(tok);
+  if (ate && ate > Date.now()) return true;
+  try {
+    const r = await fetch(`${URL_B}/rest/v1/perfil?select=id&limit=1`, { headers: { apikey: ANON, Authorization: tok }, signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return false;
+    const d = await r.json().catch(() => []);
+    if (!Array.isArray(d) || !d.length) return false;
+    if (sessoesOk.size > 200) sessoesOk.clear();
+    sessoesOk.set(tok, Date.now() + 10 * 60000);
+    return true;
+  } catch (e) { return false; }
+}
+
 // A tabela de referência muda uma vez por mês. Guardar por uma hora
 // evita uma ida extra à FIPE em cada clique do negociador.
 let refCache = { codigo: null, mes: null, em: 0 };
@@ -160,6 +176,9 @@ module.exports = async function handler(req, res) {
   // o resto de api/. ANON só entra aqui para a checagem de configuração.
   if (!ANON) return res.status(500).json({ erro: "SUPABASE_ANON_KEY não configurada." });
   if (!tokenDe(req)) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
+  // `tokenDe` só confere o formato do cabeçalho. Sem esta ida ao banco, qualquer
+  // "Bearer x" usava o Worker como relé aberto para a FIPE (varredura de 08/11/2026).
+  if (!(await sessaoValida(tokenDe(req)))) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
 
   const acao = String(req.query.acao || "");
   const tipo = tipoDe(req);

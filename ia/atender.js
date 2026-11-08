@@ -31,6 +31,14 @@ const MIDIA = require("./midia.js");
 const ESPERA_ENTRE = (txt) => Math.min(6000, 1500 + 35 * String(txt || "").length);
 const DO_CANAL = { "prospeccao-ativa": "prospeccao", tv: "tv", loja: "fluxo_loja" };
 
+/* PAUSA QUANDO A IA OU A PONTE ESTÃO FORA (08/11/2026). Em 29/10 a chave da
+ * Anthropic ficou inválida e o cron tentou ~4.000 vezes em cinco dias, uma
+ * por conversa por minuto, sem aviso. Agora o primeiro 401/403/5xx pausa a
+ * fila por alguns minutos (a reserva volta e a mensagem espera) — e a
+ * falha continua gravada em `ia_falha`, que a tela de Números lê. Vale por
+ * instância do Worker; se ela reiniciar, a pausa recomeça de zero. */
+let pausaAte = 0;
+
 async function atenderFila(env) {
   const URL_BASE = env.SUPABASE_URL, ANON = env.SUPABASE_ANON_KEY, SEG = env.IA_SEGREDO;
   const CHAVE = env.ANTHROPIC_API_KEY;
@@ -41,7 +49,7 @@ async function atenderFila(env) {
     const r = await fetch(`${URL_BASE}/rest/v1/rpc/${nome}`, {
       method: "POST", signal: AbortSignal.timeout(20000),
       headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, "Content-Type": "application/json" },
-      body: JSON.stringify(corpo),
+      body: JSON.stringify(/^wa_/.test(nome) ? { ...corpo, p_segredo: SEG } : corpo),
     });
     const t = await r.text();
     if (!r.ok) throw new Error(`${nome}: ${t.slice(0, 200)}`);
@@ -55,6 +63,7 @@ async function atenderFila(env) {
     return r.json().catch(() => ({ ok: false, erro: `a ponte respondeu ${r.status}` }));
   };
 
+  if (Date.now() < pausaAte) return { pulado: "pausada depois de falha" };
   const fila = (await rpc("ia_fila", { p_segredo: SEG })) || [];
   const feitos = [];
   for (const item of fila) {
@@ -112,14 +121,20 @@ async function atenderFila(env) {
         r = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST", signal: AbortSignal.timeout(45000),
         headers: { "x-api-key": CHAVE, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
-        body: JSON.stringify({ model: MODELO, max_tokens: 700, system: sistema,
+        body: JSON.stringify({ model: MODELO, max_tokens: 1200, system: sistema,
           messages: [{ role: "user", content: FLAVIA.conversaEmTexto(msgs, null, (ctx && ctx.outras) || []) }] }),
         });
-      } catch (e) { await liberar(`IA sem resposta: ${String((e && e.message) || e).slice(0, 200)}`); continue; }
+      } catch (e) { await liberar(`IA sem resposta: ${String((e && e.message) || e).slice(0, 200)}`); pausaAte = Date.now() + 2 * 60000; break; }
       const corpo = await r.text();
       if (!r.ok) {
         const erro = `IA ${r.status}: ${corpo.slice(0, 200)}`;
-        if (passa(r.status, corpo)) await liberar(erro); else await fim("falhou", { erro });
+        if (passa(r.status, corpo)) {
+          await liberar(erro);
+          // Chave recusada ou sem crédito não se conserta sozinha: 10 min. Limite e pane: 2 min.
+          pausaAte = Date.now() + (r.status === 401 || r.status === 403 || r.status === 400 ? 10 : 2) * 60000;
+          break;
+        }
+        await fim("falhou", { erro });
         continue;
       }
       let saida = "", uso = null;
@@ -136,6 +151,13 @@ async function atenderFila(env) {
         const e = await ponte("/enviar", canal, { para, conteudo: { type: "text", text: { body: texto }, digitando: ESPERA_ENTRE(texto) } });
         if (!e || !e.ok) { erro = (e && e.erro) || "a ponte não mandou"; break; }
         enviados.push(texto); if (e.id) wa_ids.push(e.id);
+      }
+      // Ponte caída ou número desconectado não queima a mensagem do cliente:
+      // a reserva volta e a conversa é atendida quando o número voltar.
+      if (!enviados.length && /ponte|desconect|conex|503|QR/i.test(erro) && !/n[aã]o tem WhatsApp/i.test(erro)) {
+        await liberar(`ponte: ${erro}`.slice(0, 200));
+        pausaAte = Date.now() + 2 * 60000;
+        break;
       }
       await fim(enviados.length ? "enviada" : "falhou", { mensagens: enviados, agendar: p.agendar, encerrar: p.encerrar, wa_ids, erro, uso });
 
@@ -178,7 +200,7 @@ async function retomar(env) {
     const r = await fetch(`${URL_BASE}/rest/v1/rpc/${nome}`, {
       method: "POST", signal: AbortSignal.timeout(20000),
       headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, "Content-Type": "application/json" },
-      body: JSON.stringify(corpo),
+      body: JSON.stringify(/^wa_/.test(nome) ? { ...corpo, p_segredo: SEG } : corpo),
     });
     const t = await r.text();
     if (!r.ok) throw new Error(`${nome}: ${t.slice(0, 200)}`);
@@ -277,7 +299,7 @@ async function lerLeads(env) {
     const r = await fetch(`${URL_BASE}/rest/v1/rpc/${nome}`, {
       method: "POST", signal: AbortSignal.timeout(20000),
       headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, "Content-Type": "application/json" },
-      body: JSON.stringify(corpo),
+      body: JSON.stringify(/^wa_/.test(nome) ? { ...corpo, p_segredo: SEG } : corpo),
     });
     const t = await r.text();
     if (!r.ok) throw new Error(`${nome}: ${t.slice(0, 200)}`);

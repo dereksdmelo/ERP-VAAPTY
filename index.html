@@ -403,7 +403,16 @@ async function sessaoGuardada() {
   try { const r = await window.storage.get("vaapty:sessao"); return r && r.value ? JSON.parse(r.value) : null; }
   catch (e) { return null; }
 }
-async function renovarSessao() {
+/* UMA RENOVAÇÃO POR VEZ (08/11/2026). A lista de atendimentos faz quatro
+ * chamadas ao mesmo tempo; com o token vencido, as quatro renovavam com o MESMO
+ * refresh_token e a segunda recusada derrubava uma sessão boa. Quem chega
+ * enquanto uma renovação está em curso espera por ela. */
+let renovacaoEmCurso = null;
+function renovarSessao() {
+  if (!renovacaoEmCurso) renovacaoEmCurso = renovarSessaoInterna().finally(() => { renovacaoEmCurso = null; });
+  return renovacaoEmCurso;
+}
+async function renovarSessaoInterna() {
   const cfg = await carregarConfig();
   const atual = AUTH.sessao;
   const guardada = await sessaoGuardada();
@@ -430,6 +439,9 @@ async function renovarSessao() {
 
 function sair() {
   guardarSessao(null);
+  // O atendimento aberto e a tela ficam na sessão da aba: sem apagá-los, quem entra
+  // depois no mesmo computador abre dentro do atendimento de quem saiu.
+  try { sessionStorage.removeItem("vaapty:aberto"); sessionStorage.removeItem("vaapty:tela"); } catch (e) {}
   if (AUTH.aoSair) AUTH.aoSair();
 }
 
@@ -1003,6 +1015,11 @@ async function waCanais() {
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.erro || "Não consegui ler os números.");
   return d.canais || [];
+}
+async function waSaudeIA() {
+  const r = await fetchAut("/api/atendimento?recurso=wa&acao=saude");
+  const d = await r.json().catch(() => ({}));
+  return r.ok ? d : null;
 }
 async function dutFila({ situacao, q } = {}) {
   const qs = comoQuery({ situacao: situacao || undefined, q: q || undefined });
@@ -1984,7 +2001,7 @@ function ConferirFipe({ f, set }) {
     });
   };
 
-  const daPlaca = Number(f.fipe) || 0;
+  const daPlaca = numeroBR(f.fipe) || 0;
   const diferenca = res && daPlaca ? res.valor - daPlaca : 0;
 
   return (
@@ -2675,16 +2692,20 @@ function linhaDoCRM(f, atendimento, status) {
   ].join("\t");
 }
 
+/** O banco guarda o estado do pneu sem acento ("medio"); a tela usa a lista PNEU
+ *  ("Médio"). Sem este mapa o select ficava sem opção e o gate passava. */
+const pneuDoBanco = (x) => ({ novo: "Novo", bom: "Bom", medio: "Médio", fraco: "Fraco" }[String(x || "").toLowerCase()] || "");
+
 function gerarDescritivo(f, n) {
   const brlC = (v) => {
-    const x = Number(String(v == null ? "" : v).replace(/\./g, "").replace(",", "."));
+    const x = numeroBR(v);
     return Number.isFinite(x) && x ? x.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : "—";
   };
   const ROT_PNEU = ["DE", "DD", "TE", "TD"];
   const L = ["🏢 VAAPTY / JOINVILLE 🏢", "", `🚗 Modelo: ${f.modelo}`, ""];
   L.push(`🔢 Ano ou Mod: ${f.ano}`);
   L.push(`⚙️ Câmbio: ${(f.cambio || "").toUpperCase()}`);
-  L.push(`🌑 Km: ${Number(f.km).toLocaleString("pt-BR")}${f.kmEntrada ? ` (Pegou c/${Math.round(f.kmEntrada / 1000)}k)` : ""}`);
+  L.push(`🌑 Km: ${numeroBR(f.km).toLocaleString("pt-BR")}${f.kmEntrada ? ` (Pegou c/${Math.round(f.kmEntrada / 1000)}k)` : ""}`);
   L.push(`🛞 Pneus: ${(f.pneus || []).map((p, i) => `${ROT_PNEU[i]}: ${p || "—"}`).join(" | ")}`);
   L.push(`💰 FIPE: ${brlC(f.fipe)}`);
   L.push(`💵 POR: ${brlC(f.por)}`, "");
@@ -2740,7 +2761,7 @@ function fichaDoVeiculo(v) {
     // salvamento alinha os dois. Ver o comentário do formulário.
     pedida: n(v.valor_por) || n(v.preco_pedido),
     gastos: n(v.gastos_descricao),
-    pneus: [cap(v.pneu_de), cap(v.pneu_dd), cap(v.pneu_te), cap(v.pneu_td)],
+    pneus: [pneuDoBanco(v.pneu_de), pneuDoBanco(v.pneu_dd), pneuDoBanco(v.pneu_te), pneuDoBanco(v.pneu_td)],
     leilao: !!v.leilao_sinistro, gnv: !!v.gnv,
     opcionais: Array.isArray(v.opcionais) ? v.opcionais : [],
     lataria: n(v.detalhes_lataria), mecanica: n(v.detalhes_mecanica),
@@ -2914,14 +2935,14 @@ const payloadShinkai = (f, n) => ({
   origem: "vaapty-joinville",
   veiculo: {
     placa: f.placa, chassi: f.chassi, marca_modelo: f.modelo, ano_modelo: f.ano,
-    cor: f.cor, combustivel: f.combustivel, cambio: f.cambio, km_atual: Number(f.km) || null,
-    fipe_codigo: f.fipeCodigo, fipe_valor: Number(f.fipe) || null,
+    cor: f.cor, combustivel: f.combustivel, cambio: f.cambio, km_atual: numeroBR(f.km) || null,
+    fipe_codigo: f.fipeCodigo, fipe_valor: numeroBR(f.fipe) || null,
     leilao_sinistro: f.leilao, gnv: f.gnv,
     pneus: { diant_esq: f.pneus[0], diant_dir: f.pneus[1], tras_esq: f.pneus[2], tras_dir: f.pneus[3] },
     opcionais: f.opcionais, detalhes_lataria: f.lataria, detalhes_mecanica: f.mecanica,
   },
   oferta: {
-    valor_por: Number(f.por) || null, gastos: f.gastos,
+    valor_por: numeroBR(f.por) || null, gastos: f.gastos,
     pontos_positivos: (f.positivos || "").split("\n").filter(Boolean),
     ressalvas_lojista: (f.ressalvas || "").split("\n").filter(Boolean),
   },
@@ -2987,7 +3008,13 @@ const hora = (d = new Date()) =>
 const vazio = (rotulo) =>
   `<span class="falta" title="${rotulo}">________________</span>`;
 
-const ou = (valor, rotulo) => (valor ? String(valor) : vazio(rotulo));
+/** Escapa texto que vai para dentro do HTML dos documentos. O nome do cliente
+ *  pode vir do perfil do WhatsApp, e o documento abre numa janela da mesma
+ *  origem do sistema — texto cru ali roubaria a sessão (varredura de 08/11/2026). */
+const escDoc = (v) => String(v == null ? "" : v)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+const ou = (valor, rotulo) => (valor ? escDoc(valor) : vazio(rotulo));
 
 /* ---------------- moldura ---------------- */
 
@@ -3267,23 +3294,23 @@ function reciboDoc(r) {
   ${brlDoc(r.valor)}
 </div>
 
-<p>Recebi de <b>${pagador.nome}</b>${pagador.doc ? `, inscrito(a) no CPF/CNPJ sob n. ${pagador.doc}` : ""},
+<p>Recebi de <b>${escDoc(pagador.nome)}</b>${pagador.doc ? `, inscrito(a) no CPF/CNPJ sob n. ${escDoc(pagador.doc)}` : ""},
 a importância de <b>${brlDoc(r.valor)}</b> (${valorPorExtenso(r.valor)}),
-referente a <b>${r.referente || vazio("descrição")}</b>.</p>
+referente a <b>${r.referente ? escDoc(r.referente) : vazio("descrição")}</b>.</p>
 
 <p>Para clareza firmo o presente recibo, dando plena, geral e irrevogável quitação
 da importância acima, para que produza os seus efeitos legais.</p>
 
 <table class="dados">
-  <tr><td class="r">Quem pagou</td><td>${pagador.nome}${pagador.doc ? ` — ${pagador.doc}` : ""}</td></tr>
-  <tr><td class="r">Quem recebeu</td><td>${recebedor.nome}${recebedor.doc ? ` — ${recebedor.doc}` : ""}</td></tr>
+  <tr><td class="r">Quem pagou</td><td>${escDoc(pagador.nome)}${pagador.doc ? ` — ${escDoc(pagador.doc)}` : ""}</td></tr>
+  <tr><td class="r">Quem recebeu</td><td>${escDoc(recebedor.nome)}${recebedor.doc ? ` — ${escDoc(recebedor.doc)}` : ""}</td></tr>
   <tr><td class="r">Data do pagamento</td><td>${dataPorExtenso(r.emitido_em_data)}</td></tr>
 </table>
 
 <p style="margin-top:26px">Joinville/SC, ${dataPorExtenso(r.emitido_em_data)}.</p>
 
 <div class="assinatura">
-  <div class="linha">${recebedor.nome}${recebedor.doc ? `<br>${recebedor.doc}` : ""}</div>
+  <div class="linha">${escDoc(recebedor.nome)}${recebedor.doc ? `<br>${escDoc(recebedor.doc)}` : ""}</div>
 </div>
 
 <p style="margin-top:26px;font-size:9pt;color:#6B6478">${VAAPTY_PJ}</p>`;
@@ -3398,7 +3425,7 @@ function aceiteProposta(f, cl) {
     // "Entre outros": despachante, guincho, segunda via de chave. Sem
     // linha fixa, mas descontado do cliente do mesmo jeito.
     .concat(extrasDe(cl).filter((x) => c(x && x.valor) > 0)
-      .map((x) => [String(x.descricao || "Outro desconto"), c(x.valor)]))
+      .map((x) => [escDoc(x.descricao || "Outro desconto"), c(x.valor)]))
     // A comissão só entra no negócio com comissão. No limpo, o valor
     // combinado já é o líquido — imprimir a linha tiraria dinheiro do
     // cliente no papel que ele assina.
@@ -3407,7 +3434,7 @@ function aceiteProposta(f, cl) {
   const liquido = bruto - total;
 
   const detDeb = debitosItensDe(cl).filter((x) => x && (x.descricao || c(x.valor)))
-    .map((x) => `<tr><td class="sub">${String(x.descricao || "Débito").toUpperCase()}</td><td class="num sub">${brlDoc(c(x.valor))}</td></tr>`)
+    .map((x) => `<tr><td class="sub">${escDoc(String(x.descricao || "Débito").toUpperCase())}</td><td class="num sub">${brlDoc(c(x.valor))}</td></tr>`)
     .join("");
 
   const linhasDed = DEDUCOES
@@ -3748,7 +3775,7 @@ Anita Garibaldi - 705 CEP: 89.203-300, doravante denominada simplesmente <strong
 <p>Representante Legal: ${marca(L.rep_nome)} Sim ${marca(!L.rep_nome)} Não se aplica</p>
 <p>Espécie de representante: ${marca(especie === "Administrador")} Administrador ${marca(especie === "Procurador")} Procurador
 ${marca(especie === "Curador")} Curador ${marca(especie === "Inventariante")} Inventariante
-${marca(especie && ["Administrador", "Procurador", "Curador", "Inventariante"].indexOf(especie) < 0)} Outros: ${especie && ["Administrador", "Procurador", "Curador", "Inventariante"].indexOf(especie) < 0 ? especie : "______________"}</p>
+${marca(especie && ["Administrador", "Procurador", "Curador", "Inventariante"].indexOf(especie) < 0)} Outros: ${especie && ["Administrador", "Procurador", "Curador", "Inventariante"].indexOf(especie) < 0 ? escDoc(especie) : "______________"}</p>
 
 <p><strong>DADOS DO VEÍCULO:</strong></p>
 <table class="dados">
@@ -3993,7 +4020,7 @@ function contaDoNegocio(cl) {
   // o total joga essa conversa para depois da assinatura.
   const detalheDebitos = debitosItensDe(cl)
     .filter((x) => x && (x.descricao || c(x.valor)))
-    .map((x) => `<tr><td class="r sub">${x.descricao || "Débito"}</td><td class="num sub">${brlDoc(c(x.valor))}</td></tr>`)
+    .map((x) => `<tr><td class="r sub">${escDoc(x.descricao || "Débito")}</td><td class="num sub">${brlDoc(c(x.valor))}</td></tr>`)
     .join("");
 
   const linhas = CL_DESCONTOS
@@ -4008,7 +4035,7 @@ function contaDoNegocio(cl) {
     })
     .join("") +
     extrasDe(cl).filter((x) => c(x && x.valor) > 0)
-      .map((x) => `<tr><td class="r">− ${x.descricao || "Outro desconto"}</td><td class="num">${brlDoc(c(x.valor))}</td></tr>`)
+      .map((x) => `<tr><td class="r">− ${escDoc(x.descricao || "Outro desconto")}</td><td class="num">${brlDoc(c(x.valor))}</td></tr>`)
       .join("");
 
   const banco = CL_BANCO
@@ -4077,7 +4104,7 @@ descrito, cuja negociação foi aproximada pela INTERMEDIADORA.</p>
   <tr><td class="r">Chassi</td><td>${ou(f.chassi, "chassi — do CRLV")}</td></tr>
   <tr><td class="r">Combustível</td><td>${ou(f.combustivel, "combustível")}</td></tr>
   <tr><td class="r">Cor</td><td>${ou(f.cor, "cor")}</td></tr>
-  <tr><td class="r">Quilometragem</td><td>${f.km ? `${f.km} km` : vazio("km")}</td></tr>
+  <tr><td class="r">Quilometragem</td><td>${f.km ? `${escDoc(f.km)} km` : vazio("km")}</td></tr>
   <tr><td class="r">Valor FIPE</td><td>${brlDoc(f.fipe)}</td></tr>
   <tr><td class="r">Valor da venda</td><td>${brlDoc(f.valorFechado)}</td></tr>
 </table>
@@ -4515,7 +4542,7 @@ function checkList(f, cl) {
   };
   const linha = (r, v) => `<tr><td class="r">${r}</td><td>${v}</td></tr>`;
   const val = (k, alt) => (c[k] != null && c[k] !== "" ? brlDoc(c[k]) : (alt != null && alt !== "" ? brlDoc(alt) : vazio("valor")));
-  const txt = (k, rotulo) => (c[k] ? String(c[k]) : vazio(rotulo));
+  const txt = (k, rotulo) => (c[k] ? escDoc(c[k]) : vazio(rotulo));
 
   const corpo = `<h1>Check list do negócio</h1>
 
@@ -8273,6 +8300,11 @@ function useEscuta(f, set) {
   const recRef = useRef(null);
   const ligadoRef = useRef(false);
   const textoRef = useRef(f.transcricao || "");
+  // `f` chega vazio no primeiro render e só depois a ficha do aparelho ou do outro lado:
+  // sem ler a transcrição atual, o primeiro trecho falado depois de recarregar
+  // sobrescrevia a conversa inteira (08/11/2026).
+  const fAtualRef = useRef(f);
+  fAtualRef.current = f;
   // `set` muda de identidade a cada render; o callback do
   // reconhecimento não pode ficar preso na versão velha.
   const setRef = useRef(set);
@@ -8298,7 +8330,15 @@ function useEscuta(f, set) {
         // Só o trecho fechado vai para a ficha: gravar a cada palavra
         // provisória escreveria no localStorage dezenas de vezes por
         // minuto.
-        textoRef.current = (textoRef.current + novoFinal).slice(-16000);
+        // Vale a que está à frente: a da ficha (veio do banco ou do outro aparelho) ou a que
+        // este hook acabou de montar e a tela ainda não desenhou.
+        const daFicha = String((fAtualRef.current && fAtualRef.current.transcricao) || "");
+        const base = textoRef.current.length > daFicha.length && textoRef.current.indexOf(daFicha) === 0 ? textoRef.current : daFicha;
+        let junto = base + novoFinal;
+        // Conversa longa: guarda o COMEÇO (é onde o cliente conta o motivo da venda, e o
+        // resumo precisa dele) e o fim; corta o meio.
+        if (junto.length > 40000) junto = junto.slice(0, 8000) + "\n[…]\n" + junto.slice(-31000);
+        textoRef.current = junto;
         setRef.current("transcricao", textoRef.current);
       }
     };
@@ -11595,7 +11635,19 @@ function TelaWhatsApp() {
   const [canais, setCanais] = useState(null);
   const [erro, setErro] = useState("");
   const [cadastrando, setCadastrando] = useState(false);
+  const [saude, setSaude] = useState(null);
   useEffect(() => { waCanais().then(setCanais).catch((e) => setErro(e.message)); }, []);
+  useEffect(() => {
+    let vivo = true;
+    const ler = () => waSaudeIA().then((d) => { if (vivo) setSaude(d); }).catch(() => {});
+    ler();
+    const t = setInterval(ler, 60000);
+    return () => { vivo = false; clearInterval(t); };
+  }, []);
+  // A falha vale como alarme enquanto for de menos de 30 minutos e mais nova
+  // que a última resposta que a Flávia conseguiu mandar.
+  const iaCaida = saude && saude.falha && (Date.now() - new Date(saude.falha.quando).getTime() < 30 * 60000)
+    && !(saude.ultima_resposta && new Date(saude.ultima_resposta) > new Date(saude.falha.quando));
 
   const criar = async (dados) => {
     const novo = await waCriarCanal(dados);
@@ -11625,6 +11677,13 @@ function TelaWhatsApp() {
             Cadastrar número
           </button>
         ) : null} />
+      {iaCaida && (
+        <div className="mb-4 rounded-xl px-4 py-3 text-[14px]" style={{ background: "#FBEAE8", border: "1px solid #C0281B", color: "#8A1B10" }}>
+          <b>A Flávia não está conseguindo responder.</b> Os clientes dos números com IA ficam sem resposta até isso
+          ser resolvido. Último erro ({new Date(saude.falha.quando).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}):
+          {" "}{saude.falha.erro}
+        </div>
+      )}
       {erro && <p className="mb-4 text-[14px]" style={{ color: C.laranja }}>{erro}</p>}
       {!canais && !erro && <p className="text-[14px]" style={{ color: C.mute }}>carregando…</p>}
       {cadastrando && (
@@ -11638,8 +11697,8 @@ function TelaWhatsApp() {
       </div>
       <div className="mt-4">
         <Pendente>
-          Fora o aviso de chegada no grupo, a ponte só ESCUTA: ela registra o que
-          chega e o que a loja responde, e não manda mensagem para cliente.
+          Os números ligados registram o que chega e o que a loja responde. A caixa de
+          Conversas, os avisos do DUT e a Flávia mandam mensagem pelos números marcados para isso.
         </Pendente>
       </div>
     </div>
@@ -18634,7 +18693,7 @@ function fichaDoEstoque(e) {
     // O preço pedido manda; o valor_por da avaliação é o padrão.
     por: e.preco_pedido != null ? e.preco_pedido : v.valor_por,
     gastos: v.gastos_descricao || "",
-    pneus: [cap(v.pneu_de), cap(v.pneu_dd), cap(v.pneu_te), cap(v.pneu_td)],
+    pneus: [pneuDoBanco(v.pneu_de), pneuDoBanco(v.pneu_dd), pneuDoBanco(v.pneu_te), pneuDoBanco(v.pneu_td)],
     leilao: !!v.leilao_sinistro, gnv: !!v.gnv, opcionais: v.opcionais || [],
     lataria: v.detalhes_lataria || "", mecanica: v.detalhes_mecanica || "",
     positivos: (v.pontos_positivos || []).join("\n"),
@@ -22610,7 +22669,7 @@ function FinFolha({ comp }) {
   };
   const campo = (l, k) => (
     <input key={`${l.funcionario_id}-${k}-${l[k]}`} className="w-24 rounded border px-1.5 py-1 text-right text-[12px] outline-none" style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal"
-      defaultValue={Number(l[k]) ? Math.round(l[k] * 100) / 100 : ""} onBlur={(e) => { const v = Number(String(e.target.value).replace(/\./g, "").replace(",", ".")) || 0; if (v !== Number(l[k])) gravar(l, { [k]: v }); }} />
+      defaultValue={Number(l[k]) ? centavosBR(l[k]) : ""} onBlur={(e) => { const v = numeroBR(e.target.value) || 0; if (v !== Number(l[k])) gravar(l, { [k]: v }); }} />
   );
   // Erro sem a folha carregada é o único que ocupa a tela; com a folha
   // na mão, ele aparece em cima dela — um aviso não pode apagar a tabela.
@@ -22922,7 +22981,7 @@ function VisorAnexos({ anexos, inicio, aoFechar, conferencia }) {
           ) : html == null ? (
             <p className="mt-10 text-center text-[13px]" style={{ color: "#fff", opacity: 0.8 }}>Abrindo o documento…</p>
           ) : (
-            <iframe ref={quadro} srcDoc={html} title={a.nome || "documento"} className="h-full w-full rounded-lg"
+            <iframe ref={quadro} srcDoc={html} sandbox="allow-same-origin allow-modals" title={a.nome || "documento"} className="h-full w-full rounded-lg"
               style={{ background: "#fff", border: "none", minHeight: "70vh" }} />
           )
         ) : ePdf ? (
@@ -30973,7 +31032,7 @@ function App() {
   };
 
   useEffect(() => {
-    AUTH.aoSair = () => { setPerfil(null); setEstado("fora"); };
+    AUTH.aoSair = () => { setPerfil(null); setAberto(null); setTela("atendimentos"); setEstado("fora"); };
     (async () => {
       try { await carregarConfig(); } catch (e) { setErro(e.message); setEstado("erro"); return; }
       // O link de recuperação vem antes da sessão guardada: quem clicou

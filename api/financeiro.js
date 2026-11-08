@@ -97,6 +97,27 @@ async function supa(url, opcoes) {
     erro.status = r.status === 401 ? 401 : 502;
     throw erro;
   }
+  /* O PostgREST devolve no máximo 1.000 linhas por chamada, mesmo com
+   * `limit=100000` na URL — e o financeiro tem passado de 4.000 lançamentos.
+   * Quem soma saldo, fluxo e fechamento em cima de uma lista cortada erra
+   * sem aviso (varredura de 08/11/2026). Lista que veio cheia (1.000) pede as
+   * páginas seguintes até esvaziar, com teto de 30. Só leitura, e só quando
+   * a URL não pediu um `limit` menor que a página. */
+  const metodo = String((opcoes && opcoes.method) || "GET").toUpperCase();
+  const lim = /[?&]limit=(\d+)/.exec(url);
+  if (metodo === "GET" && Array.isArray(dado) && dado.length === 1000 && !/[?&]offset=/.test(url) && (!lim || Number(lim[1]) > 1000)) {
+    for (let pg = 1; pg < 30; pg++) {
+      let r2;
+      try { r2 = await fetch(`${url}${url.indexOf("?") >= 0 ? "&" : "?"}offset=${pg * 1000}`, opcoes); }
+      catch (e) { const erro = new Error("Não consegui falar com o banco."); erro.status = 502; throw erro; }
+      if (!r2.ok) break;
+      let mais = [];
+      try { mais = JSON.parse(await r2.text()); } catch (e) {}
+      if (!Array.isArray(mais) || !mais.length) break;
+      dado = dado.concat(mais);
+      if (mais.length < 1000) break;
+    }
+  }
   return dado;
 }
 async function corpoDe(req) {
@@ -383,9 +404,11 @@ async function lancamento(req, res, tok) {
         sugestoes[l.id] = Object.keys(c).sort((a, b) => c[b] - c[a])[0];
       });
     }
-    return res.status(200).json({ competencia: comp, lancamentos: lista || [], saldo_anterior: saldoAnterior, abertura, sugestoes, truncado: (lista || []).length >= 2000 });
+    return res.status(200).json({ competencia: comp, lancamentos: lista || [], saldo_anterior: saldoAnterior, abertura, sugestoes, truncado: (lista || []).length >= 20000 });
   }
-  if (req.method === "POST") {
+  // A transferência tem o próprio ramo, mais abaixo: sem esta exceção o POST genérico a atendia
+  // antes e recusava com "Escolha a conta" (achado de 08/11/2026).
+  if (req.method === "POST" && String(req.query.acao || "") !== "transferir") {
     const c = await corpoDe(req);
     if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
     const l = linhaLancamento(c, tok);
@@ -1642,17 +1665,22 @@ async function titulo(req, res, tok) {
 
     const novos = [];
     for (let i = 1; i <= n; i++) {
-      const d = new Date(`${venc0}T12:00:00Z`);
-      d.setUTCMonth(d.getUTCMonth() + i);
-      const venc = d.toISOString().slice(0, 10);
+      // Dia 31 num mês de 30 dias cai no último dia do mês, não no mês seguinte.
+      const d0 = new Date(`${venc0}T12:00:00Z`);
+      const alvo = new Date(Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth() + i, 1, 12));
+      const ultimo = new Date(Date.UTC(alvo.getUTCFullYear(), alvo.getUTCMonth() + 1, 0, 12)).getUTCDate();
+      alvo.setUTCDate(Math.min(d0.getUTCDate(), ultimo));
+      const venc = alvo.toISOString().slice(0, 10);
+      // A última parcela leva a diferença dos centavos: 1.000 em 3× são 333,34 + 333,33 + 333,33.
+      const dessa = dividir && i === n ? Math.round((total - cada * n) * 100) / 100 : cada;
       novos.push({
         // A conta prevista vai junto: o aluguel que sai do Itaú sai do
         // Itaú nos doze meses.
         conta_id: base0.conta_id || null, data: venc, competencia: competenciaDe(venc),
         categoria_id: base0.categoria_id, descricao: base0.descricao,
         favorecido: base0.favorecido, favorecido_id: base0.favorecido_id,
-        debito: Number(base0.debito) > 0 ? cada : 0,
-        credito: Number(base0.credito) > 0 ? cada : 0,
+        debito: Number(base0.debito) > 0 ? dessa : 0,
+        credito: Number(base0.credito) > 0 ? dessa : 0,
         estoque_id: base0.estoque_id, tipo_negociacao: base0.tipo_negociacao,
         funcionario_id: base0.funcionario_id,
         situacao: "aberto", vencimento: venc, origem: "serie",

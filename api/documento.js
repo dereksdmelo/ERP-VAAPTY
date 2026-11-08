@@ -720,6 +720,12 @@ module.exports = async function handler(req, res) {
       if (conteudo && conteudo.length > MAX_CONTEUDO) {
         return res.status(413).json({ erro: "Documento grande demais para registrar." });
       }
+      /* O HTML do documento é aberto numa janela da mesma origem do sistema e na
+         página pública de assinatura: script ou manipulador de evento ali roubaria
+         a sessão de quem abre. O molde dos documentos nunca os usa. */
+      if (conteudo && /<\s*(script|iframe|object|embed)\b|\bon[a-z]+\s*=|javascript\s*:/i.test(conteudo)) {
+        return res.status(400).json({ erro: "O documento tem conteúdo que não pode ser registrado." });
+      }
 
       // Só o termo de aceite tem rodada; nos outros a coluna fica nula.
       const rodada = tipo === "termo_aceite" && Number.isFinite(Number(corpo.rodada))

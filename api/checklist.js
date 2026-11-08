@@ -751,7 +751,7 @@ async function avisarLojista(req, tok, p, tipo) {
       await fetch(`${URL_BASE}/rest/v1/rpc/wa_receber`, {
         method: "POST", headers: json(tok),
         body: JSON.stringify({ p_canal: canal.slug, p_telefone: fone, p_nome: "", p_wa_id: String(d.id || `dut-${p.id}-${Date.now()}`),
-          p_eco: true, p_tipo: "texto", p_texto: texto, p_anexo: null, p_quando: new Date().toISOString(), p_anuncio: null }),
+          p_eco: true, p_tipo: "texto", p_texto: texto, p_anexo: null, p_quando: new Date().toISOString(), p_anuncio: null, p_segredo: process.env.IA_SEGREDO || "" }),
       });
     } catch (e) {}
     return { enviado: true, canal: canal.nome, tipo };
@@ -790,7 +790,7 @@ async function mandarPeloAdm(req, tok, telefone, conteudo, textoNaConversa) {
         body: JSON.stringify({ p_canal: canal.slug, p_telefone: fone, p_nome: "", p_wa_id: String(d.id || `adm-${Date.now()}`),
           p_eco: true, p_tipo: conteudo.type === "document" ? "midia" : "texto", p_texto: textoNaConversa || "",
           p_anexo: conteudo.type === "document" ? { tipo: "document", nome: conteudo.document.filename || "" } : null,
-          p_quando: new Date().toISOString(), p_anuncio: null }),
+          p_quando: new Date().toISOString(), p_anuncio: null, p_segredo: process.env.IA_SEGREDO || "" }),
       });
     } catch (e) {}
     return { enviado: true, canal: canal.nome, id: d.id || null, fone };

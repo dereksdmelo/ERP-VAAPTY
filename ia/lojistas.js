@@ -20,7 +20,7 @@ async function avisarPrazos(env) {
     const r = await fetch(`${URL_BASE}/rest/v1/rpc/${nome}`, {
       method: "POST", signal: AbortSignal.timeout(20000),
       headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, "Content-Type": "application/json" },
-      body: JSON.stringify(corpo),
+      body: JSON.stringify(/^wa_/.test(nome) ? { ...corpo, p_segredo: SEG } : corpo),
     });
     const t = await r.text();
     if (!r.ok) throw new Error(`${nome}: ${t.slice(0, 200)}`);

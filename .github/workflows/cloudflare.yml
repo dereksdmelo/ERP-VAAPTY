@@ -22,7 +22,7 @@ on:
     # integração de lá. **No dia em que a migração fechar, o cloudflare
     # vira a main e esta linha perde o segundo nome** -- deixá-lo
     # depois faz um branch antigo publicar por cima da produção.
-    branches: [main, cloudflare]
+    branches: [cloudflare]
   # Para republicar sem precisar de commit novo (rollback, ou quando um
   # segredo muda e o Worker precisa reler).
   workflow_dispatch:
@@ -49,6 +49,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Instalar o esbuild (só para o teste de sintaxe)
+        run: npm ci --prefix workers/ponte-whatsapp --ignore-scripts
+
+      - name: Sintaxe de todas as rotas, do Worker e da IA
+        # Um erro de sintaxe em api/atendimento.js derruba TODAS as rotas,
+        # porque o Worker é um pacote só.
+        run: |
+          for f in api/*.js worker/index.js ia/*.js regras/*.js; do node --check "$f"; done
+
       - name: Os testes que leem o próprio código
         # Os três leem as funções da fonte em vez de copiá-las, então
         # falham quando a tela muda e o teste não. Barato: sem
@@ -58,6 +67,10 @@ jobs:
           node ferramentas-shinkai.js
           node ferramentas-agendamento.js
           node ferramentas-fila.js
+          node ferramentas-flavia.js
+          node ferramentas-indice.js
+          node ferramentas-quadro.js
+          node ferramentas-sintaxe.js
 
       - name: A versão que vai ao ar
         # A página fica aberta o dia inteiro e roda o código de quando foi

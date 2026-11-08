@@ -102,7 +102,7 @@ export default {
       return new Response(r.body, { status: r.status, statusText: r.statusText, headers: h });
     }
 
-    const handler = ROTAS[m[1]];
+    const handler = Object.prototype.hasOwnProperty.call(ROTAS, m[1]) ? ROTAS[m[1]] : null;
     if (!handler) return Response.json({ erro: "Rota desconhecida." }, { status: 404 });
 
     /* Os segredos chegam pelo `env` do Worker; os handlers os leem em
@@ -146,11 +146,12 @@ export default {
       const r = handler(req, res);
       // Handler que estoura DEPOIS de ja ter respondido nao pode virar
       // 500 por cima de uma resposta boa.
-      if (r && typeof r.catch === "function") r.catch((e) => { try { res.status(500).json({ erro: String((e && e.message) || e) }); } catch {} });
+      if (r && typeof r.catch === "function") r.catch((e) => { console.error("handler:", String((e && e.stack) || e).slice(0, 400)); try { res.status(500).json({ erro: "Falha interna." }); } catch {} });
     } catch (e) {
       return Response.json({ erro: String((e && e.message) || e) }, { status: 500 });
     }
-    return espera;
+    // Handler que termina sem responder não pode deixar a conexão aberta para sempre.
+    return Promise.race([espera, new Promise((r) => setTimeout(() => r(Response.json({ erro: "O servidor demorou demais." }, { status: 504 })), 100000))]);
   },
 
   /* O DESPERTADOR DA PONTE DO WHATSAPP (21/10/2026).
@@ -203,7 +204,7 @@ async function despertar(env) {
     const r = await fetch(`${env.SUPABASE_URL}/rest/v1/rpc/wa_canais_para_acordar`, {
       method: "POST", signal: AbortSignal.timeout(15000),
       headers: { apikey: env.SUPABASE_ANON_KEY, Authorization: `Bearer ${env.SUPABASE_ANON_KEY}`, "Content-Type": "application/json" },
-      body: "{}",
+      body: JSON.stringify({ p_segredo: env.IA_SEGREDO || "" }),
     });
     if (!r.ok) { console.error("despertador: não li os números", r.status); return; }
     const canais = (await r.json().catch(() => [])) || [];

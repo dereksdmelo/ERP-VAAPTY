@@ -110,6 +110,13 @@ module.exports = async function handler(req, res) {
 
   const tok = tokenDe(req);
   if (!tok) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
+  // A tela só mostra o importador ao gerente; aqui o servidor confere também (decisão 13).
+  try {
+    const rp = await fetch(`${URL_BASE}/rest/v1/perfil?select=papel&limit=50`, { headers: { apikey: process.env.SUPABASE_ANON_KEY, Authorization: tok }, signal: AbortSignal.timeout(8000) });
+    const lp = rp.ok ? await rp.json().catch(() => []) : [];
+    const meu = (Array.isArray(lp) ? lp : []).find((x) => x && x.papel === "gerente");
+    if (!meu) return res.status(403).json({ erro: "Só o gerente importa a planilha." });
+  } catch (e) { return res.status(502).json({ erro: "Não consegui conferir seu acesso." }); }
 
   let corpo = req.body;
   if (corpo && typeof Buffer !== "undefined" && Buffer.isBuffer(corpo)) corpo = corpo.toString("utf8");

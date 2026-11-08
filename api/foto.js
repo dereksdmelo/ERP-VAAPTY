@@ -1295,7 +1295,7 @@ async function waEnvio(req, res, tok) {
   const agora = Date.now();
   const anexo = { tipo: qual === "document" ? "document" : qual, mime: tipo, nome, legenda, voz: qual === "audio", chave: caminho };
   const wa = String(d.id || `erp-${agora}`);
-  const comum = { p_canal: ca.slug, p_wa_id: wa, p_eco: true, p_tipo: "midia", p_texto: legenda, p_anexo: anexo, p_quando: new Date(agora).toISOString() };
+  const comum = { p_canal: ca.slug, p_wa_id: wa, p_eco: true, p_tipo: "midia", p_texto: legenda, p_anexo: anexo, p_quando: new Date(agora).toISOString(), p_segredo: process.env.IA_SEGREDO || "" };
   let msgId = null;
   try {
     if (cv.grupo) {

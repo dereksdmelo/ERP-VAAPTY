@@ -1,0 +1,21 @@
+# Relatório: casca, sessão, equipe, fila, painel do gestor, ADM/DUT, Meu dia (agente, 08/11/2026)
+ALTO
+A1. Visor renderiza HTML do banco em iframe srcDoc SEM sandbox (index.html:22909; html de documento.conteudo, 22855). srcDoc herda a origem → script dentro do conteúdo lê localStorage vp:vaapty:sessao do revisor/gerente. Conteúdo é gravado pelo cliente com token de qualquer membro. Conserto: sandbox="allow-same-origin allow-modals" sem allow-scripts (ou sanitizar), e servidor recusar <script/on*=/javascript:.
+A2. Logout não limpa estado nem aparelho: sair() só guardarSessao(null) (432-435); AUTH.aoSair (30965) só setPerfil/setEstado; aberto/tela/conversaAlvo ficam; sessionStorage vaapty:aberto e chaves vp:vaapty:at/fotos/veiculo:<id> nunca apagadas. Computador compartilhado: o próximo abre dentro do atendimento do anterior.
+A3. renovarSessao sem deduplicação em voo (406-433, 441-466): CRM abre com 4 chamadas paralelas (13308-13330); token vencido → 4 refresh com o MESMO refresh_token → o recusado chama sair(). "Caí no login do nada" dentro de uma aba. Conserto: promessa única AUTH.renovando.
+MÉDIO
+M1. Permissão do menu ≠ documentação: estoque, whats_neg, recuperacao, vez, painel, extrato abrem para qualquer papel (destinosPara 27616-27636; rotas 31058-31077); lojistas/rentabilidade têm gate. Pré-venda vê custo/margem/preco_pedido; RLS do estoque é da equipe inteira → a tela é a única barreira.
+M2. Lista de Atendimentos corta em 200 em silêncio (13347; servidor 3835), sem paginação/aviso; contas por status saem do que coube.
+M3. LembreteDoDia e SinalAbriu não existem com atendimento aberto (31027-31055): quem recarrega com vaapty:aberto nunca manda "abriu" → fora da fila; SinalAbriu remonta a cada volta à lista.
+M4. GET ?recurso=vez tem efeito colateral (penaliza/repassa, 1655-1661, 1498) executado por qualquer leitor a cada 20 s (AvisosDaFila 26960 + TelaFilaDaVez 27391 → dois pollers); ~150 consultas/min só da fila. Mover vencidas para o cron; um poller por página.
+M5. DUT: "Salvar" manda situacao:"pendente" (25095) → servidor zera carimbos e dispara avisarLojista("falta") num pedido já no cartório; chip de entrega troca para Correios sem rastreio (25075; trava só em mud.situacao==='entregue', checklist.js:1041-1062).
+M6. Histórico pode travar após voltar lento (30888-30912): restaurando só limpa quando tela+aberto coincidem.
+M7. Anexos: tamanho/tipo não conferidos na tela (1287-1300); servidor confia em corpo.tipo (foto.js:869-887, "não dá para conferir magic bytes" — dá: 4 assinaturas).
+M8. URL assinada de 1 h: Anexos (11848-11851) e FichaColaborador (30453-30455) leem uma vez e nunca releem.
+M9. LembreteDoDia ignora config_loja e fuso (26160 08:30–18:00 fixo; 26061 relógio local; 30877 todo papel ≠ gerente) — pergunta no sábado à tarde e no domingo.
+M10. CombinadoRemuneracao não valida nada (30243-30437): faixas duplicadas/fora de ordem, % > 100, valor em branco → folha projetada some/dobra sem erro.
+M11. TelaRecuperacao "Ligar" conta no clique do tel: (27223-27224) mesmo cancelado.
+M12. Texto diz 3 h, código 4 h (api/atendimento.js:1207 vs index.html:12995-13003; decisão 67 cita os dois).
+BAIXO
+B1. sessaoDoLink descarta fragmento ≠ recovery (30975-30979). B2. RedeDeErro da raiz engole o menu (31138). B3. horaCurta fuso local (28101-28105); hojeSP duplica hojeEmSP. B4. OuvirAMesa.medir pode vazar setInterval (28509-28520). B5. criarNaFolha engole falha do PATCH de nome (30505). B6. CRM grava localStorage fora do wrapper e sem teto (13311-13337 vaapty:nao-repetido cresce para sempre). B7. Fila: ações do gerente sobre terceiros sem confirmação (27504-27510). B8. Excluir atendimento sem confirm (13209-13243); veículo e fotos órfãos. B9. window.open noopener 18843. B10. Senha provisória no DOM/clipboard (29980, 28051, 29889) — zerar ao trocar de tela.
+Certo: fetchAut renova 401/500 JWT expired; senha_provisoria barra tudo; token só em fragmento; encerrarChamada idempotente; avisarLojista só na mudança; obs_interna fora; ConfigTelaSala upsert id=1; etapaDe fonte única; ROTULOS_ATENDIMENTO ⊂ ROTULOS; MeuDia mescla com cleanup; roteamento consistente (todo destino tem rota, dentro de RedeDeErro onde="tela"; Shell/SinalAbriu/App só na rede raiz).

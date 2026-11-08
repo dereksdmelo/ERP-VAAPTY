@@ -292,6 +292,12 @@ async function tatica(req, res, tok) {
       erro: "A leitura por IA não está ligada. Falta a variável ANTHROPIC_API_KEY nas configurações da Vercel — as táticas por expressão continuam funcionando.",
     });
   }
+  // A leitura por IA custa por chamada: confere no banco que o token é de um usuário ativo
+  // (`tokenDe` só olha o formato do cabeçalho — varredura de 08/11/2026).
+  try {
+    const eu = await banco(`${URL_BASE}/rest/v1/perfil?select=id&limit=1`, { headers: cabecalhos(tok) });
+    if (!Array.isArray(eu) || !eu.length) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
+  } catch (e) { return res.status(401).json({ erro: "Sessão expirada. Entre de novo." }); }
   const c = await lerCorpo(req);
   const texto = String((c && c.texto) || "").trim();
   if (texto.length < 40) return res.status(400).json({ erro: "Conversa curta demais para ler." });
@@ -1857,7 +1863,17 @@ async function leads(req, res, tok) {
     if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido." });
     const atual = (await banco(`${base}?select=*&id=eq.${id}`, { headers: cabecalhos(tok) }) || [])[0];
     if (!atual) return res.status(404).json({ erro: "Lead não encontrado." });
-    if (atual.atendimento_id) return res.status(200).json({ ok: true, atendimento_id: atual.atendimento_id, ja_existia: true });
+    if (atual.atendimento_id) {
+      /* O lead de uma visita de RECUPERAÇÃO já nasce ligado ao atendimento que existe. Devolver
+         "já existia" sem mudar o status deixava o cartão em AGENDADO para sempre — a visita
+         nunca contava como "veio" (varredura de 08/11/2026). */
+      if (atual.status !== "compareceu") {
+        try {
+          await banco(`${base}?id=eq.${id}`, { method: "PATCH", headers: json(tok), body: JSON.stringify({ status: "compareceu" }) });
+        } catch (e) {}
+      }
+      return res.status(200).json({ ok: true, atendimento_id: atual.atendimento_id, ja_existia: true });
+    }
 
     // O atendimento nasce com o que a pré-venda já perguntou ao
     // telefone. É o ponto inteiro desta tela: ninguém redigita nome,
@@ -2803,7 +2819,8 @@ async function ponte(req, res) {
     const r = await fetch(`${URL_BASE}/rest/v1/rpc/${nome}`, {
       method: "POST",
       headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, "Content-Type": "application/json" },
-      body: JSON.stringify(corpo),
+      // As funções wa_* do banco exigem o segredo (0124): a chave anônima é pública.
+      body: JSON.stringify(/^wa_/.test(nome) ? { ...corpo, p_segredo: process.env.IA_SEGREDO || "" } : corpo),
     });
     const txt = await r.text();
     if (!r.ok) { const e = new Error(txt.slice(0, 200)); e.status = r.status; throw e; }
@@ -3033,7 +3050,7 @@ module.exports = async function handler(req, res) {
         porque: "Diga se veio ou não — sem isso o lead fica parado e o funil não fecha.",
         cor: "laranja",
         leads: todos.filter((l) => ["agendado", "confirmado"].indexOf(l.status) >= 0 &&
-          l.agendado_para && l.agendado_para < new Date(agora - 2 * 3600000).toISOString()),
+          l.agendado_para && String(l.agendado_para).slice(0, 16) < new Date(agora - (3 + 2) * 3600000).toISOString().slice(0, 16)),
       },
       {
         id: "amanha",
@@ -3220,7 +3237,7 @@ module.exports = async function handler(req, res) {
         msgId = await banco(`${URL_BASE}/rest/v1/rpc/wa_receber`, {
           method: "POST", headers: json(tok),
           body: JSON.stringify({ p_canal: ca.slug, p_telefone: fone, p_nome: "", p_wa_id: String(d.id || `erp-${agora}`),
-            p_eco: true, p_tipo: "texto", p_texto: texto, p_anexo: null, p_quando: new Date(agora).toISOString(), p_anuncio: null }),
+            p_eco: true, p_tipo: "texto", p_texto: texto, p_anexo: null, p_quando: new Date(agora).toISOString(), p_anuncio: null, p_segredo: process.env.IA_SEGREDO || "" }),
         });
       } catch (e) {}
       await marcarAutor(tok, msgId);
@@ -3284,7 +3301,7 @@ module.exports = async function handler(req, res) {
         msgId = await banco(`${URL_BASE}/rest/v1/rpc/wa_receber`, {
           method: "POST", headers: json(tok),
           body: JSON.stringify({ p_canal: slug, p_telefone: cv.telefone, p_nome: "", p_wa_id: String(d.id || `erp-${agora}`),
-            p_eco: true, p_tipo: "texto", p_texto: texto, p_anexo: null, p_quando: new Date(agora).toISOString(), p_anuncio: null }),
+            p_eco: true, p_tipo: "texto", p_texto: texto, p_anexo: null, p_quando: new Date(agora).toISOString(), p_anuncio: null, p_segredo: process.env.IA_SEGREDO || "" }),
         });
       } catch (e) { /* saiu para o cliente; só não ficou registrada aqui */ }
       await marcarAutor(tok, msgId);
@@ -3295,7 +3312,7 @@ module.exports = async function handler(req, res) {
             const DO_CANAL = { "prospeccao-ativa": "prospeccao", tv: "tv", loja: "fluxo_loja" };
             await banco(`${URL_BASE}/rest/v1/rpc/wa_lead_avanca`, {
               method: "POST", headers: json(tok),
-              body: JSON.stringify({ p_mensagem: msgId, p_evento: "agendou", p_quando: quando, p_origem: DO_CANAL[slug] || "outro" }),
+              body: JSON.stringify({ p_mensagem: msgId, p_evento: "agendou", p_quando: quando, p_origem: DO_CANAL[slug] || "outro", p_segredo: process.env.IA_SEGREDO || "" }),
             });
           }
         } catch (e) {}
@@ -3528,6 +3545,18 @@ module.exports = async function handler(req, res) {
      * conferência de papel aí em cima é a mesma de sempre: conveniência
      * para a mensagem sair legível, não controle.
      */
+    /* A SAÚDE DA IA (08/11/2026). A chave da Anthropic ficou inválida por cinco dias
+       (29/10 a 03/11) com a tela dizendo "respondendo": a última falha e a última
+       resposta enviada vão para a tela de Números, que avisa quando a falha é mais
+       nova que a última resposta. */
+    if (req.method === "GET" && !canal && String(req.query.acao || "") === "saude") {
+      let falha = null, resposta = null;
+      try { falha = ((await banco(`${URL_BASE}/rest/v1/ia_falha?select=quando,erro&order=quando.desc&limit=1`, { headers: cabecalhos(tok) })) || [])[0] || null; } catch (e) {}
+      try { resposta = ((await banco(`${URL_BASE}/rest/v1/ia_resposta?select=criado_em&estado=eq.enviada&order=criado_em.desc&limit=1`, { headers: cabecalhos(tok) })) || [])[0] || null; } catch (e) {}
+      return res.status(200).json({ falha: falha ? { quando: falha.quando, erro: String(falha.erro || "").slice(0, 160) } : null,
+        ultima_resposta: resposta ? resposta.criado_em : null });
+    }
+
     if (req.method === "GET" && !canal) {
       // A contagem vem embutida: sem ela seria uma consulta por número
       // só para saber se dá para apagar.
