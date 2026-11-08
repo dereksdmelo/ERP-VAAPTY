@@ -19129,7 +19129,7 @@ function FinContasFixas({ comp }) {
         <input className={`${sel} w-12 text-center`} style={inputSty} inputMode="numeric" value={c.dia_vencimento || ""} onChange={(e) => mudar({ dia_vencimento: e.target.value })} />
       </label>
       <select className={sel} style={inputSty} value={c.categoria_id || ""} onChange={(e) => mudar({ categoria_id: e.target.value || null })}>
-        <option value="">categoria…</option>{cats.map((k) => <option key={k.id} value={k.id}>{k.nome}</option>)}
+        <option value="">categoria…</option>{cats.map((k) => <option key={k.id} value={k.id}>{rotCat(k)}</option>)}
       </select>
       <select className={sel} style={inputSty} value={c.conta_id || ""} onChange={(e) => mudar({ conta_id: e.target.value || null })}>
         <option value="">sai de qualquer conta</option>{contas.map((k) => <option key={k.id} value={k.id}>{k.nome}</option>)}
@@ -19218,6 +19218,9 @@ function FinContasFixas({ comp }) {
  * relida quando a aba volta a ficar à vista — cadastro feito em outra
  * aba ou em outro aparelho. */
 function avisarCategorias() { try { window.dispatchEvent(new Event("vaapty:categorias")); } catch (e) {} }
+/** "3.04 Vale": o código do plano de contas na frente do nome (0129). */
+const rotCat = (c) => (c && c.codigo ? `${c.codigo} ` : "") + (c ? c.nome : "");
+
 function useCategoriasFin(soAtivas) {
   const [cats, setCats] = useState([]);
   useEffect(() => {
@@ -19225,7 +19228,10 @@ function useCategoriasFin(soAtivas) {
     const ler = () => fin("categoria").then((x) => {
       if (!vivo) return;
       const l = x.lista || [];
-      setCats(soAtivas ? l.filter((c) => c.ativa !== false) : l);
+      // Grupos (Pessoas, Ocupação…) só agrupam: o lançamento vai numa conta, nunca no grupo.
+      const maes = new Set(l.map((c) => c.pai_id).filter(Boolean));
+      const folhas = l.filter((c) => !maes.has(c.id));
+      setCats(soAtivas ? folhas.filter((c) => c.ativa !== false) : folhas);
     }).catch(() => {});
     const aoVer = () => { if (document.visibilityState === "visible") ler(); };
     ler();
@@ -19257,7 +19263,7 @@ function FinPlanoContas() {
   if (erro && !lista) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
   if (!lista) return <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>;
   const mostradas = lista.filter((c) => so === "todas" || c.ativa !== false)
-    .slice().sort((a, b) => String(a.grupo).localeCompare(String(b.grupo)) || (a.ordem || 0) - (b.ordem || 0) || String(a.nome).localeCompare(String(b.nome)));
+    .slice().sort((a, b) => (a.ordem || 0) - (b.ordem || 0) || String(a.nome).localeCompare(String(b.nome)));
   const sel = "rounded border px-1.5 py-1 text-[12.5px] outline-none";
   return (
     <div className="space-y-3">
@@ -19270,12 +19276,15 @@ function FinPlanoContas() {
         <span className="text-[12px]" style={{ color: C.mute }}>Entra no DRE: despesa e receita com "no DRE" ligado. Negociação, retirada e transferência ficam fora.</span>
       </div>
       <div className="rolar overflow-x-auto rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-        <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 900 }}>
-          <thead><tr>{["Categoria", "Dentro de", "Grupo", "No DRE", "Custo", "Pede a pessoa", "Ordem", ""].map((h) => (
+        <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 960 }}>
+          <thead><tr>{["Código", "Categoria", "Dentro de", "Grupo", "No DRE", "Custo", "Pede a pessoa", "Ordem", ""].map((h) => (
             <th key={h} className="whitespace-nowrap px-2 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.04em]" style={{ color: C.mute, borderBottom: `1px solid ${C.line}` }}>{h}</th>))}</tr></thead>
           <tbody>
             {mostradas.map((c) => (
               <tr key={c.id} style={{ borderBottom: `1px solid ${C.line}`, opacity: c.ativa === false ? 0.5 : 1 }}>
+                <td className="px-2 py-1"><input key={`${c.id}-cod-${c.codigo}`} className={`${sel} w-16`} style={inputSty} defaultValue={c.codigo || ""} placeholder="—"
+                  title="Código do plano de contas: o número do grupo, ponto, o da conta (3.04)"
+                  onBlur={(e) => { const v = e.target.value.trim(); if (v !== (c.codigo || "")) mudar(c.id, { codigo: v || null }); }} /></td>
                 <td className="px-2 py-1"><input key={`${c.id}-${c.nome}`} className={`${sel} w-full`} style={inputSty} defaultValue={c.nome}
                   onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== c.nome) mudar(c.id, { nome: v }); }} /></td>
                 <td className="px-2 py-1"><select className={sel} style={inputSty} value={c.pai_id || ""} title="Categoria-mãe: o DRE agrupa as subcategorias sob ela"
@@ -19771,7 +19780,7 @@ function EditorRateio({ l, cats, carros, funcs, aoFechar, aoSalvar }) {
               <select className="max-w-[150px] rounded border px-1 py-1 text-[12px] outline-none" style={inputSty}
                 value={x.categoria_id || ""} onChange={(e) => mexer(i, { categoria_id: e.target.value })}>
                 <option value="">— categoria —</option>
-                {cats.map((k) => <option key={k.id} value={k.id}>{k.nome}{k.no_dre ? "" : " (fora do DRE)"}</option>)}
+                {cats.map((k) => <option key={k.id} value={k.id}>{rotCat(k)}{k.no_dre ? "" : " (fora do DRE)"}</option>)}
               </select>
               {c && c.grupo === "negociacao" && (
                 <>
@@ -20072,7 +20081,7 @@ function FinLancamentos({ comp, aoIrTitulos }) {
       className="max-w-[140px] rounded border px-1 py-0.5 text-[12px] outline-none"
       style={{ ...inputSty, borderColor: l.fin_categoria ? C.line : C.laranja }}>
       <option value="">— sem categoria —</option>
-      {cats.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+      {cats.map((c) => <option key={c.id} value={c.id}>{rotCat(c)}</option>)}
     </select>
   );
 
@@ -20085,7 +20094,7 @@ function FinLancamentos({ comp, aoIrTitulos }) {
         </select>
         <select className="rounded-lg border px-3 py-2 text-[13px] outline-none" style={inputSty} value={filtroCat} onChange={(e) => setFiltroCat(e.target.value)}>
           <option value="">Todas as categorias</option>
-          {cats.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+          {cats.map((c) => <option key={c.id} value={c.id}>{rotCat(c)}</option>)}
         </select>
         <label className="flex items-center gap-1 text-[12px]" style={{ color: C.mute }}>
           <input type="checkbox" checked={soPendentes} onChange={(e) => setSoPendentes(e.target.checked)} /> só pendentes
@@ -20155,7 +20164,7 @@ function FinLancamentos({ comp, aoIrTitulos }) {
           <div className="mt-2 flex items-center gap-2">
             <select className="rounded-lg border px-3 py-2 text-[14px] outline-none" style={inputSty} value={novo.categoria_id} onChange={(e) => setNovo({ ...novo, categoria_id: e.target.value })}>
               <option value="">Categoria</option>
-              {cats.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+              {cats.map((c) => <option key={c.id} value={c.id}>{rotCat(c)}</option>)}
             </select>
             <BotaoPrimario onClick={gravarNovo}>Gravar</BotaoPrimario>
             <button onClick={() => setNovo(null)} className="text-[13px]" style={{ color: C.mute }}>fechar</button>
@@ -21043,7 +21052,7 @@ function EditarTitulo({ titulo, aoFechar, aoMudou, novo }) {
           {campo("Categoria (plano de contas)", (
             <select className={inputCls} style={{ ...inputSty, borderColor: f.categoria_id ? C.line : C.laranja }} value={f.categoria_id} onChange={(e) => set("categoria_id", e.target.value)}>
               <option value="">— sem categoria —</option>
-              {cats.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.no_dre ? "" : " (fora do DRE)"}</option>)}
+              {cats.map((c) => <option key={c.id} value={c.id}>{rotCat(c)}{c.no_dre ? "" : " (fora do DRE)"}</option>)}
             </select>
           ), "lg:col-span-2")}
           {campo("Conta bancária", (
@@ -21248,7 +21257,7 @@ function TitulosDoMes({ comp, abas }) {
                     <select className="max-w-[170px] rounded border px-1 py-0.5 text-[12px] outline-none" style={{ ...inputSty, borderColor: l.categoria_id ? C.line : C.laranja }}
                       value={l.categoria_id || ""} onChange={(ev) => mudar(l, { categoria_id: ev.target.value || null })}>
                       <option value="">sem categoria</option>
-                      {cats.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                      {cats.map((c) => <option key={c.id} value={c.id}>{rotCat(c)}</option>)}
                     </select>
                   </td>
                   <td className="whitespace-nowrap px-2 py-1.5 text-right text-[12.5px] font-semibold" style={{ fontVariantNumeric: "tabular-nums", color: val(l) < 0 ? C.laranja : C.verde }}>{rs2(val(l))}</td>
@@ -21426,7 +21435,7 @@ function FinContas({ comp }) {
             <label className="lg:col-span-2"><Rotulo>Categoria</Rotulo>
               <select className={inputCls} style={inputSty} value={novo.categoria_id} onChange={(e) => setNovo({ ...novo, categoria_id: e.target.value })}>
                 <option value="">— categoria —</option>
-                {cats.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                {cats.map((c) => <option key={c.id} value={c.id}>{rotCat(c)}</option>)}
               </select></label>
             {/* A conta de onde sai (ou onde entra) — a caixinha, o caixa
                 da casa, o banco (0070). Opcional: quem ainda não sabe
@@ -21705,7 +21714,7 @@ function DetalheDRE({ comp, linha, aoMudou }) {
                   <select className="rounded border px-1 py-0.5 outline-none" style={inputSty} value={it.categoria_id || ""}
                     onChange={(e) => mudar(it, { categoria_id: e.target.value || null })} title="Mudar a categoria">
                     <option value="">sem categoria</option>
-                    {cats.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                    {cats.map((c) => <option key={c.id} value={c.id}>{rotCat(c)}</option>)}
                   </select>
                   <input type="month" className="rounded border px-1 py-0.5 outline-none" style={inputSty} defaultValue={String(it.competencia || "").slice(0, 7)}
                     title="Competência: o mês a que a despesa pertence"
@@ -21795,7 +21804,7 @@ function FinDRE({ comp }) {
       <div key={rot}>
         <button onClick={() => setAbrir(aberta ? null : abrirCom)} title="Ver os títulos que somam este valor"
           className="flex w-full items-baseline justify-between gap-3 px-3 py-1.5 text-left text-[13px] hover:bg-[#F7F4FA]" style={{ borderBottom: aberta ? "none" : `1px solid ${C.line}`, fontWeight: forte ? 700 : 400, paddingLeft: nivel ? 28 : undefined }}>
-          <span><span className="mr-1.5 text-[11px]" style={{ color: C.mute }}>{aberta ? "▾" : "▸"}</span>{rot}</span>
+          <span><span className="mr-1.5 text-[11px]" style={{ color: C.mute }}>{aberta ? "▾" : "▸"}</span>{abrirCom.codigo ? <span style={{ color: C.mute, fontVariantNumeric: "tabular-nums" }}>{abrirCom.codigo} </span> : null}{rot}</span>
           <span style={{ fontVariantNumeric: "tabular-nums", color: cor || (v < 0 ? C.laranja : C.ink) }}>{rs2(v)}</span>
         </button>
         {aberta && <DetalheDRE comp={comp} linha={abrirCom} aoMudou={() => setVers((x) => x + 1)} />}
@@ -21823,7 +21832,7 @@ function FinDRE({ comp }) {
               <div key={`mae-${l.pai_id}`}>
                 <button onClick={() => setMaes((m) => ({ ...m, [l.pai_id]: !m[l.pai_id] }))} title="Ver as subcategorias"
                   className="flex w-full items-baseline justify-between gap-3 px-3 py-1.5 text-left text-[13px] font-semibold hover:bg-[#F7F4FA]" style={{ borderBottom: `1px solid ${C.line}`, background: C.bg }}>
-                  <span><span className="mr-1.5 text-[11px]" style={{ color: C.mute }}>{aberta ? "▾" : "▸"}</span>{l.pai_nome || "Grupo"} <span className="text-[11px] font-normal" style={{ color: C.mute }}>· {filhas.length} subcategoria{filhas.length === 1 ? "" : "s"}</span></span>
+                  <span><span className="mr-1.5 text-[11px]" style={{ color: C.mute }}>{aberta ? "▾" : "▸"}</span>{l.pai_codigo ? <span style={{ color: C.mute, fontVariantNumeric: "tabular-nums" }}>{l.pai_codigo} </span> : null}{l.pai_nome || "Grupo"} <span className="text-[11px] font-normal" style={{ color: C.mute }}>· {filhas.length} subcategoria{filhas.length === 1 ? "" : "s"}</span></span>
                   <span style={{ fontVariantNumeric: "tabular-nums", color: soma < 0 ? C.laranja : C.ink }}>{rs2(soma)}</span>
                 </button>
                 {aberta && filhas.map((x) => linha(x.nome, x.valor, false, null, x, 1))}
@@ -22775,7 +22784,7 @@ function FinFolha({ comp }) {
               <select className="rounded border px-1.5 py-1 text-[12.5px] outline-none" style={{ ...inputSty, borderColor: cfgFolha[k] ? C.line : C.laranja }}
                 value={cfgFolha[k] || ""} onChange={(e) => mudarCfgFolha(k, e.target.value)}>
                 <option value="">escolha a categoria…</option>
-                {catsFolha.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                {catsFolha.map((c) => <option key={c.id} value={c.id}>{rotCat(c)}</option>)}
               </select>
             </label>
           ))}

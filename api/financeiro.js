@@ -207,7 +207,7 @@ const TIPOS_CUSTO = ["receita", "variavel", "fixa", "fora"];
 const tipoCusto = (v) => (TIPOS_CUSTO.indexOf(String(v)) >= 0 ? String(v) : "fixa");
 const categoria = cadastro("fin_categoria",
   [["nome", texto], ["grupo", grupo], ["no_dre", bool], ["ordem", inteiro], ["ativa", bool],
-   ["pede_funcionario", bool], ["tipo_custo", tipoCusto], ["pai_id", idOuNulo]], "ordem.asc,nome.asc");
+   ["pede_funcionario", bool], ["tipo_custo", tipoCusto], ["pai_id", idOuNulo], ["codigo", texto]], "ordem.asc,nome.asc");
 const funcionarioCad = cadastro("fin_funcionario",
   [["nome", texto], ["salario_base", (v) => decimal(v) || 0], ["negociador_id", idOuNulo], ["ativo", bool]], "nome.asc");
 /* JUNTAR E TIRAR PESSOA DA FOLHA (0117, 07/11/2026, o Derek: "duplicou
@@ -1431,7 +1431,7 @@ async function dreDoMes(tok, comp) {
     supa(`${base("fin_lancamento")}?select=debito,credito,situacao,categoria_id,estoque_id,tipo_negociacao,funcionario_id,` +
       `fin_rateio(valor,categoria_id,estoque_id,tipo_negociacao,funcionario_id)&situacao=in.(aberto,efetivado)&competencia=eq.${comp}&limit=10000`,
       { headers: cab(tok) }),
-    supa(`${base("fin_categoria")}?select=id,nome,grupo,no_dre,ordem,pede_funcionario,pai_id`, { headers: cab(tok) }),
+    supa(`${base("fin_categoria")}?select=id,nome,grupo,no_dre,ordem,pede_funcionario,pai_id,codigo`, { headers: cab(tok) }),
   ]);
   const catPorId = {};
   (cats || []).forEach((c) => { catPorId[c.id] = c; });
@@ -1465,7 +1465,8 @@ async function dreDoMes(tok, comp) {
       if (aberto) { emAberto += p.valor; return; }
       if (!c) { semCategoria += p.valor; return; }
       por[c.id] = por[c.id] || { id: c.id, nome: c.nome, grupo: c.grupo, ordem: c.ordem, valor: 0,
-        pai_id: c.pai_id || null, pai_nome: c.pai_id && catPorId[c.pai_id] ? catPorId[c.pai_id].nome : null };
+        codigo: c.codigo || null, pai_id: c.pai_id || null, pai_nome: c.pai_id && catPorId[c.pai_id] ? catPorId[c.pai_id].nome : null,
+        pai_codigo: c.pai_id && catPorId[c.pai_id] ? catPorId[c.pai_id].codigo || null : null };
       // Como na planilha: DRE = crédito − débito, então despesa é negativa.
       por[c.id].valor += p.valor;
     });
