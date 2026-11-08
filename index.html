@@ -4927,7 +4927,47 @@ function TrilhoFechamento({ f, preContratoFeito, contratoLiberado }) {
  * campo (`irParaCampo`, pelo rótulo que está na tela), acende ele e põe
  * o cursor lá — duas cópias do mesmo campo seriam duas verdades.
  * Só no computador (≥ 1024 px): no celular a tela não tem duas colunas. */
-function ResumoAtendimento({ f, cliente, statusAtual, voltaEm, fotos, irParaCampo, irPara }) {
+/* AS ANOTAÇÕES DO ATENDIMENTO (08/11/2026, o Derek: "onde fica a
+ * anotação de recuperação que eu fiz?"). O "Anotar" da Recuperação e da
+ * conversa grava nas observações do atendimento — que a tela do
+ * atendimento não mostrava em lugar nenhum. Agora elas abrem a faixa "O
+ * que já sabemos", a mais nova em cima, com um campo para anotar ali. */
+function AnotacoesDoAtendimento({ atendimentoId, iniciais }) {
+  const [texto, setTexto] = useState(iniciais || "");
+  const [nova, setNova] = useState(""); const [erro, setErro] = useState("");
+  useEffect(() => { setTexto(iniciais || ""); }, [atendimentoId]);
+  const linhas = String(texto || "").split("\n").map((x) => x.trim()).filter(Boolean).reverse();
+  const anotar = async () => {
+    if (!nova.trim() || !atendimentoId) return;
+    setErro("");
+    try {
+      const r = await fetchAut("/api/atendimento?recurso=do-telefone&acao=nota", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ atendimento_id: atendimentoId, texto: nova.trim() }) });
+      const d = await r.json(); if (!r.ok) throw new Error(d.erro || "Não consegui anotar.");
+      setTexto(d.observacoes || ""); setNova("");
+    } catch (e) { setErro(e.message); }
+  };
+  return (
+    <div className="mt-3">
+      <div className="border-b pb-0.5 text-[10.5px] font-bold uppercase tracking-[0.1em]" style={{ color: C.ink, borderColor: C.line }}>Anotações</div>
+      <div className="mt-1 flex gap-1">
+        <input value={nova} onChange={(e) => setNova(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") anotar(); }}
+          placeholder="anotar…" className="min-w-0 flex-1 rounded border px-1.5 py-1 text-[12px] outline-none" style={inputSty} />
+        <button onClick={anotar} className="text-[11px] font-semibold" style={{ color: C.roxo }}>ok</button>
+      </div>
+      {erro && <div className="mt-1 text-[11px]" style={{ color: C.laranja }}>{erro}</div>}
+      <div className="mt-1 max-h-[180px] space-y-1 overflow-y-auto">
+        {linhas.length ? linhas.map((l, i) => (
+          <div key={i} className="text-[11.5px] leading-snug" style={{ color: C.ink }}>
+            {/^\[[^\]]+\]/.test(l) ? <><span style={{ color: C.mute }}>{l.match(/^\[[^\]]+\]/)[0]}</span>{l.replace(/^\[[^\]]+\]/, "")}</> : l}
+          </div>
+        )) : <div className="text-[11.5px]" style={{ color: "#B3ACBC" }}>nenhuma ainda</div>}
+      </div>
+    </div>
+  );
+}
+
+function ResumoAtendimento({ f, cliente, statusAtual, voltaEm, fotos, irParaCampo, irPara, atendimentoId, anotacoesIniciais }) {
   const v = (x) => (x === 0 || (x && String(x).trim()) ? x : null);
   const din = (x) => (v(x) != null && numeroBR(x) ? brl(numeroBR(x)) : null);
   const ult = (f.rodadas || []).length ? f.rodadas[f.rodadas.length - 1] : null;
@@ -4983,6 +5023,7 @@ function ResumoAtendimento({ f, cliente, statusAtual, voltaEm, fotos, irParaCamp
     <aside className="fixed bottom-0 left-0 top-0 z-20 hidden w-[264px] overflow-y-auto px-3 pb-6 pt-3 lg:block"
       style={{ background: C.paper, borderRight: `1px solid ${C.line}` }} aria-label="Resumo do atendimento">
       <div className="text-[10px] font-semibold uppercase tracking-[0.12em]" style={{ color: C.roxo }}>O que já sabemos</div>
+      {atendimentoId && <AnotacoesDoAtendimento atendimentoId={atendimentoId} iniciais={anotacoesIniciais} />}
       {secoes.map(([titulo, linhas]) => (
         <div key={titulo} className="mt-3">
           <div className="border-b pb-0.5 text-[10.5px] font-bold uppercase tracking-[0.1em]" style={{ color: C.ink, borderColor: C.line }}>{titulo}</div>
@@ -6267,7 +6308,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   return (
     <div id="vp-atendimento-corpo" className="min-h-screen w-full pb-16 lg:pl-[264px]" style={{ background: C.bg, fontFamily: F.body, color: C.ink }}>
       <ResumoAtendimento f={f} cliente={cliente} statusAtual={statusAtual} voltaEm={voltaEm} fotos={enviadas.length}
-        irParaCampo={irParaCampo} irPara={irPara} />
+        irParaCampo={irParaCampo} irPara={irPara} atendimentoId={atendimento && atendimento.id} anotacoesIniciais={atendimento && atendimento.observacoes} />
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Public+Sans:wght@400;500;600&family=Roboto+Mono:wght@500;700&display=swap');
         input:focus,textarea:focus,select:focus{border-color:${C.roxo}!important;box-shadow:0 0 0 3px ${C.roxoFraco}}
         .rolar::-webkit-scrollbar{height:0}
@@ -10587,7 +10628,8 @@ function AtendimentoDaConversa({ telefone, nome, aoAbrir }) {
       await criarAcao({ dia: quando.dia, hora: quando.hora || null, tipo: "recuperacao", atendimento_id: a.id, feito: false,
         titulo: `Recuperação: retomar com ${a.cliente_nome || nome || "cliente"}${carro ? ` · ${carro}` : ""}${a.cliente_telefone ? ` · ${a.cliente_telefone}` : ""}` });
       await atualizarAtendimento(a.id, { volta_em: quando.dia, ...(a.status === "fechado" ? {} : { status: "vai_voltar" }) }).catch(() => {});
-      setAberto(""); setMsg(`Recuperação agendada para ${diaBR(quando.dia)}${quando.hora ? ` às ${quando.hora}` : ""} — está no seu Meu dia.`); ler();
+      await agendarVisitaDeRecuperacao(a, quando.dia, quando.hora || "10:00", carro).catch((e) => setErro(`Ficou no Meu dia, mas não entrou em Agendamentos: ${e.message}`));
+      setAberto(""); setMsg(`Recuperação agendada para ${diaBR(quando.dia)} às ${quando.hora || "10:00"} — está em Agendamentos e no Meu dia.`); ler();
     } catch (e) { setErro(e.message); }
   };
   const botao = (rot, k) => (
@@ -15540,6 +15582,18 @@ async function listarLeads(f) {
   if (!r.ok) throw new Error(d.erro || "Não consegui carregar os leads.");
   return d.leads || [];
 }
+/* A RECUPERAÇÃO AGENDADA TAMBÉM É VISITA (08/11/2026, o Derek: "o
+ * agendamento que eu fiz não fica em agendamentos?"). Além da ação no Meu
+ * dia, o cliente entra na agenda da loja — um lead de origem Recuperação,
+ * no dia e na hora, com o negociador do atendimento e LIGADO a ele: o
+ * "Chegou" abre o atendimento que já existe. Reagendar mexe no mesmo. */
+async function agendarVisitaDeRecuperacao(a, dia, hora, carro) {
+  return criarLead({ nome: a.cliente_nome || "Cliente", telefone: a.cliente_telefone || null, carro: carro || a.carro_descricao || null,
+    origem: "recuperacao", status: "agendado", agendado_para: `${dia}T${(hora || "10:00").slice(0, 5)}:00`,
+    negociador_nome: a.negociador_nome || null, atendimento_id: a.id,
+    observacoes: "Recuperação agendada pelo negociador." });
+}
+
 async function criarLead(dados) {
   const r = await fetchAut("/api/atendimento?recurso=lead", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
@@ -27099,8 +27153,9 @@ function TelaRecuperacao({ perfil, aoAbrir }) {
       await criarAcao({ dia: q.dia, hora: q.hora || null, tipo: "recuperacao", atendimento_id: a.id, feito: false,
         titulo: `Recuperação: retomar com ${a.cliente_nome || "cliente"} · ${carroDe(a)}${a.cliente_telefone ? ` · ${a.cliente_telefone}` : ""}` });
       await atualizarAtendimento(a.id, { volta_em: q.dia, ...(a.status === "fechado" ? {} : { status: "vai_voltar" }) }).catch(() => {});
+      await agendarVisitaDeRecuperacao(a, q.dia, q.hora || "10:00", carroDe(a)).catch((e) => setErro(`Ficou no Meu dia, mas não entrou em Agendamentos: ${e.message}`));
       setPainel((m) => ({ ...m, [a.id]: "" }));
-      setAviso((m) => ({ ...m, [a.id]: `Recuperação agendada para ${diaBR(q.dia)}${q.hora ? ` às ${q.hora}` : ""} — está no Meu dia.` }));
+      setAviso((m) => ({ ...m, [a.id]: `Recuperação agendada para ${diaBR(q.dia)} às ${q.hora || "10:00"} — está em Agendamentos e no Meu dia.` }));
       carregar(true);
     } catch (e) { setErro(e.message); }
   };

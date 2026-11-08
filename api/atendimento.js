@@ -170,6 +170,10 @@ function paraColunas(c) {
     valor_fechado: decimal(c.valor_fechado),
     forma_fechamento: texto(c.forma_fechamento),
     proximo_contato: data(c.proximo_contato),
+    // O "volta em" (0036) nunca entrava aqui, e o servidor o descartava
+    // calado: a tela dizia "volta 09/11" e a coluna seguia vazia (achado em
+    // 08/11/2026, com a recuperação agendada do Picasso).
+    volta_em: data(c.volta_em),
     observacoes: texto(c.observacoes),
     // A hora em que o cliente chegou (0074), com o fuso: "…T14:30:00-03:00".
     chegada_em: /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?([+-]\d{2}:\d{2}|Z)$/.test(String(c.chegada_em || "")) ? c.chegada_em : null,
@@ -1076,6 +1080,9 @@ function paraLead(c) {
     const t = String(c.agendado_para || "").trim();
     l.agendado_para = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(t) ? t : null;
   }
+  // A recuperação agendada (08/11/2026) nasce ligada ao atendimento que já
+  // existe: o "Chegou" dela abre ESSE atendimento, não um novo.
+  if (c.atendimento_id !== undefined) l.atendimento_id = RX_UUID.test(String(c.atendimento_id || "")) ? c.atendimento_id : null;
   return l;
 }
 
@@ -1893,7 +1900,25 @@ async function leads(req, res, tok) {
      * Agendar — e a conversa ficou num, a visita no outro. Lead em aberto
      * com o mesmo telefone (DDD + os oito últimos) é reaproveitado: o
      * nome e o carro que já estavam ficam, o resto entra. */
-    const k = chaveFone(l.telefone);
+    /* A RECUPERAÇÃO DO MESMO ATENDIMENTO É O MESMO AGENDAMENTO (08/11/2026):
+     * reagendar a volta do cliente mexe no lead que já está na agenda, com
+     * a data antiga guardada em `remarcacoes`, em vez de criar outro. */
+    if (l.atendimento_id) {
+      try {
+        const ja = ((await banco(`${base}?select=id,agendado_para,remarcacoes&atendimento_id=eq.${l.atendimento_id}` +
+          `&status=in.(agendado,confirmado,nao_compareceu)&excluido_em=is.null&order=criado_em.desc&limit=1`, { headers: cabecalhos(tok) })) || [])[0];
+        if (ja) {
+          const mudar = { agendado_para: l.agendado_para, status: "agendado" };
+          if (ja.agendado_para && ja.agendado_para !== l.agendado_para) {
+            mudar.remarcacoes = (Array.isArray(ja.remarcacoes) ? ja.remarcacoes : []).concat([{ de: ja.agendado_para, para: l.agendado_para, em: new Date().toISOString() }]);
+          }
+          const r = await banco(`${base}?id=eq.${ja.id}`, { method: "PATCH", headers: json(tok, { Prefer: "return=representation" }), body: JSON.stringify(mudar) });
+          const salvo = Array.isArray(r) ? r[0] : r;
+          if (salvo) return res.status(200).json({ ok: true, lead: salvo, reaproveitado: true });
+        }
+      } catch (e) { /* segue criando */ }
+    }
+    const k = l.atendimento_id ? null : chaveFone(l.telefone);
     if (k) {
       try {
         const padrao = "*" + k.slice(-8).split("").join("*") + "*";

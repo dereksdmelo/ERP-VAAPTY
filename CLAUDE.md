@@ -6174,7 +6174,15 @@ eu as tinha posto só na conversa): a anotação vai às observações do
 atendimento; o agendamento é a ação planejada no Meu dia, que a tela lê
 de volta (`agendada`, no `?recurso=recuperacao`) e põe em primeiro lugar
 no dia dela ("Recuperação agendada para hoje", com as atrasadas). Ligar
-ou mandar WhatsApp para quem estava agendado marca a ação como feita.
+ou mandar WhatsApp para quem estava agendado marca a ação como feita. **E vira visita na agenda da loja** (o Derek: "o
+agendamento que eu fiz não fica em agendamentos?"): `agendarVisitaDeRecuperacao`
+cria (ou, reagendando, move) um lead de origem Recuperação no dia e na
+hora, com o negociador e **ligado ao atendimento** (`lead.atendimento_id`)
+— o "Chegou" abre o atendimento que já existe. **As anotações aparecem no
+atendimento** (`AnotacoesDoAtendimento`, no topo de "O que já sabemos",
+com campo para anotar ali). E o **`volta_em` nunca era gravado**: faltava
+em `paraColunas` do `api/atendimento.js`, e o servidor o descartava calado
+desde a 0036.
 
 ### 42. Assinatura eletrônica própria: o papel some do caminho
 
