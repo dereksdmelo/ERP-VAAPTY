@@ -40,7 +40,7 @@
   .logo { width: 5.2vh; height: 5.2vh; border-radius: 1.2vh; background: var(--roxo); color: #fff; display: grid; place-items: center;
           font-weight: 900; font-size: 2.8vh; }
   .titulo { font-size: 3.4vh; font-weight: 900; letter-spacing: -0.02em; }
-  .mes { font-size: 2.2vh; color: var(--mudo); text-transform: capitalize; }
+  .mes { font-size: 2.2vh; color: var(--mudo); }
   .relogio { margin-left: auto; text-align: right; }
   .relogio b { font-size: 4.2vh; font-weight: 800; display: block; line-height: 1; }
   .relogio span { font-size: 1.5vh; color: var(--mudo); }
@@ -200,7 +200,8 @@
     $("titulo").textContent = cfg.titulo || "Gestão à vista";
     var hoje = new Date(d.hoje + "T12:00:00"), fim = new Date(d.fim + "T12:00:00");
     var dia = hoje.getDate(), dias = fim.getDate(), fracao = dia / dias;
-    $("mes").textContent = hoje.toLocaleDateString("pt-BR", { month: "long", year: "numeric" }) + " · dia " + dia + " de " + dias;
+    var mesTxt = hoje.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+    $("mes").textContent = mesTxt.charAt(0).toUpperCase() + mesTxt.slice(1) + " · dia " + dia + " de " + dias;
     var pessoas = d.pessoas || [], loja = d.loja || {};
     var meta = Number(d.meta_loja) > 0 ? Number(d.meta_loja) : pessoas.reduce(function (t, p) { return t + (Number(p.meta) || 0); }, 0);
     var feito = Number(loja.feito) || 0, valores = cfg.valores !== false;

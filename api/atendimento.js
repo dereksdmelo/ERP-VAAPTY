@@ -858,10 +858,15 @@ async function recuperacao(req, res, tok) {
   const todos = gerente && pedido === "*";
   const dias = Math.min(365, Math.max(7, Number(req.query.dias) || 90));
   const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
-  const desde = new Date(Date.parse(hoje) - dias * 86400000).toISOString().slice(0, 10);
+  // Período personalizado (08/11/2026, o Derek: "períodos mais
+  // personalizados"): `de` e `ate` mandam quando vêm; senão, os `dias`.
+  const RX_D = /^\d{4}-\d{2}-\d{2}$/;
+  const deQ = String(req.query.de || ""), ateQ = String(req.query.ate || "");
+  const desde = RX_D.test(deQ) ? deQ : new Date(Date.parse(hoje) - dias * 86400000).toISOString().slice(0, 10);
+  const ateF = RX_D.test(ateQ) ? `&data=lte.${ateQ}` : "";
   const ats = await banco(`${URL_BASE}/rest/v1/atendimento?select=id,cliente_nome,cliente_telefone,carro_descricao,status,data,volta_em,` +
     `negociador_nome,negociador_id,veiculo(placa,marca_modelo,ano_modelo,fipe_valor)` +
-    `&status=in.(${RECUPERAVEIS.join(",")})&data=gte.${desde}&order=data.desc&limit=1000`, { headers: cabecalhos(tok) });
+    `&status=in.(${RECUPERAVEIS.join(",")})&data=gte.${desde}${ateF}&order=data.desc&limit=1000`, { headers: cabecalhos(tok) });
   const dele = (a) => a.negociador_id === eu || chaves.has(semAc(a.negociador_nome));
   const meus = (ats || []).filter((a) => (todos ? true : gerente && pedido ? chaves.has(semAc(a.negociador_nome)) : dele(a)));
   // O contato: o que foi registrado na agenda como recuperação, ligado ao
@@ -880,7 +885,7 @@ async function recuperacao(req, res, tok) {
   }
   const lista = meus.map((a) => ({ ...a, contatos: (contato[a.id] || {}).vezes || 0, ultimo_contato: (contato[a.id] || {}).ultimo || null,
     ultimo_resultado: (contato[a.id] || {}).ultimo_titulo || null }));
-  return res.status(200).json({ hoje, dias, gerente, nomes, atendimentos: lista });
+  return res.status(200).json({ hoje, dias, de: desde, ate: RX_D.test(ateQ) ? ateQ : hoje, gerente, nomes, atendimentos: lista });
 }
 
 async function agenda(req, res, tok) {

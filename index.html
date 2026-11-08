@@ -26900,15 +26900,31 @@ function TelaRecuperacao({ perfil, aoAbrir }) {
   const [equipe, setEquipe] = useState([]);
   const [d, setD] = useState(null); const [erro, setErro] = useState("");
   const [prazo, setPrazo] = useState(3);
+  // QUANDO O CLIENTE VEIO (08/11/2026, o Derek: "períodos mais
+  // personalizados"): atalhos e o de/até livre.
+  const [periodo, setPeriodo] = useState("90");
+  const [deP, setDeP] = useState(""); const [ateP, setAteP] = useState("");
   const [contato, setContato] = useState({}); // atendimento → { acaoId, titulo }
   const [verHoje, setVerHoje] = useState(false);
+  const faixa = (() => {
+    const h = hojeSP(), m0 = `${h.slice(0, 8)}01`;
+    if (periodo === "mes") return { de: m0, ate: h };
+    if (periodo === "mes_passado") {
+      const d0 = new Date(Date.parse(m0) - 86400000).toISOString().slice(0, 10);
+      return { de: `${d0.slice(0, 8)}01`, ate: d0 };
+    }
+    if (periodo === "livre") return { de: deP, ate: ateP };
+    return { dias: Number(periodo) || 90 };
+  })();
+  const consulta = faixa.de ? `&de=${faixa.de}${faixa.ate ? `&ate=${faixa.ate}` : ""}` : `&dias=${faixa.dias}`;
   const carregar = (manter) => {
     if (!manter) setD(null);
-    fetchAut(`/api/atendimento?recurso=recuperacao${quem ? `&negociador=${encodeURIComponent(quem)}` : ""}`)
+    if (periodo === "livre" && !deP) { setD({ atendimentos: [], dias: 0 }); return; }
+    fetchAut(`/api/atendimento?recurso=recuperacao${quem ? `&negociador=${encodeURIComponent(quem)}` : ""}${consulta}`)
       .then((r) => r.json().then((x) => { if (!r.ok) throw new Error(x.erro || "Não consegui carregar."); setD(x); setErro(""); }))
       .catch((e) => setErro(e.message));
   };
-  useEffect(() => { carregar(); }, [quem]);
+  useEffect(() => { carregar(); }, [quem, consulta]);
   useEffect(() => { if (eGerente) listarNegociadores().then((l) => setEquipe(l.filter((n) => n.ativo !== false && n.papel !== "prospeccao"))).catch(() => {}); }, []);
   const hoje = hojeSP();
   const lista = (d && d.atendimentos) || [];
@@ -27008,18 +27024,39 @@ function TelaRecuperacao({ perfil, aoAbrir }) {
           </select>
         )}
         <label className="flex items-center gap-1.5" style={{ color: C.mute }}>
-          procurar de novo quem está sem contato há
-          <select value={prazo} onChange={(e) => setPrazo(Number(e.target.value))} className="rounded border px-1 py-0.5 outline-none" style={inputSty}>
-            {[1, 2, 3, 5, 7, 14].map((n) => <option key={n} value={n}>{n} dia{n > 1 ? "s" : ""}</option>)}
+          clientes que vieram
+          <select value={periodo} onChange={(e) => setPeriodo(e.target.value)} className="rounded border px-1.5 py-0.5 outline-none" style={{ ...inputSty, fontWeight: 600 }}>
+            <option value="7">nos últimos 7 dias</option><option value="15">nos últimos 15 dias</option>
+            <option value="30">nos últimos 30 dias</option><option value="60">nos últimos 60 dias</option>
+            <option value="90">nos últimos 90 dias</option><option value="180">nos últimos 6 meses</option>
+            <option value="mes">este mês</option><option value="mes_passado">mês passado</option>
+            <option value="livre">de… até… (escolher)</option>
           </select>
         </label>
-        {d && <span className="ml-auto" style={{ color: C.mute }}>atendimentos dos últimos {d.dias} dias que não fecharam</span>}
+        {periodo === "livre" && (
+          <span className="flex items-center gap-1" style={{ color: C.mute }}>
+            de <input type="date" value={deP} onChange={(e) => setDeP(e.target.value)} className="rounded border px-1 py-0.5 outline-none" style={inputSty} />
+            até <input type="date" value={ateP} onChange={(e) => setAteP(e.target.value)} className="rounded border px-1 py-0.5 outline-none" style={inputSty} />
+          </span>
+        )}
+        <label className="flex items-center gap-1.5" style={{ color: C.mute }}>
+          e estão sem contato há pelo menos
+          <input type="number" min={0} max={365} value={prazo} onChange={(e) => setPrazo(Math.max(0, Math.min(365, Number(e.target.value) || 0)))}
+            className="w-[56px] rounded border px-1 py-0.5 text-center outline-none" style={inputSty} />
+          dia{prazo === 1 ? "" : "s"}
+          {[0, 1, 3, 7, 15, 30].map((n) => (
+            <button key={n} onClick={() => setPrazo(n)} className="rounded-full px-2 py-0.5 text-[11.5px] font-semibold"
+              style={{ background: prazo === n ? C.roxo : "#fff", color: prazo === n ? "#fff" : C.mute, border: `1px solid ${prazo === n ? C.roxo : C.line}` }}>
+              {n === 0 ? "todos" : `${n}d`}
+            </button>
+          ))}
+        </label>
       </div>
       {erro && <p className="text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
       {!d ? <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p> : (
         <>
           {!!voltam.length && secao("Prometeu voltar — o dia chegou", "ligue hoje: foi o combinado", voltam, C.laranja)}
-          {secao("Para recuperar", `sem contato há ${prazo} dia${prazo > 1 ? "s" : ""} ou mais — quem nunca foi procurado vem primeiro`, recuperar)}
+          {secao("Para recuperar", `${prazo ? `sem contato há ${prazo} dia${prazo > 1 ? "s" : ""} ou mais` : "todos"} — quem nunca foi procurado vem primeiro`, recuperar)}
           <section>
             <button onClick={() => setVerHoje(!verHoje)} className="text-[12px] font-bold uppercase tracking-[0.08em]" style={{ color: C.verde }}>
               {verHoje ? "▾" : "▸"} Procurados hoje ({deHoje.length})
@@ -30499,6 +30536,44 @@ function App() {
   const [tela, setTela] = useState(() => lerSessao("vaapty:tela") || "atendimentos");
   useEffect(() => { gravarSessao("vaapty:tela", tela); }, [tela]);
   useEffect(() => { if (estado === "dentro") gravarSessao("vaapty:aberto", aberto && aberto.id); }, [aberto, estado]);
+  /* O VOLTAR DO NAVEGADOR E DO CELULAR (08/11/2026, o Derek: "quando eu
+   * clique em voltar no navegador, ou no celular, ele volte pra tela
+   * anterior que estava no app"). O app é uma página só: trocar de tela
+   * não mudava o histórico, e o voltar saía do sistema. Agora cada troca
+   * de tela — e cada atendimento aberto ou fechado — vira um passo do
+   * histórico (`pushState`), e o voltar (`popstate`) devolve a tela e o
+   * atendimento daquele passo. Janelas por cima (menus, diálogos) não
+   * entram: elas fecham no ESC e no fundo, como sempre. */
+  const histRef = useRef({ iniciado: false });
+  const idAberto = aberto ? aberto.id : null;
+  useEffect(() => {
+    if (estado !== "dentro") return;
+    const st = { tela, aberto: idAberto };
+    const cur = window.history.state || {};
+    if (!histRef.current.iniciado) { histRef.current.iniciado = true; try { window.history.replaceState(st, ""); } catch (e) {} return; }
+    // Restaurando um passo do voltar: o atendimento chega depois da tela
+    // (é lido do banco), e o meio do caminho não pode virar passo novo.
+    const alvo = histRef.current.restaurando;
+    if (alvo) { if (alvo.tela === st.tela && (alvo.aberto || null) === st.aberto) histRef.current.restaurando = null; return; }
+    if (cur.tela === st.tela && (cur.aberto || null) === st.aberto) return;
+    try { window.history.pushState(st, ""); } catch (e) {}
+  }, [tela, idAberto, estado]);
+  useEffect(() => {
+    const aoVoltar = async (ev) => {
+      const st = ev.state;
+      if (!st || !st.tela) return;
+      // Só marca "restaurando" quando algo vai mudar — senão o efeito não
+      // roda, a marca não sai, e o histórico para de andar.
+      if (st.tela !== tela || (st.aberto || null) !== idAberto) histRef.current.restaurando = { tela: st.tela, aberto: st.aberto || null };
+      setTela(st.tela);
+      if (!st.aberto) { setAberto(null); return; }
+      if (!aberto || aberto.id !== st.aberto) {
+        try { setAberto(await lerAtendimento(st.aberto)); } catch (e) { histRef.current.restaurando = null; setAberto(null); }
+      }
+    };
+    window.addEventListener("popstate", aoVoltar);
+    return () => window.removeEventListener("popstate", aoVoltar);
+  }, [aberto, tela]);
   /* A CONVERSA ORIGINAL, aberta de dentro do lead.
    *
    * O alvo mora no App porque quem pede está na Pré-vendas e quem
