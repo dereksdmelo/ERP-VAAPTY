@@ -905,7 +905,7 @@ async function recuperacao(req, res, tok) {
   const desde = RX_D.test(deQ) ? deQ : new Date(Date.parse(hoje) - dias * 86400000).toISOString().slice(0, 10);
   const ateF = RX_D.test(ateQ) ? `&data=lte.${ateQ}` : "";
   const ats = await banco(`${URL_BASE}/rest/v1/atendimento?select=id,cliente_nome,cliente_telefone,carro_descricao,status,data,volta_em,` +
-    `negociador_nome,negociador_id,veiculo(placa,marca_modelo,ano_modelo,fipe_valor)` +
+    `negociador_nome,negociador_id,observacoes,pretensao,veiculo(placa,marca_modelo,ano_modelo,fipe_valor)` +
     `&status=in.(${RECUPERAVEIS.join(",")})&data=gte.${desde}${ateF}&order=data.desc&limit=1000`, { headers: cabecalhos(tok) });
   const dele = (a) => a.negociador_id === eu || chaves.has(semAc(a.negociador_nome));
   const meus = (ats || []).filter((a) => (todos ? true : gerente && pedido ? chaves.has(semAc(a.negociador_nome)) : dele(a)));
@@ -940,8 +940,29 @@ async function recuperacao(req, res, tok) {
       `negociador_nome,negociador_id,veiculo(placa,marca_modelo,ano_modelo,fipe_valor)&id=in.(${faltam.slice(0, 150).join(",")})`, { headers: cabecalhos(tok) }).catch(() => []);
     (extra || []).filter((a) => todos || (gerente && pedido ? chaves.has(semAc(a.negociador_nome)) : dele(a))).forEach((a) => meus.push(a));
   }
+  /* O QUE A NEGOCIAÇÃO DEIXOU (08/11/2026, o Derek: "as anotações que a
+   * negociação tem e que fazemos devem aparecer aqui para as próximas
+   * recuperações"). Da ficha de trabalho (`negociacao_viva.ficha`, 0050):
+   * motivo, objeção, pretensão, a última rodada e as internas — só os
+   * campos, pelo caminho JSON do PostgREST, sem trazer a ficha inteira.
+   * A RLS da 0033 deixa o dono e o gerente lerem. */
+  const neg = {};
+  const todosIds = meus.map((a) => a.id);
+  for (let i = 0; i < todosIds.length; i += 150) {
+    const fatia = todosIds.slice(i, i + 150);
+    const nv = await banco(`${URL_BASE}/rest/v1/negociacao_viva?select=atendimento_id,motivo:ficha->>motivo,motivo_det:ficha->>motivoDetalhe,` +
+      `objecao:ficha->>objecao,pretensao:ficha->>pretensao,internas:ficha->>internas,rodadas:ficha->rodadas&atendimento_id=in.(${fatia.join(",")})`,
+      { headers: cabecalhos(tok) }).catch(() => []);
+    (nv || []).forEach((x) => {
+      const rs = Array.isArray(x.rodadas) ? x.rodadas : [];
+      const u = rs.length ? rs[rs.length - 1] : null;
+      neg[x.atendimento_id] = { motivo: [x.motivo, x.motivo_det].filter(Boolean).join(" — ") || null, objecao: x.objecao || null,
+        pretensao: x.pretensao || null, internas: x.internas || null,
+        rodada: u ? { n: rs.length, ofertado: u.impresso || null, pediu: u.contra || null } : null };
+    });
+  }
   const lista = meus.map((a) => ({ ...a, contatos: (contato[a.id] || {}).vezes || 0, ultimo_contato: (contato[a.id] || {}).ultimo || null,
-    ultimo_resultado: (contato[a.id] || {}).ultimo_titulo || null, agendada: agendadas[a.id] || null }));
+    ultimo_resultado: (contato[a.id] || {}).ultimo_titulo || null, agendada: agendadas[a.id] || null, negociacao: neg[a.id] || null }));
   return res.status(200).json({ hoje, dias, de: desde, ate: RX_D.test(ateQ) ? ateQ : hoje, gerente, nomes, atendimentos: lista });
 }
 

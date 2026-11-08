@@ -1049,12 +1049,13 @@ async function waNovaConversa(dados) {
  * não é enfeite: mensagem para quem nunca falou com o número é o que o
  * WhatsApp mais pune num número ligado por QR — a Prospecção caiu assim
  * em 29/10/2026. */
-function NovaConversa({ operacao, negociacao, canalAtual, aoFechar, aoEnviada }) {
+function NovaConversa({ operacao, negociacao, canalAtual, aoFechar, aoEnviada, inicial }) {
   const [numeros, setNumeros] = useState(null);
   const [canal, setCanal] = useState("");
-  const [telefone, setTelefone] = useState("");
-  const [nome, setNome] = useState("");
-  const [texto, setTexto] = useState("");
+  // Vindo da Recuperação (08/11/2026): telefone, nome e mensagem prontos.
+  const [telefone, setTelefone] = useState((inicial && inicial.telefone) || "");
+  const [nome, setNome] = useState((inicial && inicial.nome) || "");
+  const [texto, setTexto] = useState((inicial && inicial.texto) || "");
   const [indo, setIndo] = useState(false);
   const [erro, setErro] = useState("");
   useEffect(() => {
@@ -10917,9 +10918,15 @@ function TelaConversas({ alvo, aoConsumirAlvo, operacao, negociacao, aoAbrir }) 
    * outro conforme quem digitou — a mesma chave do `chaveFone()` do
    * funil. Procurar pela string inteira não acharia justamente os
    * números antigos. */
+  // O alvo pode vir com nome e mensagem (a Recuperação, 08/11/2026): sem
+  // conversa com aquele telefone, abre a "nova conversa" já preenchida.
+  const [novaInicial, setNovaInicial] = useState(null);
+  const alvoObj = useRef(null);
   useEffect(() => {
     if (!alvo) return;
-    const d = String(alvo).replace(/\D/g, "");
+    const tel = typeof alvo === "object" ? alvo.telefone : alvo;
+    alvoObj.current = typeof alvo === "object" ? alvo : null;
+    const d = String(tel || "").replace(/\D/g, "");
     setCanal(""); setAba("todas");
     setBusca(d.length >= 8 ? d.slice(-8) : d);
     setAberta(null);
@@ -10933,6 +10940,8 @@ function TelaConversas({ alvo, aoConsumirAlvo, operacao, negociacao, aoAbrir }) 
   useEffect(() => {
     if (!abrirPrimeira || !lista) return;
     if (lista.length) setAberta(lista[0]);
+    else if (alvoObj.current) { setNovaInicial(alvoObj.current); setNova(true); }
+    alvoObj.current = null;
     setAbrirPrimeira(false);
   }, [abrirPrimeira, lista]);
   // Para o agendador oferecer o negociador, como na Pré-vendas.
@@ -11093,7 +11102,7 @@ function TelaConversas({ alvo, aoConsumirAlvo, operacao, negociacao, aoAbrir }) 
         </div>
       </div>
       {nova && (
-        <NovaConversa operacao={operacao} negociacao={negociacao} canalAtual={canal} aoFechar={() => setNova(false)}
+        <NovaConversa operacao={operacao} negociacao={negociacao} canalAtual={canal} inicial={novaInicial} aoFechar={() => { setNova(false); setNovaInicial(null); }}
           aoEnviada={(d) => {
             // Abre a conversa nova pela busca, o mesmo caminho de quem vem do lead.
             const t = String(d.telefone || "").replace(/\D/g, "");
@@ -27059,7 +27068,7 @@ function NotaDaVez({ vez, escolhido, especifico, setEspecifico }) {
 const hojeSP = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
 const agoraSP = () => new Date().toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
 const diaSP = (iso) => (iso ? new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }) : "");
-function TelaRecuperacao({ perfil, aoAbrir }) {
+function TelaRecuperacao({ perfil, aoAbrir, aoConversar }) {
   const eGerente = !!(perfil && perfil.papel === "gerente");
   const [quem, setQuem] = useState(eGerente ? "*" : "");
   const [equipe, setEquipe] = useState([]);
@@ -27072,7 +27081,12 @@ function TelaRecuperacao({ perfil, aoAbrir }) {
   const [contato, setContato] = useState({}); // atendimento → { acaoId, titulo }
   const [verHoje, setVerHoje] = useState(false);
   const [verDepois, setVerDepois] = useState(false);
+  // Com número de NEGOCIAÇÃO ligado (0122), o WhatsApp abre a conversa do
+  // sistema — registrada, com quem mandou — e não o WhatsApp do celular.
+  const [temNumeroNeg, setTemNumeroNeg] = useState(false);
+  useEffect(() => { waNumeros().then((ns) => setTemNumeroNeg(ns.some((n) => n.uso === "negociacao"))).catch(() => {}); }, []);
   const [painel, setPainel] = useState({}); // atendimento → "nota" | "agenda"
+  const [anot, setAnot] = useState({}); const [verNotas, setVerNotas] = useState({});
   const [nota, setNota] = useState({}); const [quando, setQuando] = useState({});
   const [aviso, setAviso] = useState({});
   const faixa = (() => {
@@ -27144,6 +27158,7 @@ function TelaRecuperacao({ perfil, aoAbrir }) {
         body: JSON.stringify({ atendimento_id: a.id, texto: txt }) });
       const d = await r.json(); if (!r.ok) throw new Error(d.erro || "Não consegui anotar.");
       setNota((m) => ({ ...m, [a.id]: "" })); setPainel((m) => ({ ...m, [a.id]: "" })); setAviso((m) => ({ ...m, [a.id]: "Anotado no atendimento." }));
+      if (d.observacoes != null) setAnot((m) => ({ ...m, [a.id]: d.observacoes }));
     } catch (e) { setErro(e.message); }
   };
   const agendarRec = async (a) => {
@@ -27182,13 +27197,58 @@ function TelaRecuperacao({ perfil, aoAbrir }) {
           </div>
         )}
         {a.ultimo_resultado && !c && <div className="mt-0.5 text-[11.5px]" style={{ color: C.mute }}>último: {a.ultimo_resultado}</div>}
+        {/* O QUE JÁ SE SABE, para a próxima ligação (08/11/2026): o que a
+            negociação deixou e as anotações de recuperação. */}
+        {(() => {
+          const n = a.negociacao || {};
+          const din = (x) => (x && numeroBR(x) ? brl(numeroBR(x)) : null);
+          const itens = [
+            n.motivo && ["vende porque", n.motivo],
+            n.objecao && ["não fechou por", n.objecao],
+            (n.pretensao || a.pretensao) && ["quer", din(n.pretensao || a.pretensao) || n.pretensao],
+            n.rodada && [`${n.rodada.n}ª rodada`, [din(n.rodada.ofertado) && `ofertamos ${din(n.rodada.ofertado)}`, din(n.rodada.pediu) && `pediu ${din(n.rodada.pediu)}`].filter(Boolean).join(" · ")],
+            n.internas && ["interno", n.internas],
+          ].filter((x) => x && x[1]);
+          const notas = String(anot[a.id] != null ? anot[a.id] : a.observacoes || "").split("\n").map((x) => x.trim()).filter(Boolean).reverse();
+          if (!itens.length && !notas.length) return null;
+          const todas = verNotas[a.id];
+          return (
+            <div className="mt-2 rounded-md px-2.5 py-1.5 text-[12px]" style={{ background: C.bg }}>
+              {!!itens.length && (
+                <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                  {itens.map(([r, v]) => <span key={r}><span style={{ color: C.mute }}>{r}:</span> <b style={{ fontWeight: 600 }}>{v}</b></span>)}
+                </div>
+              )}
+              {!!notas.length && (
+                <div className={itens.length ? "mt-1" : ""}>
+                  {(todas ? notas : notas.slice(0, 3)).map((l, i) => (
+                    <div key={i} className="leading-snug">
+                      {/^\[[^\]]+\]/.test(l) ? <><span style={{ color: C.mute }}>{l.match(/^\[[^\]]+\]/)[0]}</span>{l.replace(/^\[[^\]]+\]/, "")}</> : l}
+                    </div>
+                  ))}
+                  {notas.length > 3 && (
+                    <button onClick={() => setVerNotas((m) => ({ ...m, [a.id]: !m[a.id] }))} className="text-[11.5px] font-semibold" style={{ color: C.roxo }}>
+                      {todas ? "mostrar menos" : `ver as ${notas.length} anotações`}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
         <div className="mt-2 flex flex-wrap items-center gap-2 text-[12.5px]">
           {tel ? (
             <>
               <a href={`tel:+55${tel.length <= 11 ? tel : tel.slice(-11)}`} onClick={() => registrar(a, "ligar")}
                 className="rounded-md px-3 py-1 font-semibold text-white" style={{ background: C.roxo }}>Ligar</a>
-              <a href={zap(a.cliente_telefone, msg)} target="_blank" rel="noreferrer" onClick={() => registrar(a, "whatsapp")}
-                className="rounded-md px-3 py-1 font-semibold text-white" style={{ background: "#128C7E" }}>WhatsApp</a>
+              {temNumeroNeg && aoConversar ? (
+                <button onClick={() => { registrar(a, "whatsapp"); aoConversar({ telefone: a.cliente_telefone, nome: a.cliente_nome || "", texto: msg }); }}
+                  className="rounded-md px-3 py-1 font-semibold text-white" style={{ background: "#128C7E" }} title="Abre a conversa no WhatsApp da loja, dentro do sistema">WhatsApp</button>
+              ) : (
+                <a href={zap(a.cliente_telefone, msg)} target="_blank" rel="noreferrer" onClick={() => registrar(a, "whatsapp")}
+                  className="rounded-md px-3 py-1 font-semibold text-white" style={{ background: "#128C7E" }}
+                  title="Sem número de negociação ligado: abre o WhatsApp deste aparelho">WhatsApp</a>
+              )}
               <span style={{ color: C.mute }}>{a.cliente_telefone}</span>
             </>
           ) : <span style={{ color: AMARELO.texto }}>sem telefone no atendimento</span>}
@@ -30862,6 +30922,9 @@ function App() {
   }, []);
 
   const verConversa = (telefone) => { setConversaAlvo(String(telefone || "")); setTela("conversas"); };
+  // A conversa da Recuperação abre no WhatsApp dos negociadores (0122).
+  const [conversaAlvoNeg, setConversaAlvoNeg] = useState(null);
+  const conversarNeg = (alvo) => { setConversaAlvoNeg(alvo); setTela("whats_neg"); };
   const [comp, setComp] = useState(() => competenciaDe(hojeEmSP()));
   const MESES = useMemo(() => mesesRecentes(18), []);
   // Chegou pelo link do "esqueci minha senha": a sessão vem no
@@ -30979,7 +31042,7 @@ function App() {
         aoVerConversa={verConversa} mes={mes} comp={compOuAtual} />}
       {tela === "atendimentos" && <CRM perfil={perfil} aoAbrir={abrir} mes={{ ...mes, todos: true }} />}
       {tela === "vez" && <TelaFilaDaVez perfil={perfil} aoAbrir={abrir} />}
-      {tela === "recuperacao" && <TelaRecuperacao perfil={perfil} aoAbrir={abrir} />}
+      {tela === "recuperacao" && <TelaRecuperacao perfil={perfil} aoAbrir={abrir} aoConversar={conversarNeg} />}
       {tela === "estoque" && <TelaEstoque perfil={perfil} comp={compOuAtual} mes={mes} />}
       {/* A rota confere de novo: esconder o item do menu é conveniência,
           não controle. Quem chegar aqui por outro caminho não passa. */}
@@ -30992,7 +31055,7 @@ function App() {
       {tela === "gestao" && <TelaGestao perfil={perfil} comp={compOuAtual} />}
       {tela === "remuneracao" && <TelaPerfisRemuneracao />}
       {tela === "adm_whats" && <TelaConversas key="adm" operacao />}
-      {tela === "whats_neg" && <TelaConversas key="neg" negociacao aoAbrir={abrir} />}
+      {tela === "whats_neg" && <TelaConversas key="neg" negociacao aoAbrir={abrir} alvo={conversaAlvoNeg} aoConsumirAlvo={() => setConversaAlvoNeg(null)} />}
       {tela === "adm_transf" && <TelaTransferencias />}
       {tela === "conversas" && (
         <TelaConversas alvo={conversaAlvo} aoConsumirAlvo={() => setConversaAlvo(null)} />

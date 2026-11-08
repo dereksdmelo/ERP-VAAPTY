@@ -6182,7 +6182,14 @@ ou mandar WhatsApp para quem estava agendado marca a ação como feita. **E vira
 agendamento que eu fiz não fica em agendamentos?"): `agendarVisitaDeRecuperacao`
 cria (ou, reagendando, move) um lead de origem Recuperação no dia e na
 hora, com o negociador e **ligado ao atendimento** (`lead.atendimento_id`)
-— o "Chegou" abre o atendimento que já existe. **As anotações aparecem no
+— o "Chegou" abre o atendimento que já existe. **Com número de negociação
+ligado, o WhatsApp da Recuperação abre a conversa do sistema** (Negociação
+→ WhatsApp, pelo `alvo` com telefone, nome e mensagem: com conversa, abre
+ela; sem conversa, abre a "nova conversa" preenchida); sem número, cai no
+WhatsApp do aparelho. **E cada cliente mostra o que já se sabe**: da ficha
+de trabalho (`negociacao_viva.ficha`, só os campos pelo caminho JSON) o
+motivo, a objeção, quanto quer, a última rodada e as internas; e as
+anotações, as três mais novas e "ver todas". **As anotações aparecem no
 atendimento** (`AnotacoesDoAtendimento`, no topo de "O que já sabemos",
 com campo para anotar ali). E o **`volta_em` nunca era gravado**: faltava
 em `paraColunas` do `api/atendimento.js`, e o servidor o descartava calado
