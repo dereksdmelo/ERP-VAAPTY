@@ -18829,7 +18829,7 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
     <div>
       <Cabecalho titulo={TITULO[aba] || "Financeiro"} mes={aba === "pendencias" || aba === "caixas" || aba === "ano" || aba === "plano" ? null : mes} sub={SUB[aba]} />
       {aba === "pendencias" && <FinPendencias aoIr={irPara} />}
-      {aba === "lancamentos" && <FinLancamentos comp={comp} />}
+      {aba === "lancamentos" && <FinLancamentos comp={comp} aoIrTitulos={() => irPara("contas")} />}
       {aba === "recebimentos" && <FinRecebimentos comp={comp} />}
       {aba === "contas" && <FinContas comp={comp} />}
       {aba === "fechamento" && <FinFechamento comp={comp} />}
@@ -19679,7 +19679,7 @@ function AberturaConta({ d, comp, conta, aoGravar, aoErro }) {
   );
 }
 
-function FinLancamentos({ comp }) {
+function FinLancamentos({ comp, aoIrTitulos }) {
   const [contas, setContas] = useState([]);
   const [conta, setConta] = useState("");
   const [cats, setCats] = useCategoriasFin(false);
@@ -19861,7 +19861,14 @@ function FinLancamentos({ comp }) {
           {(contas.find((c) => c.id === conta) || {}).tipo === "dinheiro"
             ? <span style={{ color: C.mute }}>dinheiro em espécie · sem extrato</span>
             : <button onClick={() => setImportando(!importando)} style={{ color: C.roxo, fontWeight: 600 }}>importar extrato</button>}
-          <button onClick={() => setNovo({ data: hojeEmSP(), competencia: comp, descricao: "", debito: "", credito: "", categoria_id: "" })} style={{ color: C.roxo, fontWeight: 600 }}>+ lançamento</button>
+          {/* O LANÇAMENTO À MÃO SÓ NA CONTA DE DINHEIRO (08/11/2026, o Derek:
+              "tem que tirar o + lançamento da conciliação pra não confundir,
+              ou ela deve levar pros títulos"). No banco, a linha vem do
+              extrato e o previsto se lança nos Títulos; na gaveta não há
+              extrato, e o lançamento à mão é o próprio extrato (0070). */}
+          {(contas.find((c) => c.id === conta) || {}).tipo === "dinheiro"
+            ? <button onClick={() => setNovo({ data: hojeEmSP(), competencia: comp, descricao: "", debito: "", credito: "", categoria_id: "" })} style={{ color: C.roxo, fontWeight: 600 }}>+ lançamento</button>
+            : aoIrTitulos && <button onClick={aoIrTitulos} style={{ color: C.roxo, fontWeight: 600 }} title="O previsto (conta a pagar, a receber) se lança nos Títulos financeiros">+ título → Títulos financeiros</button>}
         </span>
       </div>
 

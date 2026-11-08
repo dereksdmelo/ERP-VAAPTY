@@ -4624,7 +4624,10 @@ bagunçado"*): "Do mês | Em aberto", o filtro num seletor, a busca e
 **"+ título"** — o título se lança AQUI (o que se sabe antes de pagar ou
 receber; os do contrato e das contas fixas nascem sozinhos); a
 Conciliação liga a linha do banco ao título, e só lança direto o que
-apareceu no extrato sem previsão.
+apareceu no extrato sem previsão. Por isso o "+ lançamento" da Conciliação ficou só na
+conta de dinheiro (a gaveta não tem extrato: o lançamento à mão é o
+próprio extrato, 0070); na conta de banco ele virou "+ título → Títulos
+financeiros".
 
 **Ligar à mão a linha do banco ao título (07/11/2026, o Derek: *"como
 eu faço pra ligar os títulos das previsões com os títulos do
