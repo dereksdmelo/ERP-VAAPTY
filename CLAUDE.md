@@ -4390,7 +4390,11 @@ sumia da lista. **A causa era a importação da planilha**: o carro que
 entra ao fechar pega o nome do atendimento (escolhido numa lista, o do
 cadastro); a planilha colada gravava o texto como veio. Agora o
 importador troca o nome pelo do cadastro quando casam sem acento, e os
-135 carros "ANDRE BRUNO" viraram "ANDRÉ BRUNO" no mesmo dia.
+135 carros "ANDRE BRUNO" viraram "ANDRÉ BRUNO" no mesmo dia. E o filtro lista
+quem está no cadastro de negociadores (com ou sem venda no mês) mais
+quem tem carro no mês: ex-negociador fora do cadastro (FELIPE, SAVYON,
+HENRIQUE — o Derek: "pode tirar") só aparece no mês em que vendeu. Os
+carros deles não mudam.
 
 **A previsão de rentabilidade (0118)** — o Derek: *"valores prováveis de
 venda nos carros que estão em estoque… vendendo todos, ou só alguns…

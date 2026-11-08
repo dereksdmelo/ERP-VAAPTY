@@ -13951,12 +13951,20 @@ function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar, aoMudar, aoPr
   const [fProsp, setFProsp] = useState("");
   const [fPrej, setFPrej] = useState(false);
   const [ordem, setOrdem] = useState({ col: "", desc: false });
+  // O cadastro de negociadores: quem não está nele (ex-negociador, nome
+  // de planilha) só aparece no filtro do mês em que tem carro.
+  const [cadNeg, setCadNeg] = useState(null);
+  useEffect(() => { listarNegociadores().then((l) => setCadNeg(new Set(l.map((n) => chaveNeg(n.nome))))).catch(() => setCadNeg(null)); }, []);
   const todas = vendidos.map((e) => ({ e, r: rentabilidadeDe(e), semana: semanaDe(e), dias: diasNoPatio(e) }));
   const opcoes = (f) => Array.from(new Set(todas.map(f).filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b), "pt-BR"));
-  // Todos os negociadores que já venderam algum carro, não só os do mês:
-  // escolher quem não vendeu no mês mostra "nenhum carro", que é resposta.
+  // Os do cadastro que já venderam algum carro, mesmo sem venda no mês
+  // (escolher mostra "nenhum carro", que é resposta), mais quem tem carro
+  // neste mês. Ex-negociador fora do cadastro (FELIPE, SAVYON, HENRIQUE —
+  // o Derek, 08/11/2026: "pode tirar") só aparece no mês em que vendeu.
   const nomeNeg = nomesDeNegociador((todosVendidos || []).concat(vendidos));
-  const negsOp = Object.keys(nomeNeg).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  const doMes = new Set(vendidos.map((e) => chaveNeg(e.negociador_nome)));
+  const negsOp = Object.keys(nomeNeg).filter((k) => doMes.has(k) || !cadNeg || cadNeg.has(k))
+    .filter((k) => /[A-Z]/.test(k)).sort((a, b) => a.localeCompare(b, "pt-BR"));
   const meiosOp = opcoes(({ e }) => e.meio_alcance);
   const prospOp = opcoes(({ e }) => e.prospector);
   const termosR = semAcento(fBusca).toLowerCase().split(/\s+/).filter(Boolean);
