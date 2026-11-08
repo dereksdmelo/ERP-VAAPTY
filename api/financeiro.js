@@ -1124,9 +1124,15 @@ async function sincronizarTitulosDoCarro(tok, estoqueId, forcar) {
     else pagoParte[k.slice(0, i)] = (pagoParte[k.slice(0, i)] || 0) + (Number(x.debito) || 0) + (Number(x.credito) || 0);
   });
   const entrou = String(e.entrou_em || "").slice(0, 10), vendeu = String(e.vendido_em || "").slice(0, 10);
-  const gerido = forcar || (existentes || []).length > 0;
-  const doCorteCompra = gerido || (entrou && entrou >= CORTE_TITULOS);
-  const doCorteVenda = gerido || (vendeu && vendeu >= CORTE_TITULOS);
+  /* O corte vale por LADO (08/11/2026). Carro de outubro vendido em
+   * novembro gera só a venda; ter um título da venda não pode puxar a
+   * compra e os custos de outubro (que "já passou", o Derek). O lado da
+   * compra só é gerido se o carro entrou depois do corte, se já tem
+   * título da compra/custos, ou se foi forçado; o da venda, idem. */
+  const temCompra = existentes.some((x) => !String(x.item_contrato).startsWith("venda:"));
+  const temVenda = existentes.some((x) => String(x.item_contrato).startsWith("venda:"));
+  const doCorteCompra = forcar || temCompra || (entrou && entrou >= CORTE_TITULOS);
+  const doCorteVenda = forcar || temVenda || (vendeu && vendeu >= CORTE_TITULOS);
   const v = e.veiculo || {};
   const carro = [v.marca_modelo, v.placa].filter(Boolean).join(" ");
   const cliente = e.atendimento && e.atendimento.cliente_nome;
