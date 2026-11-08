@@ -1080,9 +1080,17 @@ async function projecaoDoMes(tok, comp, d, folhaPronta) {
     });
     pessoasFolha.forEach((p) => {
       const porCat = (d.lancado_por_func || {})[p.fid] || {};
-      let resto = 0;
-      Object.keys(porCat).forEach((c) => { if (catsFolha.has(c)) { resto += porCat[c]; atribuidoPorCat[c] = (atribuidoPorCat[c] || 0) + porCat[c]; } });
-      ["salario", "comissao", "bonificacao"].forEach((k) => { const a = Math.min(resto, p[k]); alocado[k] += a; resto -= a; });
+      // A bonificação é paga pontualmente, na categoria dela, e só abate a bonificação. Salário
+      // e comissão saem juntos (vales + o principal do quinto dia útil), em qualquer das outras
+      // categorias da folha: o que a pessoa recebeu ali cobre o salário e, depois, a comissão.
+      let resto = 0, restoBonif = 0;
+      Object.keys(porCat).forEach((c) => {
+        if (!catsFolha.has(c)) return;
+        atribuidoPorCat[c] = (atribuidoPorCat[c] || 0) + porCat[c];
+        if (c === catDe.bonificacao && c !== catDe.salario && c !== catDe.comissao) restoBonif += porCat[c]; else resto += porCat[c];
+      });
+      ["salario", "comissao"].forEach((k) => { const a = Math.min(resto, p[k]); alocado[k] += a; resto -= a; });
+      const aB = Math.min(restoBonif, p.bonificacao); alocado.bonificacao += aB;
     });
     // Duas partes na mesma categoria dividem a conta fixa dela uma vez só.
     const fixaUsada = {};
