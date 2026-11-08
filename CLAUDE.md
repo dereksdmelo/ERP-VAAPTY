@@ -6149,7 +6149,11 @@ põe o carro no pátio, decisão 23): cada entrada nova vira comemoração em
 tela cheia (troféu, confete em canvas, fanfarra sintetizada — o navegador
 pede um toque para liberar o som). A chave fica em texto, não em hash: o
 gerente precisa copiar o link de novo depois de pendurar a TV, e o que ela
-abre é número de vendas, não cadastro.
+abre é número de vendas, não cadastro. **A agenda da semana (0123)** liga na mesma
+configuração ("Mostrar a agenda da semana"): `tv_agenda(chave)` devolve os
+agendamentos de segunda a sábado — dia, hora, carro, estado e quem agendou,
+**sem o nome do cliente** —, e a TV mostra a contagem de cada dia e a lista
+de hoje (no domingo, a semana que começa amanhã).
 
 **O WhatsApp dos negociadores (0122, 08/11/2026, o Derek: "um número de
 whats da loja que os negociadores possam conversar com os clientes e fique

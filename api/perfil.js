@@ -548,12 +548,12 @@ const CAMPOS_DESEMPENHO = [
  * 32 bytes; gerar de novo desliga o anterior) e guarda a configuração. A
  * RLS da `painel_tv` é do gerente: para os outros, o GET volta vazio e o
  * POST/PUT volta 403. A TV lê pela `tv_painel(chave)`, sem passar aqui. */
-const TV_CONFIG = ["titulo", "podio", "valores", "comemorar", "som", "segundos", "recado", "tema", "ordem"];
+const TV_CONFIG = ["titulo", "podio", "valores", "comemorar", "som", "segundos", "recado", "tema", "ordem", "agenda"];
 function limparConfigTv(c) {
   const o = {};
   TV_CONFIG.forEach((k) => {
     if (c[k] === undefined) return;
-    if (["podio", "valores", "comemorar", "som"].indexOf(k) >= 0) o[k] = !!c[k];
+    if (["podio", "valores", "comemorar", "som", "agenda"].indexOf(k) >= 0) o[k] = !!c[k];
     else if (k === "segundos") o[k] = Math.max(3, Math.min(30, Math.round(Number(c[k]) || 8)));
     else if (k === "tema") o[k] = c[k] === "claro" ? "claro" : "escuro";
     else if (k === "ordem") o[k] = c[k] === "percentual" ? "percentual" : "valor";

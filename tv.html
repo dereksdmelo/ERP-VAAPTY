@@ -76,6 +76,18 @@
   .mini i.ok { background: var(--verde); }
   .mini .dia { position: absolute; top: 0; bottom: 0; width: 0.2vw; background: var(--tinta); opacity: 0.7; }
   .pct { font-weight: 800; }
+  /* A AGENDA DA SEMANA (0123): hoje em lista, a semana em contagem. */
+  .direita { display: grid; grid-template-rows: auto 1fr; gap: 2vh; min-height: 0; }
+  .direita.so { grid-template-rows: 1fr; }
+  .semana { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.6vw; margin-top: 1.2vh; }
+  .semana div { border: 1px solid var(--linha); border-radius: 1vh; padding: 0.8vh 0; text-align: center; }
+  .semana div.hoje { border-color: var(--roxo2); background: rgba(139,63,217,.18); }
+  .semana b { display: block; font-size: 3vh; font-weight: 900; line-height: 1.1; }
+  .semana span { font-size: 1.3vh; color: var(--mudo); text-transform: uppercase; letter-spacing: .1em; font-weight: 800; }
+  .lista { margin-top: 1.4vh; display: grid; grid-template-columns: 1fr 1fr; gap: 0.6vh 1.4vw; }
+  .lista div { font-size: 2vh; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0.4vh 0; border-bottom: 1px solid var(--linha); }
+  .lista b { font-weight: 900; margin-right: 0.6vw; }
+  .lista .ok { color: var(--verde); } .lista .veio { color: var(--roxo2); } .lista .faltou { color: var(--laranja); text-decoration: line-through; }
   footer { display: grid; grid-template-columns: repeat(5, auto) 1fr; gap: 2vw; align-items: center; }
   .kpi b { display: block; font-size: 4.2vh; font-weight: 900; line-height: 1; }
   .kpi span { font-size: 1.4vh; color: var(--mudo); text-transform: uppercase; letter-spacing: 0.12em; font-weight: 800; }
@@ -120,10 +132,17 @@
         <div class="podio" id="podio"></div>
       </div>
     </div>
-    <div class="caixa" style="overflow:hidden">
-      <div class="rotulo">Negociadores</div>
-      <table><thead><tr><th>Nome</th><th>Meta</th><th class="n" id="thFeito">Feito</th><th class="n">%</th><th class="n">Carros</th><th class="n">Conv.</th></tr></thead>
-      <tbody id="ranking"></tbody></table>
+    <div class="direita so" id="direita">
+      <div class="caixa" style="overflow:hidden">
+        <div class="rotulo">Negociadores</div>
+        <table><thead><tr><th>Nome</th><th>Meta</th><th class="n" id="thFeito">Feito</th><th class="n">%</th><th class="n">Carros</th><th class="n">Conv.</th></tr></thead>
+        <tbody id="ranking"></tbody></table>
+      </div>
+      <div class="caixa" id="agendaCaixa" style="display:none; overflow:hidden">
+        <div class="rotulo" id="agendaTitulo">Agenda</div>
+        <div class="semana" id="semana"></div>
+        <div class="lista" id="agendaLista"></div>
+      </div>
     </div>
   </div>
   <footer>
@@ -243,11 +262,38 @@
     festejar();
   }
 
+  // A agenda da semana (0123), quando ligada na configuração.
+  var DIAS = ["seg", "ter", "qua", "qui", "sex", "sáb"];
+  function desenharAgenda(a) {
+    var hoje = a.hoje, seg = new Date(a.segunda + "T12:00:00");
+    var porDia = {}; (a.itens || []).forEach(function (x) { (porDia[x.dia] = porDia[x.dia] || []).push(x); });
+    var dias = []; for (var i = 0; i < 6; i++) { var d = new Date(seg.getTime() + i * 86400000); dias.push(d.toISOString().slice(0, 10)); }
+    var foco = dias.indexOf(hoje) >= 0 ? hoje : dias[0];
+    $("agendaTitulo").textContent = foco === hoje ? "Agenda de hoje" : "Agenda de amanhã · " + new Date(foco + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+    $("semana").innerHTML = dias.map(function (d, i) {
+      return "<div class='" + (d === foco ? "hoje" : "") + "'><b>" + ((porDia[d] || []).length) + "</b><span>" + DIAS[i] + " " + d.slice(8, 10) + "</span></div>";
+    }).join("");
+    var doDia = porDia[foco] || [];
+    $("agendaLista").innerHTML = doDia.length ? doDia.slice(0, 14).map(function (x) {
+      var cls = x.status === "confirmado" ? "ok" : x.status === "compareceu" ? "veio" : x.status === "nao_compareceu" ? "faltou" : "";
+      var marca = x.status === "confirmado" ? " ✓" : x.status === "compareceu" ? " · veio" : "";
+      return "<div class='" + cls + "'><b>" + esc(x.hora) + "</b>" + esc(x.carro || "carro a confirmar") + marca + (x.agendou ? " <span style='color:var(--mudo)'>· " + esc(primeiro(x.agendou)) + "</span>" : "") + "</div>";
+    }).join("") + (doDia.length > 14 ? "<div style='color:var(--mudo)'>+ " + (doDia.length - 14) + " agendamentos</div>" : "") : "<div style='color:var(--mudo)'>Nenhum agendamento.</div>";
+  }
+  function lerAgenda() {
+    if (cfg.agenda !== true) { $("agendaCaixa").style.display = "none"; $("direita").className = "direita so"; return; }
+    fetch(URL_SB + "/rest/v1/rpc/tv_agenda", { method: "POST", headers: { apikey: ANON, Authorization: "Bearer " + ANON, "Content-Type": "application/json" },
+      body: JSON.stringify({ p_token: token }) })
+      .then(function (r) { return r.json(); })
+      .then(function (a) { if (!a || !a.itens) return; $("agendaCaixa").style.display = ""; $("direita").className = "direita"; desenharAgenda(a); })
+      .catch(function () {});
+  }
+
   function ler() {
     fetch(URL_SB + "/rest/v1/rpc/tv_painel", { method: "POST", headers: { apikey: ANON, Authorization: "Bearer " + ANON, "Content-Type": "application/json" },
       body: JSON.stringify({ p_token: token }) })
       .then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.message || "falhou"); return d; }); })
-      .then(function (d) { aviso.style.display = "none"; $("tela").style.display = ""; ultimaLeitura = Date.now(); desenhar(d); if (d.config && d.config.som && !somLiberado) $("som").style.display = ""; })
+      .then(function (d) { aviso.style.display = "none"; $("tela").style.display = ""; ultimaLeitura = Date.now(); desenhar(d); lerAgenda(); if (d.config && d.config.som && !somLiberado) $("som").style.display = ""; })
       .catch(function (e) {
         if (/inválido|42501/.test(String(e.message))) { $("tela").style.display = "none"; aviso.style.display = ""; aviso.textContent = "Este link foi trocado. Gere o novo no Painel do gestor."; }
       });

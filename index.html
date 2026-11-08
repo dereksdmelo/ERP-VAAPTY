@@ -29022,6 +29022,10 @@ function ConfigTelaSala() {
           {chave("valores", "Mostrar os valores em R$", "desligado, a TV mostra só o % da meta de cada um")}
           {chave("comemorar", "Comemorar quando um carro fecha", "tela cheia com troféu e confete, com o nome de quem fechou")}
           {chave("som", "Tocar som na comemoração", "a TV pede um toque na tela uma vez para liberar o som")}
+          <label className="flex items-start gap-2 text-[13px]">
+            <input type="checkbox" className="mt-0.5" checked={c.agenda === true} onChange={(e) => salvar({ agenda: e.target.checked })} />
+            <span><b>Mostrar a agenda da semana</b><span className="block text-[11.5px]" style={{ color: C.mute }}>os agendamentos de hoje (hora, carro, quem agendou) e quantos em cada dia — sem o nome do cliente</span></span>
+          </label>
           <label className="flex items-center gap-2 text-[13px]"><b>Duração da comemoração</b>
             <select value={c.segundos || 8} onChange={(e) => salvar({ segundos: Number(e.target.value) })} className="rounded border px-1.5 py-1 outline-none" style={inputSty}>
               {[5, 8, 12, 20, 30].map((n) => <option key={n} value={n}>{n} segundos</option>)}
