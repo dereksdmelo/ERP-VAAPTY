@@ -14356,21 +14356,29 @@ function PacoteLojistas({ carros, aoTirar }) {
   const somaCusto = linhas.reduce((t, l) => t + l.custo, 0);
   const precoPacote = numeroBR(fechado) > 0 ? numeroBR(fechado) : somaPreco;
   const semPreco = linhas.filter((l) => !l.preco).length, semFipe = linhas.filter((l) => !l.fipe).length;
+  // Sem preço fechado, o % só compara o que tem preço: carro sem preço
+  // contaria como de graça, e o pacote apareceria "100% abaixo da FIPE".
+  const comPreco = linhas.filter((l) => l.preco && l.fipe);
+  const p = numeroBR(fechado) > 0 ? pct(precoPacote, somaFipe)
+    : comPreco.length ? pct(comPreco.reduce((t, l) => t + l.preco, 0), comPreco.reduce((t, l) => t + l.fipe, 0)) : null;
+  const pctParcial = !(numeroBR(fechado) > 0) && comPreco.length > 0 && comPreco.length < linhas.length;
   const texto = [
     `*Pacote com ${linhas.length} carro${linhas.length > 1 ? "s" : ""}*`, "",
     ...linhas.map((l) => `• ${l.v.marca_modelo || "—"}${l.v.ano_modelo ? ` ${l.v.ano_modelo}` : ""}${l.v.km_atual ? ` · ${Number(l.v.km_atual).toLocaleString("pt-BR")} km` : ""}\n  FIPE ${brl(l.fipe)} · ${l.preco ? brl(l.preco) : "a combinar"}`),
     "", `FIPE somada: ${brl(somaFipe)}`, `*Valor do pacote: ${brl(precoPacote)}*`,
-    somaFipe ? `${fmtPct(pct(precoPacote, somaFipe))} da FIPE` : "",
+    p != null && !pctParcial ? `${fmtPct(p)} da FIPE` : "",
   ].filter((x, i, a) => !(x === "" && a[i - 1] === "")).join("\n");
   const copiar = async () => { try { await navigator.clipboard.writeText(texto); setCopiado(true); setTimeout(() => setCopiado(false), 2000); } catch (e) { alert("Não consegui copiar."); } };
-  const p = pct(precoPacote, somaFipe);
   return (
     <div className="mb-3 rounded-xl p-3" style={{ background: C.paper, border: `1px solid ${C.roxo}` }}>
       <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1">
         <span className="text-[15px] font-bold">Pacote · {linhas.length} carro{linhas.length > 1 ? "s" : ""}</span>
         <span className="text-[13px]">FIPE somada <b style={{ fontVariantNumeric: "tabular-nums" }}>{brl(somaFipe)}</b></span>
         <span className="text-[13px]">Preço do pacote <b style={{ fontVariantNumeric: "tabular-nums" }}>{brl(precoPacote)}</b></span>
-        <span className="text-[18px] font-extrabold" style={{ color: p == null ? C.mute : p >= 0 ? C.verde : C.laranja }}>{fmtPct(p)} da FIPE</span>
+        <span className="text-[18px] font-extrabold" style={{ color: p == null ? C.mute : p >= 0 ? C.verde : C.laranja }}>
+          {p == null ? "digite os preços para ver o % da FIPE" : `${fmtPct(p)} da FIPE`}
+          {pctParcial && <span className="ml-1 text-[11.5px] font-semibold" style={{ color: AMARELO.texto }}>(só dos {comPreco.length} com preço)</span>}
+        </span>
       </div>
       {(semPreco > 0 || semFipe > 0) && (
         <p className="mt-1 text-[12px]" style={{ color: AMARELO.texto }}>
