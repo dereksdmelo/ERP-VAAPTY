@@ -4182,6 +4182,16 @@ está lá para quando o cadastro vier de lá — hoje não vem.
 **A margem aparece antes de confirmar a venda**, e é de propósito: é a
 última chance de ver que o carro está saindo no prejuízo.
 
+**O preço para os lojistas na linha do pátio, e o pacote (08/11/2026,
+o Derek: "campo para digitar valor de venda, e gerar um pacote
+selecionando diversos carros… a FIPE, o preço pros lojistas e quanto %
+abaixo da FIPE o pacote está").** O campo da linha grava o `preco_pedido`
+(o mesmo da Venda para lojistas, com o histórico de preço) e mostra a
+distância da FIPE. "Montar pacote" marca carros e abre `PacoteLojistas`:
+FIPE, preço e % abaixo de cada um e do pacote, um preço fechado opcional,
+e "copiar" com o texto para o WhatsApp — que leva carro, FIPE, preço e
+desconto, e não custo nem margem (estes ficam na tela, decisão 2).
+
 **A busca do Estoque (07/11/2026)** procura placa, modelo, ano,
 comprador e negociador no pátio, nos vendidos e nos baixados de uma vez
 — com texto, o filtro sai de cena e cada linha diz onde o carro está. E

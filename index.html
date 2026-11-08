@@ -14335,6 +14335,90 @@ function ImportarRentabilidade({ aoTerminar }) {
  * entrada no fechamento traria para cá todo negócio marcado como
  * fechado por engano, e o custo de desfazer é maior que o de um toque.
  */
+/* O PACOTE PARA OS LOJISTAS (08/11/2026, o Derek: "permitir que eu gere
+ * um pacote selecionando diversos carros. Ele mostra a FIPE dos carros, e
+ * o preço pros lojistas e quanto % abaixo da FIPE o pacote está"). O preço
+ * de cada carro é o preço pedido (o campo da linha); o do pacote é a soma,
+ * ou um valor fechado digitado aqui. O texto copiado leva só o que o
+ * lojista pode ler: carro, FIPE, preço e o desconto — custo e margem
+ * ficam na tela, como `internas` (decisão 2). */
+function PacoteLojistas({ carros, aoTirar }) {
+  const [fechado, setFechado] = useState("");
+  const [copiado, setCopiado] = useState(false);
+  const pct = (preco, fipe) => (fipe ? (1 - preco / fipe) * 100 : null);
+  const fmtPct = (p) => (p == null ? "—" : p >= 0 ? `${p.toFixed(1).replace(".", ",")}% abaixo` : `${(-p).toFixed(1).replace(".", ",")}% acima`);
+  const linhas = carros.map((e) => {
+    const v = e.veiculo || {};
+    return { e, v, fipe: Number(v.fipe_valor) || 0, preco: Number(e.preco_pedido) || 0, custo: contaDoEstoque(e).atual };
+  });
+  const somaFipe = linhas.reduce((t, l) => t + l.fipe, 0);
+  const somaPreco = linhas.reduce((t, l) => t + l.preco, 0);
+  const somaCusto = linhas.reduce((t, l) => t + l.custo, 0);
+  const precoPacote = numeroBR(fechado) > 0 ? numeroBR(fechado) : somaPreco;
+  const semPreco = linhas.filter((l) => !l.preco).length, semFipe = linhas.filter((l) => !l.fipe).length;
+  const texto = [
+    `*Pacote com ${linhas.length} carro${linhas.length > 1 ? "s" : ""}*`, "",
+    ...linhas.map((l) => `• ${l.v.marca_modelo || "—"}${l.v.ano_modelo ? ` ${l.v.ano_modelo}` : ""}${l.v.km_atual ? ` · ${Number(l.v.km_atual).toLocaleString("pt-BR")} km` : ""}\n  FIPE ${brl(l.fipe)} · ${l.preco ? brl(l.preco) : "a combinar"}`),
+    "", `FIPE somada: ${brl(somaFipe)}`, `*Valor do pacote: ${brl(precoPacote)}*`,
+    somaFipe ? `${fmtPct(pct(precoPacote, somaFipe))} da FIPE` : "",
+  ].filter((x, i, a) => !(x === "" && a[i - 1] === "")).join("\n");
+  const copiar = async () => { try { await navigator.clipboard.writeText(texto); setCopiado(true); setTimeout(() => setCopiado(false), 2000); } catch (e) { alert("Não consegui copiar."); } };
+  const p = pct(precoPacote, somaFipe);
+  return (
+    <div className="mb-3 rounded-xl p-3" style={{ background: C.paper, border: `1px solid ${C.roxo}` }}>
+      <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1">
+        <span className="text-[15px] font-bold">Pacote · {linhas.length} carro{linhas.length > 1 ? "s" : ""}</span>
+        <span className="text-[13px]">FIPE somada <b style={{ fontVariantNumeric: "tabular-nums" }}>{brl(somaFipe)}</b></span>
+        <span className="text-[13px]">Preço do pacote <b style={{ fontVariantNumeric: "tabular-nums" }}>{brl(precoPacote)}</b></span>
+        <span className="text-[18px] font-extrabold" style={{ color: p == null ? C.mute : p >= 0 ? C.verde : C.laranja }}>{fmtPct(p)} da FIPE</span>
+      </div>
+      {(semPreco > 0 || semFipe > 0) && (
+        <p className="mt-1 text-[12px]" style={{ color: AMARELO.texto }}>
+          {semPreco ? `${semPreco} sem preço para lojista (digite na linha do carro). ` : ""}{semFipe ? `${semFipe} sem FIPE na ficha — a conta fica incompleta.` : ""}
+        </p>
+      )}
+      <div className="rolar mt-2 overflow-x-auto">
+        <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 640 }}>
+          <thead><tr>{["Carro", "Placa", "FIPE", "Preço lojista", "Abaixo da FIPE", "Custo · margem (só você vê)", ""].map((h, i) => (
+            <th key={i} className="whitespace-nowrap px-2 py-1 text-[11px] font-semibold uppercase" style={{ color: C.mute, textAlign: i >= 2 && i <= 5 ? "right" : "left", borderBottom: `1px solid ${C.line}` }}>{h}</th>))}</tr></thead>
+          <tbody>
+            {linhas.map((l) => (
+              <tr key={l.e.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                <td className="px-2 py-1 text-[12.5px]">{l.v.marca_modelo || "—"}{l.v.ano_modelo ? <span style={{ color: C.mute }}> {l.v.ano_modelo}</span> : null}</td>
+                <td className="px-2 py-1 text-[12.5px]" style={{ fontFamily: F.mono }}>{l.v.placa || "—"}</td>
+                <td className="px-2 py-1 text-right text-[12.5px]" style={{ fontVariantNumeric: "tabular-nums" }}>{l.fipe ? brl(l.fipe) : "—"}</td>
+                <td className="px-2 py-1 text-right text-[12.5px] font-semibold" style={{ fontVariantNumeric: "tabular-nums" }}>{l.preco ? brl(l.preco) : <span style={{ color: AMARELO.texto }}>sem preço</span>}</td>
+                <td className="px-2 py-1 text-right text-[12px]" style={{ color: (pct(l.preco, l.fipe) || 0) >= 0 ? C.verde : C.laranja }}>{l.preco && l.fipe ? fmtPct(pct(l.preco, l.fipe)) : "—"}</td>
+                <td className="px-2 py-1 text-right text-[12px]" style={{ color: C.mute, fontVariantNumeric: "tabular-nums" }}>{brl(l.custo)}{l.preco ? <span style={{ color: l.preco - l.custo >= 0 ? C.verde : C.laranja }}> · {brl(l.preco - l.custo)}</span> : null}</td>
+                <td className="px-2 py-1 text-right"><button onClick={() => aoTirar(l.e.id)} className="text-[11.5px]" style={{ color: C.mute }}>tirar</button></td>
+              </tr>
+            ))}
+            <tr style={{ background: C.bg }}>
+              <td className="px-2 py-1 text-[12.5px] font-bold" colSpan={2}>Pacote</td>
+              <td className="px-2 py-1 text-right text-[12.5px] font-bold" style={{ fontVariantNumeric: "tabular-nums" }}>{brl(somaFipe)}</td>
+              <td className="px-2 py-1 text-right text-[12.5px] font-bold" style={{ fontVariantNumeric: "tabular-nums" }}>{brl(precoPacote)}</td>
+              <td className="px-2 py-1 text-right text-[12px] font-bold" style={{ color: (p || 0) >= 0 ? C.verde : C.laranja }}>{fmtPct(p)}</td>
+              <td className="px-2 py-1 text-right text-[12px]" style={{ color: C.mute, fontVariantNumeric: "tabular-nums" }}>{brl(somaCusto)} · <span style={{ color: precoPacote - somaCusto >= 0 ? C.verde : C.laranja }}>{brl(precoPacote - somaCusto)}</span></td>
+              <td />
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <label className="flex items-center gap-1.5 text-[12.5px]">
+          Preço fechado do pacote
+          <input value={fechado} onChange={(ev) => setFechado(ev.target.value)} inputMode="decimal" placeholder={centavosBR(somaPreco)}
+            className="w-[130px] rounded border px-1.5 py-1 text-right text-[12.5px] outline-none" style={{ ...inputSty, fontFamily: F.mono }} />
+        </label>
+        <span className="text-[11.5px]" style={{ color: C.mute }}>vazio = a soma dos preços</span>
+        <button onClick={copiar} className="ml-auto rounded-md px-3 py-1.5 text-[12.5px] font-semibold text-white" style={{ background: C.roxo }}>
+          {copiado ? "Copiado ✓" : "Copiar o pacote (WhatsApp)"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function TelaEstoque({ perfil, comp, mes, modo }) {
   const [lista, setLista] = useState(null);
   const [fila, setFila] = useState([]);
@@ -14351,6 +14435,9 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
   const [importando, setImportando] = useState(false);
   const eGerente = !!(perfil && perfil.papel === "gerente");
   const [limpando, setLimpando] = useState(false);
+  // O PACOTE (08/11/2026): vários carros do pátio oferecidos juntos.
+  const [pacote, setPacote] = useState(false);
+  const [noPacote, setNoPacote] = useState({});
   const [marcados, setMarcados] = useState({});
   const [tirando, setTirando] = useState(false);
   // A BUSCA (07/11/2026, o Derek: "barra de pesquisa no estoque pra
@@ -14641,7 +14728,20 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
           servidor confere), e as linhas de custo saem junto. Carro que
           já foi vendido e ficou aqui não se tira — vende-se, para a venda
           e a margem existirem. */}
-      {filtro === "em_estoque" && eGerente && (
+      {filtro === "em_estoque" && !buscando && (
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <button onClick={() => { setPacote(!pacote); setNoPacote({}); setLimpando(false); }}
+            className="rounded-md border px-3 py-1.5 text-[12.5px] font-semibold"
+            style={{ borderColor: pacote ? C.roxo : C.line, color: C.roxo, background: pacote ? "#F1ECF8" : "#fff" }}>
+            {pacote ? "fechar o pacote" : "montar pacote"}
+          </button>
+          {pacote && <span className="text-[12.5px]" style={{ color: C.mute }}>Toque nos carros para pôr no pacote ({Object.keys(noPacote).length}).</span>}
+        </div>
+      )}
+      {pacote && Object.keys(noPacote).length > 0 && (
+        <PacoteLojistas carros={(lista || []).filter((x) => noPacote[x.id])} aoTirar={(id) => setNoPacote((m) => { const n = { ...m }; delete n[id]; return n; })} />
+      )}
+      {filtro === "em_estoque" && eGerente && !pacote && (
         <div className="mb-2 flex flex-wrap items-center gap-2">
           <button onClick={() => { setLimpando(!limpando); setMarcados({}); }}
             className="rounded-md border px-3 py-1.5 text-[12.5px] font-semibold"
@@ -14712,10 +14812,15 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
            * lido. */
           const cor = dias == null ? C.mute : dias >= 60 ? C.laranja : dias >= 30 ? AMARELO.texto : C.mute;
           return (
-            <button key={e.id} onClick={() => (limpando ? setMarcados((m) => { const n = { ...m }; if (n[e.id]) delete n[e.id]; else n[e.id] = true; return n; }) : setAbrindo(e.id))}
-              className="flex w-full items-center gap-3 px-3 py-2 text-left"
-              style={{ borderTop: i ? `1px solid ${C.line}` : "none", background: limpando && marcados[e.id] ? "#FFF1EB" : "transparent" }}>
+            <div key={e.id} role="button" tabIndex={0}
+              onKeyDown={(ev) => { if (ev.key === "Enter" && ev.target === ev.currentTarget) ev.currentTarget.click(); }}
+              onClick={() => (limpando ? setMarcados((m) => { const n = { ...m }; if (n[e.id]) delete n[e.id]; else n[e.id] = true; return n; })
+                : pacote && e.situacao === "em_estoque" ? setNoPacote((m) => { const n = { ...m }; if (n[e.id]) delete n[e.id]; else n[e.id] = true; return n; })
+                : setAbrindo(e.id))}
+              className="flex w-full cursor-pointer items-center gap-3 px-3 py-2 text-left"
+              style={{ borderTop: i ? `1px solid ${C.line}` : "none", background: limpando && marcados[e.id] ? "#FFF1EB" : pacote && noPacote[e.id] ? "#F1ECF8" : "transparent" }}>
               {limpando && <input type="checkbox" readOnly checked={!!marcados[e.id]} className="shrink-0" />}
+              {pacote && !limpando && <input type="checkbox" readOnly checked={!!noPacote[e.id]} disabled={e.situacao !== "em_estoque"} className="shrink-0" />}
               {/* A foto principal na linha (05/11/2026). */}
               <span className="grid h-[42px] w-[56px] shrink-0 place-items-center overflow-hidden rounded" style={{ background: C.bg }}>
                 {capaDe && capaDe.url
@@ -14756,7 +14861,31 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
                   </span>
                 )}
               </span>
-            </button>
+              {/* O PREÇO PARA OS LOJISTAS NA LINHA (08/11/2026, o Derek:
+                  "adicionar campo para digitar valor de venda"). É o preço
+                  pedido do carro — o mesmo da Venda para lojistas, com o
+                  histórico de quando muda —, e embaixo a distância da FIPE. */}
+              {e.situacao === "em_estoque" && (
+                <span className="w-[132px] shrink-0 text-right" onClick={(ev) => ev.stopPropagation()}>
+                  <input key={`pp-${e.id}-${e.preco_pedido}`} defaultValue={Number(e.preco_pedido) ? centavosBR(e.preco_pedido) : ""}
+                    inputMode="decimal" placeholder="preço lojista"
+                    className="w-full rounded border px-1.5 py-1 text-right text-[12.5px] outline-none" style={{ ...inputSty, fontFamily: F.mono }}
+                    onKeyDown={(ev) => { if (ev.key === "Enter") ev.target.blur(); }}
+                    onBlur={async (ev) => {
+                      const novo = ev.target.value.trim() ? numeroBR(ev.target.value) : null;
+                      if ((novo || null) === (Number(e.preco_pedido) || null)) return;
+                      try { const r = await atualizarEstoque(e.id, { preco_pedido: novo }); if (r) setLista((l) => l.map((x) => (x.id === e.id ? { ...x, ...r } : x))); }
+                      catch (x) { alert(x.message); }
+                    }} />
+                  {(() => {
+                    const fipe = Number(v.fipe_valor) || 0, pp = Number(e.preco_pedido) || 0;
+                    if (!fipe) return <span className="block text-[10.5px]" style={{ color: C.mute }}>sem FIPE</span>;
+                    const pct = pp ? (1 - pp / fipe) * 100 : null;
+                    return <span className="block text-[10.5px]" style={{ color: C.mute }}>FIPE {brl(fipe)}{pct != null ? <b style={{ color: pct >= 0 ? C.verde : C.laranja }}> · {pct >= 0 ? `${pct.toFixed(1).replace(".", ",")}% abaixo` : `${(-pct).toFixed(1).replace(".", ",")}% acima`}</b> : null}</span>;
+                  })()}
+                </span>
+              )}
+            </div>
           );
         })}
       </div>
