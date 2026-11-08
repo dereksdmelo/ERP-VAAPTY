@@ -274,11 +274,12 @@
       return "<div class='" + (d === foco ? "hoje" : "") + "'><b>" + ((porDia[d] || []).length) + "</b><span>" + DIAS[i] + " " + d.slice(8, 10) + "</span></div>";
     }).join("");
     var doDia = porDia[foco] || [];
-    $("agendaLista").innerHTML = doDia.length ? doDia.slice(0, 14).map(function (x) {
+    var cabe = 8;
+    $("agendaLista").innerHTML = doDia.length ? doDia.slice(0, doDia.length > cabe ? cabe - 1 : cabe).map(function (x) {
       var cls = x.status === "confirmado" ? "ok" : x.status === "compareceu" ? "veio" : x.status === "nao_compareceu" ? "faltou" : "";
       var marca = x.status === "confirmado" ? " ✓" : x.status === "compareceu" ? " · veio" : "";
-      return "<div class='" + cls + "'><b>" + esc(x.hora) + "</b>" + esc(x.carro || "carro a confirmar") + marca + (x.agendou ? " <span style='color:var(--mudo)'>· " + esc(primeiro(x.agendou)) + "</span>" : "") + "</div>";
-    }).join("") + (doDia.length > 14 ? "<div style='color:var(--mudo)'>+ " + (doDia.length - 14) + " agendamentos</div>" : "") : "<div style='color:var(--mudo)'>Nenhum agendamento.</div>";
+      return "<div class='" + cls + "'><b>" + esc(x.hora) + "</b>" + esc(x.carro || "carro a confirmar") + marca + (x.agendou ? " <span style='color:var(--mudo)'>· " + esc(primeiro(String(x.agendou).replace(/\s*-\s*/g, " ").replace(/^Celular ·.*/, "celular"))) + "</span>" : "") + "</div>";
+    }).join("") + (doDia.length > cabe ? "<div style='color:var(--mudo)'>+ " + (doDia.length - cabe + 1) + " agendamentos</div>" : "") : "<div style='color:var(--mudo)'>Nenhum agendamento.</div>";
   }
   function lerAgenda() {
     if (cfg.agenda !== true) { $("agendaCaixa").style.display = "none"; $("direita").className = "direita so"; return; }
