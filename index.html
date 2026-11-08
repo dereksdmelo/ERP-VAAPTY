@@ -13912,7 +13912,27 @@ function PrevisaoRentabilidade({ patio, realizadoMes, comp, aoMudar, aoAbrir }) 
   );
 }
 
-function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar, aoMudar, aoPrever, prevendo, previsao }) {
+/* O NOME DO NEGOCIADOR SEM ACENTO (08/11/2026, o Derek: "tá aparecendo
+ * dois André Bruno"). Os carros guardam o nome em texto, como veio — e
+ * "ANDRE BRUNO" e "ANDRÉ BRUNO" viravam duas pessoas no filtro e na caixa
+ * por negociador. A chave tira o acento; o nome mostrado é a grafia mais
+ * usada, com acento quando houver. */
+const chaveNeg = (n) => semAcento(String(n || "")).toUpperCase().replace(/\s+/g, " ").trim();
+function nomesDeNegociador(lista) {
+  const por = {};
+  (lista || []).forEach((e) => {
+    const n = String(e.negociador_nome || "").trim(); if (!n) return;
+    const k = chaveNeg(n); por[k] = por[k] || {};
+    por[k][n.toUpperCase()] = (por[k][n.toUpperCase()] || 0) + 1;
+  });
+  const nome = {};
+  Object.keys(por).forEach((k) => {
+    nome[k] = Object.keys(por[k]).sort((a, b) => (b !== chaveNeg(b)) - (a !== chaveNeg(a)) || por[k][b] - por[k][a])[0];
+  });
+  return nome;
+}
+
+function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar, aoMudar, aoPrever, prevendo, previsao, todosVendidos }) {
   const rs = (v) => (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   // TOTAL NEGOCIADORES abre por botão (24/10/2026, o Derek: *"pode ser um
   // botão que abre um pop-up, aí não fica ocupando espaço na lateral"*):
@@ -13933,12 +13953,15 @@ function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar, aoMudar, aoPr
   const [ordem, setOrdem] = useState({ col: "", desc: false });
   const todas = vendidos.map((e) => ({ e, r: rentabilidadeDe(e), semana: semanaDe(e), dias: diasNoPatio(e) }));
   const opcoes = (f) => Array.from(new Set(todas.map(f).filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b), "pt-BR"));
-  const negsOp = opcoes(({ e }) => e.negociador_nome && String(e.negociador_nome).toUpperCase());
+  // Todos os negociadores que já venderam algum carro, não só os do mês:
+  // escolher quem não vendeu no mês mostra "nenhum carro", que é resposta.
+  const nomeNeg = nomesDeNegociador((todosVendidos || []).concat(vendidos));
+  const negsOp = Object.keys(nomeNeg).sort((a, b) => a.localeCompare(b, "pt-BR"));
   const meiosOp = opcoes(({ e }) => e.meio_alcance);
   const prospOp = opcoes(({ e }) => e.prospector);
   const termosR = semAcento(fBusca).toLowerCase().split(/\s+/).filter(Boolean);
   const filtradas = todas.filter(({ e, r, semana }) => {
-    if (fNeg && String(e.negociador_nome || "").toUpperCase() !== fNeg) return false;
+    if (fNeg && chaveNeg(e.negociador_nome) !== fNeg) return false;
     if (fSem && String(semana || "") !== fSem) return false;
     if (fMeio && e.meio_alcance !== fMeio) return false;
     if (fProsp && e.prospector !== fProsp) return false;
@@ -13980,8 +14003,8 @@ function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar, aoMudar, aoPr
   // A caixa TOTAL NEGOCIADORES da planilha.
   const porNeg = {};
   linhas.forEach(({ e, r }) => {
-    const n = String(e.negociador_nome || "sem negociador").toUpperCase();
-    porNeg[n] = porNeg[n] || { nome: n, carros: 0, venda: 0, liquida: 0 };
+    const n = e.negociador_nome ? chaveNeg(e.negociador_nome) : "SEM NEGOCIADOR";
+    porNeg[n] = porNeg[n] || { nome: nomeNeg[n] || n, carros: 0, venda: 0, liquida: 0 };
     porNeg[n].carros += 1; porNeg[n].venda += r.venda; porNeg[n].liquida += r.liquida;
   });
   const negociadores = Object.keys(porNeg).map((k) => porNeg[k]).sort((a, b) => b.liquida - a.liquida);
@@ -14080,7 +14103,7 @@ function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar, aoMudar, aoPr
         <input value={fBusca} onChange={(ev) => setFBusca(ev.target.value)} placeholder="Pesquisar carro, placa, comprador…"
           className="w-[240px] max-w-full rounded-md border px-2.5 py-1 text-[12.5px] outline-none"
           style={{ ...inputSty, borderColor: fBusca ? C.roxo : C.line }} />
-        {sel(fNeg, setFNeg, "todos os negociadores", negsOp)}
+        {sel(fNeg, setFNeg, "todos os negociadores", negsOp, (k) => nomeNeg[k] || k)}
         {sel(fSem, setFSem, "todas as semanas", ["1", "2", "3", "4"], (n) => `${n}ª semana`)}
         {!!meiosOp.length && sel(fMeio, setFMeio, "todo meio de alcance", meiosOp)}
         {!!prospOp.length && sel(fProsp, setFProsp, "todo prospector", prospOp)}
@@ -14579,6 +14602,7 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
             try { const novo = await atualizarEstoque(id, dados); if (novo) setLista((l) => l.map((x) => (x.id === id ? { ...x, ...novo } : x))); }
             catch (err) { alert(err.message); }
           }}
+          todosVendidos={lista.filter((e) => e.situacao === "vendido")}
           vendidos={lista.filter((e) => e.situacao === "vendido" && String(e.vendido_em || e.entrou_em || "").slice(0, 7) === String(comp).slice(0, 7))} />
       )}
 

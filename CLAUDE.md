@@ -4381,6 +4381,13 @@ placa ou comprador; negociador, semana, meio de alcance e prospector em
 lista; "só prejuízo"; clicar no cabeçalho ordena. O TOTAL e a caixa por
 negociador somam só o que está à vista.
 
+**O negociador sem acento (08/11/2026):** o carro guarda o nome em
+texto, e "ANDRE BRUNO" e "ANDRÉ BRUNO" viravam duas pessoas no filtro e
+no "Por negociador". `chaveNeg` tira o acento; o nome mostrado é a
+grafia mais usada, com acento quando há. O filtro lista todo negociador
+que já vendeu, não só os do mês — o André Ricardo, sem venda em novembro,
+sumia da lista.
+
 **A previsão de rentabilidade (0118)** — o Derek: *"valores prováveis de
 venda nos carros que estão em estoque… vendendo todos, ou só alguns…
 às vezes já vendemos um e queremos saber quanto vai dar, mas não tem
