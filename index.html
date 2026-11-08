@@ -22837,7 +22837,7 @@ function FinFolha({ comp }) {
             <input type="date" className="rounded-lg border px-2 py-1.5 text-[13px] outline-none" style={inputSty} value={novoVale.data} onChange={(e) => setNovoVale({ ...novoVale, data: e.target.value })} />
             <input className="w-28 rounded-lg border px-2 py-1.5 text-right text-[13px] outline-none" style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal" placeholder="Valor" value={novoVale.valor} onChange={(e) => setNovoVale({ ...novoVale, valor: e.target.value })} />
             <input className="flex-1 rounded-lg border px-2 py-1.5 text-[13px] outline-none" style={inputSty} placeholder="Motivo (opcional)" value={novoVale.descricao} onChange={(e) => setNovoVale({ ...novoVale, descricao: e.target.value })} />
-            <BotaoPrimario onClick={async () => { try { await fin("vale", null, finJson("POST", { ...novoVale, competencia: comp })); setNovoVale(null); carregar(); } catch (e) { setErro(e.message); } }}>Lançar</BotaoPrimario>
+            <BotaoPrimario onClick={async () => { try { const rv = await fin("vale", null, finJson("POST", { ...novoVale, competencia: comp })); setNovoVale(null); if (rv && rv.aviso) setErro(rv.aviso); carregar(); } catch (e) { setErro(e.message); } }}>Lançar</BotaoPrimario>
             <button onClick={() => setNovoVale(null)} className="text-[13px]" style={{ color: C.mute }}>cancelar</button>
           </div>
         )}
@@ -22846,6 +22846,11 @@ function FinFolha({ comp }) {
             <div key={v.id} className="flex items-center gap-3 text-[13px]">
               <span className="w-24" style={{ color: C.mute }}>{diaBR(v.data)}</span>
               <span className="flex-1">{v.fin_funcionario ? v.fin_funcionario.nome : "—"}{v.descricao ? <span style={{ color: C.mute }}> · {v.descricao}</span> : null}</span>
+              {/* O vale novo é um título a pagar; a Conciliação o liga ao PIX. Os antigos ficam só na Folha. */}
+              <span className="rounded-full px-2 py-px text-[10.5px] font-bold" title={v.titulo ? "Está em Títulos financeiros; concilie com o PIX do extrato." : "Vale antigo: só desconta na Folha, não tem título."}
+                style={v.titulo ? (v.titulo.situacao === "efetivado" ? { background: "#E4F1E8", color: C.verde } : { background: AMARELO.fundo, color: AMARELO.texto }) : { background: C.bg, color: C.mute }}>
+                {v.titulo ? (v.titulo.situacao === "efetivado" ? "pago no banco" : "título a pagar") : "só na folha"}
+              </span>
               <span style={{ fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>{rs2(v.valor)}</span>
               <button onClick={async () => { try { await fin("vale", { id: v.id }, { method: "DELETE" }); carregar(); } catch (e) { setErro(e.message); } }} className="text-[11px]" style={{ color: C.mute }}>apagar</button>
             </div>

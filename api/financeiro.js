@@ -2077,7 +2077,14 @@ async function vale(req, res, tok) {
   if (req.method === "GET") {
     const comp = competenciaDe(req.query.competencia) || competenciaDe(hojeAqui());
     const lista = await supa(`${base("fin_vale")}?select=*,fin_funcionario(id,nome)&competencia=eq.${comp}&order=data.asc`, { headers: cab(tok) });
-    return res.status(200).json({ competencia: comp, vales: lista || [] });
+    // Cada vale novo tem um título; o estado dele (a pagar / pago no banco) vem junto.
+    const ids = (lista || []).map((v) => v.lancamento_id).filter(Boolean);
+    let tits = {};
+    if (ids.length) {
+      const ts = await supa(`${base("fin_lancamento")}?select=id,situacao,extrato_id&id=in.(${ids.join(",")})`, { headers: cab(tok) }).catch(() => []);
+      (ts || []).forEach((t) => { tits[t.id] = t; });
+    }
+    return res.status(200).json({ competencia: comp, vales: (lista || []).map((v) => ({ ...v, titulo: v.lancamento_id ? (tits[v.lancamento_id] || null) : null })) });
   }
   if (req.method === "POST" || req.method === "PATCH") {
     const c = await corpoDe(req);
@@ -2092,21 +2099,54 @@ async function vale(req, res, tok) {
     if (req.method === "POST") {
       if (!l.funcionario_id || !l.valor) return res.status(400).json({ erro: "Informe o funcionário e o valor." });
       l.data = l.data || hojeAqui(); l.competencia = l.competencia || competenciaDe(l.data);
+      /* O VALE É UM TÍTULO (0127, 08/11/2026). Além do registro que desconta do líquido na
+       * Folha, nasce um título a pagar com a pessoa e a categoria da folha: é ele que a
+       * Conciliação liga ao PIX, e é por ele que o DRE e a projeção enxergam o vale como
+       * pagamento da pessoa. Sem categoria da folha configurada, nasce só o registro. */
+      const cfg = await supa(`${base("fin_config")}?select=*&id=eq.1`, { headers: cab(tok) }).then(um).catch(() => null);
+      const func = um(await supa(`${base("fin_funcionario")}?select=nome&id=eq.${l.funcionario_id}`, { headers: cab(tok) }).catch(() => []));
+      let titulo = null;
+      if (cfg && cfg.folha_cat_salario) {
+        const desc = `Vale — ${(func && func.nome) || "funcionário"}${l.descricao ? ` (${l.descricao})` : ""}`;
+        titulo = um(await supa(base("fin_lancamento"), { method: "POST", headers: cab(tok, REP), body: JSON.stringify({
+          data: l.data, vencimento: l.data, competencia: l.competencia, categoria_id: cfg.folha_cat_salario,
+          descricao: desc, favorecido: (func && func.nome) || null, funcionario_id: l.funcionario_id,
+          debito: l.valor, credito: 0, situacao: "aberto", origem: "vale" }) }).catch(() => null));
+        if (titulo) l.lancamento_id = titulo.id;
+      }
       const r = await supa(base("fin_vale"), { method: "POST", headers: cab(tok, REP), body: JSON.stringify(l) });
       if (!um(r)) return recusado(res);
-      return res.status(201).json({ ok: true, vale: um(r) });
+      return res.status(201).json({ ok: true, vale: um(r), titulo: !!titulo, aviso: titulo ? undefined : "O vale foi registrado na Folha, mas não virou título: escolha as categorias da folha na aba Folha." });
     }
     const id = String(req.query.id || "");
     if (!RX_ID.test(id)) return res.status(400).json({ erro: "id inválido." });
     const r = await supa(`${base("fin_vale")}?id=eq.${id}`, { method: "PATCH", headers: cab(tok, REP), body: JSON.stringify(l) });
     if (!um(r)) return recusado(res);
-    return res.status(200).json({ ok: true, vale: um(r) });
+    // Enquanto o título está em aberto, acompanha o vale; depois de pago no banco, não se mexe.
+    const v = um(r);
+    if (v && v.lancamento_id && (l.valor !== undefined || l.data !== undefined || l.descricao !== undefined)) {
+      const mud = {};
+      if (l.valor !== undefined) mud.debito = l.valor;
+      if (l.data !== undefined) { mud.data = l.data; mud.vencimento = l.data; }
+      if (l.competencia !== undefined) mud.competencia = l.competencia;
+      await supa(`${base("fin_lancamento")}?id=eq.${v.lancamento_id}&situacao=eq.aberto`, { method: "PATCH", headers: cab(tok), body: JSON.stringify(mud) }).catch(() => {});
+    }
+    return res.status(200).json({ ok: true, vale: v });
   }
   if (req.method === "DELETE") {
     const id = String(req.query.id || "");
     if (!RX_ID.test(id)) return res.status(400).json({ erro: "id inválido." });
+    const atual = um(await supa(`${base("fin_vale")}?select=lancamento_id&id=eq.${id}`, { headers: cab(tok) }).catch(() => []));
+    if (atual && atual.lancamento_id) {
+      const t = um(await supa(`${base("fin_lancamento")}?select=situacao&id=eq.${atual.lancamento_id}`, { headers: cab(tok) }).catch(() => []));
+      if (t && t.situacao === "efetivado") return res.status(409).json({ erro: "Esse vale já foi pago no banco. Desfaça o vínculo na Conciliação antes de apagar." });
+    }
     const r = await supa(`${base("fin_vale")}?id=eq.${id}`, { method: "DELETE", headers: cab(tok, REP) });
     if (!um(r)) return recusado(res);
+    // O título em aberto que nasceu com o vale vai junto; o que já ligou ao banco fica.
+    if (atual && atual.lancamento_id) {
+      await supa(`${base("fin_lancamento")}?id=eq.${atual.lancamento_id}&situacao=eq.aberto`, { method: "PATCH", headers: cab(tok), body: JSON.stringify({ situacao: "cancelado" }) }).catch(() => {});
+    }
     return res.status(200).json({ ok: true });
   }
   res.setHeader("Allow", "GET, POST, PATCH, DELETE");
