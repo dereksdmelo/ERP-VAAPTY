@@ -21645,13 +21645,18 @@ function FolhaProjetada({ comp }) {
  * número da linha —, os em aberto à parte e as contas fixas que ainda
  * não viraram título. Corrige-se ali: categoria, competência e a
  * observação; o lançamento repartido diz que a correção é em Lançamentos. */
-function DetalheDRE({ comp, linha, aoFechar, aoMudou }) {
+/* OS TÍTULOS DE UMA LINHA DO DRE, ABERTOS NA PRÓPRIA TABELA (08/11/2026, o Derek:
+ * "igual ao DRE do Camisetas Já"). Antes abria uma janela por cima; agora a linha se
+ * expande embaixo, com a seta, a etiqueta de cada título (banco / em aberto), o valor e
+ * um ✎ que mostra os campos de correção (categoria e competência) naquele título. */
+function DetalheDRE({ comp, linha, aoMudou }) {
   const [d, setD] = useState(null); const [erro, setErro] = useState("");
   const [cats] = useCategoriasFin(true);
   const [mexido, setMexido] = useState({});
+  const [editando, setEditando] = useState(null);
   const ler = () => fin("dre", { competencia: comp, acao: "detalhe", categoria_id: linha.id || "sem" })
     .then((x) => { setD(x); setErro(""); }).catch((e) => setErro(e.message));
-  useEffect(() => { ler(); }, [comp, linha.id]);
+  useEffect(() => { setD(null); ler(); }, [comp, linha.id]);
   const mudar = async (it, mud) => {
     try {
       await fin("lancamento", { id: it.id }, finJson("PATCH", mud));
@@ -21660,23 +21665,39 @@ function DetalheDRE({ comp, linha, aoFechar, aoMudou }) {
       ler();
     } catch (e) { setErro(e.message); }
   };
-  const efet = d ? d.itens.filter((x) => x.situacao === "efetivado") : [];
-  const abertos = d ? d.itens.filter((x) => x.situacao === "aberto") : [];
-  const tabela = (lista) => (
-    <table className="w-full" style={{ borderCollapse: "collapse" }}>
-      <tbody>
-        {lista.map((it) => (
-          <tr key={it.id} style={{ borderBottom: `1px solid ${C.line}`, background: mexido[it.id] ? "#F3F7F4" : undefined }}>
-            <td className="whitespace-nowrap px-2 py-1.5 align-top text-[12px]" style={{ color: C.mute }}>{it.data ? diaBR(it.data) : "—"}</td>
-            <td className="px-2 py-1.5 align-top text-[12.5px]">
-              <div>{it.descricao || "—"}</div>
-              <div className="text-[11px]" style={{ color: C.mute }}>
-                {[it.favorecido, it.funcionario, it.conta].filter(Boolean).join(" · ")}
-                {it.repartido && <span style={{ color: AMARELO.texto }}> · repartido: só esta parte (R$ {rs2(Math.abs(it.valor))} de {rs2(Math.abs(it.total))}) — corrija em Lançamentos</span>}
-                {it.observacao && <span> · obs: {it.observacao}</span>}
+  const itens = d ? d.itens.slice().sort((a, b) => (a.situacao === b.situacao ? Math.abs(b.valor) - Math.abs(a.valor) : a.situacao === "efetivado" ? -1 : 1)) : [];
+  const etiqueta = (it) => it.situacao === "efetivado"
+    ? <span className="rounded-full px-2 py-px text-[10.5px] font-bold" style={{ background: "#E4F1E8", color: C.verde }}>banco</span>
+    : <span className="rounded-full px-2 py-px text-[10.5px] font-bold" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>em aberto</span>;
+  return (
+    <div className="px-3 pb-3 pt-1.5 pl-8" style={{ background: "#F7F9FB", borderBottom: `1px solid ${C.line}` }}>
+      {erro && <p className="mb-1 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+      {!d ? <p className="text-[12.5px]" style={{ color: C.mute }}>Carregando…</p> : (
+        <>
+          {!itens.length && !(d.fixas_sem_titulo || []).length && (
+            <p className="text-[12.5px]" style={{ color: C.mute }}>Sem lançamento nesta conta (o valor vem de cálculo, não de título).</p>
+          )}
+          {itens.map((it) => (
+            <div key={it.id} className="py-1" style={{ background: mexido[it.id] ? "#F3F7F4" : undefined }}>
+              <div className="flex items-baseline gap-2 text-[12.5px]">
+                <span className="w-12 shrink-0 text-[11.5px]" style={{ color: C.mute }}>{it.data ? diaBR(it.data) : "—"}</span>
+                <span className="min-w-0 flex-1">
+                  {it.descricao || "—"}
+                  {[it.favorecido, it.funcionario, it.conta].filter(Boolean).length > 0 && (
+                    <span style={{ color: C.mute }}> · {[it.favorecido, it.funcionario, it.conta].filter(Boolean).join(" · ")}</span>
+                  )}{" "}
+                  {etiqueta(it)}
+                  {it.repartido && <span className="text-[11px]" style={{ color: AMARELO.texto }}> · repartido: só esta parte (R$ {rs2(Math.abs(it.valor))} de {rs2(Math.abs(it.total))}) — corrija em Lançamentos</span>}
+                  {it.observacao && <span className="text-[11px]" style={{ color: C.mute }}> · obs: {it.observacao}</span>}
+                </span>
+                <span className="whitespace-nowrap font-semibold" style={{ fontVariantNumeric: "tabular-nums", color: it.valor < 0 ? C.laranja : C.verde }}>{rs2(it.valor)}</span>
+                {!it.repartido ? (
+                  <button onClick={() => setEditando(editando === it.id ? null : it.id)} title="Corrigir categoria ou competência deste título"
+                    className="rounded px-1.5 text-[12px]" style={{ border: `1px solid ${C.line}`, color: C.mute }}>✎</button>
+                ) : <span className="w-6" />}
               </div>
-              {!it.repartido && (
-                <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11.5px]">
+              {editando === it.id && !it.repartido && (
+                <div className="mt-1 flex flex-wrap items-center gap-1.5 pl-14 text-[11.5px]">
                   <select className="rounded border px-1 py-0.5 outline-none" style={inputSty} value={it.categoria_id || ""}
                     onChange={(e) => mudar(it, { categoria_id: e.target.value || null })} title="Mudar a categoria">
                     <option value="">sem categoria</option>
@@ -21687,56 +21708,26 @@ function DetalheDRE({ comp, linha, aoFechar, aoMudou }) {
                     onBlur={(e) => { const v = e.target.value; if (v && v !== String(it.competencia || "").slice(0, 7)) mudar(it, { competencia: `${v}-01` }); }} />
                 </div>
               )}
-            </td>
-            <td className="whitespace-nowrap px-2 py-1.5 text-right align-top text-[12.5px] font-semibold" style={{ fontVariantNumeric: "tabular-nums", color: it.valor < 0 ? C.laranja : C.verde }}>{rs2(it.valor)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-3 lg:p-8" style={{ background: "rgba(24,18,33,0.45)" }} onClick={aoFechar}>
-      <div className="w-full max-w-3xl rounded-xl p-4" style={{ background: C.paper }} onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-baseline justify-between gap-3">
-          <div>
-            <div className="text-[17px] font-bold">{linha.nome}</div>
-            <div className="text-[12px]" style={{ color: C.mute }}>{rotuloMes(comp)} · na linha do DRE: <b>{rs2(linha.valor)}</b></div>
-          </div>
-          <button onClick={aoFechar} className="text-[13px]" style={{ color: C.mute }}>fechar</button>
-        </div>
-        {erro && <p className="mt-2 text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
-        {!d ? <p className="mt-3 text-[13px]" style={{ color: C.mute }}>Carregando…</p> : (
-          <div className="mt-3 space-y-4">
-            <section>
-              <div className="mb-1 flex items-baseline justify-between text-[11px] font-bold uppercase tracking-[0.06em]" style={{ color: C.mute }}>
-                <span>Passou no banco ({efet.length})</span><span style={{ fontVariantNumeric: "tabular-nums" }}>{rs2(d.efetivado)}</span>
-              </div>
-              {efet.length ? tabela(efet) : <p className="text-[12.5px]" style={{ color: C.mute }}>Nada efetivado nesta categoria no mês.</p>}
-            </section>
-            {!!abertos.length && (
-              <section>
-                <div className="mb-1 flex items-baseline justify-between text-[11px] font-bold uppercase tracking-[0.06em]" style={{ color: AMARELO.texto }}>
-                  <span>Títulos em aberto ({abertos.length}) — fora da linha, entram na projeção</span><span style={{ fontVariantNumeric: "tabular-nums" }}>{rs2(d.aberto)}</span>
-                </div>
-                {tabela(abertos)}
-              </section>
-            )}
-            {!!(d.fixas_sem_titulo || []).length && (
-              <section>
-                <div className="mb-1 text-[11px] font-bold uppercase tracking-[0.06em]" style={{ color: C.mute }}>Contas fixas desta categoria ainda sem título</div>
-                {d.fixas_sem_titulo.map((x) => (
-                  <div key={x.id} className="flex justify-between px-2 py-1 text-[12.5px]" style={{ borderBottom: `1px solid ${C.line}` }}>
-                    <span>{x.nome}</span><span style={{ fontVariantNumeric: "tabular-nums" }}>{rs2(-x.previsto)}</span>
-                  </div>
-                ))}
-              </section>
-            )}
-            {Math.abs(d.efetivado - linha.valor) >= 0.01 && !Object.keys(mexido).length && (
-              <p className="text-[11.5px]" style={{ color: AMARELO.texto }}>A soma ({rs2(d.efetivado)}) não bate com a linha ({rs2(linha.valor)}) — recarregue o DRE.</p>
-            )}
-          </div>
-        )}
-      </div>
+            </div>
+          ))}
+          {!!(d.fixas_sem_titulo || []).length && (
+            <div className="mt-1 pt-1" style={{ borderTop: `1px dashed ${C.line}` }}>
+              <div className="text-[10.5px] font-bold uppercase tracking-[0.06em]" style={{ color: C.mute }}>Contas fixas desta categoria ainda sem título</div>
+              {d.fixas_sem_titulo.map((x) => (
+                <div key={x.id} className="flex justify-between py-0.5 text-[12.5px]"><span>{x.nome}</span><span style={{ fontVariantNumeric: "tabular-nums" }}>{rs2(-x.previsto)}</span></div>
+              ))}
+            </div>
+          )}
+          {!!itens.length && (
+            <p className="mt-1 text-[11px]" style={{ color: C.mute }}>
+              No banco: {rs2(d.efetivado)}{d.aberto ? ` · em aberto (fora da linha, entra na projeção): ${rs2(d.aberto)}` : ""}
+              {Math.abs(d.efetivado - linha.valor) >= 0.01 && !Object.keys(mexido).length && (
+                <span style={{ color: AMARELO.texto }}> · a soma não bate com a linha ({rs2(linha.valor)}) — recarregue o DRE</span>
+              )}
+            </p>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -21788,16 +21779,24 @@ function FinDRE({ comp }) {
     );
   }
   if (!d) return <div>{seletor}<p className="text-[13px]" style={{ color: C.mute }}>Calculando…</p></div>;
-  const linha = (rot, v, forte, cor, abrirCom) => abrirCom ? (
-    <button key={rot} onClick={() => setAbrir(abrirCom)} title="Ver os lançamentos que somam este valor"
-      className="flex w-full items-baseline justify-between gap-3 px-3 py-1.5 text-left text-[13px] hover:bg-[#F7F4FA]" style={{ borderBottom: `1px solid ${C.line}`, fontWeight: forte ? 700 : 400 }}>
-      <span>{rot} <span className="text-[11px]" style={{ color: C.mute }}>›</span></span><span style={{ fontVariantNumeric: "tabular-nums", color: cor || (v < 0 ? C.laranja : C.ink) }}>{rs2(v)}</span>
-    </button>
-  ) : (
-    <div key={rot} className="flex items-baseline justify-between gap-3 px-3 py-1.5 text-[13px]" style={{ borderBottom: `1px solid ${C.line}`, fontWeight: forte ? 700 : 400 }}>
-      <span>{rot}</span><span style={{ fontVariantNumeric: "tabular-nums", color: cor || (v < 0 ? C.laranja : C.ink) }}>{rs2(v)}</span>
-    </div>
-  );
+  const linha = (rot, v, forte, cor, abrirCom) => {
+    if (!abrirCom) return (
+      <div key={rot} className="flex items-baseline justify-between gap-3 px-3 py-1.5 text-[13px]" style={{ borderBottom: `1px solid ${C.line}`, fontWeight: forte ? 700 : 400 }}>
+        <span>{rot}</span><span style={{ fontVariantNumeric: "tabular-nums", color: cor || (v < 0 ? C.laranja : C.ink) }}>{rs2(v)}</span>
+      </div>
+    );
+    const aberta = !!abrir && (abrir.id || "sem") === (abrirCom.id || "sem");
+    return (
+      <div key={rot}>
+        <button onClick={() => setAbrir(aberta ? null : abrirCom)} title="Ver os títulos que somam este valor"
+          className="flex w-full items-baseline justify-between gap-3 px-3 py-1.5 text-left text-[13px] hover:bg-[#F7F4FA]" style={{ borderBottom: aberta ? "none" : `1px solid ${C.line}`, fontWeight: forte ? 700 : 400 }}>
+          <span><span className="mr-1.5 text-[11px]" style={{ color: C.mute }}>{aberta ? "▾" : "▸"}</span>{rot}</span>
+          <span style={{ fontVariantNumeric: "tabular-nums", color: cor || (v < 0 ? C.laranja : C.ink) }}>{rs2(v)}</span>
+        </button>
+        {aberta && <DetalheDRE comp={comp} linha={abrirCom} aoMudou={() => setVers((x) => x + 1)} />}
+      </div>
+    );
+  };
   return (
     <div>{seletor}
     <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
@@ -21853,7 +21852,6 @@ function FinDRE({ comp }) {
       </div>
     </div>
     <FolhaProjetada comp={comp} />
-    {abrir && <DetalheDRE comp={comp} linha={abrir} aoFechar={() => setAbrir(null)} aoMudou={() => setVers((x) => x + 1)} />}
     </div>
   );
 }
