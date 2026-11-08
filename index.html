@@ -27017,6 +27017,10 @@ function TelaRecuperacao({ perfil, aoAbrir }) {
   const [deP, setDeP] = useState(""); const [ateP, setAteP] = useState("");
   const [contato, setContato] = useState({}); // atendimento → { acaoId, titulo }
   const [verHoje, setVerHoje] = useState(false);
+  const [verDepois, setVerDepois] = useState(false);
+  const [painel, setPainel] = useState({}); // atendimento → "nota" | "agenda"
+  const [nota, setNota] = useState({}); const [quando, setQuando] = useState({});
+  const [aviso, setAviso] = useState({});
   const faixa = (() => {
     const h = hojeSP(), m0 = `${h.slice(0, 8)}01`;
     if (periodo === "mes") return { de: m0, ate: h };
@@ -27040,10 +27044,18 @@ function TelaRecuperacao({ perfil, aoAbrir }) {
   const hoje = hojeSP();
   const lista = (d && d.atendimentos) || [];
   const diasDesde = (iso) => (iso ? Math.round((Date.parse(hoje) - Date.parse(diaSP(iso))) / 86400000) : null);
-  const voltam = lista.filter((a) => a.volta_em && a.volta_em <= hoje && diaSP(a.ultimo_contato) !== hoje)
+  // AS RECUPERAÇÕES AGENDADAS (08/11/2026, o Derek: "cadê as opções de
+  // recuperação que eu pedi?"): o que foi marcado no "Agendar
+  // recuperação" vem primeiro, no dia dele — e as atrasadas junto.
+  const agendHoje = lista.filter((a) => a.agendada && a.agendada.dia <= hoje && !contato[a.id])
+    .sort((a, b) => `${a.agendada.dia} ${a.agendada.hora || "99"}`.localeCompare(`${b.agendada.dia} ${b.agendada.hora || "99"}`));
+  const agendDepois = lista.filter((a) => a.agendada && a.agendada.dia > hoje)
+    .sort((a, b) => `${a.agendada.dia} ${a.agendada.hora || "99"}`.localeCompare(`${b.agendada.dia} ${b.agendada.hora || "99"}`));
+  const idsAgend = new Set(agendHoje.concat(agendDepois).map((a) => a.id));
+  const voltam = lista.filter((a) => !idsAgend.has(a.id) && a.volta_em && a.volta_em <= hoje && diaSP(a.ultimo_contato) !== hoje)
     .sort((a, b) => (a.volta_em < b.volta_em ? -1 : 1));
-  const idsVolta = new Set(voltam.map((a) => a.id));
-  const deHoje = lista.filter((a) => diaSP(a.ultimo_contato) === hoje || contato[a.id]);
+  const idsVolta = new Set(voltam.map((a) => a.id).concat([...idsAgend]));
+  const deHoje = lista.filter((a) => !idsAgend.has(a.id) && (diaSP(a.ultimo_contato) === hoje || contato[a.id]));
   const idsHoje = new Set(deHoje.map((a) => a.id));
   const recuperar = lista.filter((a) => !idsVolta.has(a.id) && !idsHoje.has(a.id)
     && !(a.volta_em && a.volta_em > hoje)
@@ -27056,6 +27068,8 @@ function TelaRecuperacao({ perfil, aoAbrir }) {
     const titulo = `${modo === "ligar" ? "Ligou para" : "WhatsApp para"} ${a.cliente_nome || "cliente"} · ${carroDe(a)}${a.cliente_telefone ? ` · ${a.cliente_telefone}` : ""}`;
     try {
       const acao = await criarAcao({ dia: hoje, hora: agoraSP(), tipo: "recuperacao", titulo, atendimento_id: a.id, feito: true });
+      // A recuperação que estava agendada para hoje está feita.
+      if (a.agendada && a.agendada.dia <= hoje) mexerAcao(a.agendada.id, { feito: true }).catch(() => {});
       setContato((m) => ({ ...m, [a.id]: { acaoId: acao && acao.id, titulo, hora: agoraSP() } }));
     } catch (e) { setErro(`Não registrou no Meu dia: ${e.message}`); }
   };
@@ -27069,6 +27083,27 @@ function TelaRecuperacao({ perfil, aoAbrir }) {
     } catch (e) { setErro(e.message); }
   };
   const somaDiasSP = (n) => new Date(Date.parse(hoje) + n * 86400000).toISOString().slice(0, 10);
+  const anotar = async (a) => {
+    const txt = String(nota[a.id] || "").trim(); if (!txt) return;
+    try {
+      const r = await fetchAut("/api/atendimento?recurso=do-telefone&acao=nota", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ atendimento_id: a.id, texto: txt }) });
+      const d = await r.json(); if (!r.ok) throw new Error(d.erro || "Não consegui anotar.");
+      setNota((m) => ({ ...m, [a.id]: "" })); setPainel((m) => ({ ...m, [a.id]: "" })); setAviso((m) => ({ ...m, [a.id]: "Anotado no atendimento." }));
+    } catch (e) { setErro(e.message); }
+  };
+  const agendarRec = async (a) => {
+    const q = quando[a.id] || {}; if (!q.dia) { setErro("Escolha o dia da recuperação."); return; }
+    try {
+      if (a.agendada) await mexerAcao(a.agendada.id, { feito: true }).catch(() => {});
+      await criarAcao({ dia: q.dia, hora: q.hora || null, tipo: "recuperacao", atendimento_id: a.id, feito: false,
+        titulo: `Recuperação: retomar com ${a.cliente_nome || "cliente"} · ${carroDe(a)}${a.cliente_telefone ? ` · ${a.cliente_telefone}` : ""}` });
+      await atualizarAtendimento(a.id, { volta_em: q.dia, ...(a.status === "fechado" ? {} : { status: "vai_voltar" }) }).catch(() => {});
+      setPainel((m) => ({ ...m, [a.id]: "" }));
+      setAviso((m) => ({ ...m, [a.id]: `Recuperação agendada para ${diaBR(q.dia)}${q.hora ? ` às ${q.hora}` : ""} — está no Meu dia.` }));
+      carregar(true);
+    } catch (e) { setErro(e.message); }
+  };
   const cartao = (a) => {
     const c = contato[a.id];
     const tel = soDigitos(a.cliente_telefone);
@@ -27086,6 +27121,11 @@ function TelaRecuperacao({ perfil, aoAbrir }) {
             {" · "}{a.contatos ? `${a.contatos} contato${a.contatos > 1 ? "s" : ""}, o último ${desde === 0 ? "hoje" : desde === 1 ? "ontem" : `há ${desde} d`}` : "nunca procurado"}
           </span>
         </div>
+        {a.agendada && (
+          <div className="mt-1 text-[12px] font-semibold" style={{ color: a.agendada.dia < hoje ? C.laranja : C.roxo }}>
+            ⏰ recuperação agendada {a.agendada.dia === hoje ? "para hoje" : a.agendada.dia < hoje ? `para ${diaBR(a.agendada.dia)} — atrasada` : `para ${diaBR(a.agendada.dia)}`}{a.agendada.hora ? ` às ${String(a.agendada.hora).slice(0, 5)}` : ""}
+          </div>
+        )}
         {a.ultimo_resultado && !c && <div className="mt-0.5 text-[11.5px]" style={{ color: C.mute }}>último: {a.ultimo_resultado}</div>}
         <div className="mt-2 flex flex-wrap items-center gap-2 text-[12.5px]">
           {tel ? (
@@ -27111,7 +27151,37 @@ function TelaRecuperacao({ perfil, aoAbrir }) {
             </span>
           )}
           {c && c.feito && <span className="font-semibold" style={{ color: C.verde }}>✓ {c.feito} — está no seu Meu dia</span>}
+          {/* ANOTAR E AGENDAR, em todo cliente (08/11/2026). */}
+          <span className="ml-auto flex flex-wrap gap-1.5">
+            {[["nota", "Anotar"], ["agenda", a.agendada ? "Reagendar recuperação" : "Agendar recuperação"]].map(([k, r]) => (
+              <button key={k} onClick={() => setPainel((m) => ({ ...m, [a.id]: m[a.id] === k ? "" : k }))} className="rounded-full px-3 py-1 font-semibold"
+                style={{ background: painel[a.id] === k ? C.roxo : "#fff", color: painel[a.id] === k ? "#fff" : C.roxo, border: `1px solid ${C.roxo}` }}>{r}</button>
+            ))}
+            {aoAbrir && <button onClick={() => aoAbrir(a.id)} className="rounded-full px-3 py-1 font-semibold" style={{ color: C.mute }}>abrir atendimento</button>}
+          </span>
         </div>
+        {painel[a.id] === "nota" && (
+          <div className="mt-2 flex gap-2 text-[12.5px]">
+            <input autoFocus value={nota[a.id] || ""} onChange={(e) => setNota((m) => ({ ...m, [a.id]: e.target.value }))} onKeyDown={(e) => { if (e.key === "Enter") anotar(a); }}
+              placeholder="ex.: quer 45 mil, vai falar com a esposa e retorna sexta" className="min-w-0 flex-1 rounded-md border px-2 py-1.5 outline-none" style={inputSty} />
+            <button onClick={() => anotar(a)} className="rounded-md px-3 py-1.5 font-semibold text-white" style={{ background: C.roxo }}>Anotar</button>
+          </div>
+        )}
+        {painel[a.id] === "agenda" && (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[12.5px]">
+            {[["amanhã", 1], ["em 2 dias", 2], ["em 3 dias", 3], ["em 1 semana", 7], ["em 15 dias", 15], ["em 30 dias", 30]].map(([r, n]) => {
+              const q = quando[a.id] || {}; const sel = q.dia === somaDiasSP(n);
+              return <button key={r} onClick={() => setQuando((m) => ({ ...m, [a.id]: { hora: "10:00", ...(m[a.id] || {}), dia: somaDiasSP(n) } }))}
+                className="rounded border px-2 py-1" style={{ borderColor: sel ? C.roxo : C.line, background: sel ? "#F1ECF8" : "#fff" }}>{r}</button>;
+            })}
+            <input type="date" min={hoje} value={(quando[a.id] || {}).dia || ""} onChange={(e) => setQuando((m) => ({ ...m, [a.id]: { hora: "10:00", ...(m[a.id] || {}), dia: e.target.value } }))}
+              className="rounded border px-1.5 py-1 outline-none" style={inputSty} />
+            <input type="time" value={(quando[a.id] || {}).hora || "10:00"} onChange={(e) => setQuando((m) => ({ ...m, [a.id]: { ...(m[a.id] || {}), hora: e.target.value } }))}
+              className="rounded border px-1.5 py-1 outline-none" style={inputSty} />
+            <button onClick={() => agendarRec(a)} className="rounded-md px-3 py-1 font-semibold text-white" style={{ background: C.roxo }}>Agendar</button>
+          </div>
+        )}
+        {aviso[a.id] && <div className="mt-1 text-[12px] font-semibold" style={{ color: C.verde }}>✓ {aviso[a.id]}</div>}
       </div>
     );
   };
@@ -27166,8 +27236,17 @@ function TelaRecuperacao({ perfil, aoAbrir }) {
       {erro && <p className="text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
       {!d ? <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p> : (
         <>
+          {secao("Recuperação agendada para hoje", "o que foi marcado para hoje (e o que ficou para trás) — o horário manda", agendHoje, C.roxo)}
           {!!voltam.length && secao("Prometeu voltar — o dia chegou", "ligue hoje: foi o combinado", voltam, C.laranja)}
           {secao("Para recuperar", `${prazo ? `sem contato há ${prazo} dia${prazo > 1 ? "s" : ""} ou mais` : "todos"} — quem nunca foi procurado vem primeiro`, recuperar)}
+          {!!agendDepois.length && (
+            <section>
+              <button onClick={() => setVerDepois(!verDepois)} className="text-[12px] font-bold uppercase tracking-[0.08em]" style={{ color: C.roxo }}>
+                {verDepois ? "▾" : "▸"} Agendadas para os próximos dias ({agendDepois.length})
+              </button>
+              {verDepois && <div className="mt-2 space-y-2">{agendDepois.map(cartao)}</div>}
+            </section>
+          )}
           <section>
             <button onClick={() => setVerHoje(!verHoje)} className="text-[12px] font-bold uppercase tracking-[0.08em]" style={{ color: C.verde }}>
               {verHoje ? "▾" : "▸"} Procurados hoje ({deHoje.length})

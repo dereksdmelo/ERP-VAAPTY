@@ -6168,7 +6168,13 @@ voltar) e abrir o atendimento. Cada mensagem enviada já guarda quem mandou
 (0112). **O voltar do navegador** volta a tela anterior do app
 (`pushState` a cada troca de tela ou de atendimento aberto). A
 Recuperação ganhou período livre (atalhos e de/até) e "sem contato há"
-com qualquer número.
+com qualquer número. **E cada cliente da Recuperação tem Anotar e Agendar
+recuperação** (o Derek: "cadê as opções de recuperação que eu pedi?" —
+eu as tinha posto só na conversa): a anotação vai às observações do
+atendimento; o agendamento é a ação planejada no Meu dia, que a tela lê
+de volta (`agendada`, no `?recurso=recuperacao`) e põe em primeiro lugar
+no dia dela ("Recuperação agendada para hoje", com as atrasadas). Ligar
+ou mandar WhatsApp para quem estava agendado marca a ação como feita.
 
 ### 42. Assinatura eletrônica própria: o papel some do caminho
 

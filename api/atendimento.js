@@ -919,8 +919,25 @@ async function recuperacao(req, res, tok) {
       c.vezes += 1; if (!c.ultimo) { c.ultimo = x.criado_em; c.ultimo_titulo = x.titulo; }
     });
   }
+  // As recuperações AGENDADAS (o "Agendar recuperação"): ação planejada no
+  // Meu dia, ainda não feita, ligada ao atendimento. Vêm todas as que não
+  // foram feitas até a semana que vem — a tela separa as de hoje e as que
+  // passaram.
+  const agendadas = {};
+  const ateSemana = new Date(Date.parse(hoje) + 7 * 86400000).toISOString().slice(0, 10);
+  const ag = await banco(`${URL_BASE}/rest/v1/agenda?select=id,dia,hora,titulo,atendimento_id,perfil_id&tipo=eq.recuperacao&feito_em=is.null` +
+    `&atendimento_id=not.is.null&dia=lte.${ateSemana}&order=dia.asc,hora.asc.nullslast&limit=1000`, { headers: cabecalhos(tok) }).catch(() => []);
+  (ag || []).forEach((x) => { if (!agendadas[x.atendimento_id]) agendadas[x.atendimento_id] = x; });
+  // Atendimento agendado que saiu do recorte (veio antes do período, ou
+  // está num status de fim) entra assim mesmo: o agendamento é o que manda.
+  const faltam = Object.keys(agendadas).filter((id) => !meus.some((a) => a.id === id));
+  if (faltam.length) {
+    const extra = await banco(`${URL_BASE}/rest/v1/atendimento?select=id,cliente_nome,cliente_telefone,carro_descricao,status,data,volta_em,` +
+      `negociador_nome,negociador_id,veiculo(placa,marca_modelo,ano_modelo,fipe_valor)&id=in.(${faltam.slice(0, 150).join(",")})`, { headers: cabecalhos(tok) }).catch(() => []);
+    (extra || []).filter((a) => todos || (gerente && pedido ? chaves.has(semAc(a.negociador_nome)) : dele(a))).forEach((a) => meus.push(a));
+  }
   const lista = meus.map((a) => ({ ...a, contatos: (contato[a.id] || {}).vezes || 0, ultimo_contato: (contato[a.id] || {}).ultimo || null,
-    ultimo_resultado: (contato[a.id] || {}).ultimo_titulo || null }));
+    ultimo_resultado: (contato[a.id] || {}).ultimo_titulo || null, agendada: agendadas[a.id] || null }));
   return res.status(200).json({ hoje, dias, de: desde, ate: RX_D.test(ateQ) ? ateQ : hoje, gerente, nomes, atendimentos: lista });
 }
 
