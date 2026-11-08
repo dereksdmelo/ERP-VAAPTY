@@ -1062,11 +1062,35 @@ async function projecaoDoMes(tok, comp, d, folhaPronta) {
     });
     ((folha && folha.so_combinado) || []).forEach((p) => { ["salario", "comissao", "bonificacao"].forEach((k) => { prev[k] += Number(p[k]) || 0; }); });
     const catDe = { salario: cfg && cfg.folha_cat_salario, comissao: cfg && cfg.folha_cat_comissao, bonificacao: cfg && cfg.folha_cat_bonificacao };
+    /* A FOLHA PAGA NUMA VEZ SÓ (08/11/2026, o Derek: a financeira baixa o pagamento
+     * da pessoa inteiro como "Prestação de Serviço", mas ele já inclui a comissão, e a
+     * projeção seguia prevendo a comissão). Pagamento é da PESSOA: o que ela recebeu em
+     * qualquer das categorias da folha cobre primeiro o salário, depois a comissão, depois
+     * a bonificação dela. O que não tem pessoa continua valendo na categoria onde caiu. */
+    const catsFolha = new Set(Object.keys(catDe).map((k) => catDe[k]).filter(Boolean));
+    const alocado = { salario: 0, comissao: 0, bonificacao: 0 };
+    const atribuidoPorCat = {};
+    const pessoasFolha = [];
+    ((folha && folha.linhas) || []).forEach((l) => {
+      const fonte = !l.gravada && l.combinado && folha.aberto ? l.combinado.ritmo_partes : l;
+      pessoasFolha.push({ fid: l.funcionario_id, salario: Number(fonte.salario) || 0, comissao: Number(fonte.comissao) || 0, bonificacao: Number(fonte.bonificacao) || 0 });
+    });
+    ((folha && folha.so_combinado) || []).forEach((p) => {
+      pessoasFolha.push({ fid: p.funcionario_id || p.id, salario: Number(p.salario) || 0, comissao: Number(p.comissao) || 0, bonificacao: Number(p.bonificacao) || 0 });
+    });
+    pessoasFolha.forEach((p) => {
+      const porCat = (d.lancado_por_func || {})[p.fid] || {};
+      let resto = 0;
+      Object.keys(porCat).forEach((c) => { if (catsFolha.has(c)) { resto += porCat[c]; atribuidoPorCat[c] = (atribuidoPorCat[c] || 0) + porCat[c]; } });
+      ["salario", "comissao", "bonificacao"].forEach((k) => { const a = Math.min(resto, p[k]); alocado[k] += a; resto -= a; });
+    });
     // Duas partes na mesma categoria dividem a conta fixa dela uma vez só.
     const fixaUsada = {};
     const partesFolha = ["salario", "comissao", "bonificacao"].map((k) => {
       const cat = catDe[k];
-      const lancado = cat ? (d.lancado_por_cat[cat] || 0) : 0;
+      // O que já tem pessoa foi distribuído acima; o resto da categoria (sem pessoa) fica nela.
+      const semPessoa = cat ? Math.max(0, (d.lancado_por_cat[cat] || 0) - (atribuidoPorCat[cat] || 0)) : 0;
+      const lancado = cat ? alocado[k] + semPessoa : 0;
       const falta = Math.max(0, prev[k] - lancado);
       const fixaCat = cat ? Math.max(0, (fixasPorCat[cat] || 0) - (fixaUsada[cat] || 0)) : 0;
       const daFixa = Math.min(falta, fixaCat);
@@ -1408,6 +1432,7 @@ async function dreDoMes(tok, comp) {
   // Quanto saiu (ou vai sair, em título) por categoria nesta competência:
   // a projeção da folha desconta daqui o que de cada parte já entrou.
   const lancadoPorCat = {};
+  const lancadoPorFunc = {};   // pessoa -> categoria -> valor (para a folha paga numa vez só)
   (lanc || []).forEach((l) => {
     // O DRE do mês continua sendo o que passou no banco — é o número
     // que o Derek confere hoje. O que está em aberto vai à parte, para
@@ -1420,6 +1445,10 @@ async function dreDoMes(tok, comp) {
       if (c && !c.no_dre) return;
       if ((c && c.pede_funcionario) || p.funcionario_id) folhaLancada += -p.valor;
       if (p.categoria_id && p.valor < 0) lancadoPorCat[p.categoria_id] = (lancadoPorCat[p.categoria_id] || 0) - p.valor;
+      if (p.categoria_id && p.funcionario_id && p.valor < 0) {
+        const m = lancadoPorFunc[p.funcionario_id] = lancadoPorFunc[p.funcionario_id] || {};
+        m[p.categoria_id] = (m[p.categoria_id] || 0) - p.valor;
+      }
       if (aberto) { emAberto += p.valor; return; }
       if (!c) { semCategoria += p.valor; return; }
       por[c.id] = por[c.id] || { id: c.id, nome: c.nome, grupo: c.grupo, ordem: c.ordem, valor: 0 };
@@ -1435,7 +1464,7 @@ async function dreDoMes(tok, comp) {
     { bruta: 0, liquida: 0, venda: 0 });
 
   return {
-    competencia: comp, linhas, total_despesas: totalDespesas, sem_categoria: semCategoria, em_aberto: emAberto, folha_lancada: folhaLancada, lancado_por_cat: lancadoPorCat,
+    competencia: comp, linhas, total_despesas: totalDespesas, sem_categoria: semCategoria, em_aberto: emAberto, folha_lancada: folhaLancada, lancado_por_cat: lancadoPorCat, lancado_por_func: lancadoPorFunc,
     carros_vendidos: vendidos.length, rentabilidade: rent.liquida, rentabilidade_bruta: rent.bruta, faturamento: rent.venda,
     lucro: rent.liquida + totalDespesas + semCategoria,
   };
