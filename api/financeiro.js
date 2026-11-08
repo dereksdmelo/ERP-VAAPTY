@@ -1330,6 +1330,35 @@ async function dre(req, res, tok) {
   try {
     d.projecao = await projecaoDoMes(tok, comp, d);
   } catch (e) { d.projecao = null; }
+  /* O PREVISTO LINHA A LINHA (08/11/2026, o Derek: "marcar as previsões com outra cor… os aluguéis não
+   * estão aí"). Cada categoria ganha `previsto`: títulos em aberto + contas fixas ainda sem título +
+   * a folha que falta lançar — as mesmas três parcelas do lucro projetado, só que por categoria.
+   * Categoria que só tem previsto (o aluguel que ainda não passou no banco) ganha linha com valor 0. */
+  try {
+    const prev = {};
+    const soma = (id, v) => { if (id && v) prev[id] = (prev[id] || 0) + v; };
+    Object.keys(d.aberto_por_cat || {}).forEach((k) => soma(k, d.aberto_por_cat[k]));
+    const pj = d.projecao || {};
+    (pj.fixas_por_cat || []).forEach((x) => soma(x.categoria_id, -(Number(x.valor) || 0)));
+    (pj.folha_partes || []).forEach((x) => soma(x.categoria_id, -(Number(x.a_lancar) || 0)));
+    const porId = {}; d.linhas.forEach((l) => { porId[l.id] = l; });
+    Object.keys(prev).forEach((k) => {
+      const v = Math.round(prev[k] * 100) / 100;
+      if (Math.abs(v) < 0.01) return;
+      const c = (d.categorias || {})[k];
+      if (!c || !c.no_dre) return;
+      if (!porId[k]) {
+        const mae = c.pai_id && d.categorias[c.pai_id] ? d.categorias[c.pai_id] : null;
+        porId[k] = { id: c.id, nome: c.nome, grupo: c.grupo, ordem: c.ordem, valor: 0, codigo: c.codigo || null,
+          pai_id: c.pai_id || null, pai_nome: mae ? mae.nome : null, pai_codigo: mae ? mae.codigo || null : null };
+        d.linhas.push(porId[k]);
+      }
+      porId[k].previsto = v;
+    });
+    d.linhas.sort((x, y) => (x.ordem || 0) - (y.ordem || 0) || String(x.nome).localeCompare(String(y.nome)));
+    d.total_previsto = Math.round(d.linhas.reduce((t, l) => t + (l.previsto || 0), 0) * 100) / 100;
+  } catch (e) {}
+  delete d.categorias; delete d.aberto_por_cat;
   return res.status(200).json(d);
 }
 
@@ -1457,6 +1486,7 @@ async function dreDoMes(tok, comp) {
   // Quanto saiu (ou vai sair, em título) por categoria nesta competência:
   // a projeção da folha desconta daqui o que de cada parte já entrou.
   const lancadoPorCat = {};
+  const abertoPorCat = {};     // categoria -> títulos em aberto (o previsto que já tem título)
   const lancadoPorFunc = {};   // pessoa -> categoria -> valor (para a folha paga numa vez só)
   (lanc || []).forEach((l) => {
     // O DRE do mês continua sendo o que passou no banco — é o número
@@ -1474,7 +1504,7 @@ async function dreDoMes(tok, comp) {
         const m = lancadoPorFunc[p.funcionario_id] = lancadoPorFunc[p.funcionario_id] || {};
         m[p.categoria_id] = (m[p.categoria_id] || 0) - p.valor;
       }
-      if (aberto) { emAberto += p.valor; return; }
+      if (aberto) { emAberto += p.valor; if (c) abertoPorCat[c.id] = (abertoPorCat[c.id] || 0) + p.valor; return; }
       if (!c) { semCategoria += p.valor; return; }
       por[c.id] = por[c.id] || { id: c.id, nome: c.nome, grupo: c.grupo, ordem: c.ordem, valor: 0,
         codigo: c.codigo || null, pai_id: c.pai_id || null, pai_nome: c.pai_id && catPorId[c.pai_id] ? catPorId[c.pai_id].nome : null,
@@ -1491,7 +1521,7 @@ async function dreDoMes(tok, comp) {
     { bruta: 0, liquida: 0, venda: 0 });
 
   return {
-    competencia: comp, linhas, total_despesas: totalDespesas, sem_categoria: semCategoria, em_aberto: emAberto, folha_lancada: folhaLancada, lancado_por_cat: lancadoPorCat, lancado_por_func: lancadoPorFunc,
+    competencia: comp, linhas, total_despesas: totalDespesas, sem_categoria: semCategoria, em_aberto: emAberto, folha_lancada: folhaLancada, lancado_por_cat: lancadoPorCat, lancado_por_func: lancadoPorFunc, aberto_por_cat: abertoPorCat, categorias: catPorId,
     carros_vendidos: vendidos.length, rentabilidade: rent.liquida, rentabilidade_bruta: rent.bruta, faturamento: rent.venda,
     lucro: rent.liquida + totalDespesas + semCategoria,
   };

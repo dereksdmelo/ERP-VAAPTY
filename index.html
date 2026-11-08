@@ -21810,7 +21810,10 @@ function FinDRE({ comp }) {
         <button onClick={() => setAbrir(aberta ? null : abrirCom)} title="Ver os títulos que somam este valor"
           className="flex w-full items-baseline justify-between gap-3 px-3 py-1.5 text-left text-[13px] hover:bg-[#F7F4FA]" style={{ borderBottom: aberta ? "none" : `1px solid ${C.line}`, fontWeight: forte ? 700 : 400, paddingLeft: nivel ? 28 : undefined }}>
           <span><span className="mr-1.5 text-[11px]" style={{ color: C.mute }}>{aberta ? "▾" : "▸"}</span>{abrirCom.codigo ? <span style={{ color: C.mute, fontVariantNumeric: "tabular-nums" }}>{abrirCom.codigo} </span> : null}{rot}</span>
-          <span style={{ fontVariantNumeric: "tabular-nums", color: cor || (v < 0 ? C.laranja : C.ink) }}>{rs2(v)}</span>
+          <span style={{ fontVariantNumeric: "tabular-nums", color: cor || (v < 0 ? C.laranja : C.ink) }}>
+            {abrirCom.previsto ? <span className="mr-2 rounded px-1.5 py-px text-[11px] font-semibold" style={{ background: AMARELO.fundo, color: AMARELO.texto }} title="Previsto: títulos em aberto, contas fixas sem título e folha a lançar. Ainda não passou no banco.">previsto {rs2(abrirCom.previsto)}</span> : null}
+            {Math.abs(v) < 0.005 && abrirCom.previsto ? <span style={{ color: C.mute }}>—</span> : rs2(v)}
+          </span>
         </button>
         {aberta && <DetalheDRE comp={comp} linha={abrirCom} aoMudou={() => setVers((x) => x + 1)} />}
       </div>
@@ -21838,7 +21841,10 @@ function FinDRE({ comp }) {
                 <button onClick={() => setMaes((m) => ({ ...m, [l.pai_id]: !m[l.pai_id] }))} title="Ver as subcategorias"
                   className="flex w-full items-baseline justify-between gap-3 px-3 py-1.5 text-left text-[13px] font-semibold hover:bg-[#F7F4FA]" style={{ borderBottom: `1px solid ${C.line}`, background: C.bg }}>
                   <span><span className="mr-1.5 text-[11px]" style={{ color: C.mute }}>{aberta ? "▾" : "▸"}</span>{l.pai_codigo ? <span style={{ color: C.mute, fontVariantNumeric: "tabular-nums" }}>{l.pai_codigo} </span> : null}{l.pai_nome || "Grupo"} <span className="text-[11px] font-normal" style={{ color: C.mute }}>· {filhas.length} subcategoria{filhas.length === 1 ? "" : "s"}</span></span>
-                  <span style={{ fontVariantNumeric: "tabular-nums", color: soma < 0 ? C.laranja : C.ink }}>{rs2(soma)}</span>
+                  <span style={{ fontVariantNumeric: "tabular-nums", color: soma < 0 ? C.laranja : C.ink }}>
+                    {filhas.some((x) => x.previsto) ? <span className="mr-2 rounded px-1.5 py-px text-[11px] font-semibold" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>previsto {rs2(filhas.reduce((t, x) => t + (x.previsto || 0), 0))}</span> : null}
+                    {rs2(soma)}
+                  </span>
                 </button>
                 {aberta && filhas.map((x) => linha(x.nome, x.valor, false, null, x, 1))}
               </div>
@@ -21849,6 +21855,12 @@ function FinDRE({ comp }) {
         {!!d.sem_categoria && linha("Sem categoria", d.sem_categoria, false, C.laranja, { id: null, nome: "Sem categoria", valor: d.sem_categoria })}
         {!d.linhas.length && <p className="px-3 py-6 text-center text-[13px]" style={{ color: C.mute }}>Nenhum lançamento nesta competência.</p>}
         {linha("Total de despesas", d.total_despesas, true)}
+        {!!d.total_previsto && (
+          <div className="flex items-baseline justify-between gap-3 px-3 py-1.5 text-[13px]" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
+            <span>Previsto ainda não pago (em amarelo nas linhas acima)</span>
+            <span style={{ fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>{rs2(d.total_previsto)}</span>
+          </div>
+        )}
       </div>
       <div className="self-start rounded-xl p-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
         <div className="text-[12px]" style={{ color: C.mute }}>Rentabilidade dos carros ({d.carros_vendidos} vendido{d.carros_vendidos === 1 ? "" : "s"})</div>
