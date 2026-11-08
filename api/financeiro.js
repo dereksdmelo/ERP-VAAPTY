@@ -1089,8 +1089,11 @@ async function projecaoDoMes(tok, comp, d, folhaPronta) {
         atribuidoPorCat[c] = (atribuidoPorCat[c] || 0) + porCat[c];
         if (c === catDe.bonificacao && c !== catDe.salario && c !== catDe.comissao) restoBonif += porCat[c]; else resto += porCat[c];
       });
-      ["salario", "comissao"].forEach((k) => { const a = Math.min(resto, p[k]); alocado[k] += a; resto -= a; });
       const aB = Math.min(restoBonif, p.bonificacao); alocado.bonificacao += aB;
+      // Parte das bonificações vai junto do salário: o que sobrar do pagamento principal depois
+      // do salário e da comissão cobre a bonificação que ainda não foi paga à parte.
+      ["salario", "comissao"].forEach((k) => { const a = Math.min(resto, p[k]); alocado[k] += a; resto -= a; });
+      const aB2 = Math.min(resto, Math.max(0, p.bonificacao - aB)); alocado.bonificacao += aB2;
     });
     // Duas partes na mesma categoria dividem a conta fixa dela uma vez só.
     const fixaUsada = {};
