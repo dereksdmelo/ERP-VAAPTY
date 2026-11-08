@@ -18812,7 +18812,7 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
     pendencias: "Tudo que pede ação, num lugar só.",
     lancamentos: "O extrato do banco: cada linha ligada ao título a que se refere, ou lançada direto.",
     recebimentos: "Toda venda tem que aparecer no extrato — ou ter um motivo escrito.",
-    contas: "O que o DRE soma: os previstos e os realizados do mês, e o vínculo de cada um com o extrato.",
+    contas: "Previstos e realizados do mês — o que o DRE soma.",
     carros: "O que foi combinado com cada carro contra o que foi lançado.",
     fechamento: "Previsto × realizado do mês.",
     dre: "O resultado: quanto entrou, quanto custou, quanto sobrou.",
@@ -20688,14 +20688,14 @@ const doExtrato = (l) => ["ofx", "planilha", "extrato"].indexOf(String(l && l.or
  * (tem a chave do banco) não muda valor nem data — é o que o banco diz.
  * Registrar pagamento com valor menor que o título é a baixa parcial: a
  * parte paga vira lançamento e o título fica aberto com o que falta. */
-function EditarTitulo({ titulo, aoFechar, aoMudou }) {
+function EditarTitulo({ titulo, aoFechar, aoMudou, novo }) {
   const t0 = titulo;
   const [cats] = useCategoriasFin(true);
   const [contas, setContas] = useState([]); const [favs, setFavs] = useState([]); const [funcs, setFuncs] = useState([]); const [carros, setCarros] = useState([]);
   const valor0 = (Number(t0.debito) || 0) + (Number(t0.credito) || 0);
   const [f, setF] = useState({
     descricao: t0.descricao || "", favorecido_id: t0.favorecido_id || "", favorecido: t0.favorecido || "",
-    lado: Number(t0.credito) > 0 ? "receber" : "pagar", valor: centavosBR(valor0),
+    lado: Number(t0.credito) > 0 ? "receber" : "pagar", valor: valor0 ? centavosBR(valor0) : "",
     vencimento: String(t0.vencimento || "").slice(0, 10), data: String(t0.data || "").slice(0, 10),
     competencia: String(t0.competencia || "").slice(0, 7), conta_id: t0.conta_id || "", categoria_id: t0.categoria_id || "",
     estoque_id: t0.estoque_id || null, tipo_negociacao: t0.tipo_negociacao || "", funcionario_id: t0.funcionario_id || "",
@@ -20728,6 +20728,19 @@ function EditarTitulo({ titulo, aoFechar, aoMudou }) {
       if (v > 0) { mud.debito = f.lado === "pagar" ? v : 0; mud.credito = f.lado === "receber" ? v : 0; }
     }
     Object.keys(mud).forEach((k) => { if (mud[k] === undefined) delete mud[k]; });
+    // TÍTULO NOVO (08/11/2026): nasce em aberto, com o vencimento como
+    // data — é o que se sabe antes de pagar; a conciliação liga depois.
+    if (novo) {
+      if (!(v > 0)) { setErro("Digite o valor."); setIndo(""); return; }
+      if (!f.descricao.trim()) { setErro("Diga o que é (descrição)."); setIndo(""); return; }
+      try {
+        await fin("lancamento", null, finJson("POST", { ...mud, situacao: "aberto", origem: "manual",
+          vencimento: f.vencimento || hojeEmSP(), data: f.vencimento || hojeEmSP(),
+          debito: f.lado === "pagar" ? v : 0, credito: f.lado === "receber" ? v : 0 }));
+        aoMudou(); aoFechar();
+      } catch (e) { setErro(e.message); setIndo(""); }
+      return;
+    }
     try { await fin("lancamento", { id: t0.id }, finJson("PATCH", mud)); aoMudou(); aoFechar(); }
     catch (e) { setErro(e.message); setIndo(""); }
   };
@@ -20765,7 +20778,7 @@ function EditarTitulo({ titulo, aoFechar, aoMudou }) {
       <div className="w-full max-w-3xl rounded-xl p-4" style={{ background: C.paper }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-baseline justify-between gap-3">
           <div>
-            <div className="text-[17px] font-bold">{aberto ? "Título em aberto" : "Título pago"}{t0.item_contrato ? <span className="ml-2 text-[11.5px] font-semibold" style={{ color: C.roxo }}>do contrato do carro</span> : null}</div>
+            <div className="text-[17px] font-bold">{novo ? "Novo título" : aberto ? "Título em aberto" : "Título pago"}{t0.item_contrato ? <span className="ml-2 text-[11.5px] font-semibold" style={{ color: C.roxo }}>do contrato do carro</span> : null}</div>
             <div className="text-[12px]" style={{ color: C.mute }}>{doBanco ? "Veio do extrato: valor e data são os do banco." : aberto ? "Previsto — ainda não passou no banco." : "Baixado sem linha do extrato."}</div>
           </div>
           <button onClick={aoFechar} className="text-[13px]" style={{ color: C.mute }}>fechar</button>
@@ -20818,9 +20831,9 @@ function EditarTitulo({ titulo, aoFechar, aoMudou }) {
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <BotaoPrimario onClick={salvar} disabled={!!indo}>{indo === "salvar" ? "Salvando…" : "Salvar"}</BotaoPrimario>
-          {aberto && <button onClick={cancelar} className="ml-auto text-[12.5px]" style={{ color: C.mute }}>cancelar título</button>}
+          {aberto && !novo && <button onClick={cancelar} className="ml-auto text-[12.5px]" style={{ color: C.mute }}>cancelar título</button>}
         </div>
-        {aberto && (
+        {aberto && !novo && (
           <div className="mt-4 rounded-lg p-3" style={{ background: C.bg }}>
             <div className="text-[12px] font-bold uppercase tracking-[0.06em]" style={{ color: ROTULO_COR }}>Registrar pagamento (baixa)</div>
             <p className="mt-0.5 text-[11.5px]" style={{ color: C.mute }}>
@@ -20914,13 +20927,14 @@ function VincularLinha({ titulo, aoFechar, aoFeito }) {
  * previstos (em aberto) e os realizados — que é a base do DRE —, com o
  * vínculo de cada um ao extrato e o que foi reconhecido sozinho em
  * amarelo, para conferir. */
-function TitulosDoMes({ comp }) {
+function TitulosDoMes({ comp, abas }) {
   const [d, setD] = useState(null); const [erro, setErro] = useState("");
   const [cats] = useCategoriasFin(true);
   const [filtro, setFiltro] = useState("todos");
   const [q, setQ] = useState("");
   const [vinculando, setVinculando] = useState("");
   const [editando, setEditando] = useState(null);
+  const [criando, setCriando] = useState(false);
   const carregar = (manter) => { if (!manter) setD(null); fin("titulo", { todos: 1, competencia: comp }).then(setD).catch((e) => setErro(e.message)); };
   useEffect(() => { carregar(); }, [comp]);
   const mudar = async (l, mud) => {
@@ -20947,14 +20961,19 @@ function TitulosDoMes({ comp }) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
-        {[["todos", "Todos"], ["carros", "Carros (contrato)"], ["aberto", "Em aberto"], ["conferir", "Para conferir"], ["vinculado", "Vinculados"], ["conciliacao", "Pela conciliação"], ["mao", "Sem extrato"]].map(([v, r]) => (
-          <button key={v} onClick={() => setFiltro(v)} className="rounded-full px-3 py-1 font-semibold"
-            style={{ background: filtro === v ? C.roxo : "#fff", color: filtro === v ? "#fff" : C.mute, border: `1px solid ${filtro === v ? C.roxo : C.line}` }}>
-            {r}{v !== "todos" && cont[v] ? ` (${cont[v]})` : v === "todos" ? ` (${todos.length})` : ""}
-          </button>
-        ))}
+        {abas}
+        <select value={filtro} onChange={(e) => setFiltro(e.target.value)}
+          className="rounded-md border px-2 py-1 text-[12.5px] outline-none" style={{ ...inputSty, borderColor: filtro !== "todos" ? C.roxo : C.line, fontWeight: 600 }}>
+          {[["todos", "Todos"], ["carros", "Carros (contrato)"], ["aberto", "Em aberto"], ["conferir", "Para conferir"], ["vinculado", "Vinculados ao extrato"], ["conciliacao", "Lançados pela conciliação"], ["mao", "Pagos sem extrato"]].map(([v, r]) => (
+            <option key={v} value={v}>{r} ({v === "todos" ? todos.length : cont[v] || 0})</option>
+          ))}
+        </select>
+        {!!cont.conferir && filtro !== "conferir" && (
+          <button onClick={() => setFiltro("conferir")} className="rounded-md px-2 py-1 font-semibold" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>{cont.conferir} para conferir</button>
+        )}
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Procurar"
-          className="ml-auto w-[220px] rounded-full border px-3 py-1 text-[12.5px] outline-none" style={{ borderColor: q ? C.roxo : C.line }} />
+          className="min-w-[160px] flex-1 rounded-md border px-2.5 py-1 text-[12.5px] outline-none" style={{ borderColor: q ? C.roxo : C.line }} />
+        <button onClick={() => setCriando(true)} className="rounded-md px-3 py-1 font-semibold text-white" style={{ background: C.roxo }}>+ título</button>
       </div>
       {erro && <p className="text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
       <div className="rolar overflow-x-auto rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
@@ -21018,6 +21037,8 @@ function TitulosDoMes({ comp }) {
         {!vis.length && <p className="px-3 py-6 text-center text-[13px]" style={{ color: C.mute }}>Nenhum título {filtro === "todos" ? "" : "nesta lista "}em {rotuloMes(comp)}.</p>}
       </div>
       {editando && <EditarTitulo titulo={editando} aoFechar={() => setEditando(null)} aoMudou={() => carregar(true)} />}
+      {criando && <EditarTitulo novo titulo={{ situacao: "aberto", competencia: comp, vencimento: hojeEmSP(), debito: 0, credito: 0 }}
+        aoFechar={() => setCriando(false)} aoMudou={() => carregar(true)} />}
       <p className="text-[11px] leading-snug" style={{ color: C.mute }}>
         Clique no título para abrir e editar. Um título é o que o DRE soma, pela competência. "Previsto" ainda não passou no banco (contas fixas, a pagar e a receber);
         os outros já passaram — ligados a uma linha do extrato, lançados direto na Conciliação bancária, ou baixados à mão sem extrato.
@@ -21084,15 +21105,18 @@ function FinContas({ comp }) {
   const hoje = hojeEmSP();
   const titulos = d ? d.titulos : [];
   const contasAtivas = contas.filter((c) => c.ativa !== false);
+  // Compacto (08/11/2026, o Derek: "diminua esse cabeçalho, tá muito
+  // bagunçado"): as duas vistas num seletor de duas casas, na mesma linha
+  // do filtro, da busca e do "+ título".
   const abas = (
-    <div className="flex flex-wrap gap-2">
-      {[["mes", `Títulos de ${rotuloMes(comp)}`], ["aberto", "Em aberto (o que vence)"]].map(([m, r]) => (
-        <button key={m} onClick={() => trocarModo(m)} className="rounded-full px-3.5 py-1.5 text-[13px] font-semibold"
-          style={{ background: modo === m ? C.roxo : "#fff", color: modo === m ? "#fff" : C.mute, border: `1px solid ${modo === m ? C.roxo : C.line}` }}>{r}</button>
+    <div className="inline-flex shrink-0 overflow-hidden rounded-md border text-[12.5px] font-semibold" style={{ borderColor: C.line }}>
+      {[["mes", "Do mês"], ["aberto", "Em aberto"]].map(([m, r]) => (
+        <button key={m} onClick={() => trocarModo(m)} className="px-3 py-1"
+          style={{ background: modo === m ? C.roxo : "#fff", color: modo === m ? "#fff" : C.mute }}>{r}</button>
       ))}
     </div>
   );
-  if (modo === "mes") return <div className="space-y-3">{abas}<TitulosDoMes comp={comp} /></div>;
+  if (modo === "mes") return <TitulosDoMes comp={comp} abas={abas} />;
 
   return (
     <div className="space-y-3">

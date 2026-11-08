@@ -4618,7 +4618,13 @@ a baixa parcial (`parteDoTitulo`): a parte vira lançamento efetivado e o
 título fica aberto com o resto; o mesmo vale para ligar uma linha do
 banco menor que o título ("parcial"). A parte leva o item com sufixo
 (`item#…`), e a geração do carro desconta as partes do que falta. Os
-cartões de total da tela de Títulos saíram ("desnecessário").
+cartões de total da tela de Títulos saíram ("desnecessário"). E o cabeçalho
+virou uma linha (08/11/2026, *"diminua esse cabeçalho, tá muito
+bagunçado"*): "Do mês | Em aberto", o filtro num seletor, a busca e
+**"+ título"** — o título se lança AQUI (o que se sabe antes de pagar ou
+receber; os do contrato e das contas fixas nascem sozinhos); a
+Conciliação liga a linha do banco ao título, e só lança direto o que
+apareceu no extrato sem previsão.
 
 **Ligar à mão a linha do banco ao título (07/11/2026, o Derek: *"como
 eu faço pra ligar os títulos das previsões com os títulos do
