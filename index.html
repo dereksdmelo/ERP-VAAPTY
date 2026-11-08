@@ -21274,7 +21274,8 @@ function TitulosDoMes({ comp, abas }) {
     if (fl.situacao === "vencido" && !vencido(l)) return false;
     if (fl.lado === "pagar" && !(Number(l.debito) > 0)) return false;
     if (fl.lado === "receber" && !(Number(l.credito) > 0)) return false;
-    if (fl.categoria) {
+    if (fl.categoria === "sem") { if (l.categoria_id) return false; }
+    else if (fl.categoria) {
       const ok = l.categoria_id === fl.categoria || catsMae[l.categoria_id] === fl.categoria;
       if (!ok) return false;
     }
@@ -21354,7 +21355,7 @@ function TitulosDoMes({ comp, abas }) {
             <datalist id="titulos-fornecedores">{fornecedores.map((n) => <option key={n} value={n} />)}</datalist></label>
           <label className="flex flex-col gap-0.5"><span style={{ color: C.mute }}>Categoria</span>
             <select value={fl.categoria} onChange={(e) => setF({ categoria: e.target.value })} className="max-w-[200px] rounded border px-1.5 py-1 outline-none" style={{ ...inputSty, borderColor: fl.categoria ? C.roxo : C.line }}>
-              <option value="">todas</option>
+              <option value="">todas</option><option value="sem">— sem categoria —</option>
               {todasCats.filter((c) => !c.pai_id).sort((x, y) => (x.ordem || 0) - (y.ordem || 0)).map((g) => [
                 <option key={g.id} value={g.id}>{rotCat(g)}{todasCats.some((c) => c.pai_id === g.id) ? " (grupo todo)" : ""}</option>,
                 ...todasCats.filter((c) => c.pai_id === g.id).sort((x, y) => (x.ordem || 0) - (y.ordem || 0)).map((c) => <option key={c.id} value={c.id}>— {rotCat(c)}</option>),
@@ -21378,7 +21379,7 @@ function TitulosDoMes({ comp, abas }) {
           <span style={{ color: C.mute }}>Atalhos:</span>
           {[["Vencidos", () => setF({ situacao: "vencido", lado: "pagar" })],
             ["Vencem em 7 dias", () => { const h = hojeEmSP(); const f7 = new Date(Date.parse(h) + 7 * 86400000).toISOString().slice(0, 10); setF({ situacao: "aberto", dde: h, date: f7 }); }],
-            ["Sem categoria", () => setF({ categoria: "", situacao: "todas" }) || setQ("")],
+            ["Sem categoria", () => setF({ categoria: "sem" })],
             ["Pagos à mão", () => setFiltro("mao")], ["Para conferir", () => setFiltro("conferir")]].map(([r, f]) => (
             <button key={r} onClick={f} className="rounded-full px-2.5 py-0.5 font-semibold" style={{ background: C.bg, color: C.roxo }}>{r}</button>))}
           {filtrando && <button onClick={() => { setFl(FILTROS_0); setFiltro("todos"); setQ(""); }} className="ml-auto font-semibold" style={{ color: C.laranja }}>limpar filtros</button>}
