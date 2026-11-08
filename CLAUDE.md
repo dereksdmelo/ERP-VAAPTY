@@ -6151,6 +6151,25 @@ pede um toque para liberar o som). A chave fica em texto, não em hash: o
 gerente precisa copiar o link de novo depois de pendurar a TV, e o que ela
 abre é número de vendas, não cadastro.
 
+**O WhatsApp dos negociadores (0122, 08/11/2026, o Derek: "um número de
+whats da loja que os negociadores possam conversar com os clientes e fique
+registrado… anotações no atendimento daquele cliente… agendamentos de
+recuperação a partir dali").** O número ganhou `uso`: comercial
+(pré-venda, vira lead), operação (o adm) e **negociação** — não vira lead
+(`comercial` falso) e não entra na caixa do adm (que agora filtra
+`uso=operacao`; os avisos aos lojistas também). Negociação → WhatsApp é a
+mesma `TelaConversas` com `negociacao`; dentro da conversa,
+`AtendimentoDaConversa` acha o atendimento pelo telefone (DDD + oito
+últimos, `?recurso=do-telefone`) e oferece: **Anotar** (vai para as
+observações do atendimento com data e quem escreveu; a RLS deixa o dono e
+o gerente), **Agendar recuperação** (ação planejada no Meu dia, tipo
+recuperação, ligada ao atendimento, mais o `volta_em` e o status vai
+voltar) e abrir o atendimento. Cada mensagem enviada já guarda quem mandou
+(0112). **O voltar do navegador** volta a tela anterior do app
+(`pushState` a cada troca de tela ou de atendimento aberto). A
+Recuperação ganhou período livre (atalhos e de/até) e "sem contato há"
+com qualquer número.
+
 ### 42. Assinatura eletrônica própria: o papel some do caminho
 
 O Derek trouxe em 15/09/2026 a especificação do assinador que já roda

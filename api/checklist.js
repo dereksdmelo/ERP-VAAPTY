@@ -731,7 +731,7 @@ async function avisarLojista(req, tok, p, tipo) {
     const segredo = process.env.PONTE_SEGREDO || "";
     const base = process.env.PONTE_URL || "";
     if (!segredo || (!req.ponte && !base)) return { enviado: false, erro: "a ponte do WhatsApp não está configurada" };
-    const canais = (await (await fetch(`${URL_BASE}/rest/v1/wa_canal?select=slug,nome&comercial=eq.false&ativo=eq.true&telefone=not.is.null&order=slug`,
+    const canais = (await (await fetch(`${URL_BASE}/rest/v1/wa_canal?select=slug,nome&comercial=eq.false&uso=eq.operacao&ativo=eq.true&telefone=not.is.null&order=slug`,
       { headers: cabecalhos(tok) })).json().catch(() => [])) || [];
     const canal = canais.find((x) => /adm/i.test(`${x.slug} ${x.nome}`)) || canais[0];
     if (!canal) return { enviado: false, erro: "nenhum número do administrativo ligado" };
@@ -770,7 +770,7 @@ async function mandarPeloAdm(req, tok, telefone, conteudo, textoNaConversa) {
   const segredo = process.env.PONTE_SEGREDO || "";
   const base = process.env.PONTE_URL || "";
   if (!segredo || (!req.ponte && !base)) return { enviado: false, erro: "a ponte do WhatsApp não está configurada" };
-  const canais = (await (await fetch(`${URL_BASE}/rest/v1/wa_canal?select=slug,nome&comercial=eq.false&ativo=eq.true&telefone=not.is.null&order=slug`,
+  const canais = (await (await fetch(`${URL_BASE}/rest/v1/wa_canal?select=slug,nome&comercial=eq.false&uso=eq.operacao&ativo=eq.true&telefone=not.is.null&order=slug`,
     { headers: cabecalhos(tok) })).json().catch(() => [])) || [];
   const canal = canais.find((x) => /adm/i.test(`${x.slug} ${x.nome}`)) || canais[0];
   if (!canal) return { enviado: false, erro: "nenhum número do administrativo ligado" };

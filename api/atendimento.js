@@ -831,6 +831,42 @@ const RX_DIA = /^\d{4}-\d{2}-\d{2}$/;
 const RX_HORA = /^([01]\d|2[0-3]):[0-5]\d$/;
 const horaOuNulo = (v) => (RX_HORA.test(String(v || "")) ? String(v) : null);
 
+/* O CLIENTE DA CONVERSA, e o que se faz com ele dali (0122, 08/11/2026,
+ * o Derek: "fazer anotações a partir dali no atendimento daquele
+ * cliente… e gerar agendamentos de recuperação"). Os atendimentos do
+ * mesmo telefone (DDD + oito últimos, a chave do funil), o mais recente
+ * primeiro. A anotação entra nas observações do atendimento com a data e
+ * quem escreveu — a RLS deixa o dono e o gerente escreverem. */
+async function doTelefone(req, res, tok) {
+  if (req.method === "GET") {
+    const k = chaveFone(req.query.tel);
+    if (!k) return res.status(200).json({ atendimentos: [] });
+    const ult4 = String(req.query.tel || "").replace(/\D/g, "").slice(-4);
+    const l = await banco(`${URL_BASE}/rest/v1/atendimento?select=id,cliente_nome,cliente_telefone,carro_descricao,status,data,volta_em,` +
+      `negociador_nome,negociador_id,observacoes,veiculo(placa,marca_modelo,ano_modelo)&cliente_telefone=like.*${ult4}*&order=data.desc&limit=200`,
+      { headers: cabecalhos(tok) }) || [];
+    return res.status(200).json({ atendimentos: l.filter((a) => chaveFone(a.cliente_telefone) === k).slice(0, 10) });
+  }
+  if (req.method === "POST" && String(req.query.acao || "") === "nota") {
+    const c = await lerCorpo(req) || {};
+    const id = String(c.atendimento_id || "");
+    const txt = String(c.texto || "").replace(/\r/g, "").trim().slice(0, 2000);
+    if (!RX_UUID.test(id) || !txt) return res.status(400).json({ erro: "Escreva a anotação." });
+    const eu = donoDoToken(tok);
+    const p = eu ? ((await banco(`${URL_BASE}/rest/v1/perfil?select=nome&id=eq.${eu}`, { headers: cabecalhos(tok) }).catch(() => [])) || [])[0] : null;
+    const a = ((await banco(`${URL_BASE}/rest/v1/atendimento?select=observacoes&id=eq.${id}`, { headers: cabecalhos(tok) })) || [])[0];
+    if (!a) return res.status(404).json({ erro: "Atendimento não encontrado." });
+    const quando = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+    const nova = `[${quando}${p && p.nome ? ` · ${p.nome}` : ""}] ${txt}`;
+    const obs = a.observacoes ? `${a.observacoes}\n${nova}` : nova;
+    const r = await banco(`${URL_BASE}/rest/v1/atendimento?id=eq.${id}`, { method: "PATCH", headers: json(tok, { Prefer: "return=representation" }), body: JSON.stringify({ observacoes: obs }) });
+    if (!(Array.isArray(r) && r[0])) return res.status(403).json({ erro: "Só o negociador do atendimento (ou o gerente) anota nele." });
+    return res.status(200).json({ ok: true, observacoes: obs });
+  }
+  res.setHeader("Allow", "GET, POST");
+  return res.status(405).json({ erro: "Use GET ou POST." });
+}
+
 /* A RECUPERAÇÃO DO NEGOCIADOR (08/11/2026, o Derek: "tem como eles
  * terem um painel de fazer recuperação que registre automático… um
  * painel de ações do dia para o negociador"). O André Ricardo colava
@@ -3085,7 +3121,7 @@ module.exports = async function handler(req, res) {
      * que sai NÃO cria lead (0059) — escrever para quem nunca falou com a
      * loja é contato, não lead. */
     if (req.method === "GET" && String(req.query.acao || "") === "numeros") {
-      const ns = await banco(`${URL_BASE}/rest/v1/wa_canal?select=slug,nome,comercial&ativo=eq.true&order=nome`, { headers: cabecalhos(tok) });
+      const ns = await banco(`${URL_BASE}/rest/v1/wa_canal?select=slug,nome,comercial,uso&ativo=eq.true&order=nome`, { headers: cabecalhos(tok) });
       return res.status(200).json({ numeros: ns || [] });
     }
     if (req.method === "POST" && String(req.query.acao || "") === "nova") {
@@ -3287,15 +3323,18 @@ module.exports = async function handler(req, res) {
     // `comercial=1`: o inverso, para a pré-venda — o número do adm tem
     // aba própria no Administrativo e não é conversa de lead (28/10/2026).
     const soComercial = String(req.query.comercial || "") === "1";
-    const emb = canal || soOperacao || soComercial ? "wa_canal!inner(slug,nome,atendente,comercial)" : "wa_canal(slug,nome,atendente,comercial)";
+    // `negociacao=1` (0122): o número dos negociadores — nem lead, nem adm.
+    const soNegociacao = String(req.query.negociacao || "") === "1";
+    const emb = canal || soOperacao || soComercial || soNegociacao ? "wa_canal!inner(slug,nome,atendente,comercial,uso)" : "wa_canal(slug,nome,atendente,comercial,uso)";
     const partes = [
       `select=id,telefone,nome,grupo,ultima_em,primeira_em,ultima_de_fora,respondida_em,lida_em,nao_lida,anuncio,atendimento_id,lead_id,${emb}`,
       "order=ultima_em.desc",
       `limit=${Math.min(200, Number(req.query.limite) || 60)}`,
     ];
     if (canal) partes.push(`wa_canal.slug=eq.${encodeURIComponent(canal)}`);
-    if (soOperacao) partes.push("wa_canal.comercial=eq.false");
+    if (soOperacao) partes.push("wa_canal.uso=eq.operacao");
     if (soComercial) partes.push("wa_canal.comercial=eq.true");
+    if (soNegociacao) partes.push("wa_canal.uso=eq.negociacao");
     const busca = String(req.query.busca || "").trim();
     if (busca) {
       // Vírgula e parêntese são sintaxe do `or=` do PostgREST: um nome
@@ -3489,7 +3528,9 @@ module.exports = async function handler(req, res) {
       if (typeof c2.nome === "string" && c2.nome.trim()) mud.nome = c2.nome.trim();
       if (c2.atendente === "ia" || c2.atendente === "humano") mud.atendente = c2.atendente;
       if (typeof c2.ativo === "boolean") mud.ativo = c2.ativo;
-      if (typeof c2.comercial === "boolean") mud.comercial = c2.comercial;
+      if (typeof c2.comercial === "boolean") { mud.comercial = c2.comercial; mud.uso = c2.comercial ? "comercial" : "operacao"; }
+      // O uso (0122): pré-venda (vira lead), operação (o adm) ou negociação.
+      if (["comercial", "operacao", "negociacao"].indexOf(String(c2.uso)) >= 0) { mud.uso = c2.uso; mud.comercial = c2.uso === "comercial"; }
       // A Flávia responde este número (0075). Ligar marca o momento: ela
       // só responde o que chegar DEPOIS, nunca a fila que já estava lá.
       if (typeof c2.ia_responde === "boolean") {
@@ -3563,6 +3604,11 @@ module.exports = async function handler(req, res) {
     if (String(req.query.recurso || "") === "tatica") {
     try { return await tatica(req, res, tok); }
     catch (e) { return res.status(502).json({ erro: "Não consegui analisar." }); }
+  }
+
+  if (String(req.query.recurso || "") === "do-telefone") {
+    try { return await doTelefone(req, res, tok); }
+    catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Falhou." }); }
   }
 
   if (String(req.query.recurso || "") === "recuperacao") {

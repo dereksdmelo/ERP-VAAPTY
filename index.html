@@ -1020,8 +1020,8 @@ async function dutMudar(id, mud) {
   return { ...d.pedido, _aviso: d.aviso || null };
 }
 
-async function waConversas({ canal, busca, operacao, comercial } = {}) {
-  const q = comoQuery({ canal: canal || undefined, busca: busca || undefined, operacao: operacao ? "1" : undefined, comercial: comercial ? "1" : undefined });
+async function waConversas({ canal, busca, operacao, comercial, negociacao } = {}) {
+  const q = comoQuery({ canal: canal || undefined, busca: busca || undefined, operacao: operacao ? "1" : undefined, comercial: comercial ? "1" : undefined, negociacao: negociacao ? "1" : undefined });
   const r = await fetchAut(`/api/atendimento?recurso=conversas${q ? `&${q}` : ""}`);
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.erro || "Não consegui carregar as conversas.");
@@ -1049,7 +1049,7 @@ async function waNovaConversa(dados) {
  * não é enfeite: mensagem para quem nunca falou com o número é o que o
  * WhatsApp mais pune num número ligado por QR — a Prospecção caiu assim
  * em 29/10/2026. */
-function NovaConversa({ operacao, canalAtual, aoFechar, aoEnviada }) {
+function NovaConversa({ operacao, negociacao, canalAtual, aoFechar, aoEnviada }) {
   const [numeros, setNumeros] = useState(null);
   const [canal, setCanal] = useState("");
   const [telefone, setTelefone] = useState("");
@@ -1059,7 +1059,9 @@ function NovaConversa({ operacao, canalAtual, aoFechar, aoEnviada }) {
   const [erro, setErro] = useState("");
   useEffect(() => {
     waNumeros().then((ns) => {
-      const meus = ns.filter((n) => (operacao ? n.comercial === false : n.comercial !== false));
+      // O uso do número (0122): pré-venda, operação (adm) ou negociação.
+      const usoDe = (n) => n.uso || (n.comercial === false ? "operacao" : "comercial");
+      const meus = ns.filter((n) => usoDe(n) === (negociacao ? "negociacao" : operacao ? "operacao" : "comercial"));
       setNumeros(meus);
       const pref = meus.filter((n) => n.slug === canalAtual)[0] || meus.filter((n) => /adm/i.test(n.nome + n.slug))[0] || meus[0];
       if (pref) setCanal(pref.slug);
@@ -10547,7 +10549,102 @@ function Balao({ m, primeiro = true }) {
   );
 }
 
-function Conversa({ conversa, aoVoltar, aoVirarLead, equipe, aoMarcar }) {
+/* O ATENDIMENTO DO CLIENTE DENTRO DA CONVERSA (0122, 08/11/2026, o Derek:
+ * "um número de whats da loja que os negociadores possam conversar com os
+ * clientes e fique registrado… fazer anotações a partir dali no
+ * atendimento daquele cliente… e gerar agendamentos de recuperação a
+ * partir dali"). A conversa já fica registrada (cada mensagem, com quem
+ * mandou — 0112); aqui, o atendimento do mesmo telefone (DDD + oito
+ * últimos) e três gestos: anotar (vai para as observações do atendimento,
+ * com data e quem escreveu), agendar a recuperação (uma ação planejada no
+ * Meu dia, e o "volta em" do atendimento) e abrir o atendimento. */
+function AtendimentoDaConversa({ telefone, nome, aoAbrir }) {
+  const [l, setL] = useState(null); const [idx, setIdx] = useState(0);
+  const [nota, setNota] = useState(""); const [quando, setQuando] = useState({ dia: "", hora: "10:00" });
+  const [aberto, setAberto] = useState(""); const [msg, setMsg] = useState(""); const [erro, setErro] = useState("");
+  const ler = () => fetchAut(`/api/atendimento?recurso=do-telefone&tel=${encodeURIComponent(telefone || "")}`)
+    .then((r) => r.json()).then((d) => setL(d.atendimentos || [])).catch(() => setL([]));
+  useEffect(() => { setL(null); setIdx(0); setAberto(""); setMsg(""); ler(); }, [telefone]);
+  if (l === null) return null;
+  const a = l[idx];
+  const hoje = hojeSP();
+  const somar = (n) => new Date(Date.parse(hoje) + n * 86400000).toISOString().slice(0, 10);
+  const carro = a ? [(a.veiculo && a.veiculo.marca_modelo) || a.carro_descricao, a.veiculo && a.veiculo.ano_modelo].filter(Boolean).join(" ") : "";
+  const anotar = async () => {
+    if (!nota.trim()) return;
+    setErro("");
+    try {
+      const r = await fetchAut("/api/atendimento?recurso=do-telefone&acao=nota", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ atendimento_id: a.id, texto: nota.trim() }) });
+      const d = await r.json(); if (!r.ok) throw new Error(d.erro || "Não consegui anotar.");
+      setNota(""); setAberto(""); setMsg("Anotado no atendimento."); ler();
+    } catch (e) { setErro(e.message); }
+  };
+  const agendar = async () => {
+    if (!quando.dia) { setErro("Escolha o dia."); return; }
+    setErro("");
+    try {
+      await criarAcao({ dia: quando.dia, hora: quando.hora || null, tipo: "recuperacao", atendimento_id: a.id, feito: false,
+        titulo: `Recuperação: retomar com ${a.cliente_nome || nome || "cliente"}${carro ? ` · ${carro}` : ""}${a.cliente_telefone ? ` · ${a.cliente_telefone}` : ""}` });
+      await atualizarAtendimento(a.id, { volta_em: quando.dia, ...(a.status === "fechado" ? {} : { status: "vai_voltar" }) }).catch(() => {});
+      setAberto(""); setMsg(`Recuperação agendada para ${diaBR(quando.dia)}${quando.hora ? ` às ${quando.hora}` : ""} — está no seu Meu dia.`); ler();
+    } catch (e) { setErro(e.message); }
+  };
+  const botao = (rot, k) => (
+    <button onClick={() => { setAberto(aberto === k ? "" : k); setMsg(""); setErro(""); }} className="rounded-full px-3 py-1 text-[12px] font-semibold"
+      style={{ background: aberto === k ? C.roxo : "#fff", color: aberto === k ? "#fff" : C.roxo, border: `1px solid ${C.roxo}` }}>{rot}</button>
+  );
+  return (
+    <div className="px-4 py-2 text-[12.5px]" style={{ background: "#F6F1FB", borderBottom: `1px solid ${WA.linha}` }}>
+      {!a ? (
+        <span style={{ color: C.mute }}>Nenhum atendimento com este telefone. Anotação e recuperação ficam no atendimento — abra um em Atendimentos.</span>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <b>Atendimento:</b>
+            <span>{a.cliente_nome || "—"}{carro ? ` · ${carro}` : ""}</span>
+            <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ background: "#fff", color: C.mute }}>{rotuloStatus(a.status)}</span>
+            <span style={{ color: C.mute }}>veio {diaBR(a.data)}{a.negociador_nome ? ` · ${a.negociador_nome}` : ""}{a.volta_em ? ` · volta ${diaBR(a.volta_em)}` : ""}</span>
+            {l.length > 1 && (
+              <select value={idx} onChange={(e) => setIdx(Number(e.target.value))} className="rounded border px-1 py-0.5 text-[11.5px] outline-none" style={inputSty}>
+                {l.map((x, i) => <option key={x.id} value={i}>{diaBR(x.data)} · {rotuloStatus(x.status)}</option>)}
+              </select>
+            )}
+            <span className="ml-auto flex flex-wrap gap-1.5">
+              {botao("Anotar", "nota")}
+              {botao("Agendar recuperação", "agenda")}
+              {aoAbrir && <button onClick={() => aoAbrir(a.id)} className="rounded-full px-3 py-1 text-[12px] font-semibold" style={{ color: C.mute }}>abrir atendimento</button>}
+            </span>
+          </div>
+          {aberto === "nota" && (
+            <div className="mt-2 flex gap-2">
+              <input autoFocus value={nota} onChange={(e) => setNota(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") anotar(); }}
+                placeholder="ex.: quer 45 mil, vai falar com a esposa e retorna sexta" className="min-w-0 flex-1 rounded-md border px-2 py-1.5 outline-none" style={inputSty} />
+              <button onClick={anotar} className="rounded-md px-3 py-1.5 font-semibold text-white" style={{ background: C.roxo }}>Anotar</button>
+            </div>
+          )}
+          {aberto === "agenda" && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              {[["amanhã", 1], ["em 2 dias", 2], ["em 3 dias", 3], ["em 1 semana", 7], ["em 15 dias", 15]].map(([r, n]) => (
+                <button key={r} onClick={() => setQuando((q) => ({ ...q, dia: somar(n) }))} className="rounded border px-2 py-1"
+                  style={{ borderColor: quando.dia === somar(n) ? C.roxo : C.line, background: quando.dia === somar(n) ? "#F1ECF8" : "#fff" }}>{r}</button>
+              ))}
+              <input type="date" min={hoje} value={quando.dia} onChange={(e) => setQuando((q) => ({ ...q, dia: e.target.value }))} className="rounded border px-1.5 py-1 outline-none" style={inputSty} />
+              <input type="time" value={quando.hora} onChange={(e) => setQuando((q) => ({ ...q, hora: e.target.value }))} className="rounded border px-1.5 py-1 outline-none" style={inputSty} />
+              <button onClick={agendar} className="rounded-md px-3 py-1 font-semibold text-white" style={{ background: C.roxo }}>Agendar</button>
+            </div>
+          )}
+          {a.observacoes && aberto === "nota" && (
+            <pre className="mt-2 max-h-[110px] overflow-y-auto whitespace-pre-wrap rounded bg-white px-2 py-1 text-[11.5px]" style={{ fontFamily: F.body, color: C.mute }}>{a.observacoes}</pre>
+          )}
+        </>
+      )}
+      {(msg || erro) && <div className="mt-1" style={{ color: erro ? C.laranja : C.verde, fontWeight: 600 }}>{erro || `✓ ${msg}`}</div>}
+    </div>
+  );
+}
+
+function Conversa({ conversa, aoVoltar, aoVirarLead, equipe, aoMarcar, aoAbrir }) {
   const [msgs, setMsgs] = useState(null);
   const [erro, setErro] = useState("");
   const [virando, setVirando] = useState(false);
@@ -10684,6 +10781,11 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe, aoMarcar }) {
         </div>
       </div>
 
+      {/* O ATENDIMENTO DESTE CLIENTE, no número dos negociadores (0122). */}
+      {!ehGrupo && conversa.canal && conversa.canal.uso === "negociacao" && (
+        <AtendimentoDaConversa telefone={conversa.telefone} nome={conversa.nome} aoAbrir={aoAbrir} />
+      )}
+
       <div className="min-h-0 flex-1 overflow-y-auto px-[6%] py-3" style={WA_FUNDO}>
         {erro && <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
         {!msgs && !erro && <p className="text-center text-[13.5px]" style={{ color: WA.mute }}>carregando…</p>}
@@ -10748,7 +10850,7 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe, aoMarcar }) {
  * comercial (0058) — o do administrativo, que fala com lojista, cartório
  * e despachante. É o mesmo filtro no servidor, não um seletor escondido:
  * a pessoa do adm não é gerente e não lê a lista de números. */
-function TelaConversas({ alvo, aoConsumirAlvo, operacao }) {
+function TelaConversas({ alvo, aoConsumirAlvo, operacao, negociacao, aoAbrir }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
   const [canais, setCanais] = useState([]);
@@ -10805,7 +10907,7 @@ function TelaConversas({ alvo, aoConsumirAlvo, operacao }) {
       primeira = false;
       // Na pré-venda, só os números comerciais: o do adm mora na aba dele
       // no Administrativo (o Derek, 28/10/2026).
-      try { const d = await waConversas({ canal, busca, operacao, comercial: !operacao }); if (vivo) { setLista(d); setErro(""); } }
+      try { const d = await waConversas({ canal, busca, operacao, negociacao, comercial: !operacao && !negociacao }); if (vivo) { setLista(d); setErro(""); } }
       catch (e) { if (vivo) setErro(e.message); }
       // Vinte segundos: é um mural, e cinco seria pagar por movimento
       // que ninguém está olhando (mesma conta da decisão 45).
@@ -10860,7 +10962,7 @@ function TelaConversas({ alvo, aoConsumirAlvo, operacao }) {
               ))}
               <button onClick={() => setNova(true)} className="rounded-full px-3 py-1 text-[13px] font-semibold"
                 style={{ background: "#008069", color: "#fff" }}>+ Nova conversa</button>
-              {!!canais.length && !operacao && (
+              {!!canais.length && !operacao && !negociacao && (
                 <select className="ml-auto max-w-[170px] rounded-full px-2.5 py-1 text-[12.5px] outline-none"
                   style={{ background: WA.barra, color: WA.texto, border: "none" }} value={canal} onChange={(e) => setCanal(e.target.value)}>
                   <option value="">Todos os números</option>
@@ -10933,7 +11035,7 @@ function TelaConversas({ alvo, aoConsumirAlvo, operacao }) {
 
         <div className={`${abertaViva ? "flex" : "hidden lg:flex"} min-w-0 flex-1 flex-col`}>
           {abertaViva ? (
-            <Conversa conversa={abertaViva} aoVoltar={() => setAberta(null)} equipe={equipe}
+            <Conversa conversa={abertaViva} aoVoltar={() => setAberta(null)} equipe={equipe} aoAbrir={aoAbrir}
               aoMarcar={(id, estavaEsperando) => marcar(id, estavaEsperando)}
               aoVirarLead={(id, lead) => setLista((ls) => (ls || []).map((x) =>
                 (x.id === id ? { ...x, lead_id: (lead && lead.id) || x.lead_id, lead: lead || x.lead } : x)))} />
@@ -10949,7 +11051,7 @@ function TelaConversas({ alvo, aoConsumirAlvo, operacao }) {
         </div>
       </div>
       {nova && (
-        <NovaConversa operacao={operacao} canalAtual={canal} aoFechar={() => setNova(false)}
+        <NovaConversa operacao={operacao} negociacao={negociacao} canalAtual={canal} aoFechar={() => setNova(false)}
           aoEnviada={(d) => {
             // Abre a conversa nova pela busca, o mesmo caminho de quem vem do lead.
             const t = String(d.telefone || "").replace(/\D/g, "");
@@ -11040,6 +11142,7 @@ function CartaoCanal({ canal, aoMudar, aoApagar }) {
   const [nome, setNome] = useState(canal.nome || "");
   const [atendente, setAtendente] = useState(canal.atendente || "humano");
   const [comercial, setComercial] = useState(canal.comercial !== false);
+  const [uso, setUso] = useState(canal.uso || (canal.comercial === false ? "operacao" : "comercial"));
 
   // De três em três segundos: é mais ou menos o tempo que o WhatsApp
   // deixa um QR de pé. Parar quando a aba some evita gastar o 4G da
@@ -11071,7 +11174,7 @@ function CartaoCanal({ canal, aoMudar, aoApagar }) {
 
   const salvar = async () => {
     setOcupado("salvar");
-    try { await aoMudar(canal.slug, { nome, atendente, comercial }); setEditando(false); setErro(""); }
+    try { await aoMudar(canal.slug, { nome, atendente, uso }); setEditando(false); setErro(""); }
     catch (x) { setErro(x.message); }
     setOcupado("");
   };
@@ -11117,7 +11220,8 @@ function CartaoCanal({ canal, aoMudar, aoApagar }) {
 
   return (
     <Bloco titulo={canal.nome || canal.slug}
-      sub={(canal.comercial === false ? "número de operação — fora do funil"
+      sub={(canal.uso === "negociacao" ? "número dos negociadores — fora do funil"
+            : canal.comercial === false ? "número de operação — fora do funil"
             : canal.atendente === "ia" ? "número que a IA atende" : "número que a equipe atende")
            + ` · apelido ${canal.slug}`}>
       <div className="flex flex-wrap items-center gap-2">
@@ -11195,8 +11299,15 @@ function CartaoCanal({ canal, aoMudar, aoApagar }) {
               <option value="ia">A IA</option>
             </select>
           </Campo>
-          <Toggle label="É canal comercial" valor={comercial} onChange={setComercial}
-            nota="Ligado, as conversas entram no funil da pré-venda e podem virar lead. Desligue para número de operação — administrativo, cartório, despachante." />
+          {/* O USO DO NÚMERO (0122): eram dois (comercial ou operação); o
+              dos negociadores é o terceiro — não vira lead e não vai ao adm. */}
+          <Campo label="Para que serve este número" nota="Pré-venda: quem escreve vira lead. Negociação: os negociadores falam com os clientes, com anotação e recuperação no atendimento. Operação: administrativo, cartório, despachante.">
+            <select className={inputCls} style={inputSty} value={uso} onChange={(x) => { setUso(x.target.value); setComercial(x.target.value === "comercial"); }}>
+              <option value="comercial">Pré-venda (vira lead)</option>
+              <option value="negociacao">Negociação (os negociadores)</option>
+              <option value="operacao">Operação (administrativo)</option>
+            </select>
+          </Campo>
           <div className="flex gap-2">
             <button onClick={salvar} disabled={!!ocupado}
               className="rounded-lg px-3 py-2 text-[13.5px] font-semibold text-white"
@@ -27296,6 +27407,8 @@ function destinosPara(perfil) {
     // As ações do dia do negociador (08/11/2026): a recuperação, com o
     // registro automático no Meu dia.
     { id: "recuperacao", rot: "Recuperação", curto: "Recup.", area: "negociacao", icone: "meudia" },
+    // O WhatsApp dos negociadores (0122): só os números de uso "negociação".
+    { id: "whats_neg", rot: "WhatsApp", curto: "WhatsApp", area: "negociacao", icone: "meudia" },
     // Ferramenta, não destino de todo dia. Todo mundo vê — é uma
     // calculadora, não mostra dado de cliente nenhum.
     { id: "extrato", rot: "Extrato de ofertas", curto: "Extrato", area: "negociacao" },
@@ -30712,7 +30825,7 @@ function App() {
   if (!permitida && tela !== "atendimentos") { setTela("atendimentos"); return null; }
 
   return (
-    <Shell perfil={perfil} tela={tela} setTela={setTela} cheia={tela === "conversas" || tela === "adm_whats" ? true : tela === "rentabilidade" ? "larga" : false}>
+    <Shell perfil={perfil} tela={tela} setTela={setTela} cheia={tela === "conversas" || tela === "adm_whats" || tela === "whats_neg" ? true : tela === "rentabilidade" ? "larga" : false}>
       {/* Fica dentro da casca, sobre qualquer destino: a pergunta
           aparece onde a pessoa estiver, e não só no "Meu dia". */}
       {pedeLembrete && <RedeDeErro onde="lembrete"><LembreteDoDia perfil={perfil} /></RedeDeErro>}
@@ -30741,6 +30854,7 @@ function App() {
       {tela === "gestao" && <TelaGestao perfil={perfil} comp={compOuAtual} />}
       {tela === "remuneracao" && <TelaPerfisRemuneracao />}
       {tela === "adm_whats" && <TelaConversas key="adm" operacao />}
+      {tela === "whats_neg" && <TelaConversas key="neg" negociacao aoAbrir={abrir} />}
       {tela === "adm_transf" && <TelaTransferencias />}
       {tela === "conversas" && (
         <TelaConversas alvo={conversaAlvo} aoConsumirAlvo={() => setConversaAlvo(null)} />
