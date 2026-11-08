@@ -353,6 +353,19 @@ async function importarEstoque(req, res, tok, c) {
     (criados || []).forEach((x) => { compradorPor[x.nome.toLowerCase()] = x; });
   }
 
+  /* O NOME DO NEGOCIADOR É O DO CADASTRO (08/11/2026, o Derek: "por que
+   * ele apareceu com e sem acento? não era pra ser seleção automática do
+   * sistema?"). O carro que entra ao fechar pega o nome do atendimento,
+   * escolhido numa lista; a planilha colada trazia "ANDRE BRUNO" sem
+   * acento, e entrava como veio — duas grafias da mesma pessoa. Agora o
+   * nome da planilha que casa com o cadastro (sem acento, sem caixa) vira
+   * o do cadastro; o que não casa entra como veio. */
+  const semAc = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/\s+/g, " ").trim();
+  const cadNeg = {};
+  ((await supa(`${base("negociador")}?select=nome`, { headers: cab }).catch(() => [])) || [])
+    .forEach((n) => { if (n.nome) cadNeg[semAc(n.nome)] = n.nome; });
+  const nomeDoNegociador = (n) => { const t = texto(n); return t ? cadNeg[semAc(t)] || t : t; };
+
   // 5. as linhas do estoque
   const pulados = [];
   const paraInserir = [];
@@ -376,7 +389,7 @@ async function importarEstoque(req, res, tok, c) {
       comprador_id: comp ? comp.id : null,
       valor_venda: venda,
       semana_venda: semana >= 1 && semana <= 5 ? semana : null,
-      negociador_nome: texto(l.negociador),
+      negociador_nome: nomeDoNegociador(l.negociador),
       meio_alcance: texto(l.meio_alcance),
       prospector: texto(l.prospector),
       observacoes: texto(l.comentarios),

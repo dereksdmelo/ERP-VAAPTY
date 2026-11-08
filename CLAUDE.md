@@ -4386,7 +4386,11 @@ texto, e "ANDRE BRUNO" e "ANDRÉ BRUNO" viravam duas pessoas no filtro e
 no "Por negociador". `chaveNeg` tira o acento; o nome mostrado é a
 grafia mais usada, com acento quando há. O filtro lista todo negociador
 que já vendeu, não só os do mês — o André Ricardo, sem venda em novembro,
-sumia da lista.
+sumia da lista. **A causa era a importação da planilha**: o carro que
+entra ao fechar pega o nome do atendimento (escolhido numa lista, o do
+cadastro); a planilha colada gravava o texto como veio. Agora o
+importador troca o nome pelo do cadastro quando casam sem acento, e os
+135 carros "ANDRE BRUNO" viraram "ANDRÉ BRUNO" no mesmo dia.
 
 **A previsão de rentabilidade (0118)** — o Derek: *"valores prováveis de
 venda nos carros que estão em estoque… vendendo todos, ou só alguns…
