@@ -20493,8 +20493,9 @@ function TitulosDoMes({ comp }) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap gap-2">
-        {[["Realizado no mês", soma((l) => l.situacao === "efetivado"), "o que passou — é a base do DRE"],
+        {[["Realizado no DRE", soma((l) => l.situacao === "efetivado" && l.fin_categoria && l.fin_categoria.no_dre), "o que passou, nas categorias que entram no DRE"],
           ["Previsto em aberto", soma((l) => l.situacao === "aberto"), "entra na projeção"],
+          ["Sem categoria", soma((l) => l.situacao === "efetivado" && !l.categoria_id), "passou e ainda não diz o que é"],
         ].map(([r, v, sub]) => (
           <span key={r} className="rounded-xl px-4 py-2.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
             <span className="block text-[12px]" style={{ color: C.mute }}>{r}</span>
