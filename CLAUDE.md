@@ -4599,7 +4599,14 @@ linha do mesmo carro, parte e valor ainda sem item: achando uma, ela vira
 o título, em amarelo. `item_contrato` tem índice único por carro enquanto
 não cancelado, e passa para a linha do banco quando o título é ligado.
 **Só a partir de 01/11/2026** (`CORTE_TITULOS`): o histórico já está
-conciliado do jeito antigo; `forcar` gera para um carro mais velho.
+conciliado do jeito antigo; `forcar` gera para um carro mais velho. **O corte vale por
+LADO** (08/11/2026): carro de outubro vendido em novembro gera só a venda
+— a primeira versão tratava "já tem um título" como carro gerido e, na
+segunda passada, gerou a compra e os custos de outubro e marcou 8
+pagamentos de outubro; foi desfeito no mesmo dia. Carro **baixado** ou
+**tirado do estoque** cancela os títulos em aberto. A ficha do carro
+mostra os títulos dele (`TitulosDoCarro`), e os Títulos financeiros têm o
+filtro "Carros (contrato)".
 
 **A edição completa do título e a baixa parcial (07/11/2026, o Derek:
 *"abrir pra editar o título com mais dados… opção de baixa parcial… bem
