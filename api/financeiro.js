@@ -556,7 +556,7 @@ async function importar(req, res, tok) {
   // com o que se digitou, e casar por nome erraria mais que acertaria.
   const abertos = await supa(
     `${base("fin_lancamento")}?select=id,debito,credito,vencimento,descricao,favorecido,conta_id,conta_fixa_id,categoria_id,competencia,` +
-    `favorecido_id,funcionario_id,estoque_id,tipo_negociacao,observacao,item_contrato,fin_conta_fixa(nome)&situacao=eq.aberto&limit=2000`,
+    `favorecido_id,funcionario_id,estoque_id,tipo_negociacao,observacao,item_contrato,fin_conta_fixa(nome,favorecido,valor_livre)&situacao=eq.aberto&limit=2000`,
     { headers: cab(tok) });
   const casados = [];
   const usados = {};
@@ -593,6 +593,17 @@ async function importar(req, res, tok) {
       if (usados[t.id] || !t.conta_fixa_id || !t.vencimento) return false;
       if (t.conta_id && t.conta_id !== contaId) return false;
       const tv = deb ? Number(t.debito) || 0 : Number(t.credito) || 0;
+      /* CONTA FIXA DE VALOR LIVRE (0130): paga uma vez por mês a um favorecido, em valor que
+         muda (o cartório). Liga pelo nome do favorecido da conta, que precisa estar inteiro na
+         descrição do banco, sem olhar o valor; a janela de datas é a do mês seguinte. Só vale
+         para a conta que o financeiro marcou. */
+      const livre = t.fin_conta_fixa && t.fin_conta_fixa.valor_livre && t.fin_conta_fixa.favorecido;
+      if (livre) {
+        if (!(tv > 0) && !(v > 0)) return false;
+        if (diasEntre(t.vencimento, data) > 45) return false;
+        const pf = palavras(t.fin_conta_fixa.favorecido);
+        return pf.length > 0 && pf.every((w) => pd.indexOf(w) >= 0);
+      }
       if (!(tv > 0) || Math.abs(tv - v) / tv > 0.25) return false;
       if (diasEntre(t.vencimento, data) > 10) return false;
       const nomeFixa = t.fin_conta_fixa ? t.fin_conta_fixa.nome : t.descricao;
@@ -1413,6 +1424,7 @@ async function contasFixas(req, res, tok) {
     if (c.valor !== undefined) linha.valor = decimal(c.valor) || 0;
     if (c.dia_vencimento !== undefined) linha.dia_vencimento = Math.min(31, Math.max(1, Math.trunc(Number(c.dia_vencimento) || 10)));
     if (c.ativo !== undefined) linha.ativo = !!c.ativo;
+    if (c.valor_livre !== undefined) linha.valor_livre = !!c.valor_livre;
     if (c.observacao !== undefined) linha.observacao = texto(c.observacao);
     if (req.method === "POST" && !linha.nome) return res.status(400).json({ erro: "Dê um nome à conta." });
     const r = await supa(req.method === "POST" ? base("fin_conta_fixa") : `${base("fin_conta_fixa")}?id=eq.${id}`,

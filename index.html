@@ -19134,6 +19134,11 @@ function FinContasFixas({ comp }) {
       <select className={sel} style={inputSty} value={c.conta_id || ""} onChange={(e) => mudar({ conta_id: e.target.value || null })}>
         <option value="">sai de qualquer conta</option>{contas.map((k) => <option key={k.id} value={k.id}>{k.nome}</option>)}
       </select>
+      <input className={`${sel} min-w-[170px]`} style={inputSty} placeholder="Quem recebe (como no extrato)" value={c.favorecido || ""} onChange={(e) => mudar({ favorecido: e.target.value })}
+        title="O nome do favorecido como o banco escreve (ex.: WILLIAN GARCIA DE SOUZA)" />
+      <label className="flex items-center gap-1 text-[12px]" style={{ color: C.mute }} title="Paga uma vez por mês a esse favorecido, em qualquer valor: o extrato liga o PIX a esta conta pelo nome, sem olhar o valor.">
+        <input type="checkbox" checked={!!c.valor_livre} onChange={(e) => mudar({ valor_livre: e.target.checked })} /> 1× por mês, qualquer valor
+      </label>
     </>
   );
   return (
