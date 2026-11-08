@@ -106,6 +106,7 @@ async function corpoDe(req) {
   return c && typeof c === "object" ? c : null;
 }
 const um = (r) => (Array.isArray(r) ? r[0] : r) || null;
+const semAcentoS = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 const recusado = (res, msg) => res.status(403).json({ erro: msg || "Sem acesso ao financeiro." });
 
 /* ------------------ cadastros simples ------------------ */
@@ -244,7 +245,7 @@ async function funcionario(req, res, tok) {
 
 const TIPOS_NEG = ["pagto_cliente", "quitacao", "debitos", "pagto_lojista", "reembolso", "outro"];
 const SITUACOES = ["aberto", "efetivado", "cancelado"];
-const CAMPOS_LANC = "*,fin_categoria(id,nome,grupo,no_dre,pede_funcionario)," +
+const CAMPOS_LANC = "*,fin_categoria(id,nome,grupo,no_dre,pede_funcionario),fin_conta_fixa(id,nome)," +
   "fin_conta(id,nome,empresa),fin_favorecido(id,nome,documento),estoque(id,veiculo(placa,marca_modelo)),fin_funcionario(id,nome)," +
   "fin_rateio(id,valor,categoria_id,estoque_id,tipo_negociacao,funcionario_id,descricao)";
 
@@ -340,6 +341,9 @@ async function lancamento(req, res, tok) {
     const lista = await supa(
       `${base("fin_lancamento")}?select=${CAMPOS_LANC}&situacao=eq.efetivado${conta ? `&conta_id=eq.${conta}` : ""}${f}&order=data.asc,criado_em.asc&limit=2000`,
       { headers: cab(tok) });
+    // O título a que cada linha do banco se refere (07/11/2026): o que foi
+    // ligado — à mão ou pela importação — fica cancelado apontando a linha.
+    await anexarTitulos(tok, lista || []);
     /* O saldo que entra no mês: o saldo de ABERTURA da conta mais o que
      * se moveu entre a abertura e o começo do mês.
      *
@@ -528,7 +532,8 @@ async function importar(req, res, tok) {
   // vencimento — nome de favorecido no extrato do banco raramente bate
   // com o que se digitou, e casar por nome erraria mais que acertaria.
   const abertos = await supa(
-    `${base("fin_lancamento")}?select=id,debito,credito,vencimento,descricao,favorecido,conta_id&situacao=eq.aberto&limit=2000`,
+    `${base("fin_lancamento")}?select=id,debito,credito,vencimento,descricao,favorecido,conta_id,conta_fixa_id,categoria_id,competencia,` +
+    `favorecido_id,funcionario_id,estoque_id,tipo_negociacao,observacao,fin_conta_fixa(nome)&situacao=eq.aberto&limit=2000`,
     { headers: cab(tok) });
   const casados = [];
   const usados = {};
@@ -547,6 +552,30 @@ async function importar(req, res, tok) {
       t.vencimento && diasEntre(t.vencimento, data) <= 7);
     // Dois títulos do mesmo valor na mesma semana: não dá para saber
     // qual é, e chutar é pior que deixar para a pessoa.
+    return cand.length === 1 ? cand[0] : null;
+  };
+  /* A CONTA FIXA QUE VARIA (07/11/2026, o Derek: "o sistema pode
+   * reconhecer automaticamente qual é — QUANDO RECONHECER DEVE FICAR
+   * EVIDENCIADO PARA CONFERIR"). A luz prevista em 1.100 sai 1.087: o
+   * valor exato não casa. Aqui, só para título de conta fixa: valor a
+   * até 25% do previsto, data a até 10 dias do vencimento e um sinal de
+   * que é ela — a categoria que a descrição do banco costuma ter, ou o
+   * nome da conta fixa escrito na descrição. Um candidato só; e sempre
+   * com `revisar`, que a tela mostra em amarelo até alguém conferir. */
+  const palavras = (t) => semAcentoS(t).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4);
+  const casarFixa = (data, deb, cred, desc, catId) => {
+    const v = deb || cred;
+    const pd = palavras(desc);
+    const cand = (abertos || []).filter((t) => {
+      if (usados[t.id] || !t.conta_fixa_id || !t.vencimento) return false;
+      if (t.conta_id && t.conta_id !== contaId) return false;
+      const tv = deb ? Number(t.debito) || 0 : Number(t.credito) || 0;
+      if (!(tv > 0) || Math.abs(tv - v) / tv > 0.25) return false;
+      if (diasEntre(t.vencimento, data) > 10) return false;
+      const nomeFixa = t.fin_conta_fixa ? t.fin_conta_fixa.nome : t.descricao;
+      const pf = palavras(`${nomeFixa || ""} ${t.favorecido || ""}`);
+      return (catId && t.categoria_id === catId) || pf.some((w) => pd.indexOf(w) >= 0);
+    });
     return cand.length === 1 ? cand[0] : null;
   };
 
@@ -693,14 +722,26 @@ async function importar(req, res, tok) {
     // Já existe um título aberto com este valor e vencimento perto?
     // Então este movimento é o pagamento dele: efetiva a MESMA linha em
     // vez de criar uma segunda, e acende `revisar`.
-    const t = casar(data, deb, cred);
+    /* O TÍTULO RECONHECIDO FICA GUARDADO (07/11/2026). Antes, o título
+     * virava a própria linha do banco e perdia a descrição — não havia
+     * como dizer "não é este". Agora a linha do banco entra como sempre
+     * e herda do título categoria, competência e conta fixa; o título
+     * fica `cancelado` com `extrato_id` apontando a linha (o mesmo
+     * vínculo do "ligar" à mão), e `revisar` acende: "trocar" desfaz. */
+    const t = casar(data, deb, cred) || casarFixa(data, deb, cred, l.descricao, catId);
     if (t) {
       usados[t.id] = true;
       casados.push({
-        id: t.id, conta_id: contaId, data,
-        competencia: competenciaDe(l.competencia) || undefined,
-        situacao: "efetivado", conciliado: true, revisar: true, chave_extrato: chave,
-        descricao: texto(l.descricao) || t.descricao,
+        titulo: t,
+        linha: {
+          conta_id: contaId, data, competencia: t.competencia || competenciaDe(l.competencia) || competenciaDe(data),
+          categoria_id: t.categoria_id || catId, descricao: texto(l.descricao) || t.descricao, debito: deb, credito: cred,
+          estoque_id: t.estoque_id || (placa ? estoquePorPlaca[placa] || null : null),
+          tipo_negociacao: t.tipo_negociacao || null, funcionario_id: t.funcionario_id || null,
+          conta_fixa_id: t.conta_fixa_id || null, observacao: t.observacao || null,
+          favorecido_id: t.favorecido_id || favPor[docNa(l.descricao)] || null, favorecido: t.favorecido || null,
+          conciliado: true, revisar: true, origem: fitid ? "ofx" : "planilha", chave_extrato: chave,
+        },
       });
       return;
     }
@@ -728,23 +769,36 @@ async function importar(req, res, tok) {
   // diferente — não há upsert em lote que sirva.
   let conciliados = 0;
   for (const k of casados) {
-    const { id, ...mud } = k;
-    if (mud.competencia === undefined) delete mud.competencia;
-    let r;
-    try {
-      r = await supa(`${base("fin_lancamento")}?id=eq.${id}&situacao=eq.aberto`, {
-        method: "PATCH", headers: cab(tok, REP), body: JSON.stringify(mud),
-      });
-    } catch (e) {
-      // A chave do extrato pode já pertencer a outro lançamento desta
-      // conta. Baixar o título continua valendo — o que se perde é só a
-      // amarração com o identificador do banco.
-      const { chave_extrato, ...semChave } = mud;
-      r = await supa(`${base("fin_lancamento")}?id=eq.${id}&situacao=eq.aberto`, {
-        method: "PATCH", headers: cab(tok, REP), body: JSON.stringify(semChave),
-      });
+    const t = k.titulo;
+    // O título sai de cena ANTES de a linha nascer com a conta fixa dele:
+    // o índice único (conta fixa, competência) da 0096 não aceita os dois.
+    const tirou = await supa(`${base("fin_lancamento")}?id=eq.${t.id}&situacao=eq.aberto`, {
+      method: "PATCH", headers: cab(tok, REP), body: JSON.stringify({ situacao: "cancelado", conta_fixa_id: null }),
+    }).catch(() => null);
+    if (!um(tirou)) {
+      // O título já não estava aberto: a linha entra como qualquer outra
+      // (no mesmo formato do lote, que exige as mesmas chaves).
+      const x = k.linha;
+      corpo.push({ conta_id: x.conta_id, data: x.data, competencia: x.competencia, categoria_id: x.categoria_id, descricao: x.descricao,
+        debito: x.debito, credito: x.credito, estoque_id: x.estoque_id, tipo_negociacao: x.tipo_negociacao,
+        conciliado: true, origem: x.origem, favorecido_id: x.favorecido_id, chave_extrato: x.chave_extrato });
+      continue;
     }
-    if (um(r)) conciliados += 1;
+    let nova = null;
+    try {
+      nova = um(await supa(`${base("fin_lancamento")}?on_conflict=conta_id,chave_extrato`, {
+        method: "POST", headers: cab(tok, { Prefer: "resolution=ignore-duplicates,return=representation" }),
+        body: JSON.stringify([k.linha]),
+      }));
+    } catch (e) { nova = null; }
+    if (nova) {
+      await supa(`${base("fin_lancamento")}?id=eq.${t.id}`, { method: "PATCH", headers: cab(tok), body: JSON.stringify({ extrato_id: nova.id }) });
+      conciliados += 1;
+    } else {
+      // A linha não entrou (já estava): o título volta como estava.
+      await supa(`${base("fin_lancamento")}?id=eq.${t.id}`, { method: "PATCH", headers: cab(tok),
+        body: JSON.stringify({ situacao: "aberto", conta_fixa_id: t.conta_fixa_id || null }) }).catch(() => null);
+    }
   }
 
   let inseridos = 0;
@@ -1262,7 +1316,67 @@ async function carros(req, res, tok) {
  * Criar título é o POST normal de lançamento com situacao=aberto — é a
  * mesma linha, e ter dois caminhos de criação daria dois formatos.
  */
+async function anexarTitulos(tok, lista) {
+  const ids = lista.map((l) => l.id);
+  const por = {};
+  for (let i = 0; i < ids.length; i += 150) {
+    const fatia = ids.slice(i, i + 150);
+    const ts = await supa(`${base("fin_lancamento")}?select=id,descricao,vencimento,debito,credito,extrato_id,fin_conta_fixa(nome)` +
+      `&situacao=eq.cancelado&origem=neq.divisao&extrato_id=in.(${fatia.join(",")})`, { headers: cab(tok) }).catch(() => []) || [];
+    ts.forEach((t) => { (por[t.extrato_id] = por[t.extrato_id] || []).push({ id: t.id, descricao: t.descricao, vencimento: t.vencimento,
+      valor: (Number(t.debito) || 0) + (Number(t.credito) || 0) }); });
+  }
+  lista.forEach((l) => { l.titulos_ligados = por[l.id] || []; });
+}
+
+/* Solta os títulos ligados a uma linha do banco: voltam a abertos, e a
+ * conta fixa sai da linha ANTES de voltar ao primeiro título — o índice
+ * único (conta fixa, competência) da 0096 não aceita os dois vivos. */
+async function soltarTitulos(tok, linhaId) {
+  const ts = await supa(`${base("fin_lancamento")}?select=id&extrato_id=eq.${linhaId}&situacao=eq.cancelado&dividido_em=is.null&origem=neq.divisao`, { headers: cab(tok) }).catch(() => []) || [];
+  if (!ts.length) return 0;
+  const l = um(await supa(`${base("fin_lancamento")}?select=conta_fixa_id&id=eq.${linhaId}`, { headers: cab(tok) }));
+  await supa(`${base("fin_lancamento")}?id=eq.${linhaId}`, { method: "PATCH", headers: cab(tok), body: JSON.stringify({ conta_fixa_id: null, revisar: false }) });
+  let devolvida = false;
+  for (const t of ts) {
+    await supa(`${base("fin_lancamento")}?id=eq.${t.id}`, { method: "PATCH", headers: cab(tok),
+      body: JSON.stringify({ situacao: "aberto", extrato_id: null, conta_fixa_id: !devolvida && l && l.conta_fixa_id ? l.conta_fixa_id : null }) });
+    devolvida = true;
+  }
+  return ts.length;
+}
+
 async function titulo(req, res, tok) {
+  /* OS TÍTULOS FINANCEIROS DO MÊS (07/11/2026, o Derek: "deveria ter
+   * outra tela de títulos financeiros… essa tela tem como vincular a um
+   * item da conciliação… o DRE é montado a partir dos títulos"). Tudo
+   * que não foi cancelado na competência — os previstos (aberto) e os
+   * realizados (efetivado), que é exatamente a base do DRE — com o
+   * vínculo de cada um à linha do banco. */
+  if (req.method === "GET" && req.query.todos) {
+    const comp = competenciaDe(req.query.competencia) || competenciaDe(hojeAqui());
+    const lista = await supa(`${base("fin_lancamento")}?select=${CAMPOS_LANC}&situacao=in.(aberto,efetivado)&competencia=eq.${comp}` +
+      `&order=vencimento.asc.nullslast,data.asc&limit=5000`, { headers: cab(tok) }) || [];
+    await anexarTitulos(tok, lista.filter((l) => l.situacao === "efetivado"));
+    return res.status(200).json({ competencia: comp, titulos: lista });
+  }
+  // As linhas do banco que podem ser o pagamento deste título: mesmo
+  // lado, mesma conta (se o título tem), até 60 dias do vencimento, e
+  // que ainda não são de outro título nem de outra conta fixa.
+  if (req.method === "GET" && String(req.query.acao || "") === "linhas") {
+    const id = idOuNulo(req.query.id);
+    const t = id ? um(await supa(`${base("fin_lancamento")}?select=*&id=eq.${id}`, { headers: cab(tok) })) : null;
+    if (!t) return res.status(404).json({ erro: "Título não encontrado." });
+    const saida = Number(t.debito) > 0;
+    const ref = String(t.vencimento || t.data || hojeAqui()).slice(0, 10);
+    const desloc = (n) => { const d = new Date(Date.parse(ref) + n * 86400000); return d.toISOString().slice(0, 10); };
+    const lista = await supa(`${base("fin_lancamento")}?select=${CAMPOS_LANC}&situacao=eq.efetivado&chave_extrato=not.is.null` +
+      `&${saida ? "debito" : "credito"}=gt.0&data=gte.${desloc(-60)}&data=lte.${desloc(60)}` +
+      `${t.conta_id ? `&conta_id=eq.${t.conta_id}` : ""}&dividido_em=is.null&order=data.asc&limit=1500`, { headers: cab(tok) }) || [];
+    await anexarTitulos(tok, lista);
+    const livres = lista.filter((l) => !l.titulos_ligados.length && (!l.conta_fixa_id || l.conta_fixa_id === t.conta_fixa_id));
+    return res.status(200).json({ titulo: t, linhas: livres });
+  }
   if (req.method === "GET") {
     const ate = dataISO(req.query.ate);
     const f = ate ? `&vencimento=lte.${ate}` : "";
@@ -1408,6 +1522,8 @@ async function titulo(req, res, tok) {
     if (saida ? !(Number(t.debito) > 0) : !(Number(t.credito) > 0)) {
       return res.status(400).json({ erro: saida ? "Esta linha é uma saída: só título a pagar." : "Esta linha é uma entrada: só título a receber." });
     }
+    // "Trocar": a linha que já tinha título solta o anterior antes.
+    await soltarTitulos(tok, l.id);
     const mud = { conciliado: true, revisar: false };
     if (t.competencia) mud.competencia = t.competencia;
     if (t.conta_fixa_id) mud.conta_fixa_id = t.conta_fixa_id;
@@ -1426,19 +1542,9 @@ async function titulo(req, res, tok) {
   if (req.method === "POST" && String(req.query.acao || "") === "desligar") {
     const id = idOuNulo(req.query.id);
     if (!id) return res.status(400).json({ erro: "id inválido." });
-    const ts = await supa(`${base("fin_lancamento")}?select=id,conta_fixa_id&extrato_id=eq.${id}&situacao=eq.cancelado`, { headers: cab(tok) }) || [];
-    if (!ts.length) return res.status(409).json({ erro: "Esta linha não está ligada a título." });
-    const l = um(await supa(`${base("fin_lancamento")}?select=conta_fixa_id&id=eq.${id}`, { headers: cab(tok) }));
-    // A conta fixa sai da linha ANTES de voltar ao título: o índice único
-    // (conta fixa, competência) não aceita os dois vivos ao mesmo tempo.
-    await supa(`${base("fin_lancamento")}?id=eq.${id}`, { method: "PATCH", headers: cab(tok), body: JSON.stringify({ conta_fixa_id: null }) });
-    let devolvida = false;
-    for (const t of ts) {
-      await supa(`${base("fin_lancamento")}?id=eq.${t.id}`, { method: "PATCH", headers: cab(tok),
-        body: JSON.stringify({ situacao: "aberto", extrato_id: null, conta_fixa_id: !devolvida && l && l.conta_fixa_id ? l.conta_fixa_id : null }) });
-      devolvida = true;
-    }
-    return res.status(200).json({ ok: true });
+    const n = await soltarTitulos(tok, id);
+    if (!n) return res.status(409).json({ erro: "Esta linha não está ligada a título." });
+    return res.status(200).json({ ok: true, soltos: n });
   }
   if (req.method === "POST" && String(req.query.acao || "") === "desfazer_divisao") {
     const id = idOuNulo(req.query.id);

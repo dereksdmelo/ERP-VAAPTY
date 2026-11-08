@@ -4509,6 +4509,37 @@ valor dela e ignora os pedaços (senão consumiriam outra linha de mesmo
 dia e valor). "Desfazer" devolve tudo. É diferente de repartir: repartir
 divide em CATEGORIAS (decisão 26), dividir casa com TÍTULOS.
 
+**Conciliação bancária e Títulos financeiros (07/11/2026, o Derek: *"a
+tela 'lançamentos' na verdade seria a 'conciliação bancária', e deveria
+ter outra de 'títulos financeiros'… que tem como vincular a um item da
+conciliação… o DRE é montado a partir dos títulos… quando reconhecer
+automaticamente deve ficar evidenciado para conferir, e também deve dar
+pra mudar pelos títulos"*).** O modelo de uma linha só (acima) não
+mudou — mudou o que se vê:
+
+- **Conciliação bancária** (`fin_lancamentos`, era Lançamentos): o
+  extrato. Cada linha mostra a que título ou conta fixa se refere
+  (`VinculoDaLinha`); o reconhecido sozinho fica em amarelo com "está
+  certo", "trocar" e "desfazer". Lançar direto continua ali: a linha
+  categorizada é o próprio título.
+- **Títulos financeiros** (`fin_contas`, era A pagar / receber): abre
+  nos títulos do MÊS (`TitulosDoMes`, `?recurso=titulo&todos=1`) — os
+  previstos e os realizados da competência, que é exatamente o que o DRE
+  soma —, cada um com o estado do vínculo (previsto, para conferir,
+  vinculado ao extrato, lançado pela conciliação, pago à mão) e
+  "vincular ao extrato" (`VincularLinha`, `?acao=linhas`: as linhas
+  livres do mesmo lado a até 60 dias). A vista antiga dos em aberto
+  continua na segunda aba.
+- **A importação guarda o título que reconheceu.** Antes o título virava
+  a linha do banco e perdia a descrição — "não é este" não tinha volta.
+  Agora a linha entra como sempre, herda do título categoria, competência
+  e conta fixa, o título fica `cancelado` com `extrato_id`, e `revisar`
+  acende. E a conta fixa que varia é reconhecida por aproximação (até 25%
+  do previsto, 10 dias do vencimento, e a categoria que a descrição
+  costuma ter ou o nome da conta fixa na descrição; um candidato só) —
+  sempre para conferir. `soltarTitulos` desfaz, tirando a conta fixa da
+  linha antes de devolvê-la ao título (índice único da 0096).
+
 **Ligar à mão a linha do banco ao título (07/11/2026, o Derek: *"como
 eu faço pra ligar os títulos das previsões com os títulos do
 extrato?"*).** O automático só casa valor exato; a conta fixa que varia
