@@ -20441,6 +20441,10 @@ function FinCaixas() {
   );
 }
 
+// Veio do extrato do banco? A `chave_extrato` não diz (ela tem valor
+// padrão aleatório, 0021); a origem diz.
+const doExtrato = (l) => ["ofx", "planilha", "extrato"].indexOf(String(l && l.origem)) >= 0;
+
 /* O TÍTULO ABERTO PARA EDITAR (07/11/2026, o Derek: "precisa dar pra
  * abrir pra editar o título com mais dados: vencimento, data de
  * pagamento, competência, valor, valor pago, fornecedor/beneficiário/
@@ -20472,7 +20476,7 @@ function EditarTitulo({ titulo, aoFechar, aoMudou }) {
   }, []);
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
   const aberto = t0.situacao === "aberto";
-  const doBanco = !!t0.chave_extrato;
+  const doBanco = doExtrato(t0);
   const cat = cats.find((c) => c.id === f.categoria_id);
   const salvar = async () => {
     setErro(""); setIndo("salvar");
@@ -20694,7 +20698,7 @@ function TitulosDoMes({ comp }) {
   const estado = (l) => l.situacao === "aberto" ? "aberto"
     : l.revisar ? "conferir"
     : (l.titulos_ligados || []).length || l.conta_fixa_id ? "vinculado"
-    : l.chave_extrato ? "conciliacao" : "mao";
+    : doExtrato(l) ? "conciliacao" : "mao";
   const ROT = { aberto: "previsto · em aberto", conferir: "reconhecido sozinho — conferir", vinculado: "vinculado ao extrato",
     conciliacao: "lançado pela conciliação", mao: "pago à mão · sem extrato" };
   const COR = { aberto: [C.bg, C.ink], conferir: [AMARELO.fundo, AMARELO.texto], vinculado: ["#F1ECF8", C.roxo], conciliacao: ["#E8F3EE", C.verde], mao: [C.bg, C.mute] };

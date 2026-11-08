@@ -1580,7 +1580,7 @@ async function titulo(req, res, tok) {
     const saida = Number(t.debito) > 0;
     const ref = String(t.vencimento || t.data || hojeAqui()).slice(0, 10);
     const desloc = (n) => { const d = new Date(Date.parse(ref) + n * 86400000); return d.toISOString().slice(0, 10); };
-    const lista = await supa(`${base("fin_lancamento")}?select=${CAMPOS_LANC}&situacao=eq.efetivado&chave_extrato=not.is.null` +
+    const lista = await supa(`${base("fin_lancamento")}?select=${CAMPOS_LANC}&situacao=eq.efetivado&origem=in.(ofx,planilha,extrato)` +
       `&${saida ? "debito" : "credito"}=gt.0&data=gte.${desloc(-60)}&data=lte.${desloc(60)}` +
       `${t.conta_id ? `&conta_id=eq.${t.conta_id}` : ""}&dividido_em=is.null&order=data.asc&limit=1500`, { headers: cab(tok) }) || [];
     await anexarTitulos(tok, lista);
