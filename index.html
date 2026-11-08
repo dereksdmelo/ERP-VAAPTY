@@ -19042,7 +19042,7 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
    * **Sem grupo de "cadastros" por enquanto**: conta, categoria e
    * favorecido ainda se editam dentro de Lançamentos, e um grupo com um
    * atalho para a mesma tela seria menu que promete o que não tem. */
-  const TITULO = { pendencias: "Pendências", lancamentos: "Conciliação bancária", recebimentos: "Recebimentos", contas: "Títulos financeiros",
+  const TITULO = { pendencias: "Pendências", lancamentos: "Conciliação bancária", recebimentos: "Recebimentos", contas: "Títulos financeiros", cartoes: "Cartões de crédito",
     carros: "Carros", fechamento: "Fechamento", dre: "DRE", ano: "Ano", folha: "Folha", caixas: "Contas e caixas",
     fixas: "Contas fixas", plano: "Plano de contas" };
   const SUB = {
@@ -19050,6 +19050,7 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
     lancamentos: "O extrato do banco: cada linha ligada ao título a que se refere, ou lançada direto.",
     recebimentos: "Toda venda tem que aparecer no extrato — ou ter um motivo escrito.",
     contas: "Previstos e realizados do mês — o que o DRE soma.",
+    cartoes: "Cada compra lançada no cartão; a fatura é o total do ciclo e se paga como transferência da conta principal.",
     carros: "O que foi combinado com cada carro contra o que foi lançado.",
     fechamento: "Previsto × realizado do mês.",
     dre: "O resultado: quanto entrou, quanto custou, quanto sobrou.",
@@ -19064,7 +19065,7 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
   const irPara = (a, c) => { if (c && aoMudarMes) aoMudarMes(competenciaDe(c)); if (aoIrPara) aoIrPara(a); };
   return (
     <div>
-      <Cabecalho titulo={TITULO[aba] || "Financeiro"} mes={aba === "pendencias" || aba === "caixas" || aba === "ano" || aba === "plano" ? null : mes} sub={SUB[aba]} />
+      <Cabecalho titulo={TITULO[aba] || "Financeiro"} mes={aba === "pendencias" || aba === "caixas" || aba === "cartoes" || aba === "ano" || aba === "plano" ? null : mes} sub={SUB[aba]} />
       {aba === "pendencias" && <FinPendencias aoIr={irPara} />}
       {aba === "lancamentos" && <FinLancamentos comp={comp} aoIrTitulos={() => irPara("contas")} />}
       {aba === "recebimentos" && <FinRecebimentos comp={comp} />}
@@ -19073,6 +19074,7 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
       {aba === "dre" && <FinDRE comp={comp} />}
       {aba === "ano" && <FinAno comp={comp} aoIr={irPara} />}
       {aba === "carros" && <FinCarros comp={comp} />}
+      {aba === "cartoes" && <FinCartoes />}
       {aba === "folha" && <FinFolha comp={comp} />}
       {aba === "caixas" && <FinCaixas />}
       {aba === "fixas" && <FinContasFixas comp={comp} />}
@@ -20113,7 +20115,9 @@ function FinLancamentos({ comp, aoIrTitulos }) {
           <button onClick={exportar} style={{ color: C.mute, fontWeight: 600 }}>CSV</button>
           {/* Dinheiro em espécie não tem extrato (0070): tudo nela é
               lançado à mão, pelo "+ lançamento" ao lado. */}
-          {(contas.find((c) => c.id === conta) || {}).tipo === "dinheiro"
+          {(contas.find((c) => c.id === conta) || {}).tipo === "cartao"
+            ? <span style={{ color: C.mute }}>cartão de crédito · as compras se lançam na aba Cartões</span>
+            : (contas.find((c) => c.id === conta) || {}).tipo === "dinheiro"
             ? <span style={{ color: C.mute }}>dinheiro em espécie · sem extrato</span>
             : <button onClick={() => setImportando(!importando)} style={{ color: C.roxo, fontWeight: 600 }}>importar extrato</button>}
           {/* O LANÇAMENTO À MÃO SÓ NA CONTA DE DINHEIRO (08/11/2026, o Derek:
@@ -20764,7 +20768,8 @@ function FinCaixas() {
     try {
       await fin("conta", null, finJson("POST", {
         nome: nova.nome.trim(), tipo: nova.tipo, descricao: nova.descricao, banco: nova.tipo === "banco" ? nova.banco : null,
-        saldo_inicial: nova.saldo || 0, saldo_inicial_em: nova.desde || hojeEmSP(), ativa: true,
+        saldo_inicial: nova.tipo === "cartao" ? 0 : (nova.saldo || 0), saldo_inicial_em: nova.desde || hojeEmSP(), ativa: true,
+        ...(nova.tipo === "cartao" ? { dia_fechamento: nova.fecha || null, dia_vencimento: nova.venc || null, limite: nova.limite || null } : {}),
       }));
       setFeito(`${nova.nome.trim()} cadastrada.`); setNova(null); carregar();
     } catch (e) { setErro(e.message); }
@@ -20868,7 +20873,7 @@ function FinCaixas() {
         <div className="rounded-xl p-4" style={{ background: C.paper, border: `1px solid ${C.roxo}` }}>
           <div className="text-[14px] font-semibold">Nova conta</div>
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {[["dinheiro", "Dinheiro em espécie"], ["banco", "Conta no banco"]].map(([v, r]) => (
+            {[["dinheiro", "Dinheiro em espécie"], ["banco", "Conta no banco"], ["cartao", "Cartão de crédito"]].map(([v, r]) => (
               <button key={v} onClick={() => setNova({ ...nova, tipo: v })} className="rounded-full border px-3 py-1 text-[12.5px] font-semibold"
                 style={{ borderColor: nova.tipo === v ? C.roxo : C.line, background: nova.tipo === v ? C.roxo : C.paper, color: nova.tipo === v ? "#fff" : C.ink }}>{r}</button>
             ))}
@@ -20879,6 +20884,11 @@ function FinCaixas() {
             <label className="lg:col-span-2"><Rotulo>Para que serve</Rotulo>
               <input className={inputCls} style={inputSty} placeholder={nova.tipo === "dinheiro" ? "Dinheiro que fica na gaveta do financeiro" : "Conta corrente da loja"}
                 value={nova.descricao} onChange={(e) => setNova({ ...nova, descricao: e.target.value })} /></label>
+            {nova.tipo === "cartao" && (<>
+              <label><Rotulo>Fecha dia</Rotulo><input className={inputCls} style={inputSty} inputMode="numeric" placeholder="28" value={nova.fecha || ""} onChange={(e) => setNova({ ...nova, fecha: e.target.value })} /></label>
+              <label><Rotulo>Vence dia</Rotulo><input className={inputCls} style={inputSty} inputMode="numeric" placeholder="10" value={nova.venc || ""} onChange={(e) => setNova({ ...nova, venc: e.target.value })} /></label>
+              <label><Rotulo>Limite</Rotulo><input className={inputCls} style={inputSty} inputMode="decimal" placeholder="0,00" value={nova.limite || ""} onChange={(e) => setNova({ ...nova, limite: e.target.value })} /></label>
+            </>)}
             {nova.tipo === "banco" && (
               <label><Rotulo>Banco</Rotulo><input className={inputCls} style={inputSty} value={nova.banco} onChange={(e) => setNova({ ...nova, banco: e.target.value })} /></label>
             )}
@@ -21476,6 +21486,215 @@ function TitulosDoMes({ comp, abas }) {
         Clique no título para abrir e editar. Um título é o que o DRE soma, pela competência. "Previsto" ainda não passou no banco (contas fixas, a pagar e a receber);
         os outros já passaram — ligados a uma linha do extrato, lançados direto na Conciliação bancária, ou baixados à mão sem extrato.
       </p>
+    </div>
+  );
+}
+
+/* ---------------- cartão de crédito (0131) ----------------
+ * O cartão é uma conta: cada compra é um lançamento (categoria, fornecedor, competência — o que o DRE
+ * soma). A fatura é o total de um ciclo, e pagá-la é uma transferência da conta principal para o cartão
+ * (fora do DRE): a despesa já foi lançada compra a compra. */
+function FinCartoes() {
+  const [d, setD] = useState(null); const [erro, setErro] = useState("");
+  const [cartaoId, setCartaoId] = useState(""); const [ref, setRef] = useState("");
+  const [nova, setNova] = useState(null); const [pagando, setPagando] = useState(null);
+  const [novoCartao, setNovoCartao] = useState(null);
+  const [cats] = useCategoriasFin(true);
+  const carregar = (manter) => {
+    if (!manter) setD(null);
+    const p = {}; if (cartaoId) { p.conta = cartaoId; if (ref) p.ref = ref; }
+    fin("cartao", p).then((x) => { setD(x); setErro(""); if (!cartaoId && x.cartoes[0]) setCartaoId(x.cartoes[0].conta.id); }).catch((e) => setErro(e.message));
+  };
+  useEffect(() => { carregar(); }, [cartaoId, ref]);
+  if (erro && !d) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
+  if (!d) return <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>;
+
+  const mesRot = (r) => rotuloMes(`${r}-01`);
+  const sel = "rounded border px-1.5 py-1 text-[12.5px] outline-none";
+  const salvarCartao = async () => {
+    setErro("");
+    try {
+      await fin("conta", null, finJson("POST", { nome: novoCartao.nome.trim(), tipo: "cartao", descricao: novoCartao.descricao || "Cartão de crédito", ativa: true,
+        saldo_inicial: 0, saldo_inicial_em: hojeEmSP(), dia_fechamento: novoCartao.fecha, dia_vencimento: novoCartao.venc, limite: novoCartao.limite || null,
+        conta_pagadora_id: novoCartao.pagadora || null }));
+      setNovoCartao(null); setCartaoId(""); carregar();
+    } catch (e) { setErro(e.message); }
+  };
+  const formCartao = novoCartao && (
+    <div className="rounded-xl p-4" style={{ background: C.paper, border: `1px solid ${C.roxo}` }}>
+      <div className="text-[14px] font-semibold">Novo cartão de crédito</div>
+      <div className="mt-2 grid gap-2 lg:grid-cols-5">
+        <label className="lg:col-span-2"><Rotulo req>Nome</Rotulo><input className={`${sel} w-full`} style={inputSty} placeholder="Cartão Business 0502-9934" value={novoCartao.nome} onChange={(e) => setNovoCartao({ ...novoCartao, nome: e.target.value })} /></label>
+        <label><Rotulo req>Fecha dia</Rotulo><input className={`${sel} w-full`} style={inputSty} inputMode="numeric" value={novoCartao.fecha} onChange={(e) => setNovoCartao({ ...novoCartao, fecha: e.target.value })} /></label>
+        <label><Rotulo req>Vence dia</Rotulo><input className={`${sel} w-full`} style={inputSty} inputMode="numeric" value={novoCartao.venc} onChange={(e) => setNovoCartao({ ...novoCartao, venc: e.target.value })} /></label>
+        <label><Rotulo>Limite</Rotulo><input className={`${sel} w-full text-right`} style={inputSty} inputMode="decimal" value={novoCartao.limite} onChange={(e) => setNovoCartao({ ...novoCartao, limite: e.target.value })} /></label>
+        <label className="lg:col-span-2"><Rotulo>Quem paga a fatura</Rotulo>
+          <select className={`${sel} w-full`} style={inputSty} value={novoCartao.pagadora} onChange={(e) => setNovoCartao({ ...novoCartao, pagadora: e.target.value })}>
+            <option value="">escolher na hora de pagar</option>{d.contas.filter((c) => c.tipo === "banco").map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+          </select></label>
+      </div>
+      <div className="mt-3 flex gap-3"><BotaoPrimario disabled={!novoCartao.nome.trim() || !novoCartao.fecha || !novoCartao.venc} onClick={salvarCartao}>Cadastrar cartão</BotaoPrimario>
+        <button onClick={() => setNovoCartao(null)} className="text-[13px]" style={{ color: C.mute }}>cancelar</button></div>
+    </div>
+  );
+  if (!d.cartoes.length) return (
+    <div className="space-y-3">
+      <div className="rounded-xl p-5 text-[13.5px]" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        <b>Nenhum cartão de crédito cadastrado.</b>
+        <p className="mt-1" style={{ color: C.mute }}>Cadastre o cartão uma vez, com o dia do fechamento e do vencimento. Daí em diante cada compra é lançada nele e a fatura se monta sozinha.</p>
+        {!novoCartao && <button onClick={() => setNovoCartao({ nome: "", fecha: "", venc: "", limite: "", pagadora: "", descricao: "" })} className="mt-3 rounded-lg px-4 py-2 text-[13px] font-semibold text-white" style={{ background: C.roxo }}>Cadastrar cartão</button>}
+      </div>
+      {formCartao}
+    </div>
+  );
+
+  const k = d.cartoes.find((x) => x.conta.id === cartaoId) || d.cartoes[0];
+  const cartao = k.conta;
+  const fat = k.faturas.find((f) => f.ref === (k.ref || ref)) || null;
+  const ESTADO = { aberta: ["aberta", "#EEF2F8", "#3B5578"], fechada: ["fechada · a pagar", AMARELO.fundo, AMARELO.texto], paga: ["paga", "#E4F1E8", C.verde] };
+  const estadoDe = (f) => f.vencida ? ["vencida", "#FBEAE8", "#C0281B"] : ESTADO[f.estado];
+  const compras = k.compras || [];
+  const porCat = {}; compras.forEach((l) => { const n = l.fin_categoria ? rotCat(l.fin_categoria) : "Sem categoria"; porCat[n] = (porCat[n] || 0) + (Number(l.debito) || 0) - (Number(l.credito) || 0); });
+  const somaCats = Object.entries(porCat).sort((a, b) => b[1] - a[1]);
+
+  const salvarCompra = async () => {
+    setErro("");
+    try {
+      await fin("cartao", { acao: "compra" }, finJson("POST", { ...nova, conta_id: cartao.id }));
+      setNova(null); carregar(true);
+    } catch (e) { setErro(e.message); }
+  };
+  const pagar = async () => {
+    setErro("");
+    try { await fin("cartao", { acao: "pagar" }, finJson("POST", { conta_id: cartao.id, ref: pagando.ref, de: pagando.de, data: pagando.data, valor: pagando.valor })); setPagando(null); carregar(true); }
+    catch (e) { setErro(e.message); }
+  };
+  const desfazerPagamento = async (f) => {
+    if (!window.confirm(`Desfazer o pagamento da fatura de ${mesRot(f.ref)}? As duas linhas da transferência são apagadas e a fatura volta a ficar em aberto.`)) return;
+    try { await fin("cartao", { acao: "desfazer_pagamento" }, finJson("POST", { conta_id: cartao.id, ref: f.ref })); carregar(true); } catch (e) { setErro(e.message); }
+  };
+  const mudarCompra = async (l, mud) => {
+    try { await fin("lancamento", { id: l.id }, finJson("PATCH", mud)); carregar(true); } catch (e) { setErro(e.message); }
+  };
+  const excluirCompra = async (l) => {
+    if (!window.confirm(`Excluir a compra "${l.descricao}" de ${rs2(l.debito || l.credito)}?${l.parcelas ? "\n\nÉ uma parcela: as outras continuam." : ""}`)) return;
+    try { await fin("lancamento", { id: l.id }, { method: "DELETE" }); carregar(true); } catch (e) { setErro(e.message); }
+  };
+
+  return (
+    <div className="space-y-3">
+      {erro && <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+      <div className="flex flex-wrap items-center gap-2 text-[13px]">
+        {d.cartoes.map((x) => (
+          <button key={x.conta.id} onClick={() => { setCartaoId(x.conta.id); setRef(""); }} className="rounded-full px-3 py-1 font-semibold"
+            style={{ background: x.conta.id === cartao.id ? C.roxoFraco : "transparent", color: x.conta.id === cartao.id ? C.roxo : C.mute }}>{x.conta.nome}</button>
+        ))}
+        <button onClick={() => setNovoCartao({ nome: "", fecha: "", venc: "", limite: "", pagadora: "", descricao: "" })} className="font-semibold" style={{ color: C.roxo }}>+ cartão</button>
+      </div>
+      {formCartao}
+      <div className="flex flex-wrap gap-2">
+        {[["Devido no cartão", k.devido, k.devido > 0 ? C.laranja : C.verde, "tudo que ainda não foi pago, de todas as faturas"],
+          ["Limite livre", k.limite_livre, C.ink, cartao.limite != null ? `de ${rs2(cartao.limite)}` : "limite não cadastrado"],
+          ["Fecha dia / vence dia", null, C.ink, `${cartao.dia_fechamento || "—"} / ${cartao.dia_vencimento || "—"}`]].map(([r, v, cor, sub]) => (
+          <div key={r} className="rounded-xl px-3 py-2" style={{ background: C.paper, border: `1px solid ${C.line}`, minWidth: 150 }}>
+            <span className="block text-[11px] font-semibold uppercase tracking-[0.04em]" style={{ color: C.mute }}>{r}</span>
+            <span className="block text-[17px] font-bold" style={{ fontVariantNumeric: "tabular-nums", color: cor }}>{v == null ? sub : rs2(v)}</span>
+            {v != null && <span className="block text-[11px]" style={{ color: C.mute }}>{sub}</span>}
+          </div>
+        ))}
+        {!cartao.dia_fechamento && <p className="self-center text-[12px]" style={{ color: AMARELO.texto }}>Cadastre o dia do fechamento (em Contas e caixas) para as faturas separarem certo.</p>}
+      </div>
+      <div className="grid gap-3 lg:grid-cols-[260px_1fr]">
+        <div className="rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+          <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.06em]" style={{ color: C.mute, borderBottom: `1px solid ${C.line}` }}>Faturas</div>
+          {!k.faturas.length && <p className="px-3 py-4 text-[12.5px]" style={{ color: C.mute }}>Nenhuma compra ainda. Lance a primeira.</p>}
+          {k.faturas.map((f) => { const e = estadoDe(f); const ativa = fat && fat.ref === f.ref; return (
+            <button key={f.ref} onClick={() => setRef(f.ref)} className="block w-full px-3 py-2 text-left" style={{ borderBottom: `1px solid ${C.line}`, background: ativa ? C.roxoFraco : undefined }}>
+              <span className="flex items-baseline justify-between gap-2"><b className="text-[13px]">{mesRot(f.ref)}</b>
+                <span className="text-[13px] font-semibold" style={{ fontVariantNumeric: "tabular-nums" }}>{rs2(f.total)}</span></span>
+              <span className="mt-0.5 flex items-center justify-between gap-2 text-[11px]" style={{ color: C.mute }}>
+                <span>vence {diaBR(f.vencimento)} · {f.qtd} lanç.</span>
+                <span className="rounded-full px-2 py-px font-semibold" style={{ background: e[1], color: e[2] }}>{e[0]}</span></span>
+            </button>); })}
+        </div>
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <b className="text-[15px]">{fat ? `Fatura de ${mesRot(fat.ref)}` : "Compras do cartão"}</b>
+            {fat && <span className="text-[12px]" style={{ color: C.mute }}>fecha {diaBR(fat.fechamento)} · vence {diaBR(fat.vencimento)}{fat.pago_em ? ` · paga em ${diaBR(fat.pago_em)} (${rs2(fat.valor_pago)})` : ""}</span>}
+            <span className="ml-auto flex gap-2">
+              <button onClick={() => setNova({ data: hojeEmSP(), descricao: "", favorecido: "", categoria_id: "", valor: "", parcelas: 1, estorno: false, observacao: "" })}
+                className="rounded-md px-3 py-1 text-[12.5px] font-semibold text-white" style={{ background: C.roxo }}>+ compra</button>
+              {fat && fat.estado !== "paga" && fat.total > 0 && (
+                <button onClick={() => setPagando({ ref: fat.ref, de: cartao.conta_pagadora_id || (d.contas.find((c) => c.tipo === "banco") || {}).id || "", data: hojeEmSP(), valor: String(fat.total).replace(".", ",") })}
+                  className="rounded-md border px-3 py-1 text-[12.5px] font-semibold" style={{ borderColor: C.roxo, color: C.roxo }}>Pagar fatura</button>)}
+              {fat && fat.estado === "paga" && <button onClick={() => desfazerPagamento(fat)} className="text-[12.5px]" style={{ color: C.mute }}>desfazer pagamento</button>}
+            </span>
+          </div>
+          {pagando && (
+            <div className="flex flex-wrap items-end gap-2 rounded-xl p-3" style={{ background: C.bg, border: `1px solid ${C.roxo}` }}>
+              <label><Rotulo req>Sai de</Rotulo><select className={sel} style={inputSty} value={pagando.de} onChange={(e) => setPagando({ ...pagando, de: e.target.value })}>
+                <option value="">—</option>{d.contas.filter((c) => c.id !== cartao.id && c.tipo !== "cartao").map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}</select></label>
+              <label><Rotulo>Quando</Rotulo><input type="date" className={sel} style={inputSty} value={pagando.data} onChange={(e) => setPagando({ ...pagando, data: e.target.value })} /></label>
+              <label><Rotulo>Valor pago</Rotulo><input className={`${sel} w-28 text-right`} style={inputSty} inputMode="decimal" value={pagando.valor} onChange={(e) => setPagando({ ...pagando, valor: e.target.value })} /></label>
+              <BotaoPrimario disabled={!pagando.de} onClick={pagar}>Pagar</BotaoPrimario>
+              <button onClick={() => setPagando(null)} className="text-[13px]" style={{ color: C.mute }}>cancelar</button>
+              <span className="basis-full text-[11.5px]" style={{ color: C.mute }}>É uma transferência da conta para o cartão: não é despesa nova (as compras já estão no DRE). Na conciliação, a linha do banco liga a ela.</span>
+            </div>)}
+          {nova && (
+            <div className="rounded-xl p-3" style={{ background: C.bg, border: `1px solid ${C.roxo}` }}>
+              <div className="grid gap-2 lg:grid-cols-6">
+                <label><Rotulo req>Data da compra</Rotulo><input type="date" className={`${sel} w-full`} style={inputSty} value={nova.data} onChange={(e) => setNova({ ...nova, data: e.target.value })} /></label>
+                <label className="lg:col-span-2"><Rotulo req>Descrição</Rotulo><input className={`${sel} w-full`} style={inputSty} value={nova.descricao} onChange={(e) => setNova({ ...nova, descricao: e.target.value })} placeholder="Google Ads, Uber, restaurante…" /></label>
+                <label className="lg:col-span-2"><Rotulo>Fornecedor</Rotulo><input className={`${sel} w-full`} style={inputSty} value={nova.favorecido} onChange={(e) => setNova({ ...nova, favorecido: e.target.value })} /></label>
+                <label><Rotulo req>Valor</Rotulo><input className={`${sel} w-full text-right`} style={inputSty} inputMode="decimal" value={nova.valor} onChange={(e) => setNova({ ...nova, valor: e.target.value })} /></label>
+                <label className="lg:col-span-2"><Rotulo req>Categoria</Rotulo>
+                  <select className={`${sel} w-full`} style={{ ...inputSty, borderColor: nova.categoria_id ? C.line : C.laranja }} value={nova.categoria_id} onChange={(e) => setNova({ ...nova, categoria_id: e.target.value })}>
+                    <option value="">escolha…</option>{cats.map((c) => <option key={c.id} value={c.id}>{rotCat(c)}</option>)}</select></label>
+                <label><Rotulo>Parcelas</Rotulo><input className={`${sel} w-full text-center`} style={inputSty} inputMode="numeric" value={nova.parcelas} onChange={(e) => setNova({ ...nova, parcelas: e.target.value })} /></label>
+                <label className="lg:col-span-2"><Rotulo>Observação</Rotulo><input className={`${sel} w-full`} style={inputSty} value={nova.observacao} onChange={(e) => setNova({ ...nova, observacao: e.target.value })} /></label>
+                <label className="flex items-end gap-1.5 pb-1 text-[12.5px]"><input type="checkbox" checked={nova.estorno} onChange={(e) => setNova({ ...nova, estorno: e.target.checked })} /> estorno / crédito</label>
+              </div>
+              <div className="mt-2 flex items-center gap-3">
+                <BotaoPrimario disabled={!nova.descricao.trim() || !nova.valor || !nova.categoria_id} onClick={salvarCompra}>Lançar{Number(nova.parcelas) > 1 ? ` em ${nova.parcelas}×` : ""}</BotaoPrimario>
+                <button onClick={() => setNova(null)} className="text-[13px]" style={{ color: C.mute }}>cancelar</button>
+                <span className="text-[11.5px]" style={{ color: C.mute }}>Parcelado: cada parcela cai na fatura do seu mês e na competência dele.</span>
+              </div>
+            </div>)}
+          <div className="rolar overflow-x-auto rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+            <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 640 }}>
+              <thead><tr>{["Data", "Compra", "Categoria", "Competência", "Valor", ""].map((h, i) => (
+                <th key={h + i} className="whitespace-nowrap px-2 py-2 text-[11px] font-semibold uppercase tracking-[0.04em]" style={{ color: C.mute, textAlign: i === 4 ? "right" : "left", borderBottom: `1px solid ${C.line}` }}>{h}</th>))}</tr></thead>
+              <tbody>
+                {compras.map((l) => (
+                  <tr key={l.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                    <td className="whitespace-nowrap px-2 py-1.5 text-[12px]" style={{ color: C.mute }}>{diaBR(l.data)}</td>
+                    <td className="px-2 py-1.5 text-[12.5px]">{l.favorecido ? <b>{l.favorecido} </b> : null}{l.descricao}{l.observacao ? <span className="block text-[11px]" style={{ color: C.mute }}>{l.observacao}</span> : null}</td>
+                    <td className="px-2 py-1.5"><select className="max-w-[170px] rounded border px-1 py-0.5 text-[12px] outline-none" style={{ ...inputSty, borderColor: l.categoria_id ? C.line : C.laranja }}
+                      value={l.categoria_id || ""} onChange={(e) => mudarCompra(l, { categoria_id: e.target.value || null })}>
+                      <option value="">sem categoria</option>{cats.map((c) => <option key={c.id} value={c.id}>{rotCat(c)}</option>)}</select></td>
+                    <td className="whitespace-nowrap px-2 py-1.5 text-[12px]" style={{ color: C.mute }}>{l.competencia ? rotuloMes(l.competencia) : "—"}</td>
+                    <td className="whitespace-nowrap px-2 py-1.5 text-right text-[12.5px] font-semibold" style={{ fontVariantNumeric: "tabular-nums", color: Number(l.credito) > 0 ? C.verde : C.laranja }}>{Number(l.credito) > 0 ? "+" : "−"}{rs2(Math.abs(Number(l.debito) || Number(l.credito) || 0))}</td>
+                    <td className="px-2 py-1.5 text-right"><button onClick={() => excluirCompra(l)} className="text-[12px]" style={{ color: C.laranja }}>excluir</button></td>
+                  </tr>))}
+              </tbody>
+            </table>
+            {!compras.length && <p className="px-3 py-6 text-center text-[13px]" style={{ color: C.mute }}>Nenhuma compra nesta fatura.</p>}
+            {!!compras.length && (
+              <div className="flex items-baseline justify-between px-3 py-2 text-[13px] font-bold" style={{ borderTop: `1px solid ${C.line}` }}>
+                <span>Total da fatura</span><span style={{ fontVariantNumeric: "tabular-nums" }}>{rs2(fat ? fat.total : 0)}</span></div>)}
+          </div>
+          {somaCats.length > 1 && (
+            <div className="rounded-xl p-3 text-[12.5px]" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em]" style={{ color: C.mute }}>Por categoria nesta fatura</div>
+              {somaCats.map(([n, v]) => <div key={n} className="flex justify-between py-0.5"><span>{n}</span><span style={{ fontVariantNumeric: "tabular-nums" }}>{rs2(v)}</span></div>)}
+            </div>)}
+          {!!(k.pagamentos || []).length && (
+            <div className="rounded-xl p-3 text-[12.5px]" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em]" style={{ color: C.mute }}>Pagamentos de fatura (transferências)</div>
+              {k.pagamentos.map((p) => <div key={p.id} className="flex justify-between py-0.5"><span>{diaBR(p.data)} · {p.descricao}</span><span style={{ fontVariantNumeric: "tabular-nums", color: C.verde }}>{rs2(Number(p.credito) - Number(p.debito))}</span></div>)}
+            </div>)}
+        </div>
+      </div>
     </div>
   );
 }
@@ -27947,6 +28166,7 @@ function destinosPara(perfil) {
       { id: "fin_lancamentos", rot: "Conciliação bancária", curto: "Financ.", area: "financeiro", aba: "lancamentos", grupo: "todo dia",   icone: "financeiro" },
       { id: "fin_recebimentos", rot: "Recebimentos",     curto: "Financ.", area: "financeiro", aba: "recebimentos", grupo: "todo dia",  icone: "financeiro" },
       { id: "fin_contas",      rot: "Títulos financeiros", curto: "Financ.", area: "financeiro", aba: "contas",      grupo: "todo dia",   icone: "financeiro" },
+      { id: "fin_cartoes",     rot: "Cartões",           curto: "Financ.", area: "financeiro", aba: "cartoes",     grupo: "todo dia",   icone: "financeiro" },
       { id: "fin_carros",      rot: "Carros",            curto: "Financ.", area: "financeiro", aba: "carros",      grupo: "todo dia",   icone: "financeiro" },
       { id: "fin_fechamento",  rot: "Fechamento",        curto: "Financ.", area: "financeiro", aba: "fechamento",  grupo: "fim do mês", icone: "financeiro" },
       { id: "fin_dre",         rot: "DRE",               curto: "Financ.", area: "financeiro", aba: "dre",         grupo: "fim do mês", icone: "financeiro" },
@@ -31089,7 +31309,7 @@ function TelaGestao({ perfil, comp }) {
 // Destino → aba do financeiro. Mesmo desenho do ABA_PV, pela mesma
 // razão: o menu e o roteador precisam concordar.
 const ABA_FIN = {
-  fin_pendencias: "pendencias", fin_lancamentos: "lancamentos", fin_recebimentos: "recebimentos", fin_contas: "contas",
+  fin_pendencias: "pendencias", fin_lancamentos: "lancamentos", fin_recebimentos: "recebimentos", fin_contas: "contas", fin_cartoes: "cartoes",
   fin_carros: "carros", fin_fechamento: "fechamento", fin_dre: "dre", fin_ano: "ano", fin_folha: "folha", fin_caixas: "caixas",
   fin_fixas: "fixas", fin_plano: "plano",
 };

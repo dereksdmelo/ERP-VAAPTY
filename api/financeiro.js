@@ -199,10 +199,14 @@ const favorecido = cadastro("fin_favorecido",
 
 // `tipo` e `descricao` (0070): a caixinha da gaveta e o caixa da casa
 // do Derek são contas como o Itaú, só que sem extrato.
-const tipoConta = (v) => (String(v) === "dinheiro" ? "dinheiro" : "banco");
+const tipoConta = (v) => (String(v) === "dinheiro" ? "dinheiro" : String(v) === "cartao" ? "cartao" : "banco");
 const conta = cadastro("fin_conta",
   [["nome", texto], ["banco", texto], ["empresa", texto], ["saldo_inicial", (v) => decimal(v) || 0],
-   ["saldo_inicial_em", dataISO], ["ativa", bool], ["tipo", tipoConta], ["descricao", texto]], "nome.asc");
+   ["saldo_inicial_em", dataISO], ["ativa", bool], ["tipo", tipoConta], ["descricao", texto],
+   // O cartão de crédito (0131): o ciclo da fatura e quem a paga.
+   ["dia_fechamento", (v) => (v === "" || v == null ? null : Math.min(31, Math.max(1, inteiro(v))))],
+   ["dia_vencimento", (v) => (v === "" || v == null ? null : Math.min(31, Math.max(1, inteiro(v))))],
+   ["limite", (v) => (v === "" || v == null ? null : decimal(v))], ["conta_pagadora_id", idOuNulo]], "nome.asc");
 const TIPOS_CUSTO = ["receita", "variavel", "fixa", "fora"];
 const tipoCusto = (v) => (TIPOS_CUSTO.indexOf(String(v)) >= 0 ? String(v) : "fixa");
 const categoria = cadastro("fin_categoria",
@@ -1948,6 +1952,9 @@ async function titulo(req, res, tok) {
     if (["ofx", "planilha", "extrato"].indexOf(String(t.origem || "")) >= 0 || t.extrato_id) {
       return res.status(409).json({ erro: "Essa linha veio do extrato do banco: exclua a linha, ou use \"trocar\" se ela estava ligada a um título." });
     }
+    if (t.origem === "cartao") {
+      return res.status(409).json({ erro: "Essa é uma compra do cartão: exclua a compra na aba Cartões." });
+    }
     if (t.origem === "parcial") {
       return res.status(409).json({ erro: "Essa é uma parte paga de um título maior. Exclua a parte e ajuste o valor do título em aberto." });
     }
@@ -3193,7 +3200,147 @@ async function projecaoRemuneracao(tok, comp, opts) {
 const perfilRemuneracao = cadastro("perfil_remuneracao", [["nome", texto], ["descricao", texto],
   ["remuneracao", (v) => require("../regras/remuneracao.js").limpar(v)], ["ativo", bool]], "nome.asc");
 
-const RECURSOS = { conta, categoria, funcionario, favorecido, lancamento, importar, dre, carros, vale, folha, remuneracao,
+
+/* ------------------ o cartão de crédito (0131) ------------------ */
+/* O CARTÃO É UMA CONTA (08/11/2026, o Derek: "tem que ter uma aba só pra ele… nele fazemos todos os
+ * lançamentos que totalizam a fatura; o pagamento da fatura é como uma transferência da conta principal
+ * para a fatura"). As compras são lançamentos efetivados na conta do cartão, cada um com a categoria, o
+ * fornecedor e a competência — é o que o DRE soma. A fatura é derivada: a compra cai no ciclo pelo dia
+ * do fechamento. Pagar a fatura é a transferência que já existe (fora do DRE), da conta pagadora para
+ * o cartão, e o saldo devido do cartão volta a zero. */
+const mesMais = (ref, n) => { const [y, m] = ref.split("-").map(Number); const d = new Date(Date.UTC(y, m - 1 + n, 1)); return d.toISOString().slice(0, 7); };
+const dataNoMes = (ref, dia) => {   // o dia no mês, sem passar do último
+  const [y, m] = ref.split("-").map(Number); const ult = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return `${ref}-${String(Math.min(dia, ult)).padStart(2, "0")}`;
+};
+/** A fatura de uma compra: depois do fechamento, vai para o mês seguinte. */
+const refDaCompra = (data, fecha) => { const ref = String(data).slice(0, 7); return Number(String(data).slice(8, 10)) > fecha ? mesMais(ref, 1) : ref; };
+const vencDaFatura = (ref, fecha, venc) => dataNoMes(venc > fecha ? ref : mesMais(ref, 1), venc);
+
+async function cartao(req, res, tok) {
+  const hoje = hojeAqui();
+  const cartoes = await supa(`${base("fin_conta")}?select=*&tipo=eq.cartao&order=nome.asc`, { headers: cab(tok) }) || [];
+  const cfg = (c) => ({ fecha: Number(c.dia_fechamento) || 28, venc: Number(c.dia_vencimento) || 10 });
+
+  if (req.method === "GET") {
+    const contaId = idOuNulo(req.query.conta);
+    const alvo = contaId ? cartoes.find((c) => c.id === contaId) : null;
+    const lista = [];
+    for (const c of cartoes.filter((x) => !alvo || x.id === alvo.id)) {
+      const { fecha, venc } = cfg(c);
+      const linhas = await supa(`${base("fin_lancamento")}?select=${CAMPOS_LANC}&conta_id=eq.${c.id}&situacao=eq.efetivado&order=data.asc,criado_em.asc&limit=8000`, { headers: cab(tok) }) || [];
+      const pagas = await supa(`${base("fin_fatura")}?select=*&conta_id=eq.${c.id}`, { headers: cab(tok) }) || [];
+      const pagaPor = {}; pagas.forEach((p) => { pagaPor[p.ref] = p; });
+      const porRef = {};
+      let saldo = Number(c.saldo_inicial) || 0;
+      linhas.forEach((l) => {
+        const transf = l.fin_categoria && l.fin_categoria.grupo === "transferencia";
+        saldo += (Number(l.credito) || 0) - (Number(l.debito) || 0);
+        if (transf) return;
+        const ref = refDaCompra(l.data, fecha);
+        const f = porRef[ref] = porRef[ref] || { ref, total: 0, qtd: 0 };
+        f.total += (Number(l.debito) || 0) - (Number(l.credito) || 0); f.qtd += 1;
+      });
+      pagas.forEach((p) => { if (!porRef[p.ref]) porRef[p.ref] = { ref: p.ref, total: 0, qtd: 0 }; });
+      const faturas = Object.keys(porRef).sort().reverse().map((ref) => {
+        const f = porRef[ref], p = pagaPor[ref] || null;
+        const fechamento = dataNoMes(ref, fecha), vencimento = vencDaFatura(ref, fecha, venc);
+        const estado = p && p.pago_em ? "paga" : fechamento < hoje ? "fechada" : "aberta";
+        return { ref, total: Math.round(f.total * 100) / 100, qtd: f.qtd, fechamento, vencimento, estado,
+          vencida: estado === "fechada" && vencimento < hoje, pago_em: p ? p.pago_em : null, valor_pago: p ? p.valor_pago : null };
+      });
+      const item = { conta: c, devido: Math.round(-saldo * 100) / 100, faturas,
+        limite_livre: c.limite != null ? Math.round((Number(c.limite) + saldo) * 100) / 100 : null };
+      if (alvo) {
+        const ref = /^\d{4}-\d{2}$/.test(String(req.query.ref || "")) ? String(req.query.ref) : (faturas.find((f) => f.estado !== "paga") || faturas[0] || { ref: refDaCompra(hoje, fecha) }).ref;
+        item.ref = ref;
+        item.compras = linhas.filter((l) => !(l.fin_categoria && l.fin_categoria.grupo === "transferencia") && refDaCompra(l.data, fecha) === ref);
+        item.pagamentos = linhas.filter((l) => l.fin_categoria && l.fin_categoria.grupo === "transferencia");
+      }
+      lista.push(item);
+    }
+    return res.status(200).json({ cartoes: lista, contas: await supa(`${base("fin_conta")}?select=id,nome,tipo,ativa&ativa=eq.true&order=nome.asc`, { headers: cab(tok) }) || [] });
+  }
+
+  if (req.method === "POST" && String(req.query.acao || "") === "compra") {
+    const c = await corpoDe(req) || {};
+    const contaId = idOuNulo(c.conta_id);
+    const cartaoCad = cartoes.find((x) => x.id === contaId);
+    if (!cartaoCad) return res.status(400).json({ erro: "Escolha um cartão." });
+    const data = dataISO(c.data) || hoje;
+    const valor = Math.abs(decimal(c.valor) || 0);
+    if (!(valor > 0)) return res.status(400).json({ erro: "Informe o valor." });
+    const desc = texto(c.descricao);
+    if (!desc) return res.status(400).json({ erro: "Descreva a compra." });
+    const n = Math.min(48, Math.max(1, Math.trunc(Number(c.parcelas) || 1)));
+    const estorno = c.estorno === true || c.estorno === "true";
+    const cada = Math.round((valor / n) * 100) / 100;
+    const grupo = n > 1 && typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : null;
+    const compComp = competenciaDe(c.competencia);
+    const novos = [];
+    for (let i = 0; i < n; i++) {
+      const refMes = mesMais(data.slice(0, 7), i);
+      const dia = dataNoMes(refMes, Number(data.slice(8, 10)));
+      const v = i === n - 1 ? Math.round((valor - cada * (n - 1)) * 100) / 100 : cada;
+      novos.push({
+        conta_id: contaId, data: dia, competencia: i === 0 && compComp ? compComp : competenciaDe(dia),
+        categoria_id: idOuNulo(c.categoria_id), descricao: n > 1 ? `${desc} (${i + 1}/${n})` : desc,
+        favorecido: texto(c.favorecido) || null, favorecido_id: idOuNulo(c.favorecido_id),
+        debito: estorno ? 0 : v, credito: estorno ? v : 0, situacao: "efetivado", conciliado: true, origem: "cartao",
+        observacao: texto(c.observacao) || null, grupo_id: grupo, parcela: n > 1 ? i + 1 : null, parcelas: n > 1 ? n : null,
+        estoque_id: idOuNulo(c.estoque_id) || undefined, tipo_negociacao: texto(c.tipo_negociacao) || undefined,
+      });
+    }
+    const r = await supa(base("fin_lancamento"), { method: "POST", headers: cab(tok, REP), body: JSON.stringify(novos) });
+    if (!(r || []).length) return recusado(res);
+    return res.status(201).json({ ok: true, criadas: r.length });
+  }
+
+  /* PAGAR A FATURA = a transferência da conta pagadora para o cartão. Fora do DRE (a despesa já foi
+   * lançada compra a compra); o saldo devido do cartão cai pelo valor pago. */
+  if (req.method === "POST" && String(req.query.acao || "") === "pagar") {
+    const c = await corpoDe(req) || {};
+    const contaId = idOuNulo(c.conta_id), de = idOuNulo(c.de);
+    const cartaoCad = cartoes.find((x) => x.id === contaId);
+    const ref = String(c.ref || "");
+    if (!cartaoCad || !de || !/^\d{4}-\d{2}$/.test(ref)) return res.status(400).json({ erro: "Informe o cartão, a fatura e a conta de onde sai o pagamento." });
+    if (de === contaId) return res.status(400).json({ erro: "A conta pagadora não pode ser o próprio cartão." });
+    const valor = Math.abs(decimal(c.valor) || 0);
+    if (!(valor > 0)) return res.status(400).json({ erro: "Informe o valor pago." });
+    const data = dataISO(c.data) || hoje;
+    const ja = um(await supa(`${base("fin_fatura")}?select=*&conta_id=eq.${contaId}&ref=eq.${ref}`, { headers: cab(tok) }));
+    if (ja && ja.pago_em) return res.status(409).json({ erro: "Essa fatura já está paga. Desfaça o pagamento antes de pagar de novo." });
+    const cat = um(await supa(`${base("fin_categoria")}?select=id&grupo=eq.transferencia&order=ordem&limit=1`, { headers: cab(tok) }));
+    const pagadora = um(await supa(`${base("fin_conta")}?select=nome&id=eq.${de}`, { headers: cab(tok) })) || {};
+    const grupo = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : null;
+    const linha = (conta, deb, cred, desc) => ({ conta_id: conta, data, competencia: competenciaDe(data), categoria_id: cat ? cat.id : null,
+      descricao: desc, debito: deb, credito: cred, situacao: "efetivado", conciliado: true, origem: "manual", grupo_id: grupo });
+    const r = await supa(base("fin_lancamento"), { method: "POST", headers: cab(tok, REP), body: JSON.stringify([
+      linha(de, valor, 0, `Pagamento da fatura ${cartaoCad.nome} ${ref.slice(5)}/${ref.slice(0, 4)}`),
+      linha(contaId, 0, valor, `Pagamento da fatura (de ${pagadora.nome || "outra conta"})`),
+    ]) });
+    if ((r || []).length !== 2) return recusado(res);
+    const reg = { conta_id: contaId, ref, pago_em: data, valor_pago: valor, grupo_id: grupo };
+    if (ja) await supa(`${base("fin_fatura")}?id=eq.${ja.id}`, { method: "PATCH", headers: cab(tok), body: JSON.stringify(reg) });
+    else await supa(base("fin_fatura"), { method: "POST", headers: cab(tok), body: JSON.stringify(reg) });
+    return res.status(201).json({ ok: true });
+  }
+
+  if (req.method === "POST" && String(req.query.acao || "") === "desfazer_pagamento") {
+    const c = await corpoDe(req) || {};
+    const contaId = idOuNulo(c.conta_id), ref = String(c.ref || "");
+    const f = um(await supa(`${base("fin_fatura")}?select=*&conta_id=eq.${contaId}&ref=eq.${ref}`, { headers: cab(tok) }));
+    if (!f || !f.pago_em) return res.status(409).json({ erro: "Essa fatura não está marcada como paga." });
+    if (f.grupo_id) await supa(`${base("fin_lancamento")}?grupo_id=eq.${f.grupo_id}`, { method: "DELETE", headers: cab(tok) });
+    await supa(`${base("fin_fatura")}?id=eq.${f.id}`, { method: "DELETE", headers: cab(tok) });
+    return res.status(200).json({ ok: true });
+  }
+
+  res.setHeader("Allow", "GET, POST");
+  return res.status(405).json({ erro: "Use GET ou POST." });
+}
+
+const RECURSOS = { cartao, conta, categoria, funcionario, favorecido, lancamento, importar, dre, carros, vale, folha, remuneracao,
                    "contas-fixas": contasFixas, "config-folha": configFolha,
                    "perfil-remuneracao": perfilRemuneracao,
                    fechamento, orcamento, ano, rateio, negociacao, titulo, fluxo, log, recibo, pendencias, recebimentos, saldos,
