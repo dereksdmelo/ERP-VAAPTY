@@ -3040,7 +3040,14 @@ leitura errada mais cara.
 **Os dados reais mudaram o desenho, duas vezes** — a lição que o pacote
 repete (*"teste com os dados reais antes de publicar"*):
 
-- **"Carro vendido sem recebimento lançado" ficou de fora.** Os 487
+- **As pendências começam em 01/10/2026 (0120, 08/11/2026, o Derek: "tudo
+que é antigo, setembro pra trás, pode eliminar; vamos deixar outubro
+redondo e novembro perfeito").** Nada foi apagado: `fin_pendencias` e as
+vendas sem recebimento só olham dali em diante (`inicio`). Sem categoria
+caiu de 3.460 para 3, carro sem carro de 184 para 154, folha sem pessoa de
+45 para 15, meses sem fechar de 7 para 2.
+
+**"Carro vendido sem recebimento lançado" ficou de fora.** Os 487
   vendidos estão TODOS sem data de venda (a importação da planilha só
   trouxe a semana); a conferência acusaria quase todos, e alarme falso é
   o que faz um painel de pendências deixar de ser lido. A tela diz que

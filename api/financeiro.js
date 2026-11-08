@@ -2858,7 +2858,8 @@ async function pendencias(req, res, tok) {
    * Falhar aqui não derruba as outras oito conferências. */
   let vsr = null;
   try {
-    const hoje = hojeAqui(), de = somaDias(hoje, -90);
+    // 0120: as pendências começam em outubro/2026 (o histórico não é cobrado).
+    const hoje = hojeAqui(), de = [somaDias(hoje, -90), "2026-10-01"].sort().pop();
     await casarAutomatico(tok, de, hoje);
     const { vend } = await dadosRecebimento(tok, de, hoje);
     const limite = somaDias(hoje, -10);
