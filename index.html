@@ -14977,6 +14977,68 @@ function FotosDoCarro({ veiculoId, aoMudar }) {
  * responde à pergunta que importa quando a margem sai diferente do
  * combinado: onde, exatamente, ela mudou.
  */
+/* OS TÍTULOS DE UM CARRO, na ficha do estoque (08/11/2026, o Derek: "não
+ * achei os títulos do valor da compra do carro lançados"). Cada item do
+ * contrato com o estado — em aberto, ligado ao extrato, pago à mão — e o
+ * que ainda falta para nascer (sem valor de compra, sem preço de venda).
+ * Carro de antes de novembro não gera sozinho; "gerar os títulos" força.
+ * Só aparece para quem lê o financeiro (a RLS do fin_* decide). */
+function TitulosDoCarro({ e }) {
+  const [d, setD] = useState(null); const [erro, setErro] = useState(""); const [indo, setIndo] = useState(false);
+  const ler = () => fin("titulo", { estoque_id: e.id }).then(setD).catch((x) => setErro(x.message));
+  useEffect(() => { setD(null); ler(); }, [e.id, e.valor_compra, e.valor_venda, e.situacao, (e.estoque_custo || []).length]);
+  if (erro) return null;
+  if (!d) return null;
+  const ts = d.titulos || [];
+  const doContrato = ts.filter((x) => x.item_contrato);
+  const outros = ts.filter((x) => !x.item_contrato);
+  const antes = String(e.entrou_em || "").slice(0, 10) < d.corte && !(e.vendido_em && String(e.vendido_em).slice(0, 10) >= d.corte);
+  const gerar = async (forcar) => {
+    setIndo(true);
+    try { await fin("titulo", { acao: "sincronizar_carro", id: e.id, forcar: forcar ? 1 : 0 }, finJson("POST", {})); await ler(); }
+    catch (x) { alert(x.message); }
+    setIndo(false);
+  };
+  const rot = (it) => { const k = String(it || ""); return k.indexOf("compra:cliente") === 0 ? "Compra — pagar ao cliente" : k.indexOf("venda:lojista") === 0 ? "Venda — receber do lojista" : "Custo do carro"; };
+  const val = (x) => (Number(x.debito) || 0) + (Number(x.credito) || 0);
+  const faltas = [];
+  if (e.natureza !== "indicacao" && !(Number(e.valor_compra) > 0)) faltas.push("sem valor de compra — preencha o check list do negócio para nascer o título do cliente");
+  if (e.situacao === "vendido" && !(Number(e.valor_venda) > 0)) faltas.push("vendido sem valor de venda");
+  return (
+    <div className="rounded-lg p-3.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: ROTULO_COR }}>Títulos financeiros deste carro</span>
+        <button disabled={indo} onClick={() => gerar(antes)} className="text-[12px] font-semibold" style={{ color: C.roxo }}>
+          {indo ? "gerando…" : antes && !doContrato.length ? "gerar os títulos (carro de antes de novembro)" : "conferir os títulos"}
+        </button>
+      </div>
+      {faltas.map((f) => <p key={f} className="mt-1 text-[12px]" style={{ color: AMARELO.texto }}>⚠ {f}</p>)}
+      {!doContrato.length && !faltas.length && (
+        <p className="mt-1 text-[12.5px]" style={{ color: C.mute }}>{antes ? "Carro de antes de novembro: os títulos não nascem sozinhos." : "Nenhum título ainda."}</p>
+      )}
+      {doContrato.map((x) => (
+        <div key={x.id} className="mt-1.5 flex items-baseline gap-2 text-[12.5px]" style={{ borderTop: `1px solid ${C.line}`, paddingTop: 6 }}>
+          <span className="min-w-0 flex-1">
+            <b>{rot(x.item_contrato)}</b>{String(x.item_contrato).indexOf("#") >= 0 ? " (parte)" : ""}
+            <span className="block truncate text-[11px]" style={{ color: C.mute }}>{x.descricao}</span>
+          </span>
+          <span className="shrink-0 text-right" style={{ fontVariantNumeric: "tabular-nums" }}>
+            <b style={{ color: Number(x.credito) > 0 ? C.verde : C.laranja }}>{rs2(val(x))}</b>
+            <span className="block text-[11px]" style={{ color: x.situacao === "aberto" ? AMARELO.texto : x.revisar ? AMARELO.texto : C.verde }}>
+              {x.situacao === "aberto" ? `em aberto · vence ${diaBR(x.vencimento)}` : doExtrato(x) ? `pago · extrato ${diaBR(x.data)}${x.revisar ? " · conferir" : ""}` : `pago à mão · ${diaBR(x.data)}`}
+            </span>
+          </span>
+        </div>
+      ))}
+      {!!outros.length && (
+        <p className="mt-2 text-[11.5px]" style={{ color: C.mute }}>
+          + {outros.length} lançamento{outros.length > 1 ? "s" : ""} do extrato com este carro fora do contrato ({rs2(outros.reduce((t, x) => t + (Number(x.credito) || 0) - (Number(x.debito) || 0), 0))}) — ligue-os aos títulos na Conciliação bancária.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function FichaEstoque({ id, perfil, aoVoltar }) {
   const [e, setE] = useState(null);
   const [erro, setErro] = useState("");
@@ -15168,6 +15230,10 @@ function FichaEstoque({ id, perfil, aoVoltar }) {
           </button>
         )}
       </div>
+
+      {/* Os títulos financeiros deste carro (0119): o que foi gerado do
+          contrato e o que já passou no banco. */}
+      <TitulosDoCarro e={e} />
 
       {/* ---- a venda ---- */}
       {e.situacao === "baixado" ? (
@@ -20864,6 +20930,7 @@ function TitulosDoMes({ comp }) {
   if (erro && !d) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
   if (!d) return <p className="text-[13px]" style={{ color: C.mute }}>Carregando os títulos de {rotuloMes(comp)}…</p>;
   const val = (l) => (Number(l.credito) || 0) - (Number(l.debito) || 0);
+  const doCarro = (l) => !!l.item_contrato;
   const estado = (l) => l.situacao === "aberto" ? "aberto"
     : l.revisar ? "conferir"
     : (l.titulos_ligados || []).length || l.conta_fixa_id ? "vinculado"
@@ -20873,14 +20940,14 @@ function TitulosDoMes({ comp }) {
   const COR = { aberto: [C.bg, C.ink], conferir: [AMARELO.fundo, AMARELO.texto], vinculado: ["#F1ECF8", C.roxo], conciliacao: ["#E8F3EE", C.verde], mao: [C.bg, C.mute] };
   const termos = semAcento(q).toLowerCase().split(/\s+/).filter(Boolean);
   const todos = d.titulos.filter((l) => !l.fin_categoria || l.fin_categoria.grupo !== "saldo");
-  const cont = {}; todos.forEach((l) => { const e = estado(l); cont[e] = (cont[e] || 0) + 1; });
-  const vis = todos.filter((l) => (filtro === "todos" || estado(l) === filtro) && (!termos.length || termos.every((x) =>
+  const cont = {}; todos.forEach((l) => { const e = estado(l); cont[e] = (cont[e] || 0) + 1; if (doCarro(l)) cont.carros = (cont.carros || 0) + 1; });
+  const vis = todos.filter((l) => (filtro === "todos" || (filtro === "carros" ? doCarro(l) : estado(l) === filtro)) && (!termos.length || termos.every((x) =>
     semAcento(`${l.descricao || ""} ${l.fin_favorecido ? l.fin_favorecido.nome : ""} ${l.fin_categoria ? l.fin_categoria.nome : ""} ${centavosBR(Math.abs(val(l)))}`).toLowerCase().indexOf(x) >= 0)));
   const soma = (f) => todos.filter(f).reduce((t, l) => t + val(l), 0);
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
-        {[["todos", "Todos"], ["aberto", "Em aberto"], ["conferir", "Para conferir"], ["vinculado", "Vinculados"], ["conciliacao", "Pela conciliação"], ["mao", "Sem extrato"]].map(([v, r]) => (
+        {[["todos", "Todos"], ["carros", "Carros (contrato)"], ["aberto", "Em aberto"], ["conferir", "Para conferir"], ["vinculado", "Vinculados"], ["conciliacao", "Pela conciliação"], ["mao", "Sem extrato"]].map(([v, r]) => (
           <button key={v} onClick={() => setFiltro(v)} className="rounded-full px-3 py-1 font-semibold"
             style={{ background: filtro === v ? C.roxo : "#fff", color: filtro === v ? "#fff" : C.mute, border: `1px solid ${filtro === v ? C.roxo : C.line}` }}>
             {r}{v !== "todos" && cont[v] ? ` (${cont[v]})` : v === "todos" ? ` (${todos.length})` : ""}

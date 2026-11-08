@@ -1563,6 +1563,15 @@ async function titulo(req, res, tok) {
     }
     return res.status(200).json({ ok: true, ...tot });
   }
+  // Os títulos de UM carro (a ficha do estoque): os do contrato e tudo
+  // que foi lançado com aquele carro.
+  if (req.method === "GET" && req.query.estoque_id) {
+    const eid = idOuNulo(req.query.estoque_id);
+    if (!eid) return res.status(400).json({ erro: "estoque_id inválido." });
+    const lista = await supa(`${base("fin_lancamento")}?select=${CAMPOS_LANC}&estoque_id=eq.${eid}&situacao=in.(aberto,efetivado)` +
+      `&order=vencimento.asc.nullslast,data.asc&limit=500`, { headers: cab(tok) }) || [];
+    return res.status(200).json({ titulos: lista, corte: CORTE_TITULOS });
+  }
   if (req.method === "GET" && req.query.todos) {
     const comp = competenciaDe(req.query.competencia) || competenciaDe(hojeAqui());
     const lista = await supa(`${base("fin_lancamento")}?select=${CAMPOS_LANC}&situacao=in.(aberto,efetivado)&competencia=eq.${comp}` +
