@@ -4936,7 +4936,11 @@ function TrilhoFechamento({ f, preContratoFeito, contratoLiberado }) {
 function AnotacoesDoAtendimento({ atendimentoId, iniciais }) {
   const [texto, setTexto] = useState(iniciais || "");
   const [nova, setNova] = useState(""); const [erro, setErro] = useState("");
-  useEffect(() => { setTexto(iniciais || ""); }, [atendimentoId]);
+  // Sem as anotações na mão (o painel do gestor, 08/11/2026), lê do banco.
+  useEffect(() => {
+    setTexto(iniciais || "");
+    if (iniciais == null && atendimentoId) lerAtendimento(atendimentoId).then((a) => setTexto((a && a.observacoes) || "")).catch(() => {});
+  }, [atendimentoId]);
   const linhas = String(texto || "").split("\n").map((x) => x.trim()).filter(Boolean).reverse();
   const anotar = async () => {
     if (!nova.trim() || !atendimentoId) return;
@@ -28966,6 +28970,21 @@ function CartaoVolta({ v, emFoco, aoClicar }) {
         {w.objecao ? <span>objeção: <b>{w.objecao}</b></span> : null}
         {w.motivo ? <span>vende para: <b>{w.motivo}</b></span> : null}
       </div>
+      {(() => {
+        const notas = String(v.observacoes || "").split("\n").map((x) => x.trim()).filter(Boolean).reverse();
+        if (!notas.length) return null;
+        return (
+          <div className="mt-2 rounded-md px-2.5 py-1.5 text-[12px]" style={{ background: C.bg }}>
+            {rot("Anotações")}
+            {notas.slice(0, 2).map((l, i) => (
+              <div key={i} className="leading-snug">
+                {/^\[[^\]]+\]/.test(l) ? <><span style={{ color: C.mute }}>{l.match(/^\[[^\]]+\]/)[0]}</span>{l.replace(/^\[[^\]]+\]/, "")}</> : l}
+              </div>
+            ))}
+            {notas.length > 2 && <div className="text-[11px]" style={{ color: C.mute }}>+ {notas.length - 2} — clique para ver todas</div>}
+          </div>
+        );
+      })()}
       {v.sem_data && <p className="mt-1.5 text-[12px]" style={{ color: C.laranja }}>Ninguém combinou quando ele volta — clique e marque a data com o negociador.</p>}
     </button>
   );
@@ -29372,6 +29391,14 @@ function PainelGestor({ perfil, comp, aoAbrir }) {
           return (
           <div className="space-y-3 lg:sticky lg:top-4 lg:self-start">
             {aba === "voltas" && <PainelVolta v={aberto} aoAbrir={aoAbrir} aoMudou={() => { recarregarVoltas(); }} />}
+            {/* AS ANOTAÇÕES DO ATENDIMENTO no painel do gestor (08/11/2026):
+                as da recuperação, da conversa e do atendimento — e o gestor
+                anota ali também. */}
+            {aid && (
+              <div className="rounded-xl px-3.5 pb-3 pt-0.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+                <AnotacoesDoAtendimento key={aid} atendimentoId={aid} iniciais={at && at.observacoes !== undefined ? at.observacoes : undefined} />
+              </div>
+            )}
             <ResumoDoNegocio viva={vivaX} atendimento={at} />
 
             {aba === "revisar" && (

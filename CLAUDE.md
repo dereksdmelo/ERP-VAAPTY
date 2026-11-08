@@ -6189,7 +6189,10 @@ ela; sem conversa, abre a "nova conversa" preenchida); sem número, cai no
 WhatsApp do aparelho. **E cada cliente mostra o que já se sabe**: da ficha
 de trabalho (`negociacao_viva.ficha`, só os campos pelo caminho JSON) o
 motivo, a objeção, quanto quer, a última rodada e as internas; e as
-anotações, as três mais novas e "ver todas". **As anotações aparecem no
+anotações, as três mais novas e "ver todas". **No Painel do gestor também**: o painel
+lateral de qualquer aba traz `AnotacoesDoAtendimento` (lê do banco quando
+a lista não trouxe as observações, e o gestor anota ali), e o cartão de
+"Prometeram voltar" mostra as duas mais novas. **As anotações aparecem no
 atendimento** (`AnotacoesDoAtendimento`, no topo de "O que já sabemos",
 com campo para anotar ali). E o **`volta_em` nunca era gravado**: faltava
 em `paraColunas` do `api/atendimento.js`, e o servidor o descartava calado
