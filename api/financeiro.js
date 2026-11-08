@@ -207,7 +207,7 @@ const TIPOS_CUSTO = ["receita", "variavel", "fixa", "fora"];
 const tipoCusto = (v) => (TIPOS_CUSTO.indexOf(String(v)) >= 0 ? String(v) : "fixa");
 const categoria = cadastro("fin_categoria",
   [["nome", texto], ["grupo", grupo], ["no_dre", bool], ["ordem", inteiro], ["ativa", bool],
-   ["pede_funcionario", bool], ["tipo_custo", tipoCusto]], "ordem.asc,nome.asc");
+   ["pede_funcionario", bool], ["tipo_custo", tipoCusto], ["pai_id", idOuNulo]], "ordem.asc,nome.asc");
 const funcionarioCad = cadastro("fin_funcionario",
   [["nome", texto], ["salario_base", (v) => decimal(v) || 0], ["negociador_id", idOuNulo], ["ativo", bool]], "nome.asc");
 /* JUNTAR E TIRAR PESSOA DA FOLHA (0117, 07/11/2026, o Derek: "duplicou
@@ -1068,6 +1068,8 @@ async function projecaoDoMes(tok, comp, d, folhaPronta) {
      * qualquer das categorias da folha cobre primeiro o salário, depois a comissão, depois
      * a bonificação dela. O que não tem pessoa continua valendo na categoria onde caiu. */
     const catsFolha = new Set(Object.keys(catDe).map((k) => catDe[k]).filter(Boolean));
+    // O vale é pagamento da pessoa: entra no que cobre salário e comissão.
+    (cats || []).filter((c) => c.nome === "Vale" && c.pede_funcionario).forEach((c) => catsFolha.add(c.id));
     const alocado = { salario: 0, comissao: 0, bonificacao: 0 };
     const atribuidoPorCat = {};
     const pessoasFolha = [];
@@ -1429,7 +1431,7 @@ async function dreDoMes(tok, comp) {
     supa(`${base("fin_lancamento")}?select=debito,credito,situacao,categoria_id,estoque_id,tipo_negociacao,funcionario_id,` +
       `fin_rateio(valor,categoria_id,estoque_id,tipo_negociacao,funcionario_id)&situacao=in.(aberto,efetivado)&competencia=eq.${comp}&limit=10000`,
       { headers: cab(tok) }),
-    supa(`${base("fin_categoria")}?select=id,nome,grupo,no_dre,ordem,pede_funcionario`, { headers: cab(tok) }),
+    supa(`${base("fin_categoria")}?select=id,nome,grupo,no_dre,ordem,pede_funcionario,pai_id`, { headers: cab(tok) }),
   ]);
   const catPorId = {};
   (cats || []).forEach((c) => { catPorId[c.id] = c; });
@@ -1462,7 +1464,8 @@ async function dreDoMes(tok, comp) {
       }
       if (aberto) { emAberto += p.valor; return; }
       if (!c) { semCategoria += p.valor; return; }
-      por[c.id] = por[c.id] || { id: c.id, nome: c.nome, grupo: c.grupo, ordem: c.ordem, valor: 0 };
+      por[c.id] = por[c.id] || { id: c.id, nome: c.nome, grupo: c.grupo, ordem: c.ordem, valor: 0,
+        pai_id: c.pai_id || null, pai_nome: c.pai_id && catPorId[c.pai_id] ? catPorId[c.pai_id].nome : null };
       // Como na planilha: DRE = crédito − débito, então despesa é negativa.
       por[c.id].valor += p.valor;
     });
@@ -2106,10 +2109,13 @@ async function vale(req, res, tok) {
       const cfg = await supa(`${base("fin_config")}?select=*&id=eq.1`, { headers: cab(tok) }).then(um).catch(() => null);
       const func = um(await supa(`${base("fin_funcionario")}?select=nome&id=eq.${l.funcionario_id}`, { headers: cab(tok) }).catch(() => []));
       let titulo = null;
-      if (cfg && cfg.folha_cat_salario) {
+      // A categoria do vale é a "Vale" do plano de contas (dentro de Pessoas); sem ela, a do salário.
+      const catVale = um(await supa(`${base("fin_categoria")}?select=id&nome=eq.Vale&ativa=eq.true`, { headers: cab(tok) }).catch(() => []));
+      const catDoVale = (catVale && catVale.id) || (cfg && cfg.folha_cat_salario) || null;
+      if (catDoVale) {
         const desc = `Vale — ${(func && func.nome) || "funcionário"}${l.descricao ? ` (${l.descricao})` : ""}`;
         titulo = um(await supa(base("fin_lancamento"), { method: "POST", headers: cab(tok, REP), body: JSON.stringify({
-          data: l.data, vencimento: l.data, competencia: l.competencia, categoria_id: cfg.folha_cat_salario,
+          data: l.data, vencimento: l.data, competencia: l.competencia, categoria_id: catDoVale,
           descricao: desc, favorecido: (func && func.nome) || null, funcionario_id: l.funcionario_id,
           debito: l.valor, credito: 0, situacao: "aberto", origem: "vale" }) }).catch(() => null));
         if (titulo) l.lancamento_id = titulo.id;

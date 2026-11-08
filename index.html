@@ -19270,14 +19270,18 @@ function FinPlanoContas() {
         <span className="text-[12px]" style={{ color: C.mute }}>Entra no DRE: despesa e receita com "no DRE" ligado. Negociação, retirada e transferência ficam fora.</span>
       </div>
       <div className="rolar overflow-x-auto rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-        <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 820 }}>
-          <thead><tr>{["Categoria", "Grupo", "No DRE", "Custo", "Pede a pessoa", "Ordem", ""].map((h) => (
+        <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 900 }}>
+          <thead><tr>{["Categoria", "Dentro de", "Grupo", "No DRE", "Custo", "Pede a pessoa", "Ordem", ""].map((h) => (
             <th key={h} className="whitespace-nowrap px-2 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.04em]" style={{ color: C.mute, borderBottom: `1px solid ${C.line}` }}>{h}</th>))}</tr></thead>
           <tbody>
             {mostradas.map((c) => (
               <tr key={c.id} style={{ borderBottom: `1px solid ${C.line}`, opacity: c.ativa === false ? 0.5 : 1 }}>
                 <td className="px-2 py-1"><input key={`${c.id}-${c.nome}`} className={`${sel} w-full`} style={inputSty} defaultValue={c.nome}
                   onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== c.nome) mudar(c.id, { nome: v }); }} /></td>
+                <td className="px-2 py-1"><select className={sel} style={inputSty} value={c.pai_id || ""} title="Categoria-mãe: o DRE agrupa as subcategorias sob ela"
+                  onChange={(e) => mudar(c.id, { pai_id: e.target.value || null })}>
+                  <option value="">—</option>
+                  {lista.filter((p) => p.id !== c.id && !p.pai_id && p.ativa !== false).map((p) => <option key={p.id} value={p.id}>{p.nome}</option>)}</select></td>
                 <td className="px-2 py-1"><select className={sel} style={inputSty} value={c.grupo || "despesa"} onChange={(e) => mudar(c.id, { grupo: e.target.value })}>
                   {Object.entries(GRUPO_CAT_ROT).map(([v, r]) => <option key={v} value={v}>{r}</option>)}</select></td>
                 <td className="px-2 py-1"><input type="checkbox" checked={!!c.no_dre} onChange={(e) => mudar(c.id, { no_dre: e.target.checked })} /></td>
@@ -21737,6 +21741,7 @@ function FinDRE({ comp }) {
   const [meses, setMeses] = useState(1);
   const [mm, setMm] = useState(null);
   const [abrir, setAbrir] = useState(null);
+  const [maes, setMaes] = useState({});   // categorias-mãe abertas (Pessoas…)
   const [vers, setVers] = useState(0);
   // Corrigir na janela relê o DRE por baixo, sem apagar a tela.
   useEffect(() => { if (!vers) setD(null); fin("dre", { competencia: comp }).then(setD).catch((e) => setErro(e.message)); }, [comp, vers]);
@@ -21779,7 +21784,7 @@ function FinDRE({ comp }) {
     );
   }
   if (!d) return <div>{seletor}<p className="text-[13px]" style={{ color: C.mute }}>Calculando…</p></div>;
-  const linha = (rot, v, forte, cor, abrirCom) => {
+  const linha = (rot, v, forte, cor, abrirCom, nivel) => {
     if (!abrirCom) return (
       <div key={rot} className="flex items-baseline justify-between gap-3 px-3 py-1.5 text-[13px]" style={{ borderBottom: `1px solid ${C.line}`, fontWeight: forte ? 700 : 400 }}>
         <span>{rot}</span><span style={{ fontVariantNumeric: "tabular-nums", color: cor || (v < 0 ? C.laranja : C.ink) }}>{rs2(v)}</span>
@@ -21789,7 +21794,7 @@ function FinDRE({ comp }) {
     return (
       <div key={rot}>
         <button onClick={() => setAbrir(aberta ? null : abrirCom)} title="Ver os títulos que somam este valor"
-          className="flex w-full items-baseline justify-between gap-3 px-3 py-1.5 text-left text-[13px] hover:bg-[#F7F4FA]" style={{ borderBottom: aberta ? "none" : `1px solid ${C.line}`, fontWeight: forte ? 700 : 400 }}>
+          className="flex w-full items-baseline justify-between gap-3 px-3 py-1.5 text-left text-[13px] hover:bg-[#F7F4FA]" style={{ borderBottom: aberta ? "none" : `1px solid ${C.line}`, fontWeight: forte ? 700 : 400, paddingLeft: nivel ? 28 : undefined }}>
           <span><span className="mr-1.5 text-[11px]" style={{ color: C.mute }}>{aberta ? "▾" : "▸"}</span>{rot}</span>
           <span style={{ fontVariantNumeric: "tabular-nums", color: cor || (v < 0 ? C.laranja : C.ink) }}>{rs2(v)}</span>
         </button>
@@ -21802,7 +21807,31 @@ function FinDRE({ comp }) {
     <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
       <div className="rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
         <div className="px-3 py-2 text-[12px] font-semibold uppercase tracking-[0.06em]" style={{ color: C.mute, borderBottom: `1px solid ${C.line}` }}>Despesas por categoria · {rotuloMes(comp)}</div>
-        {d.linhas.map((l) => linha(l.nome, l.valor, false, null, l))}
+        {(() => {
+          /* CATEGORIA-MÃE (0128, o Derek: "Pessoas" com as subcategorias dentro). A mãe aparece
+             uma vez, com a soma das filhas, e abre para mostrar cada subcategoria — que
+             continua abrindo os títulos dela. Entra na posição da primeira filha. */
+          const vistos = {}; const saida = [];
+          d.linhas.forEach((l) => {
+            if (!l.pai_id) { saida.push(linha(l.nome, l.valor, false, null, l)); return; }
+            if (vistos[l.pai_id]) return;
+            vistos[l.pai_id] = true;
+            const filhas = d.linhas.filter((x) => x.pai_id === l.pai_id);
+            const soma = filhas.reduce((t, x) => t + x.valor, 0);
+            const aberta = !!maes[l.pai_id];
+            saida.push(
+              <div key={`mae-${l.pai_id}`}>
+                <button onClick={() => setMaes((m) => ({ ...m, [l.pai_id]: !m[l.pai_id] }))} title="Ver as subcategorias"
+                  className="flex w-full items-baseline justify-between gap-3 px-3 py-1.5 text-left text-[13px] font-semibold hover:bg-[#F7F4FA]" style={{ borderBottom: `1px solid ${C.line}`, background: C.bg }}>
+                  <span><span className="mr-1.5 text-[11px]" style={{ color: C.mute }}>{aberta ? "▾" : "▸"}</span>{l.pai_nome || "Grupo"} <span className="text-[11px] font-normal" style={{ color: C.mute }}>· {filhas.length} subcategoria{filhas.length === 1 ? "" : "s"}</span></span>
+                  <span style={{ fontVariantNumeric: "tabular-nums", color: soma < 0 ? C.laranja : C.ink }}>{rs2(soma)}</span>
+                </button>
+                {aberta && filhas.map((x) => linha(x.nome, x.valor, false, null, x, 1))}
+              </div>
+            );
+          });
+          return saida;
+        })()}
         {!!d.sem_categoria && linha("Sem categoria", d.sem_categoria, false, C.laranja, { id: null, nome: "Sem categoria", valor: d.sem_categoria })}
         {!d.linhas.length && <p className="px-3 py-6 text-center text-[13px]" style={{ color: C.mute }}>Nenhum lançamento nesta competência.</p>}
         {linha("Total de despesas", d.total_despesas, true)}
