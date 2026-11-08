@@ -6132,6 +6132,25 @@ hora, ligada ao atendimento; um toque diz como foi (não atendeu, volta em
 tal dia — status vai voltar e `volta_em` —, vendeu fora) e completa a
 linha. O gerente escolhe de quem ver.
 
+**A tela da sala — gestão à vista (0121, 08/11/2026, o Derek: "uma tela
+dinâmica pra pendurar na sala… efeitos visuais quando alguém fecha um
+carro, comemoração, pódio… configurável; as configurações no painel do
+gestor e o link gerado por lá").** `tv.html` é estática e sem login, como
+`assinar.html`: abre com `#t=<chave>` (no fragmento) e chama
+`tv_painel(chave)` com a chave anônima de 20 em 20 s — função `security
+definer` que devolve SÓ o agregado do mês (meta, feito, carros, fluxo e
+conversão por negociador; os carros que entraram, com negociador e
+modelo). A chave e a configuração ficam em `painel_tv` (uma linha, RLS do
+gerente), editadas em Painel do gestor → **Tela da sala**
+(`?recurso=tela-sala` no `api/perfil.js`): título, recado, pódio, R$ ou
+só %, comemoração, som, duração, ordem e tema. Gerar link novo desliga o
+antigo. "Fechou um carro" é o carro que **entrou no estoque** (o fechamento
+põe o carro no pátio, decisão 23): cada entrada nova vira comemoração em
+tela cheia (troféu, confete em canvas, fanfarra sintetizada — o navegador
+pede um toque para liberar o som). A chave fica em texto, não em hash: o
+gerente precisa copiar o link de novo depois de pendurar a TV, e o que ela
+abre é número de vendas, não cadastro.
+
 ### 42. Assinatura eletrônica própria: o papel some do caminho
 
 O Derek trouxe em 15/09/2026 a especificação do assinador que já roda

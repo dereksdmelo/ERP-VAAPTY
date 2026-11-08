@@ -22,6 +22,8 @@
 !assinar.html
 !verificar.html
 !dut.html
+# A tela da sala (0121): pública como assinar.html, pela chave no fragmento.
+!tv.html
 !testemunhais.json
 !apresentacao
 # A pasta sozinha não basta: o `*` lá em cima pega também os arquivos

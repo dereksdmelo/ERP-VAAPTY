@@ -544,6 +544,55 @@ const CAMPOS_DESEMPENHO = [
  * política de escrita exige e_gerente(). O PUT que volta vazio é ela
  * recusando, e vira 403 com mensagem legível.
  */
+/* A TELA DA SALA (0121, 08/11/2026). O gerente gera o link (uma chave de
+ * 32 bytes; gerar de novo desliga o anterior) e guarda a configuração. A
+ * RLS da `painel_tv` é do gerente: para os outros, o GET volta vazio e o
+ * POST/PUT volta 403. A TV lê pela `tv_painel(chave)`, sem passar aqui. */
+const TV_CONFIG = ["titulo", "podio", "valores", "comemorar", "som", "segundos", "recado", "tema", "ordem"];
+function limparConfigTv(c) {
+  const o = {};
+  TV_CONFIG.forEach((k) => {
+    if (c[k] === undefined) return;
+    if (["podio", "valores", "comemorar", "som"].indexOf(k) >= 0) o[k] = !!c[k];
+    else if (k === "segundos") o[k] = Math.max(3, Math.min(30, Math.round(Number(c[k]) || 8)));
+    else if (k === "tema") o[k] = c[k] === "claro" ? "claro" : "escuro";
+    else if (k === "ordem") o[k] = c[k] === "percentual" ? "percentual" : "valor";
+    else o[k] = String(c[k] || "").slice(0, 140);
+  });
+  return o;
+}
+async function telaDaSala(req, res, tok) {
+  const base = `${URL_BASE}/rest/v1/painel_tv`;
+  const cab = { apikey: ANON, Authorization: tok };
+  const cabJson = { ...cab, "Content-Type": "application/json", Prefer: "return=representation" };
+  if (req.method === "GET") {
+    const r = await fetch(`${base}?select=token,config,atualizado_em&id=eq.1`, { headers: cab });
+    const l = await r.json().catch(() => []);
+    return res.status(200).json({ tela: (Array.isArray(l) && l[0]) || null });
+  }
+  const c = (await lerCorpo(req)) || {};
+  if (req.method === "POST" && String(req.query.acao || "") === "gerar") {
+    const bytes = new Uint8Array(32); globalThis.crypto.getRandomValues(bytes);
+    const token = Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+    const atual = await fetch(`${base}?select=config&id=eq.1`, { headers: cab }).then((r) => r.json()).catch(() => []);
+    const config = (Array.isArray(atual) && atual[0] && atual[0].config) || limparConfigTv({ podio: true, valores: true, comemorar: true, som: true, segundos: 8, tema: "escuro", ordem: "valor" });
+    const r = await fetch(`${base}?on_conflict=id`, { method: "POST", headers: { ...cabJson, Prefer: "resolution=merge-duplicates,return=representation" },
+      body: JSON.stringify({ id: 1, token, config, atualizado_em: new Date().toISOString() }) });
+    const l = await r.json().catch(() => []);
+    if (!r.ok || !(Array.isArray(l) && l[0])) return res.status(403).json({ erro: "Só o gerente gera o link da tela." });
+    return res.status(200).json({ tela: { token: l[0].token, config: l[0].config } });
+  }
+  if (req.method === "PUT") {
+    const config = limparConfigTv(c.config || {});
+    const r = await fetch(`${base}?id=eq.1`, { method: "PATCH", headers: cabJson, body: JSON.stringify({ config, atualizado_em: new Date().toISOString() }) });
+    const l = await r.json().catch(() => []);
+    if (!r.ok || !(Array.isArray(l) && l[0])) return res.status(409).json({ erro: "Gere o link da tela primeiro (só o gerente)." });
+    return res.status(200).json({ tela: { token: l[0].token, config: l[0].config } });
+  }
+  res.setHeader("Allow", "GET, POST, PUT");
+  return res.status(405).json({ erro: "Use GET, POST ou PUT." });
+}
+
 async function desempenho(req, res, tok) {
   const base = `${URL_BASE}/rest/v1/desempenho`;
   const cab = { apikey: ANON, Authorization: tok };
@@ -881,6 +930,11 @@ module.exports = async function handler(req, res) {
 
   if (String(req.query.recurso || "") === "config-loja") {
     try { return await configLoja(req, res, tok); }
+    catch (e) { return res.status(502).json({ erro: "Não consegui falar com o banco." }); }
+  }
+
+  if (String(req.query.recurso || "") === "tela-sala") {
+    try { return await telaDaSala(req, res, tok); }
     catch (e) { return res.status(502).json({ erro: "Não consegui falar com o banco." }); }
   }
 

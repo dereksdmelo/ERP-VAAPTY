@@ -28672,6 +28672,94 @@ function PainelVolta({ v, aoMudou, aoAbrir }) {
   );
 }
 
+/* A TELA DA SALA, configurada no Painel do gestor (0121, 08/11/2026, o
+ * Derek: "as configurações dessa tela devem ficar no painel do gestor e
+ * o link pra tela deve ser gerado por lá"). Gerar o link cria a chave
+ * (gerar de novo desliga a TV antiga); o resto é o que a TV mostra. A TV
+ * relê tudo de 20 em 20 segundos — mudar aqui muda lá sem tocar nela. */
+function ConfigTelaSala() {
+  const [t, setT] = useState(undefined); const [erro, setErro] = useState(""); const [salvo, setSalvo] = useState("");
+  const [c, setC] = useState({});
+  const ler = () => fetchAut("/api/perfil?recurso=tela-sala").then((r) => r.json()).then((d) => { setT(d.tela || null); setC((d.tela && d.tela.config) || {}); }).catch((e) => setErro(e.message));
+  useEffect(() => { ler(); }, []);
+  const link = t && t.token ? `${location.origin}/tv.html#t=${t.token}` : "";
+  const gerar = async () => {
+    if (t && t.token && !window.confirm("Gerar um link novo? A TV que está com o link antigo para de atualizar até receber o novo.")) return;
+    setErro("");
+    try {
+      const r = await fetchAut("/api/perfil?recurso=tela-sala&acao=gerar", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const d = await r.json(); if (!r.ok) throw new Error(d.erro || "Não consegui gerar."); setT(d.tela); setC(d.tela.config || {});
+    } catch (e) { setErro(e.message); }
+  };
+  const salvar = async (novo) => {
+    const cfg = { ...c, ...novo }; setC(cfg); setErro(""); setSalvo("");
+    try {
+      const r = await fetchAut("/api/perfil?recurso=tela-sala", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ config: cfg }) });
+      const d = await r.json(); if (!r.ok) throw new Error(d.erro || "Não consegui salvar."); setSalvo("Salvo — a TV pega em até 20 segundos.");
+    } catch (e) { setErro(e.message); }
+  };
+  if (t === undefined) return <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>;
+  const chave = (k, rot, sub) => (
+    <label className="flex items-start gap-2 text-[13px]">
+      <input type="checkbox" className="mt-0.5" checked={c[k] !== false} onChange={(e) => salvar({ [k]: e.target.checked })} disabled={!t} />
+      <span><b>{rot}</b>{sub ? <span className="block text-[11.5px]" style={{ color: C.mute }}>{sub}</span> : null}</span>
+    </label>
+  );
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl p-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        <div className="text-[15px] font-bold">Gestão à vista — a tela da sala</div>
+        <p className="mt-1 text-[12.5px]" style={{ color: C.mute }}>
+          Abra o link na TV (ou num computador ligado à TV), em tela cheia (F11). Ela mostra a meta do mês, o pódio, cada negociador e
+          comemora sozinha quando um carro é fechado. Não pede login e só mostra números de vendas — nenhum dado de cliente.
+        </p>
+        {link ? (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <input readOnly value={link} className="min-w-[260px] flex-1 rounded-md border px-2 py-1.5 text-[12px] outline-none" style={{ ...inputSty, fontFamily: F.mono }} onFocus={(e) => e.target.select()} />
+            <button onClick={() => navigator.clipboard && navigator.clipboard.writeText(link).then(() => setSalvo("Link copiado."))} className="rounded-md px-3 py-1.5 text-[12.5px] font-semibold text-white" style={{ background: C.roxo }}>Copiar</button>
+            <a href={link} target="_blank" rel="noreferrer" className="rounded-md border px-3 py-1.5 text-[12.5px] font-semibold" style={{ borderColor: C.roxo, color: C.roxo }}>Abrir</a>
+            <button onClick={gerar} className="text-[12px]" style={{ color: C.mute }}>gerar link novo</button>
+          </div>
+        ) : (
+          <BotaoPrimario className="mt-3" onClick={gerar}>Gerar o link da tela</BotaoPrimario>
+        )}
+      </div>
+      {t && (
+        <div className="grid gap-3 rounded-xl p-4 lg:grid-cols-2" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+          <label className="block text-[13px]"><b>Título no alto</b>
+            <input defaultValue={c.titulo || ""} placeholder="Gestão à vista" onBlur={(e) => e.target.value !== (c.titulo || "") && salvar({ titulo: e.target.value })}
+              className="mt-1 w-full rounded-md border px-2 py-1.5 text-[13px] outline-none" style={inputSty} />
+          </label>
+          <label className="block text-[13px]"><b>Recado no rodapé</b>
+            <input defaultValue={c.recado || ""} placeholder="ex.: Bora bater a meta! 🚀" onBlur={(e) => e.target.value !== (c.recado || "") && salvar({ recado: e.target.value })}
+              className="mt-1 w-full rounded-md border px-2 py-1.5 text-[13px] outline-none" style={inputSty} />
+          </label>
+          {chave("podio", "Mostrar o pódio", "os três primeiros do mês, em ouro, prata e bronze")}
+          {chave("valores", "Mostrar os valores em R$", "desligado, a TV mostra só o % da meta de cada um")}
+          {chave("comemorar", "Comemorar quando um carro fecha", "tela cheia com troféu e confete, com o nome de quem fechou")}
+          {chave("som", "Tocar som na comemoração", "a TV pede um toque na tela uma vez para liberar o som")}
+          <label className="flex items-center gap-2 text-[13px]"><b>Duração da comemoração</b>
+            <select value={c.segundos || 8} onChange={(e) => salvar({ segundos: Number(e.target.value) })} className="rounded border px-1.5 py-1 outline-none" style={inputSty}>
+              {[5, 8, 12, 20, 30].map((n) => <option key={n} value={n}>{n} segundos</option>)}
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-[13px]"><b>Ordem do ranking</b>
+            <select value={c.ordem || "valor"} onChange={(e) => salvar({ ordem: e.target.value })} className="rounded border px-1.5 py-1 outline-none" style={inputSty}>
+              <option value="valor">por valor feito</option><option value="percentual">por % da meta</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-[13px]"><b>Tema</b>
+            <select value={c.tema || "escuro"} onChange={(e) => salvar({ tema: e.target.value })} className="rounded border px-1.5 py-1 outline-none" style={inputSty}>
+              <option value="escuro">escuro (melhor em TV)</option><option value="claro">claro</option>
+            </select>
+          </label>
+        </div>
+      )}
+      {(erro || salvo) && <p className="text-[12.5px]" style={{ color: erro ? C.laranja : C.verde }}>{erro || salvo}</p>}
+    </div>
+  );
+}
+
 function PainelGestor({ perfil, comp, aoAbrir }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
@@ -28782,7 +28870,7 @@ function PainelGestor({ perfil, comp, aoAbrir }) {
           : `Todo atendimento passa por aqui: o gestor revisa e devolve um retorno. ${rotuloMes(comp || competenciaDe(hojeEmSP()))}.`} />
 
       <div className="mb-3 flex flex-wrap items-center gap-1.5">
-        {[["agora", "Em andamento"], ["voltas", "Prometeram voltar"], ["revisar", "Para revisar"]].map(([v, r]) => (
+        {[["agora", "Em andamento"], ["voltas", "Prometeram voltar"], ["revisar", "Para revisar"], ["sala", "Tela da sala"]].map(([v, r]) => (
           <button key={v} onClick={() => { setAba(v); setFoco(null); }}
             className="rounded-full px-3.5 py-1.5 text-[13px] font-semibold"
             style={{ background: aba === v ? C.roxo : C.paper, color: aba === v ? "#fff" : C.ink,
@@ -28815,6 +28903,7 @@ function PainelGestor({ perfil, comp, aoAbrir }) {
       </div>
 
       {erro && <p className="mb-2 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+      {aba === "sala" && <ConfigTelaSala />}
       {aba === "agora" && lista === null && <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>}
       {aba === "revisar" && fila === null && <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>}
       {aba === "agora" && lista && !emAndamento.length && (

@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vaapty — Gestão à vista</title>
+<!--
+  A TELA DA SALA (0121, 08/11/2026). O Derek: "uma tela dinâmica, pra
+  pendurar na sala onde o gestor está e a equipe faz reuniões, pra fazer
+  gestão à vista em tempo real… efeitos visuais quando alguém fecha um
+  carro, comemoração, pódio, vitória, de forma configurável."
+
+  Página estática, sem login, como assinar.html (decisão 42): abre com
+  `tv.html#t=<chave>` — a chave vem no fragmento, que não vai a log nem a
+  Referer — e pergunta à `tv_painel(chave)` de 20 em 20 segundos, com a
+  chave ANÔNIMA do Supabase (a de `?recurso=config`). A função devolve só o
+  agregado do mês; cliente nenhum aparece aqui. A configuração (título,
+  pódio, valores, comemoração, som, tempo, recado, tema, ordem) vem junto,
+  e é editada no Painel do gestor.
+
+  "Fechou um carro" é o carro que ENTROU no estoque (o fechamento do
+  negócio põe o carro no pátio — decisão 23): cada entrada nova, depois da
+  primeira leitura, vira comemoração em tela cheia.
+-->
+<style>
+  :root {
+    --bg: #0E0B14; --painel: #17121F; --linha: #2A2236; --tinta: #F4F0FA; --mudo: #9A90AA;
+    --roxo: #8B3FD9; --roxo2: #B57CF2; --verde: #2FBF7F; --laranja: #FF6B35; --ouro: #F5C542; --prata: #C9CED6; --bronze: #D08B4E;
+  }
+  body.claro {
+    --bg: #F5F2F8; --painel: #FFFFFF; --linha: #E4DEEB; --tinta: #181221; --mudo: #6B6478;
+    --roxo: #6D1B9E; --roxo2: #8B3FD9; --verde: #1D7F58; --laranja: #EA5423; --ouro: #C99A12; --prata: #8E96A3; --bronze: #A8642B;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--tinta); font-family: -apple-system, "Segoe UI", system-ui, sans-serif; overflow: hidden;
+         font-variant-numeric: tabular-nums; }
+  .tela { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; padding: 2.2vh 2.4vw; gap: 2vh; }
+  header { display: flex; align-items: center; gap: 1.4vw; }
+  .logo { width: 5.2vh; height: 5.2vh; border-radius: 1.2vh; background: var(--roxo); color: #fff; display: grid; place-items: center;
+          font-weight: 900; font-size: 2.8vh; }
+  .titulo { font-size: 3.4vh; font-weight: 900; letter-spacing: -0.02em; }
+  .mes { font-size: 2.2vh; color: var(--mudo); text-transform: capitalize; }
+  .relogio { margin-left: auto; text-align: right; }
+  .relogio b { font-size: 4.2vh; font-weight: 800; display: block; line-height: 1; }
+  .relogio span { font-size: 1.5vh; color: var(--mudo); }
+  .meio { display: grid; grid-template-columns: 1.05fr 1fr; gap: 2vw; min-height: 0; }
+  .caixa { background: var(--painel); border: 1px solid var(--linha); border-radius: 2vh; padding: 2.4vh 1.8vw; min-height: 0; }
+  .rotulo { font-size: 1.5vh; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: var(--mudo); }
+  .feito { font-size: 9vh; font-weight: 900; line-height: 1; letter-spacing: -0.03em; margin-top: 1vh; }
+  .feito small { font-size: 2.6vh; color: var(--mudo); font-weight: 600; letter-spacing: 0; margin-left: 0.6vw; }
+  .trilho { position: relative; height: 3.4vh; background: var(--linha); border-radius: 1.7vh; margin: 2.4vh 0 1vh; overflow: hidden; }
+  .trilho i { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, var(--roxo), var(--roxo2)); border-radius: 1.7vh;
+              transition: width 1.2s cubic-bezier(.2,.8,.2,1); }
+  .trilho .dia { position: absolute; top: -0.6vh; bottom: -0.6vh; width: 0.35vw; background: var(--tinta); border-radius: 0.2vw; }
+  .ritmo { font-size: 2.4vh; font-weight: 700; margin-top: 1.4vh; }
+  .ritmo.atras { color: var(--laranja); } .ritmo.frente { color: var(--verde); }
+  .sub { font-size: 1.9vh; color: var(--mudo); margin-top: 0.6vh; }
+  .podio { display: grid; grid-template-columns: 1fr 1fr 1fr; align-items: end; gap: 1vw; height: 30vh; margin-top: 3vh; }
+  .degrau { text-align: center; }
+  .degrau .nome { font-size: 2.5vh; font-weight: 800; margin-bottom: 0.8vh; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .degrau .val { font-size: 1.9vh; color: var(--mudo); margin-bottom: 1vh; }
+  .degrau .bloco { border-radius: 1.4vh 1.4vh 0 0; display: grid; place-items: start center; padding-top: 1.4vh; font-size: 5vh; font-weight: 900; color: #fff; }
+  .p1 .bloco { height: 18vh; background: linear-gradient(180deg, var(--ouro), #B88A10); }
+  .p2 .bloco { height: 13vh; background: linear-gradient(180deg, var(--prata), #7D8591); }
+  .p3 .bloco { height: 9vh; background: linear-gradient(180deg, var(--bronze), #8A5124); }
+  .p1 .nome { font-size: 3vh; }
+  table { width: 100%; border-collapse: collapse; margin-top: 1.2vh; }
+  th { font-size: 1.4vh; letter-spacing: 0.12em; text-transform: uppercase; color: var(--mudo); text-align: left; padding: 0.6vh 0.5vw; font-weight: 800; }
+  th.n, td.n { text-align: right; }
+  td { font-size: 2.4vh; padding: 1.15vh 0.5vw; border-top: 1px solid var(--linha); white-space: nowrap; }
+  td.nome { font-weight: 800; max-width: 12vw; overflow: hidden; text-overflow: ellipsis; }
+  td.barra { width: 34%; }
+  .mini { position: relative; height: 1.6vh; background: var(--linha); border-radius: 0.8vh; overflow: hidden; }
+  .mini i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--roxo2); border-radius: 0.8vh; transition: width 1.2s; }
+  .mini i.ok { background: var(--verde); }
+  .mini .dia { position: absolute; top: 0; bottom: 0; width: 0.2vw; background: var(--tinta); opacity: 0.7; }
+  .pct { font-weight: 800; }
+  footer { display: grid; grid-template-columns: repeat(5, auto) 1fr; gap: 2vw; align-items: center; }
+  .kpi b { display: block; font-size: 4.2vh; font-weight: 900; line-height: 1; }
+  .kpi span { font-size: 1.4vh; color: var(--mudo); text-transform: uppercase; letter-spacing: 0.12em; font-weight: 800; }
+  .faixa { overflow: hidden; white-space: nowrap; font-size: 2.1vh; color: var(--mudo); mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent); }
+  .faixa div { display: inline-block; padding-left: 100%; animation: rolar 40s linear infinite; }
+  .faixa b { color: var(--tinta); }
+  @keyframes rolar { to { transform: translateX(-100%); } }
+  .recado { grid-column: 1 / -1; font-size: 2.2vh; font-weight: 700; color: var(--ouro); }
+  /* A COMEMORAÇÃO */
+  #festa { position: fixed; inset: 0; display: none; place-items: center; background: radial-gradient(circle at center, rgba(139,63,217,.92), rgba(14,11,20,.97) 70%); z-index: 10; }
+  #festa.on { display: grid; }
+  #festa .msg { text-align: center; color: #fff; animation: entra .7s cubic-bezier(.2,1.6,.4,1) both; }
+  #festa .trofeu { font-size: 22vh; line-height: 1; animation: pula 1s ease-in-out infinite alternate; }
+  #festa h1 { font-size: 10vh; margin: 2vh 0 0; font-weight: 900; letter-spacing: -0.03em; text-transform: uppercase; }
+  #festa p { font-size: 4vh; margin: 1.5vh 0 0; opacity: .9; }
+  @keyframes entra { from { transform: scale(.3); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  @keyframes pula { to { transform: translateY(-3vh) rotate(-6deg); } }
+  #confete { position: fixed; inset: 0; pointer-events: none; z-index: 11; }
+  #aviso { position: fixed; inset: 0; display: grid; place-items: center; text-align: center; font-size: 3vh; color: var(--mudo); padding: 4vw; }
+  #som { position: fixed; right: 1.2vw; bottom: 1.2vh; font-size: 1.5vh; color: var(--mudo); background: var(--painel); border: 1px solid var(--linha);
+         border-radius: 1vh; padding: .8vh 1vw; cursor: pointer; z-index: 5; }
+  @media (prefers-reduced-motion: reduce) { .faixa div, #festa .trofeu { animation: none; } }
+</style>
+</head>
+<body>
+<div id="aviso">Carregando…</div>
+<div class="tela" id="tela" style="display:none">
+  <header>
+    <div class="logo">V</div>
+    <div><div class="titulo" id="titulo">Gestão à vista</div><div class="mes" id="mes"></div></div>
+    <div class="relogio"><b id="hora">--:--</b><span id="atualizado"></span></div>
+  </header>
+  <div class="meio">
+    <div class="caixa">
+      <div class="rotulo">Meta × mês · loja</div>
+      <div class="feito" id="feito">—</div>
+      <div class="trilho"><i id="barra" style="width:0"></i><span class="dia" id="diaLoja"></span></div>
+      <div class="ritmo" id="ritmo"></div>
+      <div class="sub" id="falta"></div>
+      <div id="podioWrap">
+        <div class="rotulo" style="margin-top:3vh">Pódio do mês</div>
+        <div class="podio" id="podio"></div>
+      </div>
+    </div>
+    <div class="caixa" style="overflow:hidden">
+      <div class="rotulo">Negociadores</div>
+      <table><thead><tr><th>Nome</th><th>Meta</th><th class="n" id="thFeito">Feito</th><th class="n">%</th><th class="n">Carros</th><th class="n">Conv.</th></tr></thead>
+      <tbody id="ranking"></tbody></table>
+    </div>
+  </div>
+  <footer>
+    <div class="kpi"><b id="kFluxoHoje">0</b><span>clientes hoje</span></div>
+    <div class="kpi"><b id="kFechHoje">0</b><span>fechados hoje</span></div>
+    <div class="kpi"><b id="kFluxo">0</b><span>clientes no mês</span></div>
+    <div class="kpi"><b id="kCarros">0</b><span>carros vendidos</span></div>
+    <div class="kpi"><b id="kConv">0%</b><span>conversão</span></div>
+    <div class="faixa"><div id="faixa"></div></div>
+    <div class="recado" id="recado"></div>
+  </footer>
+</div>
+<div id="festa"><div class="msg"><div class="trofeu">🏆</div><h1 id="festaNome"></h1><p id="festaCarro"></p></div></div>
+<canvas id="confete"></canvas>
+<button id="som" style="display:none">🔈 tocar para ligar o som</button>
+<script>
+(function () {
+  var token = (location.hash.match(/t=([a-f0-9]+)/) || [])[1];
+  var aviso = document.getElementById("aviso");
+  if (!token) { aviso.textContent = "Link incompleto. Gere o link da tela no Painel do gestor."; return; }
+  var URL_SB = null, ANON = null, cfg = {}, vistos = null, fila = [], festejando = false, ultimaLeitura = 0;
+  var $ = function (id) { return document.getElementById(id); };
+  var brl = function (v) { return "R$ " + (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 0 }); };
+  var pct = function (a, b) { return b > 0 ? Math.round((a / b) * 100) : 0; };
+  var esc = function (t) { return String(t == null ? "" : t).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+  var primeiro = function (n) { return String(n || "").trim().split(/\s+/).slice(0, 2).join(" "); };
+
+  // O SOM: o navegador só deixa tocar depois de um toque na página.
+  var audio = null, somLiberado = false;
+  function liberarSom() { try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); audio.resume(); somLiberado = true; $("som").style.display = "none"; } catch (e) {} }
+  $("som").onclick = liberarSom; document.addEventListener("click", liberarSom);
+  function fanfarra() {
+    if (!cfg.som || !audio || !somLiberado) return;
+    var notas = [523.25, 659.25, 783.99, 1046.5, 783.99, 1046.5], t = audio.currentTime + 0.05;
+    notas.forEach(function (f, i) {
+      var o = audio.createOscillator(), g = audio.createGain();
+      o.type = "triangle"; o.frequency.value = f; o.connect(g); g.connect(audio.destination);
+      var ini = t + i * 0.16, dur = i === notas.length - 1 ? 0.9 : 0.15;
+      g.gain.setValueAtTime(0.0001, ini); g.gain.exponentialRampToValueAtTime(0.35, ini + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, ini + dur);
+      o.start(ini); o.stop(ini + dur + 0.05);
+    });
+  }
+
+  // O CONFETE: canvas, para não pesar a TV com centenas de elementos.
+  var cv = $("confete"), cx = cv.getContext("2d"), pecas = [], anim = null;
+  function confete() {
+    cv.width = innerWidth; cv.height = innerHeight;
+    var cores = ["#F5C542", "#8B3FD9", "#2FBF7F", "#FF6B35", "#ffffff", "#B57CF2"];
+    for (var i = 0; i < 260; i++) pecas.push({ x: Math.random() * cv.width, y: -Math.random() * cv.height * 0.6, w: 6 + Math.random() * 10, h: 10 + Math.random() * 16,
+      vy: 3 + Math.random() * 5, vx: -2 + Math.random() * 4, r: Math.random() * 6, vr: -0.2 + Math.random() * 0.4, c: cores[i % cores.length] });
+    if (!anim) passo();
+  }
+  function passo() {
+    cx.clearRect(0, 0, cv.width, cv.height);
+    pecas = pecas.filter(function (p) { return p.y < cv.height + 40; });
+    pecas.forEach(function (p) { p.y += p.vy; p.x += p.vx + Math.sin(p.y / 40); p.r += p.vr;
+      cx.save(); cx.translate(p.x, p.y); cx.rotate(p.r); cx.fillStyle = p.c; cx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h); cx.restore(); });
+    anim = pecas.length ? requestAnimationFrame(passo) : null;
+    if (!anim) cx.clearRect(0, 0, cv.width, cv.height);
+  }
+  function festejar() {
+    if (festejando || !fila.length) return;
+    festejando = true;
+    var e = fila.shift();
+    $("festaNome").textContent = primeiro(e.negociador) + " fechou!";
+    $("festaCarro").textContent = e.carro ? e.carro : "mais um carro para a Vaapty";
+    $("festa").className = "on"; confete(); fanfarra();
+    setTimeout(function () { $("festa").className = ""; festejando = false; setTimeout(festejar, 600); }, (cfg.segundos || 8) * 1000);
+  }
+
+  function desenhar(d) {
+    cfg = d.config || {};
+    document.body.className = cfg.tema === "claro" ? "claro" : "";
+    $("titulo").textContent = cfg.titulo || "Gestão à vista";
+    var hoje = new Date(d.hoje + "T12:00:00"), fim = new Date(d.fim + "T12:00:00");
+    var dia = hoje.getDate(), dias = fim.getDate(), fracao = dia / dias;
+    $("mes").textContent = hoje.toLocaleDateString("pt-BR", { month: "long", year: "numeric" }) + " · dia " + dia + " de " + dias;
+    var pessoas = d.pessoas || [], loja = d.loja || {};
+    var meta = Number(d.meta_loja) > 0 ? Number(d.meta_loja) : pessoas.reduce(function (t, p) { return t + (Number(p.meta) || 0); }, 0);
+    var feito = Number(loja.feito) || 0, valores = cfg.valores !== false;
+    $("feito").innerHTML = valores ? esc(brl(feito)) + "<small>de " + esc(brl(meta)) + " · " + pct(feito, meta) + "%</small>" : pct(feito, meta) + "%<small>da meta do mês</small>";
+    $("barra").style.width = Math.min(100, pct(feito, meta)) + "%";
+    $("diaLoja").style.left = (fracao * 100) + "%";
+    var esperado = meta * fracao, diasAtras = meta > 0 ? Math.round((esperado - feito) / (meta / dias)) : 0;
+    $("ritmo").className = "ritmo " + (diasAtras > 0 ? "atras" : "frente");
+    $("ritmo").textContent = meta > 0 ? (diasAtras > 0 ? diasAtras + " dia" + (diasAtras > 1 ? "s" : "") + " atrás do ritmo" : diasAtras < 0 ? (-diasAtras) + " dia" + (diasAtras < -1 ? "s" : "") + " à frente do ritmo" : "no ritmo") : "";
+    var falta = Math.max(0, meta - feito), restam = Math.max(1, dias - dia + 1);
+    $("falta").textContent = meta > 0 && falta > 0 ? (valores ? "faltam " + brl(falta) + " em " + restam + " dias — " + brl(falta / restam) + " por dia" : "faltam " + (100 - pct(feito, meta)) + "% em " + restam + " dias") : meta > 0 ? "meta batida! 🎯" : "";
+    var ord = pessoas.slice().sort(function (a, b) { return cfg.ordem === "percentual" ? pct(b.feito, b.meta) - pct(a.feito, a.meta) : b.feito - a.feito; });
+    // O pódio: 2º, 1º, 3º — o primeiro no meio, mais alto.
+    $("podioWrap").style.display = cfg.podio === false ? "none" : "";
+    var top = ord.slice(0, 3), lugares = [[1, "p2", "2"], [0, "p1", "1"], [2, "p3", "3"]];
+    $("podio").innerHTML = lugares.map(function (l) {
+      var p = top[l[0]]; if (!p || !(p.feito > 0)) return "<div></div>";
+      return '<div class="degrau ' + l[1] + '"><div class="nome">' + esc(primeiro(p.nome)) + '</div><div class="val">' + (valores ? esc(brl(p.feito)) + " · " : "") + pct(p.feito, p.meta) + '%</div><div class="bloco">' + l[2] + "º</div></div>";
+    }).join("");
+    $("thFeito").textContent = valores ? "Feito" : "";
+    $("ranking").innerHTML = ord.map(function (p) {
+      var pp = pct(p.feito, p.meta), conv = p.fluxo ? Math.round((p.fechados / p.fluxo) * 100) : 0;
+      return "<tr><td class='nome'>" + esc(primeiro(p.nome)) + "</td><td class='barra'><div class='mini'><i class='" + (pp >= 100 ? "ok" : "") + "' style='width:" + Math.min(100, pp) + "%'></i><span class='dia' style='left:" + (fracao * 100) + "%'></span></div></td>" +
+        "<td class='n'>" + (valores ? esc(brl(p.feito)) : "") + "</td><td class='n pct' style='color:" + (pp >= fracao * 100 ? "var(--verde)" : "var(--laranja)") + "'>" + pp + "%</td>" +
+        "<td class='n'>" + p.carros + "</td><td class='n'>" + conv + "%</td></tr>";
+    }).join("");
+    $("kFluxoHoje").textContent = loja.fluxo_hoje || 0; $("kFechHoje").textContent = loja.fechados_hoje || 0;
+    $("kFluxo").textContent = loja.fluxo || 0; $("kCarros").textContent = loja.carros || 0;
+    $("kConv").textContent = (loja.fluxo ? Math.round((loja.fechados / loja.fluxo) * 100) : 0) + "%";
+    var ent = d.entradas || [];
+    $("faixa").innerHTML = ent.length ? ent.slice(0, 12).map(function (e) {
+      var q = new Date(e.quando); return "🚗 <b>" + esc(primeiro(e.negociador)) + "</b> fechou " + esc(e.carro || "um carro") + " · " + q.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) + " " + q.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    }).join(" &nbsp;&nbsp;•&nbsp;&nbsp; ") : "Nenhum carro fechado ainda este mês. O primeiro é seu?";
+    $("recado").textContent = cfg.recado || "";
+    // Comemorar o que é NOVO desde a última leitura — a primeira só marca.
+    var ids = ent.map(function (e) { return e.id; });
+    if (vistos && cfg.comemorar !== false) ent.slice().reverse().forEach(function (e) { if (vistos.indexOf(e.id) < 0) fila.push(e); });
+    vistos = ids;
+    festejar();
+  }
+
+  function ler() {
+    fetch(URL_SB + "/rest/v1/rpc/tv_painel", { method: "POST", headers: { apikey: ANON, Authorization: "Bearer " + ANON, "Content-Type": "application/json" },
+      body: JSON.stringify({ p_token: token }) })
+      .then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.message || "falhou"); return d; }); })
+      .then(function (d) { aviso.style.display = "none"; $("tela").style.display = ""; ultimaLeitura = Date.now(); desenhar(d); if (d.config && d.config.som && !somLiberado) $("som").style.display = ""; })
+      .catch(function (e) {
+        if (/inválido|42501/.test(String(e.message))) { $("tela").style.display = "none"; aviso.style.display = ""; aviso.textContent = "Este link foi trocado. Gere o novo no Painel do gestor."; }
+      });
+  }
+  setInterval(function () {
+    var a = new Date(); $("hora").textContent = a.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    var s = ultimaLeitura ? Math.round((Date.now() - ultimaLeitura) / 1000) : null;
+    $("atualizado").textContent = s == null ? "" : s > 90 ? "sem atualizar há " + Math.round(s / 60) + " min — verifique a internet" : "atualizado há " + s + " s";
+  }, 1000);
+  fetch("/api/perfil?recurso=config").then(function (r) { return r.json(); }).then(function (c) {
+    URL_SB = c.url || c.supabase_url; ANON = c.anon || c.chave || c.anon_key;
+    if (!URL_SB || !ANON) throw new Error("sem config");
+    ler(); setInterval(ler, 20000);
+  }).catch(function () { aviso.textContent = "Não consegui falar com o sistema. Verifique a internet."; });
+  // TV ligada o dia inteiro: recarrega de madrugada para pegar a versão nova.
+  setInterval(function () { var h = new Date().getHours(); if (h === 4 && Date.now() - performance.timing.navigationStart > 3600000) location.reload(); }, 600000);
+})();
+</script>
+</body>
+</html>
