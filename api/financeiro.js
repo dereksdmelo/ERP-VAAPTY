@@ -1694,11 +1694,24 @@ async function titulo(req, res, tok) {
     return res.status(200).json({ titulos: lista, corte: CORTE_TITULOS });
   }
   if (req.method === "GET" && req.query.todos) {
+    /* Filtros livres (08/11/2026): um mês (padrão), uma faixa de competências (`de`/`ate`) ou todas
+       (`todas=1`). O resto dos filtros — fornecedor, situação, categoria, valor, datas — a tela
+       aplica sobre o que veio. */
     const comp = competenciaDe(req.query.competencia) || competenciaDe(hojeAqui());
-    const lista = await supa(`${base("fin_lancamento")}?select=${CAMPOS_LANC}&situacao=in.(aberto,efetivado)&competencia=eq.${comp}` +
-      `&order=vencimento.asc.nullslast,data.asc&limit=5000`, { headers: cab(tok) }) || [];
+    const de = competenciaDe(req.query.de), ate = competenciaDe(req.query.ate);
+    // `por`: qual data manda no período — a competência (o DRE), o vencimento (o que vence) ou o
+    // pagamento de fato (o caixa), como no financeiro do Camisetas Já.
+    const por = ["vencimento", "pagamento"].indexOf(String(req.query.por || "")) >= 0 ? String(req.query.por) : "competencia";
+    const ini = de || comp, fim = fimDoMes((ate || comp).slice(0, 7) + "-01");
+    let filtroComp = `&competencia=eq.${comp}`;
+    if (por === "vencimento") filtroComp = `&vencimento=gte.${ini}&vencimento=lte.${fim}`;
+    else if (por === "pagamento") filtroComp = `&situacao=eq.efetivado&data=gte.${ini}&data=lte.${fim}`;
+    else if (de || ate) filtroComp = `${de ? `&competencia=gte.${de}` : ""}${ate ? `&competencia=lte.${ate}` : ""}`;
+    if (String(req.query.todas || "") === "1") filtroComp = "";
+    const lista = await supa(`${base("fin_lancamento")}?select=${CAMPOS_LANC}&situacao=in.(aberto,efetivado)${filtroComp}` +
+      `&order=vencimento.asc.nullslast,data.asc&limit=8000`, { headers: cab(tok) }) || [];
     await anexarTitulos(tok, lista.filter((l) => l.situacao === "efetivado"));
-    return res.status(200).json({ competencia: comp, titulos: lista });
+    return res.status(200).json({ competencia: comp, titulos: lista, truncado: lista.length >= 8000 });
   }
   // As linhas do banco que podem ser o pagamento deste título: mesmo
   // lado, mesma conta (se o título tem), até 60 dias do vencimento, e
