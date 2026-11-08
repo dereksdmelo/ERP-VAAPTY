@@ -911,6 +911,18 @@ primeiro nome de quem tem). **As cinco cópias de 06/11 não foram
 juntadas por mim** — apagar registro de produção pede o clique de quem
 decide.
 
+**O lucro dos bônus é o PREVISTO (07/11/2026, o Derek: *"o lucro deve
+ser calculado sobre a previsão pra poder definir os salários que
+dependem de lucro"*).** Era o lucro do que passou no banco — no meio do
+mês, sem aluguel e folha pagos, alto demais. Agora `lucroParaFolha`: a
+rentabilidade menos as despesas do mês inteiro (as que passaram, títulos
+em aberto, contas fixas sem título, folha a lançar) — a mesma
+`projecaoDoMes` do DRE projetado. **Sem circularidade**: a folha dessa
+conta é calculada com o lucro em zero (fixos, comissões e bônus de venda,
+nenhum bônus por lucro) — é o lucro antes da participação. O ritmo estica
+a rentabilidade, não a despesa (que já está prevista inteira). A Folha
+projetada diz qual lucro usou.
+
 **Bônus por período e ticket por faixa (27/10/2026).** O semanal e o da
 1ª quinzena são a mesma faixa medida dentro do período
 (`bonus_periodo`): cada semana que bate uma faixa paga, e as semanas
@@ -4508,6 +4520,12 @@ barra a reentrada, e a rede 2 da importação conta a linha dividida pelo
 valor dela e ignora os pedaços (senão consumiriam outra linha de mesmo
 dia e valor). "Desfazer" devolve tudo. É diferente de repartir: repartir
 divide em CATEGORIAS (decisão 26), dividir casa com TÍTULOS.
+
+**A Conciliação separa o que falta (07/11/2026, o Derek: *"o que já foi
+vinculado desce em uma segunda lista… parecido com a do Camisetas Já"*):**
+em cima as linhas pendentes — sem categoria, ou ligadas sozinhas e não
+conferidas —, embaixo, recolhível, as conciliadas (já são títulos). O
+saldo corrido é calculado na ordem do banco antes de separar.
 
 **Conciliação bancária e Títulos financeiros (07/11/2026, o Derek: *"a
 tela 'lançamentos' na verdade seria a 'conciliação bancária', e deveria

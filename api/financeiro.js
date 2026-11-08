@@ -986,23 +986,13 @@ async function dreDetalhe(req, res, tok, comp) {
     aberto: Math.round(aberto * 100) / 100, fixas_sem_titulo: fixasSem });
 }
 
-async function dre(req, res, tok) {
-  const comp = competenciaDe(req.query.competencia) || competenciaDe(hojeAqui());
-  if (String(req.query.acao || "") === "detalhe") return dreDetalhe(req, res, tok, comp);
-  const n = Math.min(24, Math.max(0, Number(req.query.meses) || 0));
-  if (n > 1) return dreMeses(req, res, tok, comp, n);
-  const d = await dreDoMes(tok, comp);
-  /* O DRE PROJETADO (28/10/2026, o Derek: "porque os salários da galera
-   * não tá aparecendo direito no DRE projetado?"). O DRE do mês continua
-   * sendo o que passou no banco — é o número que se confere. A projeção
-   * vem à parte e soma o que ainda vai sair: os títulos em aberto, as
-   * contas fixas que ainda nem viraram título, e a folha do combinado
-   * MENOS o que dela já entrou (pago ou em título), para o salário não
-   * contar duas vezes. A rentabilidade é a de até agora: projetar venda
-   * de carro seria número bonito e mentiroso (decisão 22). */
-  try {
+/* A PROJEÇÃO DO MÊS: o lucro de até agora mais o que ainda vai sair —
+ * títulos em aberto, contas fixas sem título e a folha a lançar (ver
+ * dre()). `folha` pode vir pronta: o lucro do combinado a calcula sem os
+ * bônus que dependem do lucro (`lucroParaFolha`). */
+async function projecaoDoMes(tok, comp, d, folhaPronta) {
     const [folha, fixas, cfg, cats] = await Promise.all([
-      folhaDoMes(tok, comp).catch(() => null),
+      folhaPronta ? Promise.resolve(folhaPronta) : folhaDoMes(tok, comp).catch(() => null),
       fixasDoMes(tok, comp).catch(() => null),
       supa(`${base("fin_config")}?select=*&id=eq.1`, { headers: cab(tok) }).then(um).catch(() => null),
       supa(`${base("fin_categoria")}?select=id,nome,pede_funcionario`, { headers: cab(tok) }).catch(() => []),
@@ -1077,12 +1067,60 @@ async function dre(req, res, tok) {
       folha: partesFolha.some((x) => x.categoria_id === k) }))
       .filter((x) => x.valor > 0 || x.ja_lancado > 0)
       .sort((a, b) => b.valor - a.valor);
-    d.projecao = {
+    return {
       em_aberto: d.em_aberto, fixas_nao_geradas: fixasNaoGeradas, fixas_por_cat: fixasLista,
       folha_prevista: folhaPrevista, folha_lancada: semConfig ? (d.folha_lancada || 0) : partesFolha.reduce((t, x) => t + x.lancado, 0),
       folha_a_lancar: folhaALancar, folha_partes: semConfig ? null : partesFolha,
       lucro_projetado: d.lucro + d.em_aberto - fixasNaoGeradas - folhaALancar,
+      // O lucro que a folha usou para os bônus por lucro (`lucroParaFolha`).
+      lucro_da_folha: (folha && folha.lucro) || null,
     };
+}
+
+/* O LUCRO QUE MEDE A FOLHA (07/11/2026, o Derek: "o lucro deve ser
+ * calculado sobre a previsão pra poder definir os salários que dependem
+ * de lucro"). Era o lucro do que passou no banco — no meio do mês, sem o
+ * aluguel e a folha pagos, ele é alto demais, e o bônus por lucro saía
+ * inflado. Agora é o lucro PREVISTO: a rentabilidade, menos as despesas
+ * do mês inteiro (as que passaram, os títulos em aberto, as contas fixas
+ * sem título e a folha a lançar).
+ *
+ * Sem circularidade: a folha que entra nesta conta é a folha com o lucro
+ * em ZERO — os fixos, as comissões e os bônus de venda, mas nenhum bônus
+ * que dependa do lucro. É o lucro ANTES da participação, que é como se
+ * paga participação.
+ *
+ * Dois números: `agora` (com as vendas até hoje) e `ritmo` (a
+ * rentabilidade esticada até o fim do mês, as despesas do mês inteiro —
+ * o ritmo não estica despesa, que já está prevista inteira). */
+async function lucroParaFolha(tok, comp) {
+  const d = await dreDoMes(tok, comp);
+  const folha0 = await folhaDoMes(tok, comp, { lucro: { agora: 0, ritmo: 0 } });
+  const pj = await projecaoDoMes(tok, comp, d, folha0);
+  const hoje = hojeAqui(), fim = fimDoMes(comp);
+  const aberto = hoje >= comp && hoje <= fim;
+  const fator = aberto ? Number(fim.slice(8, 10)) / Math.max(1, Number(hoje.slice(8, 10))) : 1;
+  const agora = Math.round(pj.lucro_projetado * 100) / 100;
+  const ritmo = Math.round((agora + (d.rentabilidade || 0) * (fator - 1)) * 100) / 100;
+  return { agora, ritmo, realizado: Math.round(d.lucro * 100) / 100 };
+}
+
+async function dre(req, res, tok) {
+  const comp = competenciaDe(req.query.competencia) || competenciaDe(hojeAqui());
+  if (String(req.query.acao || "") === "detalhe") return dreDetalhe(req, res, tok, comp);
+  const n = Math.min(24, Math.max(0, Number(req.query.meses) || 0));
+  if (n > 1) return dreMeses(req, res, tok, comp, n);
+  const d = await dreDoMes(tok, comp);
+  /* O DRE PROJETADO (28/10/2026, o Derek: "porque os salários da galera
+   * não tá aparecendo direito no DRE projetado?"). O DRE do mês continua
+   * sendo o que passou no banco — é o número que se confere. A projeção
+   * vem à parte e soma o que ainda vai sair: os títulos em aberto, as
+   * contas fixas que ainda nem viraram título, e a folha do combinado
+   * MENOS o que dela já entrou (pago ou em título), para o salário não
+   * contar duas vezes. A rentabilidade é a de até agora: projetar venda
+   * de carro seria número bonito e mentiroso (decisão 22). */
+  try {
+    d.projecao = await projecaoDoMes(tok, comp, d);
   } catch (e) { d.projecao = null; }
   return res.status(200).json(d);
 }
@@ -1799,13 +1837,13 @@ async function vale(req, res, tok) {
  */
 /* A FOLHA DO MÊS, como a aba Folha a mostra — e o DRE projetado lê a
  * mesma, para a folha prevista ser uma só nas duas telas. */
-async function folhaDoMes(tok, comp) {
+async function folhaDoMes(tok, comp, opts) {
     const [funcs, gravadas, vales, colabs, proj] = await Promise.all([
     supa(`${base("fin_funcionario")}?select=*&order=nome.asc`, { headers: cab(tok) }),
     supa(`${base("fin_folha")}?select=*&competencia=eq.${comp}`, { headers: cab(tok) }),
     supa(`${base("fin_vale")}?select=funcionario_id,valor&competencia=eq.${comp}`, { headers: cab(tok) }),
     supa(`${base("colaborador")}?select=id,nome_completo,fin_funcionario_id,desligado_em,inicio_em`, { headers: cab(tok) }).catch(() => []),
-    projecaoRemuneracao(tok, comp).catch(() => null),
+    projecaoRemuneracao(tok, comp, opts).catch(() => null),
   ]);
   const gPor = {}; (gravadas || []).forEach((g) => { gPor[g.funcionario_id] = g; });
   const vPor = {}; (vales || []).forEach((v) => { vPor[v.funcionario_id] = (vPor[v.funcionario_id] || 0) + (Number(v.valor) || 0); });
@@ -1844,7 +1882,7 @@ async function folhaDoMes(tok, comp) {
   const ligados = new Set(Object.values(colabPorFin).map((c) => c.id));
   const soCombinado = ((proj && proj.pessoas) || []).filter((p) => !ligados.has(p.colaborador_id))
     .map((p) => ({ nome: p.nome, ...partes(proj.aberto ? p.ritmo : p.agora) }));
-  return { linhas, fora, aberto: !!(proj && proj.aberto), so_combinado: soCombinado };
+  return { linhas, fora, aberto: !!(proj && proj.aberto), so_combinado: soCombinado, lucro: (proj && proj.lucro_usado) || null };
 }
 
 async function folha(req, res, tok) {
@@ -2640,8 +2678,11 @@ async function remuneracao(req, res, tok) {
  * Folha (28/10/2026, o Derek: "essa folha aqui deveria puxar o que
  * cadastramos no perfil de cada colaborador"). Um lugar só: duas contas
  * do mesmo salário dariam dois salários. */
-async function projecaoRemuneracao(tok, comp) {
+async function projecaoRemuneracao(tok, comp, opts) {
   const R = require("../regras/remuneracao.js");
+  // O lucro do combinado é o PREVISTO (07/11/2026, ver `lucroParaFolha`);
+  // `opts.lucro` vem pronto quando é a própria conta dele que chama.
+  const lucroUsado = opts && opts.lucro ? opts.lucro : await lucroParaFolha(tok, comp).catch(() => null);
   const fim = fimDoMes(comp);
   const chave = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/\s+/g, " ").trim();
 
@@ -2713,11 +2754,16 @@ async function projecaoRemuneracao(tok, comp) {
         somar(P.mes, m.mes); somar(P.q1, m.q1); m.sem.forEach((w, i) => somar(P.sem[i], w));
       });
       const proprio = P.mes;
-      const met = { proprio, loja, lucro: dreMes.lucro, sem: { proprio: P.sem, loja: L.sem }, q1: { proprio: P.q1, loja: L.q1 } };
+      const lucroAgora = lucroUsado ? lucroUsado.agora : dreMes.lucro;
+      const met = { proprio, loja, lucro: lucroAgora, sem: { proprio: P.sem, loja: L.sem }, q1: { proprio: P.q1, loja: L.q1 } };
       const perfil = perfilPor[plano.perfil_id] || null;
       const pp = perfil ? perfil.remuneracao : null;
       const agora = R.calcular(plano, met, pp);
-      const ritmo = R.calcular(plano, R.noRitmo(met, fator, aberto ? Number(hoje.slice(8, 10)) : 0, diasMes), pp);
+      const metRitmo = R.noRitmo(met, fator, aberto ? Number(hoje.slice(8, 10)) : 0, diasMes);
+      // O ritmo estica a rentabilidade, não a despesa: o lucro do ritmo
+      // vem pronto da previsão, em vez de o de hoje vezes o fator.
+      if (lucroUsado) metRitmo.lucro = lucroUsado.ritmo;
+      const ritmo = R.calcular(plano, metRitmo, pp);
       return { colaborador_id: c.id, perfil_id: c.perfil_id, negociador_id: c.negociador_id,
                nome: c.nome_completo || nomeNeg[c.negociador_id] || "—", nomes_nas_vendas: nomes,
                perfil: perfil ? perfil.nome : null,
@@ -2727,7 +2773,7 @@ async function projecaoRemuneracao(tok, comp) {
 
   return {
     competencia: comp, aberto, fator: Math.round(fator * 100) / 100,
-    loja, lucro: dreMes.lucro, pessoas,
+    loja, lucro: lucroUsado ? lucroUsado.agora : dreMes.lucro, lucro_usado: lucroUsado, lucro_realizado: dreMes.lucro, pessoas,
     total_agora: pessoas.reduce((t, p) => t + p.agora.total, 0),
     total_ritmo: pessoas.reduce((t, p) => t + p.ritmo.total, 0),
   };

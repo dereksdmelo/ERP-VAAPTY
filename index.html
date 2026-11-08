@@ -20901,6 +20901,15 @@ function FolhaProjetada({ comp }) {
           o combinado de cada um contra o resultado {d.aberto ? `até hoje · no ritmo = ×${String(d.fator).replace(".", ",")} até o fim do mês` : "do mês fechado"}.
           Não entra no lucro acima — o que já foi pago está nas despesas.
         </span>
+        {/* O LUCRO QUE MEDE OS BÔNUS POR LUCRO (07/11/2026): o previsto, não
+            o que passou no banco — e antes da própria participação. */}
+        {d.lucro_usado && (
+          <span className="w-full text-[11.5px]" style={{ color: C.ink }}>
+            Lucro usado nos bônus por lucro: <b>{rs2(d.lucro_usado.agora)}</b> previsto com as vendas até hoje
+            {d.aberto ? <> · <b>{rs2(d.lucro_usado.ritmo)}</b> no ritmo</> : null}
+            <span style={{ color: C.mute }}> (realizado no banco: {rs2(d.lucro_usado.realizado)}). É o lucro previsto do mês — rentabilidade menos todas as despesas previstas, a folha incluída sem os bônus que dependem do lucro.</span>
+          </span>
+        )}
       </div>
       {!d.pessoas.length ? (
         <p className="px-3 py-5 text-center text-[13px]" style={{ color: C.mute }}>
