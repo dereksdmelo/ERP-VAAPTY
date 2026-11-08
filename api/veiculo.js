@@ -555,6 +555,7 @@ async function estoque(req, res, tok) {
       });
     }
 
+    await titulosDoCarro(tok, novo.id);
     const completo = await supa(`${base("estoque")}?select=${CAMPOS_ESTOQUE}&id=eq.${novo.id}`, { headers: cab });
     return res.status(201).json({ ok: true, estoque: (completo || [])[0] || novo });
   }
@@ -639,6 +640,7 @@ async function estoque(req, res, tok) {
     if (!(Array.isArray(salvo) ? salvo[0] : salvo)) {
       return res.status(403).json({ erro: "A regra do banco recusou a alteração." });
     }
+    if (["valor_compra", "valor_venda", "situacao", "vendido_em", "comprador_id"].some((k) => mud[k] !== undefined)) await titulosDoCarro(tok, id);
     const completo = await supa(`${base("estoque")}?select=${CAMPOS_ESTOQUE}&id=eq.${id}`, { headers: cab });
     return res.status(200).json({ ok: true, estoque: (completo || [])[0] || null });
   }
@@ -688,6 +690,7 @@ async function custo(req, res, tok) {
     });
     const novo = Array.isArray(criado) ? criado[0] : criado;
     if (!novo) return res.status(403).json({ erro: "O banco recusou o lançamento." });
+    await titulosDoCarro(tok, novo.estoque_id);
     return res.status(201).json({ ok: true, custo: novo });
   }
 
@@ -716,6 +719,7 @@ async function custo(req, res, tok) {
     });
     const linha = Array.isArray(salvo) ? salvo[0] : salvo;
     if (!linha) return res.status(403).json({ erro: "A regra do banco recusou a alteração." });
+    if (mud.previsto !== undefined || mud.realizado !== undefined || mud.descricao !== undefined) await titulosDoCarro(tok, linha.estoque_id);
     return res.status(200).json({ ok: true, custo: linha });
   }
 
@@ -730,6 +734,7 @@ async function custo(req, res, tok) {
     if (!(Array.isArray(apagado) ? apagado[0] : apagado)) {
       return res.status(403).json({ erro: "Só o gerente apaga linha de custo." });
     }
+    await titulosDoCarro(tok, (Array.isArray(apagado) ? apagado[0] : apagado).estoque_id);
     return res.status(200).json({ ok: true });
   }
 
@@ -968,6 +973,13 @@ function previstoDoChecklist(cl, estoqueId) {
  * check list, o carro daquele atendimento ainda no pátio recebe o valor
  * ao cliente (se estiver vazio) e o previsto (se não tiver nenhuma linha
  * do fechamento). Nada que alguém digitou no estoque é trocado. */
+// Os títulos do contrato acompanham o carro (0119): toda mudança de
+// compra, custo ou venda passa por aqui. Nunca derruba quem chamou.
+async function titulosDoCarro(tok, estoqueId) {
+  try { await require("./financeiro.js").sincronizarTitulosDoCarro(tok, estoqueId); } catch (e) {}
+}
+module.exports.titulosDoCarro = titulosDoCarro;
+
 async function puxarDoChecklist(tok, atendimentoId) {
   const cab = { headers: cabecalhos(tok) };
   const e = ((await supa(`${base("estoque")}?select=id,valor_compra,situacao,estoque_custo(id,do_fechamento)` +
@@ -984,6 +996,7 @@ async function puxarDoChecklist(tok, atendimentoId) {
     const linhas = previstoDoChecklist(cl, e.id);
     if (linhas.length) { await supa(base("estoque_custo"), { method: "POST", headers: cabecalhos(tok), body: JSON.stringify(linhas) }); feito.custos = linhas.length; }
   }
+  await titulosDoCarro(tok, e.id);
   return { ok: true, ...feito };
 }
 module.exports.puxarDoChecklist = puxarDoChecklist;
@@ -1016,6 +1029,7 @@ async function entrarAoFechar(tok, atendimentoId) {
   if (!novo) return { ok: false, motivo: "o banco recusou" };
   const linhas = previstoDoChecklist(cl, novo.id);
   if (linhas.length) await supa(base("estoque_custo"), { method: "POST", headers: cabecalhos(tok), body: JSON.stringify(linhas) }).catch(() => {});
+  await titulosDoCarro(tok, novo.id);
   return { ok: true, id: novo.id };
 }
 module.exports.entrarAoFechar = entrarAoFechar;

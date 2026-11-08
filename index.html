@@ -19056,7 +19056,11 @@ function VinculoDaLinha({ l, aoMudou, aoTrocar }) {
   const [indo, setIndo] = useState(false);
   const ts = l.titulos_ligados || [];
   const fixa = l.fin_conta_fixa && l.fin_conta_fixa.nome;
-  if (!ts.length && !fixa && !l.revisar) return null;
+  // O item do contrato do carro (0119): "compra:cliente", "custo:…", "venda:lojista".
+  const item = l.item_contrato ? String(l.item_contrato) : "";
+  const itemRot = !item ? "" : item.indexOf("compra:cliente") === 0 ? "pagamento ao cliente"
+    : item.indexOf("venda:lojista") === 0 ? "recebimento do lojista" : "custo do carro";
+  if (!ts.length && !fixa && !l.revisar && !item) return null;
   const conferir = !!l.revisar;
   const certo = async () => { setIndo(true); try { await fin("lancamento", { id: l.id }, finJson("PATCH", { revisar: false })); aoMudou(); } catch (e) { alert(e.message); } setIndo(false); };
   const desfazer = async () => {
@@ -19069,7 +19073,8 @@ function VinculoDaLinha({ l, aoMudou, aoTrocar }) {
       {conferir && <b>Reconhecido automaticamente — confira · </b>}
       {ts.length ? ts.map((t) => `título: ${t.descricao || "—"} (${rs2(t.valor)}${t.vencimento ? `, vence ${diaBR(t.vencimento)}` : ""})`).join(" · ") : null}
       {fixa ? `${ts.length ? " · " : ""}conta fixa: ${fixa}` : null}
-      {!ts.length && !fixa && conferir ? "baixou um título pelo valor e pela data" : null}
+      {item ? `${ts.length || fixa ? " · " : ""}contrato do carro: ${itemRot}${item.indexOf("#") >= 0 ? " (parte)" : ""}` : null}
+      {!ts.length && !fixa && !item && conferir ? "baixou um título pelo valor e pela data" : null}
       {conferir && <button disabled={indo} onClick={certo} className="ml-1.5 font-semibold underline">está certo</button>}
       {aoTrocar && <button disabled={indo} onClick={aoTrocar} className="ml-1.5 underline">trocar</button>}
       {!!ts.length && <button disabled={indo} onClick={desfazer} className="ml-1.5 underline">desfazer</button>}
@@ -19108,9 +19113,9 @@ function LigarTitulo({ l, aoFechar, aoFeito }) {
     const pa = Math.abs(valor(a) - total) / Math.max(total, 1), pb = Math.abs(valor(b) - total) / Math.max(total, 1);
     return pa - pb || dias(a) - dias(b);
   }).slice(0, 40);
-  const ligar = async (t) => {
+  const ligar = async (t, parcial) => {
     setErro(""); setIndo(t.id);
-    try { await fin("titulo", { acao: "ligar", id: l.id }, finJson("POST", { titulo_id: t.id })); aoFeito(); }
+    try { await fin("titulo", { acao: "ligar", id: l.id }, finJson("POST", { titulo_id: t.id, parcial: !!parcial })); aoFeito(); }
     catch (e) { setErro(e.message); setIndo(""); }
   };
   const desligar = async () => {
@@ -19152,6 +19157,10 @@ function LigarTitulo({ l, aoFechar, aoFeito }) {
                 </span>
                 <button disabled={!!indo} onClick={() => ligar(t)} className="shrink-0 rounded-md px-2.5 py-1 text-[12px] font-semibold text-white"
                   style={{ background: C.roxo, opacity: indo && indo !== t.id ? 0.5 : 1 }}>{indo === t.id ? "ligando…" : "é este"}</button>
+                {total < valor(t) - 0.004 && (
+                  <button disabled={!!indo} onClick={() => ligar(t, true)} className="shrink-0 rounded-md border px-2 py-1 text-[11.5px] font-semibold"
+                    style={{ borderColor: C.roxo, color: C.roxo }} title={`Pagou só uma parte: o título fica aberto com ${rs2(valor(t) - total)}`}>parcial</button>
+                )}
               </div>
             );
           })}
@@ -20432,6 +20441,175 @@ function FinCaixas() {
   );
 }
 
+/* O TÍTULO ABERTO PARA EDITAR (07/11/2026, o Derek: "precisa dar pra
+ * abrir pra editar o título com mais dados: vencimento, data de
+ * pagamento, competência, valor, valor pago, fornecedor/beneficiário/
+ * cliente, conta bancária, categoria do plano de contas, opção de baixa
+ * parcial… bem completo"). Uma janela por título. O que veio do extrato
+ * (tem a chave do banco) não muda valor nem data — é o que o banco diz.
+ * Registrar pagamento com valor menor que o título é a baixa parcial: a
+ * parte paga vira lançamento e o título fica aberto com o que falta. */
+function EditarTitulo({ titulo, aoFechar, aoMudou }) {
+  const t0 = titulo;
+  const [cats] = useCategoriasFin(true);
+  const [contas, setContas] = useState([]); const [favs, setFavs] = useState([]); const [funcs, setFuncs] = useState([]); const [carros, setCarros] = useState([]);
+  const valor0 = (Number(t0.debito) || 0) + (Number(t0.credito) || 0);
+  const [f, setF] = useState({
+    descricao: t0.descricao || "", favorecido_id: t0.favorecido_id || "", favorecido: t0.favorecido || "",
+    lado: Number(t0.credito) > 0 ? "receber" : "pagar", valor: centavosBR(valor0),
+    vencimento: String(t0.vencimento || "").slice(0, 10), data: String(t0.data || "").slice(0, 10),
+    competencia: String(t0.competencia || "").slice(0, 7), conta_id: t0.conta_id || "", categoria_id: t0.categoria_id || "",
+    estoque_id: t0.estoque_id || null, tipo_negociacao: t0.tipo_negociacao || "", funcionario_id: t0.funcionario_id || "",
+    observacao: t0.observacao || "",
+  });
+  const [pg, setPg] = useState({ data: hojeEmSP(), valor: centavosBR(valor0), conta_id: t0.conta_id || "" });
+  const [erro, setErro] = useState(""); const [indo, setIndo] = useState("");
+  useEffect(() => {
+    fin("conta").then((x) => setContas((x.lista || []).filter((c) => c.ativa !== false))).catch(() => {});
+    fin("favorecido").then((x) => setFavs(x.lista || [])).catch(() => {});
+    fin("funcionario").then((x) => setFuncs((x.lista || []).filter((p) => p.ativo !== false))).catch(() => {});
+    fin("estoque").then((x) => setCarros(x.estoque || [])).catch(() => {});
+  }, []);
+  const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+  const aberto = t0.situacao === "aberto";
+  const doBanco = !!t0.chave_extrato;
+  const cat = cats.find((c) => c.id === f.categoria_id);
+  const salvar = async () => {
+    setErro(""); setIndo("salvar");
+    const v = numeroBR(f.valor);
+    const mud = {
+      descricao: f.descricao, favorecido_id: f.favorecido_id || null, favorecido: f.favorecido_id ? null : (f.favorecido || null),
+      competencia: f.competencia ? `${f.competencia}-01` : undefined, conta_id: f.conta_id || null, categoria_id: f.categoria_id || null,
+      estoque_id: f.estoque_id || null, tipo_negociacao: f.tipo_negociacao || null, funcionario_id: f.funcionario_id || null,
+      observacao: f.observacao || null,
+    };
+    if (aberto) mud.vencimento = f.vencimento || null;
+    if (!doBanco) {
+      if (f.data) mud.data = f.data;
+      if (v > 0) { mud.debito = f.lado === "pagar" ? v : 0; mud.credito = f.lado === "receber" ? v : 0; }
+    }
+    Object.keys(mud).forEach((k) => { if (mud[k] === undefined) delete mud[k]; });
+    try { await fin("lancamento", { id: t0.id }, finJson("PATCH", mud)); aoMudou(); aoFechar(); }
+    catch (e) { setErro(e.message); setIndo(""); }
+  };
+  const pagar = async () => {
+    setErro("");
+    if (!pg.conta_id) { setErro("Escolha a conta de onde saiu (ou onde entrou)."); return; }
+    const v = numeroBR(pg.valor);
+    if (!(v > 0)) { setErro("Digite o valor pago."); return; }
+    setIndo("pagar");
+    try {
+      await salvarAntes();
+      const r = await fin("titulo", { acao: "baixar", id: t0.id }, finJson("POST", { conta_id: pg.conta_id, data: pg.data, valor: v, conciliado: false }));
+      aoMudou();
+      if (r && r.parcial) { setErro(""); alert(`Baixa parcial registrada. Falta ${rs2(r.falta)} neste título.`); }
+      aoFechar();
+    } catch (e) { setErro(e.message); setIndo(""); }
+  };
+  // Pagar grava antes o que foi editado (categoria, pessoa…): a parte paga
+  // herda do título, e herdar o antigo seria corrigir duas vezes.
+  const salvarAntes = async () => {
+    const mud = { descricao: f.descricao, categoria_id: f.categoria_id || null, favorecido_id: f.favorecido_id || null,
+      estoque_id: f.estoque_id || null, tipo_negociacao: f.tipo_negociacao || null, funcionario_id: f.funcionario_id || null,
+      competencia: f.competencia ? `${f.competencia}-01` : undefined, observacao: f.observacao || null };
+    Object.keys(mud).forEach((k) => { if (mud[k] === undefined) delete mud[k]; });
+    await fin("lancamento", { id: t0.id }, finJson("PATCH", mud));
+  };
+  const cancelar = async () => {
+    if (!window.confirm(`Cancelar o título "${t0.descricao || ""}"? Ele sai da projeção e do DRE.`)) return;
+    try { await fin("lancamento", { id: t0.id }, finJson("PATCH", { situacao: "cancelado" })); aoMudou(); aoFechar(); } catch (e) { setErro(e.message); }
+  };
+  const campo = (rot, el, cls) => <label className={`block ${cls || ""}`}><Rotulo>{rot}</Rotulo>{el}</label>;
+  const vPago = numeroBR(pg.valor);
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-3 lg:p-8" style={{ background: "rgba(24,18,33,0.45)" }} onClick={aoFechar}>
+      <div className="w-full max-w-3xl rounded-xl p-4" style={{ background: C.paper }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-baseline justify-between gap-3">
+          <div>
+            <div className="text-[17px] font-bold">{aberto ? "Título em aberto" : "Título pago"}{t0.item_contrato ? <span className="ml-2 text-[11.5px] font-semibold" style={{ color: C.roxo }}>do contrato do carro</span> : null}</div>
+            <div className="text-[12px]" style={{ color: C.mute }}>{doBanco ? "Veio do extrato: valor e data são os do banco." : aberto ? "Previsto — ainda não passou no banco." : "Baixado sem linha do extrato."}</div>
+          </div>
+          <button onClick={aoFechar} className="text-[13px]" style={{ color: C.mute }}>fechar</button>
+        </div>
+        <div className="mt-3 grid gap-2 lg:grid-cols-4">
+          {campo("Descrição", <input className={inputCls} style={inputSty} value={f.descricao} onChange={(e) => set("descricao", e.target.value)} />, "lg:col-span-4")}
+          {campo("Pessoa / fornecedor / cliente", (
+            <select className={inputCls} style={inputSty} value={f.favorecido_id} onChange={(e) => set("favorecido_id", e.target.value)}>
+              <option value="">{f.favorecido ? `— ${f.favorecido} (sem cadastro) —` : "— escolha —"}</option>
+              {favs.map((x) => <option key={x.id} value={x.id}>{x.nome}{x.documento ? ` · ${x.documento}` : ""}</option>)}
+            </select>
+          ), "lg:col-span-2")}
+          {!f.favorecido_id && campo("ou o nome, sem cadastro", <input className={inputCls} style={inputSty} value={f.favorecido} onChange={(e) => set("favorecido", e.target.value)} />, "lg:col-span-2")}
+          {campo("Categoria (plano de contas)", (
+            <select className={inputCls} style={{ ...inputSty, borderColor: f.categoria_id ? C.line : C.laranja }} value={f.categoria_id} onChange={(e) => set("categoria_id", e.target.value)}>
+              <option value="">— sem categoria —</option>
+              {cats.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.no_dre ? "" : " (fora do DRE)"}</option>)}
+            </select>
+          ), "lg:col-span-2")}
+          {campo("Conta bancária", (
+            <select className={inputCls} style={inputSty} value={f.conta_id} onChange={(e) => set("conta_id", e.target.value)} disabled={doBanco}>
+              <option value="">— qualquer —</option>
+              {contas.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+            </select>
+          ), "lg:col-span-2")}
+          {campo("A pagar ou a receber", (
+            <select className={inputCls} style={inputSty} value={f.lado} onChange={(e) => set("lado", e.target.value)} disabled={doBanco}>
+              <option value="pagar">a pagar (saída)</option><option value="receber">a receber (entrada)</option>
+            </select>
+          ))}
+          {campo("Valor", <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal" value={f.valor} onChange={(e) => set("valor", e.target.value)} disabled={doBanco} />)}
+          {campo("Competência", <input type="month" className={inputCls} style={inputSty} value={f.competencia} onChange={(e) => set("competencia", e.target.value)} />)}
+          {aberto
+            ? campo("Vencimento", <input type="date" className={inputCls} style={inputSty} value={f.vencimento} onChange={(e) => set("vencimento", e.target.value)} />)
+            : campo("Data do pagamento", <input type="date" className={inputCls} style={inputSty} value={f.data} onChange={(e) => set("data", e.target.value)} disabled={doBanco} />)}
+          {(cat && cat.grupo === "negociacao" || f.estoque_id) && campo("Carro", (
+            <SeletorCarro valor={f.estoque_id} carros={carros} aoMudar={(id) => set("estoque_id", id || null)} />
+          ), "lg:col-span-2")}
+          {(cat && cat.grupo === "negociacao" || f.tipo_negociacao) && campo("Parte do negócio", (
+            <select className={inputCls} style={inputSty} value={f.tipo_negociacao} onChange={(e) => set("tipo_negociacao", e.target.value)}>
+              <option value="">—</option>{Object.keys(TIPOS_NEG_ROT).map((k) => <option key={k} value={k}>{TIPOS_NEG_ROT[k]}</option>)}
+            </select>
+          ), "lg:col-span-2")}
+          {(cat && cat.pede_funcionario || f.funcionario_id) && campo("Pessoa da folha", (
+            <select className={inputCls} style={inputSty} value={f.funcionario_id} onChange={(e) => set("funcionario_id", e.target.value)}>
+              <option value="">—</option>{funcs.map((p) => <option key={p.id} value={p.id}>{p.nome}</option>)}
+            </select>
+          ), "lg:col-span-2")}
+          {campo("Observação", <input className={inputCls} style={inputSty} value={f.observacao} onChange={(e) => set("observacao", e.target.value)} />, "lg:col-span-4")}
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <BotaoPrimario onClick={salvar} disabled={!!indo}>{indo === "salvar" ? "Salvando…" : "Salvar"}</BotaoPrimario>
+          {aberto && <button onClick={cancelar} className="ml-auto text-[12.5px]" style={{ color: C.mute }}>cancelar título</button>}
+        </div>
+        {aberto && (
+          <div className="mt-4 rounded-lg p-3" style={{ background: C.bg }}>
+            <div className="text-[12px] font-bold uppercase tracking-[0.06em]" style={{ color: ROTULO_COR }}>Registrar pagamento (baixa)</div>
+            <p className="mt-0.5 text-[11.5px]" style={{ color: C.mute }}>
+              Para o que já passou no banco, prefira "vincular ao extrato". Aqui é a baixa à mão — dinheiro, ou o extrato que ainda não veio.
+              Valor menor que o título é baixa parcial: o resto continua em aberto.
+            </p>
+            <div className="mt-2 grid gap-2 lg:grid-cols-4">
+              {campo("Data do pagamento", <input type="date" className={inputCls} style={inputSty} value={pg.data} onChange={(e) => setPg({ ...pg, data: e.target.value })} />)}
+              {campo("Valor pago", <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal" value={pg.valor} onChange={(e) => setPg({ ...pg, valor: e.target.value })} />)}
+              {campo("Conta", (
+                <select className={inputCls} style={{ ...inputSty, borderColor: pg.conta_id ? C.line : C.laranja }} value={pg.conta_id} onChange={(e) => setPg({ ...pg, conta_id: e.target.value })}>
+                  <option value="">— escolha —</option>{contas.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                </select>
+              ))}
+              <div className="flex items-end">
+                <BotaoPrimario onClick={pagar} disabled={!!indo} className="w-full">
+                  {indo === "pagar" ? "Gravando…" : vPago > 0 && vPago < valor0 - 0.004 ? `Baixa parcial (falta ${rs2(valor0 - vPago)})` : "Baixar inteiro"}
+                </BotaoPrimario>
+              </div>
+            </div>
+          </div>
+        )}
+        {erro && <p className="mt-2 text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
+      </div>
+    </div>
+  );
+}
+
 /* VINCULAR UM TÍTULO A UMA LINHA DO EXTRATO, a partir do título
  * (07/11/2026). O caminho inverso do "título" da Conciliação: as linhas
  * do banco do mesmo lado, até 60 dias do vencimento, que ainda não são
@@ -20447,9 +20625,9 @@ function VincularLinha({ titulo, aoFechar, aoFeito }) {
   const linhas = ((d && d.linhas) || []).filter((l) => !termos.length || termos.every((x) =>
     semAcento(`${l.descricao || ""} ${l.fin_favorecido ? l.fin_favorecido.nome : ""} ${centavosBR(val(l))}`).toLowerCase().indexOf(x) >= 0))
     .sort((a, b) => Math.abs(val(a) - alvo) / Math.max(alvo, 1) - Math.abs(val(b) - alvo) / Math.max(alvo, 1) || dias(a) - dias(b)).slice(0, 40);
-  const ligar = async (l) => {
+  const ligar = async (l, parcial) => {
     setIndo(l.id); setErro("");
-    try { await fin("titulo", { acao: "ligar", id: l.id }, finJson("POST", { titulo_id: titulo.id })); aoFeito(); }
+    try { await fin("titulo", { acao: "ligar", id: l.id }, finJson("POST", { titulo_id: titulo.id, parcial: !!parcial })); aoFeito(); }
     catch (e) { setErro(e.message); setIndo(""); }
   };
   return (
@@ -20476,6 +20654,10 @@ function VincularLinha({ titulo, aoFechar, aoFeito }) {
                   <span className="block text-[10.5px]" style={{ color: Math.abs(dif) < 0.01 ? C.verde : AMARELO.texto }}>{Math.abs(dif) < 0.01 ? "valor igual" : `${dif > 0 ? "+" : "−"}${rs2(Math.abs(dif))}`}</span>
                 </span>
                 <button disabled={!!indo} onClick={() => ligar(l)} className="shrink-0 rounded-md px-2.5 py-1 text-[12px] font-semibold text-white" style={{ background: C.roxo }}>{indo === l.id ? "ligando…" : "é esta"}</button>
+                {val(l) < alvo - 0.004 && (
+                  <button disabled={!!indo} onClick={() => ligar(l, true)} className="shrink-0 rounded-md border px-2 py-1 text-[11.5px] font-semibold"
+                    style={{ borderColor: C.roxo, color: C.roxo }} title={`Pagou só uma parte: o título fica aberto com ${rs2(alvo - val(l))}`}>parcial</button>
+                )}
               </div>
             );
           })}
@@ -20499,6 +20681,7 @@ function TitulosDoMes({ comp }) {
   const [filtro, setFiltro] = useState("todos");
   const [q, setQ] = useState("");
   const [vinculando, setVinculando] = useState("");
+  const [editando, setEditando] = useState(null);
   const carregar = (manter) => { if (!manter) setD(null); fin("titulo", { todos: 1, competencia: comp }).then(setD).catch((e) => setErro(e.message)); };
   useEffect(() => { carregar(); }, [comp]);
   const mudar = async (l, mud) => {
@@ -20523,25 +20706,6 @@ function TitulosDoMes({ comp }) {
   const soma = (f) => todos.filter(f).reduce((t, l) => t + val(l), 0);
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap gap-2">
-        {[["Realizado no DRE", soma((l) => l.situacao === "efetivado" && l.fin_categoria && l.fin_categoria.no_dre), "o que passou, nas categorias que entram no DRE"],
-          ["Previsto em aberto", soma((l) => l.situacao === "aberto"), "entra na projeção"],
-          ["Sem categoria", soma((l) => l.situacao === "efetivado" && !l.categoria_id), "passou e ainda não diz o que é"],
-        ].map(([r, v, sub]) => (
-          <span key={r} className="rounded-xl px-4 py-2.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-            <span className="block text-[12px]" style={{ color: C.mute }}>{r}</span>
-            <b className="text-[18px]" style={{ color: v < 0 ? C.laranja : C.verde, fontVariantNumeric: "tabular-nums" }}>{rs2(v)}</b>
-            <span className="block text-[10.5px]" style={{ color: C.mute }}>{sub}</span>
-          </span>
-        ))}
-        {!!cont.conferir && (
-          <button onClick={() => setFiltro("conferir")} className="rounded-xl px-4 py-2.5 text-left" style={{ background: AMARELO.fundo, border: `1px solid ${C.line}` }}>
-            <span className="block text-[12px]" style={{ color: AMARELO.texto }}>Para conferir</span>
-            <b className="text-[18px]" style={{ color: AMARELO.texto }}>{cont.conferir}</b>
-            <span className="block text-[10.5px]" style={{ color: AMARELO.texto }}>o sistema ligou sozinho</span>
-          </button>
-        )}
-      </div>
       <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
         {[["todos", "Todos"], ["aberto", "Em aberto"], ["conferir", "Para conferir"], ["vinculado", "Vinculados"], ["conciliacao", "Pela conciliação"], ["mao", "Sem extrato"]].map(([v, r]) => (
           <button key={v} onClick={() => setFiltro(v)} className="rounded-full px-3 py-1 font-semibold"
@@ -20567,8 +20731,11 @@ function TitulosDoMes({ comp }) {
                     {l.situacao === "aberto" ? (l.vencimento ? `vence ${diaBR(l.vencimento)}` : "sem vencimento") : diaBR(l.data)}
                   </td>
                   <td className="px-2 py-1.5 text-[12.5px]">
-                    {l.fin_favorecido ? <b>{l.fin_favorecido.nome} </b> : null}{l.descricao || "—"}
+                    <button onClick={() => setEditando(l)} className="text-left hover:underline" title="Abrir o título para editar">
+                      {l.fin_favorecido ? <b>{l.fin_favorecido.nome} </b> : null}{l.descricao || "—"}
+                    </button>
                     {l.fin_conta_fixa && <span className="block text-[10.5px]" style={{ color: C.mute }}>conta fixa: {l.fin_conta_fixa.nome}</span>}
+                    {l.item_contrato && <span className="block text-[10.5px]" style={{ color: C.roxo }}>contrato do carro{l.estoque && l.estoque.veiculo ? ` · ${l.estoque.veiculo.placa}` : ""}</span>}
                   </td>
                   <td className="px-2 py-1.5">
                     <select className="max-w-[170px] rounded border px-1 py-0.5 text-[12px] outline-none" style={{ ...inputSty, borderColor: l.categoria_id ? C.line : C.laranja }}
@@ -20610,8 +20777,9 @@ function TitulosDoMes({ comp }) {
         </table>
         {!vis.length && <p className="px-3 py-6 text-center text-[13px]" style={{ color: C.mute }}>Nenhum título {filtro === "todos" ? "" : "nesta lista "}em {rotuloMes(comp)}.</p>}
       </div>
+      {editando && <EditarTitulo titulo={editando} aoFechar={() => setEditando(null)} aoMudou={() => carregar(true)} />}
       <p className="text-[11px] leading-snug" style={{ color: C.mute }}>
-        Um título é o que o DRE soma, pela competência. "Previsto" ainda não passou no banco (contas fixas, a pagar e a receber);
+        Clique no título para abrir e editar. Um título é o que o DRE soma, pela competência. "Previsto" ainda não passou no banco (contas fixas, a pagar e a receber);
         os outros já passaram — ligados a uma linha do extrato, lançados direto na Conciliação bancária, ou baixados à mão sem extrato.
       </p>
     </div>
@@ -20628,6 +20796,7 @@ function FinContas({ comp }) {
   const [favs, setFavs] = useState([]);
   const [repetindo, setRepetindo] = useState(null);
   const [vinculando, setVinculando] = useState(null);
+  const [editando, setEditando] = useState(null);
   // Duas vistas da mesma coisa: os títulos do MÊS (a base do DRE, com o
   // vínculo ao extrato) e os EM ABERTO de qualquer mês (o que vence).
   const [modo, setModo] = useState(() => { try { return localStorage.getItem("vaapty:titulos-modo") || "mes"; } catch (e) { return "mes"; } });
@@ -20809,6 +20978,7 @@ function FinContas({ comp }) {
                   <button onClick={() => setBaixando(l.id)} className="rounded-lg px-3.5 py-2 font-semibold" style={{ background: C.roxo, color: "#fff" }}>
                     {pagar ? "Paguei" : "Recebi"}
                   </button>
+                  <button onClick={() => setEditando(l)} style={{ color: C.roxo, fontWeight: 600 }}>editar</button>
                   <button onClick={() => setVinculando(vinculando === l.id ? null : l.id)} style={{ color: C.roxo, fontWeight: 600 }}
                     title="Já passou no banco: escolha a linha do extrato">vincular ao extrato</button>
                   {!l.parcelas && <button onClick={() => setRepetindo(repetindo === l.id ? null : l.id)} style={{ color: C.roxo, fontWeight: 600 }}>repetir</button>}
@@ -20817,6 +20987,7 @@ function FinContas({ comp }) {
               )}
               {repetindo === l.id && <Repetir l={l} aoFechar={() => setRepetindo(null)} aoRepetir={repetir} />}
               {vinculando === l.id && <VincularLinha titulo={l} aoFechar={() => setVinculando(null)} aoFeito={() => { setVinculando(null); carregar(); }} />}
+              {editando && editando.id === l.id && <EditarTitulo titulo={editando} aoFechar={() => setEditando(null)} aoMudou={carregar} />}
             </div>
           );
         })}

@@ -533,7 +533,7 @@ async function importar(req, res, tok) {
   // com o que se digitou, e casar por nome erraria mais que acertaria.
   const abertos = await supa(
     `${base("fin_lancamento")}?select=id,debito,credito,vencimento,descricao,favorecido,conta_id,conta_fixa_id,categoria_id,competencia,` +
-    `favorecido_id,funcionario_id,estoque_id,tipo_negociacao,observacao,fin_conta_fixa(nome)&situacao=eq.aberto&limit=2000`,
+    `favorecido_id,funcionario_id,estoque_id,tipo_negociacao,observacao,item_contrato,fin_conta_fixa(nome)&situacao=eq.aberto&limit=2000`,
     { headers: cab(tok) });
   const casados = [];
   const usados = {};
@@ -738,7 +738,7 @@ async function importar(req, res, tok) {
           categoria_id: t.categoria_id || catId, descricao: texto(l.descricao) || t.descricao, debito: deb, credito: cred,
           estoque_id: t.estoque_id || (placa ? estoquePorPlaca[placa] || null : null),
           tipo_negociacao: t.tipo_negociacao || null, funcionario_id: t.funcionario_id || null,
-          conta_fixa_id: t.conta_fixa_id || null, observacao: t.observacao || null,
+          conta_fixa_id: t.conta_fixa_id || null, observacao: t.observacao || null, item_contrato: t.item_contrato || null,
           favorecido_id: t.favorecido_id || favPor[docNa(l.descricao)] || null, favorecido: t.favorecido || null,
           conciliado: true, revisar: true, origem: fitid ? "ofx" : "planilha", chave_extrato: chave,
         },
@@ -798,6 +798,7 @@ async function importar(req, res, tok) {
       // A linha não entrou (já estava): o título volta como estava.
       await supa(`${base("fin_lancamento")}?id=eq.${t.id}`, { method: "PATCH", headers: cab(tok),
         body: JSON.stringify({ situacao: "aberto", conta_fixa_id: t.conta_fixa_id || null }) }).catch(() => null);
+      // (o item_contrato do título nunca saiu dele; nada a devolver)
     }
   }
 
@@ -1075,6 +1076,133 @@ async function projecaoDoMes(tok, comp, d, folhaPronta) {
       // O lucro que a folha usou para os bônus por lucro (`lucroParaFolha`).
       lucro_da_folha: (folha && folha.lucro) || null,
     };
+}
+
+/* OS TÍTULOS DA COMPRA E DA VENDA (0119, 07/11/2026, o Derek: "todas
+ * as transações de compra e venda devem gerar títulos financeiros de cada
+ * um dos itens financeiros adicionados nos contratos. Os mesmos devem ser
+ * identificados um a um no extrato depois, na conciliação").
+ *
+ * Cada carro do estoque gera:
+ *   compra:cliente   a pagar — o valor líquido ao cliente (`valor_compra`)
+ *   custo:<id>       a pagar — cada linha de custo (quitação, cada
+ *                    débito, cautelar, outros); o realizado, se houver,
+ *                    senão o previsto
+ *   venda:lojista    a receber — o valor de venda (ou a comissão, na
+ *                    indicação), quando vendido
+ * Todos em Negociação (fora do DRE: o efeito deles no resultado já está
+ * na rentabilidade do carro, e somar de novo contaria duas vezes), com o
+ * carro e a parte do negócio — é por eles que a conciliação os acha.
+ *
+ * O título em aberto acompanha o contrato: valor e data mudam, e o que
+ * deixou de existir é cancelado. O que já passou no banco não se toca.
+ * Antes de criar, procura no extrato uma linha do mesmo carro, da mesma
+ * parte e do mesmo valor, ainda sem item: achando UMA, ela vira o título
+ * (com `revisar`, para conferir) — é o pagamento que já foi feito.
+ *
+ * Só para o que entrou ou foi vendido a partir de novembro/2026 (o
+ * histórico já está pago e conciliado do jeito antigo), salvo `forcar`,
+ * e para o carro que já tem algum título do contrato. */
+const CORTE_TITULOS = "2026-11-01";
+async function sincronizarTitulosDoCarro(tok, estoqueId, forcar) {
+  const id = idOuNulo(estoqueId);
+  if (!id) return { ok: false };
+  const [e, existentes, catNeg] = await Promise.all([
+    supa(`${base("estoque")}?select=id,situacao,natureza,entrou_em,vendido_em,valor_compra,valor_venda,` +
+      `veiculo(placa,marca_modelo),comprador(nome),atendimento(cliente_nome),estoque_custo(id,tipo,descricao,previsto,realizado)&id=eq.${id}`,
+      { headers: cab(tok) }).then(um),
+    supa(`${base("fin_lancamento")}?select=id,situacao,item_contrato,debito,credito,vencimento,competencia,descricao` +
+      `&estoque_id=eq.${id}&item_contrato=not.is.null&situacao=neq.cancelado`, { headers: cab(tok) }).then((l) => l || []),
+    supa(`${base("fin_categoria")}?select=id&grupo=eq.negociacao&ativa=eq.true&order=ordem&limit=1`, { headers: cab(tok) }).then(um),
+  ]);
+  if (!e) return { ok: false, motivo: "carro não encontrado" };
+  // As partes já pagas de um item (baixa parcial): `item#…`.
+  const ex = {}, pagoParte = {};
+  existentes.forEach((x) => {
+    const k = String(x.item_contrato); const i = k.indexOf("#");
+    if (i < 0) ex[k] = x;
+    else pagoParte[k.slice(0, i)] = (pagoParte[k.slice(0, i)] || 0) + (Number(x.debito) || 0) + (Number(x.credito) || 0);
+  });
+  const entrou = String(e.entrou_em || "").slice(0, 10), vendeu = String(e.vendido_em || "").slice(0, 10);
+  const gerido = forcar || (existentes || []).length > 0;
+  const doCorteCompra = gerido || (entrou && entrou >= CORTE_TITULOS);
+  const doCorteVenda = gerido || (vendeu && vendeu >= CORTE_TITULOS);
+  const v = e.veiculo || {};
+  const carro = [v.marca_modelo, v.placa].filter(Boolean).join(" ");
+  const cliente = e.atendimento && e.atendimento.cliente_nome;
+  const comp = (d) => competenciaDe(d) || competenciaDe(hojeAqui());
+  const TIPO = { quitacao: "quitacao", debitos: "debitos" };
+  const quer = [];
+  if (doCorteCompra && e.natureza !== "indicacao") {
+    if (Number(e.valor_compra) > 0) quer.push({ item: "compra:cliente", debito: Number(e.valor_compra), tipo: "pagto_cliente",
+      descricao: `Pagar ao cliente${cliente ? ` ${cliente}` : ""} · ${carro}`, favorecido: cliente || null, data: entrou });
+    (e.estoque_custo || []).forEach((c) => {
+      const val = c.realizado != null ? Number(c.realizado) || 0 : Number(c.previsto) || 0;
+      if (val > 0) quer.push({ item: `custo:${c.id}`, debito: val, tipo: TIPO[c.tipo] || "outro",
+        descricao: `${c.descricao || c.tipo} · ${carro}`, data: entrou });
+    });
+  }
+  if (doCorteVenda && e.situacao === "vendido" && Number(e.valor_venda) > 0) {
+    quer.push({ item: "venda:lojista", credito: Number(e.valor_venda), tipo: "pagto_lojista",
+      descricao: `${e.natureza === "indicacao" ? "Comissão de indicação" : "Receber"} de ${(e.comprador && e.comprador.nome) || "lojista"} · ${carro}`,
+      favorecido: (e.comprador && e.comprador.nome) || null, data: vendeu || hojeAqui() });
+  }
+  const feito = { criados: 0, atualizados: 0, cancelados: 0, achados_no_extrato: 0 };
+  const querPor = {};
+  for (const q of quer) {
+    querPor[q.item] = true;
+    const atual = ex[q.item];
+    const valor = Math.round(((q.debito || q.credito) - (pagoParte[q.item] || 0)) * 100) / 100;
+    if (valor <= 0.004) {
+      // Pago inteiro em partes: o resto em aberto, se houver, sai.
+      if (atual && atual.situacao === "aberto") {
+        await supa(`${base("fin_lancamento")}?id=eq.${atual.id}&situacao=eq.aberto`, { method: "PATCH", headers: cab(tok), body: JSON.stringify({ situacao: "cancelado" }) });
+        feito.cancelados += 1;
+      }
+      continue;
+    }
+    if (atual) {
+      if (atual.situacao !== "aberto") continue;
+      const mud = {};
+      if (Math.abs(((Number(atual.debito) || 0) + (Number(atual.credito) || 0)) - valor) >= 0.005) {
+        if (q.debito) mud.debito = valor; else mud.credito = valor;
+      }
+      if (q.data && atual.vencimento !== q.data) { mud.vencimento = q.data; mud.data = q.data; mud.competencia = comp(q.data); }
+      if (atual.descricao !== q.descricao) mud.descricao = q.descricao;
+      if (Object.keys(mud).length) {
+        await supa(`${base("fin_lancamento")}?id=eq.${atual.id}&situacao=eq.aberto`, { method: "PATCH", headers: cab(tok), body: JSON.stringify(mud) });
+        feito.atualizados += 1;
+      }
+      continue;
+    }
+    // Já passou no banco? A linha do mesmo carro, da mesma parte e do
+    // mesmo valor, ainda sem item — uma só — vira este título.
+    const lado = q.debito ? `&debito=eq.${valor}` : `&credito=eq.${valor}`;
+    if (q.debito) q.debito = valor; else q.credito = valor;
+    const noBanco = await supa(`${base("fin_lancamento")}?select=id&estoque_id=eq.${id}&tipo_negociacao=eq.${q.tipo}` +
+      `&situacao=eq.efetivado&item_contrato=is.null${lado}&limit=2`, { headers: cab(tok) }).catch(() => []) || [];
+    if (noBanco.length === 1) {
+      await supa(`${base("fin_lancamento")}?id=eq.${noBanco[0].id}`, { method: "PATCH", headers: cab(tok),
+        body: JSON.stringify({ item_contrato: q.item, revisar: true }) }).catch(() => null);
+      feito.achados_no_extrato += 1;
+      continue;
+    }
+    const data = q.data || hojeAqui();
+    await supa(base("fin_lancamento"), { method: "POST", headers: cab(tok), body: JSON.stringify({
+      situacao: "aberto", origem: "contrato", item_contrato: q.item, estoque_id: id, tipo_negociacao: q.tipo,
+      categoria_id: catNeg ? catNeg.id : null, descricao: q.descricao, favorecido: q.favorecido || null,
+      debito: q.debito || 0, credito: q.credito || 0, vencimento: data, data, competencia: comp(data),
+    }) }).catch(() => null);
+    feito.criados += 1;
+  }
+  for (const x of existentes) {
+    if (String(x.item_contrato).indexOf("#") >= 0) continue;
+    if (querPor[x.item_contrato] || x.situacao !== "aberto") continue;
+    if (!doCorteCompra && x.item_contrato !== "venda:lojista") continue;
+    await supa(`${base("fin_lancamento")}?id=eq.${x.id}&situacao=eq.aberto`, { method: "PATCH", headers: cab(tok), body: JSON.stringify({ situacao: "cancelado" }) });
+    feito.cancelados += 1;
+  }
+  return { ok: true, ...feito };
 }
 
 /* O LUCRO QUE MEDE A FOLHA (07/11/2026, o Derek: "o lucro deve ser
@@ -1367,6 +1495,35 @@ async function anexarTitulos(tok, lista) {
   lista.forEach((l) => { l.titulos_ligados = por[l.id] || []; });
 }
 
+/* A parte paga de um título: um lançamento novo efetivado com `valor`, e
+ * o título aberto diminui do mesmo tanto. `extra` traz conta e data (baixa
+ * à mão) — ou é a própria linha do banco que vira a parte (`linhaId`). */
+async function parteDoTitulo(tok, t, valor, extra, linhaId) {
+  const total = (Number(t.debito) || 0) + (Number(t.credito) || 0);
+  const saida = Number(t.debito) > 0;
+  const item = t.item_contrato ? `${t.item_contrato}#${Date.now().toString(36)}` : null;
+  let parte;
+  if (linhaId) {
+    const mud = { conciliado: true, revisar: false, competencia: t.competencia };
+    ["categoria_id", "estoque_id", "tipo_negociacao", "funcionario_id", "favorecido_id"].forEach((k) => { if (t[k]) mud[k] = t[k]; });
+    if (item) mud.item_contrato = item;
+    mud.observacao = `Parte do título "${t.descricao || ""}" (${total.toFixed(2).replace(".", ",")})`;
+    parte = um(await supa(`${base("fin_lancamento")}?id=eq.${linhaId}`, { method: "PATCH", headers: cab(tok, REP), body: JSON.stringify(mud) }));
+  } else {
+    parte = um(await supa(base("fin_lancamento"), { method: "POST", headers: cab(tok, REP), body: JSON.stringify({
+      situacao: "efetivado", origem: "parcial", conta_id: extra.conta_id, data: extra.data, conciliado: !!extra.conciliado,
+      competencia: t.competencia, categoria_id: t.categoria_id, estoque_id: t.estoque_id, tipo_negociacao: t.tipo_negociacao,
+      funcionario_id: t.funcionario_id, favorecido_id: t.favorecido_id, favorecido: t.favorecido,
+      descricao: `${t.descricao || "Título"} (parcial)`, item_contrato: item,
+      debito: saida ? valor : 0, credito: saida ? 0 : valor,
+    }) }));
+  }
+  const resto = Math.round((total - valor) * 100) / 100;
+  await supa(`${base("fin_lancamento")}?id=eq.${t.id}&situacao=eq.aberto`, { method: "PATCH", headers: cab(tok),
+    body: JSON.stringify(saida ? { debito: resto } : { credito: resto }) });
+  return parte;
+}
+
 /* Solta os títulos ligados a uma linha do banco: voltam a abertos, e a
  * conta fixa sai da linha ANTES de voltar ao primeiro título — o índice
  * único (conta fixa, competência) da 0096 não aceita os dois vivos. */
@@ -1374,7 +1531,7 @@ async function soltarTitulos(tok, linhaId) {
   const ts = await supa(`${base("fin_lancamento")}?select=id&extrato_id=eq.${linhaId}&situacao=eq.cancelado&dividido_em=is.null&origem=neq.divisao`, { headers: cab(tok) }).catch(() => []) || [];
   if (!ts.length) return 0;
   const l = um(await supa(`${base("fin_lancamento")}?select=conta_fixa_id&id=eq.${linhaId}`, { headers: cab(tok) }));
-  await supa(`${base("fin_lancamento")}?id=eq.${linhaId}`, { method: "PATCH", headers: cab(tok), body: JSON.stringify({ conta_fixa_id: null, revisar: false }) });
+  await supa(`${base("fin_lancamento")}?id=eq.${linhaId}`, { method: "PATCH", headers: cab(tok), body: JSON.stringify({ conta_fixa_id: null, item_contrato: null, revisar: false }) });
   let devolvida = false;
   for (const t of ts) {
     await supa(`${base("fin_lancamento")}?id=eq.${t.id}`, { method: "PATCH", headers: cab(tok),
@@ -1391,6 +1548,21 @@ async function titulo(req, res, tok) {
    * que não foi cancelado na competência — os previstos (aberto) e os
    * realizados (efetivado), que é exatamente a base do DRE — com o
    * vínculo de cada um à linha do banco. */
+  // Gerar/acompanhar os títulos do contrato (0119): um carro, ou todos
+  // os que entraram ou foram vendidos desde o corte.
+  if (req.method === "POST" && String(req.query.acao || "") === "sincronizar_carro") {
+    const r = await sincronizarTitulosDoCarro(tok, req.query.id, String(req.query.forcar || "") === "1");
+    return res.status(r.ok ? 200 : 404).json(r);
+  }
+  if (req.method === "POST" && String(req.query.acao || "") === "sincronizar_carros") {
+    const lista = await supa(`${base("estoque")}?select=id&or=(entrou_em.gte.${CORTE_TITULOS},vendido_em.gte.${CORTE_TITULOS})&limit=1000`, { headers: cab(tok) }) || [];
+    const tot = { carros: lista.length, criados: 0, atualizados: 0, cancelados: 0, achados_no_extrato: 0, falhas: 0 };
+    for (const e of lista) {
+      try { const r = await sincronizarTitulosDoCarro(tok, e.id); ["criados", "atualizados", "cancelados", "achados_no_extrato"].forEach((k) => { tot[k] += r[k] || 0; }); }
+      catch (x) { tot.falhas += 1; }
+    }
+    return res.status(200).json({ ok: true, ...tot });
+  }
   if (req.method === "GET" && req.query.todos) {
     const comp = competenciaDe(req.query.competencia) || competenciaDe(hojeAqui());
     const lista = await supa(`${base("fin_lancamento")}?select=${CAMPOS_LANC}&situacao=in.(aberto,efetivado)&competencia=eq.${comp}` +
@@ -1412,7 +1584,7 @@ async function titulo(req, res, tok) {
       `&${saida ? "debito" : "credito"}=gt.0&data=gte.${desloc(-60)}&data=lte.${desloc(60)}` +
       `${t.conta_id ? `&conta_id=eq.${t.conta_id}` : ""}&dividido_em=is.null&order=data.asc&limit=1500`, { headers: cab(tok) }) || [];
     await anexarTitulos(tok, lista);
-    const livres = lista.filter((l) => !l.titulos_ligados.length && (!l.conta_fixa_id || l.conta_fixa_id === t.conta_fixa_id));
+    const livres = lista.filter((l) => !l.titulos_ligados.length && !l.item_contrato && (!l.conta_fixa_id || l.conta_fixa_id === t.conta_fixa_id));
     return res.status(200).json({ titulo: t, linhas: livres });
   }
   if (req.method === "GET") {
@@ -1562,6 +1734,14 @@ async function titulo(req, res, tok) {
     }
     // "Trocar": a linha que já tinha título solta o anterior antes.
     await soltarTitulos(tok, l.id);
+    // Pagamento PARCIAL: a linha do banco é uma parte, o título segue
+    // aberto com o que falta.
+    const valLinha = (Number(l.debito) || 0) + (Number(l.credito) || 0);
+    const valTit = (Number(t.debito) || 0) + (Number(t.credito) || 0);
+    if (c.parcial && valLinha < valTit - 0.004) {
+      await parteDoTitulo(tok, t, valLinha, null, l.id);
+      return res.status(200).json({ ok: true, parcial: true, falta: Math.round((valTit - valLinha) * 100) / 100 });
+    }
     const mud = { conciliado: true, revisar: false };
     if (t.competencia) mud.competencia = t.competencia;
     if (t.conta_fixa_id) mud.conta_fixa_id = t.conta_fixa_id;
@@ -1570,6 +1750,9 @@ async function titulo(req, res, tok) {
     }
     ["favorecido_id", "favorecido"].forEach((k) => { if (t[k] && !l[k]) mud[k] = t[k]; });
     if (t.observacao && !l.observacao) mud.observacao = t.observacao;
+    // O item do contrato (0119) passa para a linha: o título da compra ou
+    // da venda fica "identificado no extrato".
+    if (t.item_contrato) { mud.item_contrato = t.item_contrato; if (t.estoque_id) mud.estoque_id = t.estoque_id; if (t.tipo_negociacao) mud.tipo_negociacao = t.tipo_negociacao; }
     await supa(`${base("fin_lancamento")}?id=eq.${tid}&situacao=eq.aberto`, { method: "PATCH", headers: cab(tok),
       body: JSON.stringify({ situacao: "cancelado", extrato_id: l.id, conta_fixa_id: null }) });
     const r = await supa(`${base("fin_lancamento")}?id=eq.${id}`, { method: "PATCH", headers: cab(tok, REP), body: JSON.stringify(mud) });
@@ -1613,6 +1796,21 @@ async function titulo(req, res, tok) {
     const contaId = idOuNulo(c.conta_id);
     if (!contaId) return res.status(400).json({ erro: "Escolha de qual banco saiu." });
     const quando = dataISO(c.data) || hojeAqui();
+    /* BAIXA PARCIAL (07/11/2026, o Derek: "opção de baixa parcial"). Pagou
+     * menos que o título: nasce um lançamento efetivado com o que foi pago
+     * (a parte), e o título continua aberto com o que falta. A parte leva
+     * o item do contrato com sufixo (`item#…`), e a geração dos títulos do
+     * carro desconta as partes do que ainda falta. */
+    const pago = decimal(c.valor);
+    if (pago != null && pago > 0) {
+      const t = um(await supa(`${base("fin_lancamento")}?select=*&id=eq.${id}&situacao=eq.aberto`, { headers: cab(tok) }));
+      if (!t) return res.status(409).json({ erro: "Título não está mais aberto." });
+      const total = (Number(t.debito) || 0) + (Number(t.credito) || 0);
+      if (pago < total - 0.004) {
+        const parte = await parteDoTitulo(tok, t, pago, { conta_id: contaId, data: quando, conciliado: !!c.conciliado });
+        return res.status(200).json({ ok: true, parcial: true, falta: Math.round((total - pago) * 100) / 100, lancamento: parte });
+      }
+    }
     const r = await supa(`${base("fin_lancamento")}?id=eq.${id}&situacao=eq.aberto`, {
       method: "PATCH", headers: cab(tok, REP),
       body: JSON.stringify({ situacao: "efetivado", conta_id: contaId, data: quando, conciliado: !!c.conciliado, revisar: false }),
@@ -2799,3 +2997,4 @@ module.exports = async function handler(req, res) {
   try { return await r(req, res, tok); }
   catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Falhou." }); }
 };
+module.exports.sincronizarTitulosDoCarro = sincronizarTitulosDoCarro;

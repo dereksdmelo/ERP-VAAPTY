@@ -4558,6 +4558,36 @@ mudou — mudou o que se vê:
   sempre para conferir. `soltarTitulos` desfaz, tirando a conta fixa da
   linha antes de devolvê-la ao título (índice único da 0096).
 
+**Compra e venda viram títulos, item a item (0119, 07/11/2026, o Derek:
+*"todas as transações de compra e venda devem gerar títulos financeiros
+de cada um dos itens financeiros adicionados nos contratos… identificados
+um a um no extrato depois, na conciliação"*).** `sincronizarTitulosDoCarro`
+(em `api/financeiro.js`, chamada pelo `api/veiculo.js` em toda mudança de
+compra, custo ou venda — `titulosDoCarro`): a pagar o valor ao cliente
+(`compra:cliente`) e cada linha de custo (`custo:<id>`: quitação, cada
+débito, cautelar, outros), a receber a venda (`venda:lojista`). Tudo em
+Negociação, fora do DRE — o efeito já está na rentabilidade do carro, e
+somar de novo contaria duas vezes —, com o carro e a parte do negócio. O
+título em aberto acompanha o contrato (valor, data; o item que sumiu é
+cancelado); o pago não se toca. Antes de criar, procura no extrato a
+linha do mesmo carro, parte e valor ainda sem item: achando uma, ela vira
+o título, em amarelo. `item_contrato` tem índice único por carro enquanto
+não cancelado, e passa para a linha do banco quando o título é ligado.
+**Só a partir de 01/11/2026** (`CORTE_TITULOS`): o histórico já está
+conciliado do jeito antigo; `forcar` gera para um carro mais velho.
+
+**A edição completa do título e a baixa parcial (07/11/2026, o Derek:
+*"abrir pra editar o título com mais dados… opção de baixa parcial… bem
+completo"*).** `EditarTitulo`: descrição, pessoa (cadastro ou nome solto),
+categoria, conta, lado, valor, competência, vencimento ou data do
+pagamento, carro e parte, pessoa da folha, observação; o que veio do
+extrato não muda valor nem data. "Registrar pagamento" com valor menor é
+a baixa parcial (`parteDoTitulo`): a parte vira lançamento efetivado e o
+título fica aberto com o resto; o mesmo vale para ligar uma linha do
+banco menor que o título ("parcial"). A parte leva o item com sufixo
+(`item#…`), e a geração do carro desconta as partes do que falta. Os
+cartões de total da tela de Títulos saíram ("desnecessário").
+
 **Ligar à mão a linha do banco ao título (07/11/2026, o Derek: *"como
 eu faço pra ligar os títulos das previsões com os títulos do
 extrato?"*).** O automático só casa valor exato; a conta fixa que varia
