@@ -3985,7 +3985,12 @@ async function nfse(req, res, tok) {
     const n = id && um(await supa(`${base("nfse")}?select=*&id=eq.${id}`, { headers: cab(tok) }));
     if (!n) return res.status(404).json({ erro: "Nota não encontrada." });
     if (n.situacao === "emitida" || n.situacao === "cancelada") return res.status(409).json({ erro: "Esta nota já foi emitida." });
-    if (n.ambiente !== "restrita") return res.status(409).json({ erro: "Por enquanto só se emite no ambiente de testes." });
+    // Produção liberada em 09/11/2026, depois de emitir, gerar o PDF e cancelar na produção restrita. A nota
+    // nasce no ambiente que o cadastro tinha ao criá-la: rascunho de teste continua de teste.
+    const eAgora = await emp();
+    if (n.ambiente !== ((eAgora && eAgora.nfse_ambiente) || "restrita")) {
+      return res.status(409).json({ erro: `Esta nota foi criada no ambiente de ${n.ambiente === "producao" ? "produção" : "testes"} e o cadastro agora está em ${n.ambiente === "producao" ? "testes" : "produção"}. Apague e crie de novo.` });
+    }
     const e = await emp();
     const falta = nfseRegras.faltaNaEmpresa(e);
     if (falta.length) return res.status(409).json({ erro: `Falta no cadastro da empresa: ${falta.join(", ")}.` });
