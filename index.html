@@ -4645,12 +4645,17 @@ const extrairProtocolo = (html) => {
  * em claro, e ele vale — token em claro no banco é token vazado junto
  * com o banco.
  */
-function MandarAssinar({ doc, telefone, nome, estado, aoMudar }) {
+function MandarAssinar({ doc, telefone, nome, estado, aoMudar, auto }) {
   const [indo, setIndo] = useState(false);
   const [link, setLink] = useState("");
   const [copiou, setCopiou] = useState(false);
   const [erro, setErro] = useState("");
   const campo = useRef(null);
+  // `auto`: o botão "Assinar digital" já pediu o link — não precisa de outro toque.
+  const pediu = useRef(false);
+  useEffect(() => {
+    if (auto && !pediu.current && doc && doc.docId && ASSINAVEIS.indexOf(doc.tipo) >= 0) { pediu.current = true; gerar(); }
+  }, [auto, doc && doc.docId]);
 
   if (!doc || !doc.docId || ASSINAVEIS.indexOf(doc.tipo) < 0) return null;
 
@@ -5513,10 +5518,13 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
    * acontecer no mesmo passo do clique — pop-up aberto depois de um
    * await é bloqueado pelo navegador.
    */
-  const gerarDocumento = async (tipo, rotulo, html, rodada) => {
+  const gerarDocumento = async (tipo, rotulo, html, rodada, opcoes) => {
     setErroDoc("");
-    const r = abrirDocumento(html);
-    if (!r.ok) { setErroDoc(r.erro); return; }
+    // `semJanela`: o documento vai para assinar no celular do cliente, não para a impressora.
+    if (!(opcoes && opcoes.semJanela)) {
+      const r = abrirDocumento(html);
+      if (!r.ok) { setErroDoc(r.erro); return; }
+    }
 
     const reg = {
       tipo, rotulo,
@@ -5559,6 +5567,21 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     }
 
     guardarFicha({ ...fRef.current, documentos: [...(fRef.current.documentos || []), reg] });
+    return reg;
+  };
+  /* ASSINATURA DIGITAL DO PRÉ-CONTRATO EM UM TOQUE (09/11/2026, o Derek: "colocar opção de assinatura
+     digital do pré-contrato"). Ela já existia (decisão 42), mas só aparecia depois de imprimir. Agora
+     o botão gera o documento sem a impressora e já cria o link para o cliente assinar no celular. */
+  const [assinarDireto, setAssinarDireto] = useState(null);
+  const assinarDigital = async (tipo, rotulo, html) => {
+    setAssinarDireto({ indo: true });
+    const reg = await gerarDocumento(tipo, rotulo, html, null, { semJanela: true });
+    if (!reg || !reg.docId) {
+      setAssinarDireto(null);
+      setErroDoc("Para assinar digital, o documento precisa ir ao banco: preencha a placa do carro (a ficha nasce com ela).");
+      return;
+    }
+    setAssinarDireto({ doc: reg });
   };
 
   // Sem estes quatro, o documento sai com lacuna. E papel com lacuna
@@ -7520,13 +7543,32 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                     style={{ borderColor: podeImprimir ? C.roxo : C.line, color: podeImprimir ? C.roxo : C.mute }}>
                     Autorização de cautelar
                   </button>
-                  <button disabled={!podeImprimir || !f.valorFechado}
-                    onClick={() => gerarDocumento("pre_contrato", "Pré-contrato", preContrato(dadosDoc), null)}
-                    className="rounded-md border py-2 text-[12px] font-semibold"
-                    style={{ borderColor: podeImprimir && f.valorFechado ? C.roxo : C.line, color: podeImprimir && f.valorFechado ? C.roxo : C.mute }}>
-                    Pré-contrato
-                  </button>
+                  <div className="flex gap-1.5">
+                    <button disabled={!podeImprimir || !f.valorFechado}
+                      onClick={() => gerarDocumento("pre_contrato", "Pré-contrato", preContrato(dadosDoc), null)}
+                      className="flex-1 rounded-md border py-2 text-[12px] font-semibold"
+                      style={{ borderColor: podeImprimir && f.valorFechado ? C.roxo : C.line, color: podeImprimir && f.valorFechado ? C.roxo : C.mute }}>
+                      Pré-contrato · imprimir
+                    </button>
+                    <button disabled={!podeImprimir || !f.valorFechado || (assinarDireto && assinarDireto.indo)}
+                      onClick={() => assinarDigital("pre_contrato", "Pré-contrato", preContrato(dadosDoc))}
+                      className="flex-1 rounded-md py-2 text-[12px] font-semibold text-white"
+                      style={{ background: podeImprimir && f.valorFechado ? C.roxo : C.line }}
+                      title="O cliente assina no celular dele, pelo link">
+                      {assinarDireto && assinarDireto.indo ? "Gerando…" : "✍ Assinar digital"}
+                    </button>
+                  </div>
                 </div>
+                {assinarDireto && assinarDireto.doc && (
+                  <div className="rounded-md p-2" style={{ background: "#F7F3FB", border: `1px solid ${C.roxo}` }}>
+                    <div className="flex items-baseline justify-between text-[11.5px] font-semibold" style={{ color: C.roxo }}>
+                      <span>Link para o cliente assinar o pré-contrato</span>
+                      <button onClick={() => setAssinarDireto(null)} className="text-[11px] font-normal" style={{ color: C.mute }}>fechar</button>
+                    </div>
+                    <MandarAssinar auto doc={assinarDireto.doc} telefone={cliente.cliente_telefone} nome={cliente.cliente_nome}
+                      estado={assin[assinarDireto.doc.docId]} aoMudar={() => setAssin({ ...assin, [assinarDireto.doc.docId]: { situacao: "aguardando" } })} />
+                  </div>
+                )}
                 {/* Os assináveis vão para o celular do cliente em vez
                     de sair na impressora. Foi o pedido do Derek em
                     15/09/2026: "aí não precisamos imprimir". */}
