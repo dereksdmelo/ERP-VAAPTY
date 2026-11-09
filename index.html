@@ -22512,7 +22512,7 @@ function FinNotas() {
         <div className="rounded-xl p-3" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
           <div className="mb-2 flex items-baseline gap-2">
             <b className="text-[14px]">Carros negociados</b>
-            <span className="text-[12px]" style={{ color: C.mute }}>últimos 90 dias · escolha para quem é a nota e ela vem preenchida</span>
+            <span className="text-[12px]" style={{ color: C.mute }}>últimos 90 dias · clique no cliente e a nota vem preenchida</span>
           </div>
           <div className="rolar max-h-[360px] overflow-auto">
             <table className="w-full text-[12.5px]" style={{ borderCollapse: "collapse", minWidth: 760 }}>
@@ -22540,7 +22540,6 @@ function FinNotas() {
                           {c.natureza === "indicacao" ? "comissão de indicação" : c.situacao === "vendido" ? `vendido ${c.vendido_em ? diaBR(c.vendido_em) : ""}` : `no pátio desde ${diaBR(c.entrou_em)}`}
                         </span></td>
                       <td className="px-2 py-1.5">{botao("cliente", "Cliente")}</td>
-                      <td className="px-2 py-1.5">{botao("lojista", "Lojista")}</td>
                     </tr>
                   );
                 })}
@@ -22548,7 +22547,7 @@ function FinNotas() {
             </table>
           </div>
           <p className="mt-1.5 text-[11px]" style={{ color: C.mute }}>
-            Cliente: o valor sugerido é a comissão do check list. Lojista: é a margem bruta do carro (venda − compra − débitos e quitação). Confira com o contador qual é o seu caso — tudo pode ser editado antes de salvar.
+            A nota sai para o cliente que vendeu o carro, pelo valor da comissão do check list (decidido com o contador em 09/11/2026). Sem comissão no check list, o valor fica para digitar.
           </p>
         </div>
       )}

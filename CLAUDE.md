@@ -6447,6 +6447,9 @@ depois de três descobertas que valem para quem mexer aqui:
   `danfseHtml()` monta o documento a partir do `nfse_xml`, no modelo do Anexo I (A4, uma página, blocos na
   ordem, QR para `https://www.nfse.gov.br/ConsultaPublica/?tpc=1&chave=`, "NFS-e SEM VALIDADE JURÍDICA" em
   vermelho quando tpAmb = 2) e abre na janela de imprimir — "Salvar como PDF". Só imprime o que está no XML.
+- **A nota sai para o CLIENTE que vendeu o carro, pela comissão** (o Derek com o contador, 09/11/2026). Os
+  "Carros negociados" preenchem com o CPF e o endereço do atendimento e a `comissao_vaapty` do check list; a
+  opção do lojista pela margem saiu da tela.
 - **Cancelar** é o evento 101101 (`montarCancelamento`, Id `PRE` + chave + `101101`), assinado sobre o
   `infPedReg` e enviado a `/nfse/{chave}/eventos` pela mesma ponte. Recusado, a nota continua emitida e o
   motivo fica nos erros dela.
