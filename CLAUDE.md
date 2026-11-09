@@ -2068,6 +2068,15 @@ o que chega. Word e Excel não vão — o bucket não aceita; mande em PDF.
 **Publicar a ponte pede "Reiniciar" no número**, senão ele segue com o
 programa velho.
 
+**Responder, encaminhar e pesquisar (09/11/2026, o administrativo: *"precisamos das opções de responder e
+encaminhar e também a opção de buscar… procurar um documento de um veículo no whats"*).** A setinha de cada
+balão abre Responder (a ponte cita pelo id do WhatsApp; no grupo, com o telefone do `autor`), Encaminhar (até 5
+conversas do mesmo recorte; o arquivo não é copiado, a mensagem nova aponta para a mesma chave do bucket, pelo
+`?recurso=wa-encaminhar` no `api/foto.js` — decisão 9) e Copiar. A pesquisa procura também no texto, no nome do
+arquivo e na leitura da IA (`?acao=procurar`); placa com traço vira sem traço. A conversa passou a trazer as 500
+mensagens MAIS RECENTES (trazia as 500 primeiras). **Citar e a marca "Encaminhada" do lado do cliente pedem a
+ponte republicada e o número reiniciado**; sem isso a resposta sai sem a citação.
+
 **A lista de conversas lia os leads sem ordem e com teto** (`limit=1000`
 com 1.486 leads): o lead recente sumia e a conversa do Kiko, ligada a um
 lead que compareceu, aparecia "sem contato". Agora vêm os leads da página
