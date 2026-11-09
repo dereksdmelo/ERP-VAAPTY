@@ -3829,10 +3829,11 @@ async function viaPonte(req, tok) {
         method: "POST", signal: AbortSignal.timeout(45000),
         headers: { "x-ponte-segredo": process.env.PONTE_SEGREDO, "Content-Type": "application/json" },
         body: JSON.stringify({ url, method: (init && init.method) || "POST", headers: (init && init.headers) || {}, body: (init && init.body) || "",
-          key: process.env.NFSE_KEY_PEM, cert: process.env.NFSE_CERT_PEM }),
+          key: process.env.NFSE_KEY_PEM, cert: process.env.NFSE_CERT_PEM, binario: !!(init && init.binario) }),
       });
       const d = await r.json().catch(() => ({ ok: false, erro: `a ponte respondeu ${r.status}` }));
       if (!d.ok) throw new Error(`Não cheguei à Receita: ${d.erro || "a ponte não respondeu"}.`);
+      if (init && init.binario) return { status: d.status, tipo: d.tipo || "", base64: d.base64 ? d.corpo : null, corpo: d.base64 ? "" : d.corpo };
       return new Response(d.corpo || "", { status: d.status >= 200 && d.status <= 599 ? d.status : 502 });
     },
   };
@@ -3865,6 +3866,54 @@ async function nfse(req, res, tok) {
       if (vp) out.push(await teste("pela ponte, com certificado", (a, b) => vp.fetch(a, b), u));
     }
     return res.status(200).json({ certificado: certificado(), testes: out });
+  }
+  /* O PDF DA NOTA (DANFSe), do Ambiente de Dados Nacional, pela chave. Vem pela ponte, como o envio
+   * (a mesma renegociação TLS), em base64. */
+  if (req.method === "GET" && acao === "pdf") {
+    const id = idOuNulo(req.query.id);
+    const n = id && um(await supa(`${base("nfse")}?select=ambiente,chave_acesso,situacao,numero_nfse&id=eq.${id}`, { headers: cab(tok) }));
+    if (!n || !n.chave_acesso) return res.status(404).json({ erro: "Esta nota ainda não tem chave: emita antes." });
+    const vp = await viaPonte(req, tok);
+    if (!vp) return res.status(503).json({ erro: "O certificado ou a ponte não estão configurados." });
+    const A = nfseRegras.ADN[n.ambiente] || nfseRegras.ADN.restrita;
+    const tentativas = [`${A}/danfse/${n.chave_acesso}`, `${A}/contribuintes/danfse/${n.chave_acesso}`];
+    const visto = [];
+    for (const u of tentativas) {
+      try {
+        const r = await vp.fetch(u, { method: "GET", headers: { Accept: "application/pdf" }, binario: true });
+        if (r.status === 200 && r.base64 && /^JVBER/.test(r.base64)) return res.status(200).json({ pdf: r.base64, nome: `NFS-e ${n.numero_nfse || ""} ${n.chave_acesso}.pdf` });
+        visto.push(`${u.replace(A, "")}: ${r.status}`);
+      } catch (x) { visto.push(`${u.replace(A, "")}: ${x.message}`); }
+    }
+    return res.status(502).json({ erro: `A Receita não devolveu o PDF (${visto.join(" · ")}).` });
+  }
+  /* CANCELAR (evento 101101). Só a nota emitida; o motivo vai escrito (15 a 255 letras). Recusado, a nota
+   * continua emitida e o motivo da recusa fica nos erros dela. */
+  if (req.method === "POST" && acao === "cancelar") {
+    const id = idOuNulo(req.query.id);
+    const c = await corpoDe(req) || {};
+    const n = id && um(await supa(`${base("nfse")}?select=*&id=eq.${id}`, { headers: cab(tok) }));
+    if (!n) return res.status(404).json({ erro: "Nota não encontrada." });
+    if (n.situacao !== "emitida" || !n.chave_acesso) return res.status(409).json({ erro: "Só se cancela nota emitida." });
+    const motivo = String(c.motivo || "").replace(/\s+/g, " ").trim();
+    if (motivo.length < 15 || motivo.length > 255) return res.status(400).json({ erro: "Escreva o motivo do cancelamento (de 15 a 255 letras)." });
+    const e = await emp();
+    const vp = await viaPonte(req, tok);
+    if (!vp) return res.status(503).json({ erro: "O certificado ou a ponte não estão configurados." });
+    const ped = nfseRegras.montarCancelamento(e, n.chave_acesso, n.ambiente, c.codigo, motivo, new Date());
+    let r;
+    try {
+      const assinado = await nfseRegras.assinar(ped.xml, ped.id, process.env.NFSE_KEY_PEM, process.env.NFSE_CERT_PEM, null, "infPedReg");
+      r = await nfseRegras.enviarEvento(assinado, n.chave_acesso, n.ambiente, vp);
+    } catch (x) { return res.status(502).json({ erro: x.message }); }
+    if (!r.ok) {
+      const erros = (r.erros || []).map((x) => ({ ...x, descricao: `Cancelamento recusado: ${x.descricao}` }));
+      await supa(`${base("nfse")}?id=eq.${id}`, { method: "PATCH", headers: cab(tok), body: JSON.stringify({ erros }) });
+      return res.status(422).json({ ok: false, erros, erro: erros.map((x) => `${x.codigo || ""} ${x.descricao}`).join(" · ") });
+    }
+    const mud = { situacao: "cancelada", cancelada_em: new Date().toISOString(), erros: null };
+    await supa(`${base("nfse")}?id=eq.${id}`, { method: "PATCH", headers: cab(tok), body: JSON.stringify(mud) });
+    return res.status(200).json({ ok: true, ...mud });
   }
   if (req.method === "GET" && acao === "xml") {
     const id = idOuNulo(req.query.id);

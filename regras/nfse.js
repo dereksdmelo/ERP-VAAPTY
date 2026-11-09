@@ -118,14 +118,15 @@ async function chavePrivada(keyPem) {
 /* XMLDSig envelopado: Reference ao Id do infDPS, transforms enveloped + C14N, RSA-SHA256 e SHA-256.
  * Como o XML é gerado sem espaços e sem prefixos, o infDPS canônico é o próprio texto com o namespace
  * do DPS trazido para ele (a C14N copia o xmlns em uso do ancestral). */
-async function assinar(xml, id, keyPem, certPem, alg) {
+async function assinar(xml, id, keyPem, certPem, alg, el) {
   const A = alg || {};
+  const E = el || "infDPS";
   // C14N EXCLUSIVA: a inclusiva (do manual de 2022) é recusada hoje com E0714. Como o infDPS usa o
   // namespace padrão do DPS, a forma exclusiva o declara no próprio infDPS — é o que a linha abaixo faz.
   const C14N = A.c14n || "http://www.w3.org/2001/10/xml-exc-c14n#";
-  const ini = xml.indexOf("<infDPS"), fim = xml.indexOf("</infDPS>") + "</infDPS>".length;
-  if (ini < 0 || fim < ini) throw new Error("DPS sem infDPS.");
-  const inf = xml.slice(ini, fim).replace(/^<infDPS /, `<infDPS xmlns="${NS}" `);
+  const ini = xml.indexOf(`<${E}`), fim = xml.indexOf(`</${E}>`) + `</${E}>`.length;
+  if (ini < 0 || fim < ini) throw new Error(`XML sem ${E}.`);
+  const inf = xml.slice(ini, fim).replace(new RegExp(`^<${E} `), `<${E} xmlns="${NS}" `);
   const digest = await sha256B64(inf);
   const signedInfo = `<SignedInfo xmlns="http://www.w3.org/2000/09/xmldsig#">` +
     `<CanonicalizationMethod Algorithm="${C14N}"></CanonicalizationMethod>` +
@@ -140,7 +141,7 @@ async function assinar(xml, id, keyPem, certPem, alg) {
   const cert = pemCorpo(certPem, "CERTIFICATE");
   const sig = `<Signature xmlns="http://www.w3.org/2000/09/xmldsig#">${signedInfo.replace(' xmlns="http://www.w3.org/2000/09/xmldsig#"', "")}` +
     `<SignatureValue>${assinatura}</SignatureValue><KeyInfo><X509Data><X509Certificate>${cert}</X509Certificate></X509Data></KeyInfo></Signature>`;
-  return xml.replace("</infDPS>", "</infDPS>" + sig);
+  return xml.replace(`</${E}>`, `</${E}>` + sig);
 }
 
 /* ---------------- envio ---------------- */
@@ -177,4 +178,35 @@ async function enviar(xmlAssinado, ambiente, mtls) {
     bruto: (txt || "").slice(0, 2000) };
 }
 
-module.exports = { NS, BASE, faltaNaEmpresa, montarDps, idDps, dhAgora, assinar, enviar, gzipB64, gunzipTexto, esc, tag, dinheiro, so };
+/* ---------------- cancelamento (evento 101101) ----------------
+ * Pedido de registro de evento, leiaute 1.01: Id = "PRE" + chave (50) + "101101". Assinado como a DPS, sobre o
+ * infPedReg. cMotivo 1 erro na emissão, 2 serviço não prestado, 9 outros; xMotivo de 15 a 255 letras. */
+function montarCancelamento(e, chave, ambiente, cMotivo, xMotivo, agora) {
+  const id = `PRE${so(chave)}101101`;
+  const xml = `<pedRegEvento xmlns="${NS}" versao="1.01"><infPedReg Id="${id}">` +
+    `<tpAmb>${ambiente === "producao" ? 1 : 2}</tpAmb><verAplic>VAAPTY-ERP-1.0</verAplic><dhEvento>${dhAgora(agora || new Date())}</dhEvento>` +
+    `<CNPJAutor>${so(e.cnpj)}</CNPJAutor><chNFSe>${so(chave)}</chNFSe>` +
+    `<e101101><xDesc>Cancelamento de NFS-e</xDesc><cMotivo>${["1", "2", "9"].indexOf(String(cMotivo)) >= 0 ? cMotivo : "1"}</cMotivo>${tag("xMotivo", xMotivo)}</e101101>` +
+    `</infPedReg></pedRegEvento>`;
+  return { xml, id };
+}
+async function enviarEvento(xmlAssinado, chave, ambiente, mtls) {
+  const corpo = JSON.stringify({ pedidoRegistroEventoXmlGZipB64: await gzipB64(`<?xml version="1.0" encoding="UTF-8"?>${xmlAssinado}`) });
+  const r = await mtls.fetch(`${BASE[ambiente] || BASE.restrita}/nfse/${so(chave)}/eventos`, {
+    method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: corpo, signal: AbortSignal.timeout(30000),
+  });
+  const txt = await r.text();
+  let j = null; try { j = JSON.parse(txt); } catch (x) { j = null; }
+  if (r.ok && j && (j.eventoXmlGZipB64 || j.EventoXmlGZipB64)) {
+    const ev = await gunzipTexto(j.eventoXmlGZipB64 || j.EventoXmlGZipB64).catch(() => null);
+    return { ok: true, status: r.status, eventoXml: ev };
+  }
+  const erros = (j && (j.erros || j.Erros || j.erro)) || [{ descricao: (txt || "").slice(0, 400) || `HTTP ${r.status}` }];
+  return { ok: false, status: r.status, erros: (Array.isArray(erros) ? erros : [erros]).map((x) => ({ codigo: x.Codigo || x.codigo || null,
+    descricao: [x.Descricao || x.descricao || x.mensagem || "", x.Complemento || x.complemento || ""].filter(Boolean).join(" — ") || JSON.stringify(x) })),
+    bruto: (txt || "").slice(0, 2000) };
+}
+// O DANFSe (o PDF da nota) é do ADN, o Ambiente de Dados Nacional, pela chave de acesso.
+const ADN = { restrita: "https://adn.producaorestrita.nfse.gov.br", producao: "https://adn.nfse.gov.br" };
+
+module.exports = { NS, BASE, ADN, montarCancelamento, enviarEvento, faltaNaEmpresa, montarDps, idDps, dhAgora, assinar, enviar, gzipB64, gunzipTexto, esc, tag, dinheiro, so };

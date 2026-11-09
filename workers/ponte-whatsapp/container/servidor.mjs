@@ -505,7 +505,10 @@ http.createServer(async (req, res) => {
       if (alvo.protocol !== "https:" || !/(^|\.)nfse\.gov\.br$/.test(alvo.hostname)) return json(res, 400, { ok: false, erro: "só o domínio da NFS-e nacional" });
       const resp = await new Promise((ok) => {
         const r2 = https.request(alvo, { method: b.method || "POST", headers: b.headers || {}, key: b.key, cert: b.cert, timeout: 30000 }, (rr) => {
-          const partes = []; rr.on("data", (x) => partes.push(x)); rr.on("end", () => ok({ ok: true, status: rr.statusCode, corpo: Buffer.concat(partes).toString("utf8") }));
+          const partes = []; rr.on("data", (x) => partes.push(x));
+          // O PDF (DANFSe) vem binario: vai em base64, senao chega corrompido ao ERP.
+          rr.on("end", () => { const buf = Buffer.concat(partes); ok({ ok: true, status: rr.statusCode, tipo: rr.headers["content-type"] || "",
+            corpo: b.binario ? buf.toString("base64") : buf.toString("utf8"), base64: !!b.binario }); });
         });
         r2.on("timeout", () => { r2.destroy(new Error("a Receita não respondeu em 30 s")); });
         r2.on("error", (e) => ok({ ok: false, erro: String((e && e.message) || e).slice(0, 300) }));

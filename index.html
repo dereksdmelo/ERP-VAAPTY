@@ -22305,6 +22305,27 @@ function FinNotas() {
     try { await fin("nfse", { id: n.id }, { method: "DELETE" }); carregar(); } catch (e) { setErro(e.message); }
   };
   const verXml = async (n) => { try { setXml(await fin("nfse", { acao: "xml", id: n.id })); } catch (e) { setErro(e.message); } };
+  /* O PDF (DANFSe) vem da Receita em base64 e abre numa aba; a aba é aberta NO CLIQUE (decisão 15). */
+  const verPdf = async (n) => {
+    const j = window.open("", "_blank");
+    setErro(""); setIndo(`pdf${n.id}`);
+    try {
+      const d = await fin("nfse", { acao: "pdf", id: n.id });
+      const bytes = Uint8Array.from(atob(d.pdf), (c) => c.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+      if (j) j.location.href = url; else setErro("O navegador bloqueou a janela. Permita pop-ups para este site.");
+    } catch (e) { if (j) j.close(); setErro(e.message); }
+    setIndo("");
+  };
+  const [cancelando, setCancelando] = useState(null);
+  const cancelar = async () => {
+    setErro(""); setIndo(`c${cancelando.n.id}`);
+    try {
+      await fin("nfse", { acao: "cancelar", id: cancelando.n.id }, finJson("POST", { codigo: cancelando.codigo, motivo: cancelando.motivo }));
+      setCancelando(null);
+    } catch (e) { setErro(e.message); }
+    setIndo(""); carregar();
+  };
   const COR = { rascunho: [C.bg, C.mute], enviando: [AMARELO.fundo, AMARELO.texto], emitida: ["#E8F3EE", C.verde], rejeitada: ["#FBEAE8", "#B42318"], cancelada: [C.bg, C.mute] };
   if (!d) return <p className="text-[13px]" style={{ color: erro ? C.laranja : C.mute }}>{erro || "Lendo as notas…"}</p>;
   return (
@@ -22398,13 +22419,15 @@ function FinNotas() {
                 <td className="whitespace-nowrap px-2 py-1.5" style={{ fontFamily: F.mono }}>{n.numero_nfse || (n.numero_dps ? `DPS ${n.serie}/${n.numero_dps}` : "—")}</td>
                 <td className="px-2 py-1.5"><b>{n.tomador_nome}</b><span className="block text-[11px]" style={{ color: C.mute, fontFamily: F.mono }}>{n.tomador_doc}</span></td>
                 <td className="px-2 py-1.5">{n.descricao}{n.estoque && n.estoque.veiculo ? <span className="block text-[11px]" style={{ color: C.roxo }}>{n.estoque.veiculo.placa}</span> : null}
-                  {n.situacao === "rejeitada" && (n.erros || []).map((x, i) => <span key={i} className="block text-[11px]" style={{ color: "#B42318" }}>{x.codigo ? `${x.codigo}: ` : ""}{x.descricao || x.mensagem}</span>)}
+                  {(n.situacao === "rejeitada" || n.situacao === "emitida") && (n.erros || []).filter((x) => x.codigo !== "resposta").map((x, i) => <span key={i} className="block text-[11px]" style={{ color: "#B42318" }}>{x.codigo ? `${x.codigo}: ` : ""}{x.descricao || x.mensagem}</span>)}
                   {n.chave_acesso && <span className="block text-[10.5px]" style={{ color: C.mute, fontFamily: F.mono }}>chave {n.chave_acesso}</span>}</td>
                 <td className="whitespace-nowrap px-2 py-1.5 text-right font-semibold" style={{ fontVariantNumeric: "tabular-nums" }}>{rs2(n.valor)}</td>
                 <td className="px-2 py-1.5"><span className="rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ background: COR[n.situacao][0], color: COR[n.situacao][1] }}>{n.situacao}</span></td>
                 <td className="whitespace-nowrap px-2 py-1.5 text-right text-[12px]">
                   {(n.situacao === "rascunho" || n.situacao === "rejeitada") && <button disabled={!!indo} onClick={() => emitir(n)} className="mr-2 font-semibold" style={{ color: C.roxo }}>{indo === n.id ? "enviando…" : n.situacao === "rejeitada" ? "tentar de novo" : "emitir"}</button>}
+                  {n.chave_acesso && <button disabled={!!indo} onClick={() => verPdf(n)} className="mr-2 font-semibold" style={{ color: C.roxo }}>{indo === `pdf${n.id}` ? "baixando…" : "PDF"}</button>}
                   <button onClick={() => verXml(n)} className="mr-2" style={{ color: C.mute }}>XML</button>
+                  {n.situacao === "emitida" && <button disabled={!!indo} onClick={() => setCancelando({ n, codigo: "1", motivo: "" })} className="mr-2" style={{ color: C.laranja }}>{indo === `c${n.id}` ? "cancelando…" : "cancelar"}</button>}
                   {n.situacao !== "emitida" && <button onClick={() => apagar(n)} style={{ color: C.laranja }}>apagar</button>}
                 </td>
               </tr>
@@ -22413,6 +22436,27 @@ function FinNotas() {
         </table>
         {!d.notas.length && <p className="px-3 py-6 text-center text-[13px]" style={{ color: C.mute }}>Nenhuma nota ainda.</p>}
       </div>
+      {cancelando && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4" style={{ background: "rgba(24,18,33,0.45)" }} onClick={() => setCancelando(null)}>
+          <div className="mt-16 w-full max-w-md rounded-xl p-4" style={{ background: C.paper }} onClick={(e) => e.stopPropagation()}>
+            <b className="text-[15px]">Cancelar a nota {cancelando.n.numero_nfse} — {cancelando.n.tomador_nome}</b>
+            <p className="mt-1 text-[12.5px]" style={{ color: C.mute }}>{rs2(cancelando.n.valor)} · o cancelamento vai para a Receita e não se desfaz.</p>
+            <label className="mt-3 block"><Rotulo>Motivo</Rotulo>
+              <select className={inputCls} style={inputSty} value={cancelando.codigo} onChange={(e) => setCancelando({ ...cancelando, codigo: e.target.value })}>
+                <option value="1">Erro na emissão</option><option value="2">Serviço não prestado</option><option value="9">Outros</option>
+              </select></label>
+            <label className="mt-2 block"><Rotulo>Explique (15 a 255 letras)</Rotulo>
+              <textarea rows={3} className={inputCls} style={inputSty} value={cancelando.motivo} onChange={(e) => setCancelando({ ...cancelando, motivo: e.target.value })}
+                placeholder="ex.: valor da comissão digitado errado" /></label>
+            <div className="mt-3 flex items-center gap-3">
+              <button disabled={cancelando.motivo.trim().length < 15 || !!indo} onClick={cancelar} className="rounded-md px-3 py-1.5 text-[13px] font-semibold text-white"
+                style={{ background: C.laranja, opacity: cancelando.motivo.trim().length < 15 || indo ? 0.5 : 1 }}>{indo ? "cancelando…" : "Cancelar a nota"}</button>
+              <button onClick={() => setCancelando(null)} className="text-[12.5px]" style={{ color: C.mute }}>voltar</button>
+              <span className="text-[11px]" style={{ color: C.mute }}>{cancelando.motivo.trim().length}/15</span>
+            </div>
+          </div>
+        </div>
+      )}
       {xml && (
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4" style={{ background: "rgba(24,18,33,0.45)" }} onClick={() => setXml(null)}>
           <div className="w-full max-w-4xl rounded-xl p-4" style={{ background: C.paper }} onClick={(e) => e.stopPropagation()}>
