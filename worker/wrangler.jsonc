@@ -38,6 +38,12 @@
   // Workers AI cobra por uso, dentro da conta do Cloudflare -- sem chave
   // nova e sem o áudio sair para outro fornecedor.
   "ai": { "binding": "AI" },
+  // O certificado A1 da unidade para a NFS-e nacional (0138, decisão 74): é ele
+  // que abre a conexão mTLS com a Receita. Subido por
+  // worker/instalar-certificado-nfse.sh em 09/11/2026 (vence 20/01/2027); a
+  // chave e o certificado para ASSINAR a nota são os segredos NFSE_KEY_PEM e
+  // NFSE_CERT_PEM. Trocar o certificado é rodar o script de novo e trocar este id.
+  "mtls_certificates": [{ "binding": "NFSE_MTLS", "certificate_id": "cb7fc52d-2b34-4271-84f3-7df5111d145f" }],
   // A cada minuto: a Flávia responde quem escreveu, a leitura acha o
   // carro e a confirmação dos agendados (ia/atender.js), e o despertador
   // pergunta o estado dos números — sem ele os containers dormem em 15
