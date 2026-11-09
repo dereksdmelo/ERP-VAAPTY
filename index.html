@@ -7834,11 +7834,15 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               <Bloco titulo="Contrato de aceite de proposta"
                 sub="O último papel — e só depois do laudo.">
                 <div className="rounded-md px-3 py-3" style={{ background: AMARELO.fundo, border: `1px solid ${AMARELO.borda}` }}>
-                  <p className="text-[13px] font-semibold" style={{ color: AMARELO.texto }}>
+                  {/* O AVISO LEVA AONDE SE CORRIGE (09/11/2026, o Derek: "se o cara só esqueceu de ticar que o
+                      carro foi pra cautelar, ele clica aí e já leva direto onde deveria ter ticado"). */}
+                  <button type="button" className="text-left text-[13px] font-semibold underline decoration-dotted underline-offset-2" style={{ color: AMARELO.texto }}
+                    title="Ir para onde se marca isso"
+                    onClick={() => irParaCampo(!f.cautelarResultado ? (f.cautelarEnviado ? "Resultado da cautelar" : "Carro enviado para a cautelar") : "Pré-contrato e cautelar", "T")}>
                     {!f.cautelarResultado
                       ? (f.cautelarEnviado ? "Aguardando o resultado da cautelar." : "O carro ainda não foi para a cautelar.")
-                      : "Cautelar reprovada: falta imprimir o novo pré-contrato."}
-                  </p>
+                      : "Cautelar reprovada: falta imprimir o novo pré-contrato."} →
+                  </button>
                   <p className="mt-1 text-[11px] leading-snug" style={{ color: C.mute }}>
                     {!f.cautelarResultado
                       ? "O contrato sai depois do laudo, aprovado ou reprovado — antes disso o negócio ainda pode voltar à mesa, e contrato refeito é contrato que confunde o cliente."
