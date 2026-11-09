@@ -5032,7 +5032,8 @@ function GestorNoAtendimento({ atendimentoId, abrirChat }) {
           : !viva ? <p className="mt-1 text-[11px]" style={{ color: C.mute }}>Este atendimento ainda não mandou nada do aparelho do negociador.</p>
           : <div className="mt-1 text-[12px]"><ConversaResumida viva={viva} verTexto={verTexto} setVerTexto={setVerTexto} /></div>}
       </div>
-      {viva ? <div>{titulo("Ouvir a mesa")}<div className="mt-1"><OuvirAMesa viva={viva} /></div></div> : null}
+      {viva ? <div>{titulo("Ouvir a mesa")}<div className="mt-1">{viva.escuta_ok ? <OuvirAMesa viva={viva} />
+        : <p className="text-[11px] leading-snug" style={{ color: C.mute }}>O cliente ainda não autorizou a escuta. O negociador liga em "Iniciar escuta", na Abordagem — sem o aceite, não há som nem texto.</p>}</div></div> : null}
       <div>
         {titulo("Revisão")}
         <textarea value={texto} onChange={(e) => setTexto(e.target.value)} rows={4} placeholder="O retorno para o negociador sobre este atendimento"
