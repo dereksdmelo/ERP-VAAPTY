@@ -85,7 +85,10 @@ function montarDps(e, n, serie, numero, agora) {
   const xml = `<DPS xmlns="${NS}" versao="1.01"><infDPS Id="${id}">` +
     `<tpAmb>${amb}</tpAmb><dhEmi>${dh}</dhEmi><verAplic>VAAPTY-ERP-1.0</verAplic>` +
     `<serie>${esc(String(Number(so(serie))))}</serie><nDPS>${esc(String(numero))}</nDPS><dCompet>${dh.slice(0, 10)}</dCompet>` +
-    `<tpEmit>1</tpEmit><cLocEmi>${cLoc}</cLocEmi>` +
+    `<tpEmit>1</tpEmit>` +
+    // finNFSe (09/11/2026): o servidor (SefinNacional 1.6) já usa o leiaute da reforma tributária e exige a
+    // finalidade logo depois do tpEmit — 0 é a NFS-e regular. O XSD 1.01 que serviu de base ainda não o tinha.
+    `<finNFSe>0</finNFSe><cLocEmi>${cLoc}</cLocEmi>` +
     `<prest><CNPJ>${so(e.cnpj)}</CNPJ>${tag("IM", e.inscricao_municipal)}${regTrib}</prest>` +
     toma +
     `<serv><locPrest><cLocPrestacao>${cLoc}</cLocPrestacao></locPrest><cServ><cTribNac>${pad(so(e.servico_ctribnac), 6)}</cTribNac>` +
