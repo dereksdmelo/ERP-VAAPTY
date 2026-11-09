@@ -6432,6 +6432,18 @@ ambiente; rejeitada não gasta número, e reenviar a mesma nota usa o mesmo núm
 `/SefinNacional`), os parâmetros de Joinville para 100501 (`/parametros_municipais/4209102/100501`), o
 DANFSe (PDF) e o cancelamento.
 
+**A primeira nota de teste foi aceita em 09/11/2026** (Gerson, R$ 1.000, NFS-e nº 1 na produção restrita),
+depois de três descobertas que valem para quem mexer aqui:
+- **O envio vai pelo container da ponte, não pelo fetch do Worker.** O servidor da Receita é IIS e pede o
+  certificado por RENEGOCIAÇÃO TLS no meio da conexão; o fetch do Cloudflare não renegocia e devolvia
+  "error code: 520" — até sem certificado. A rota `/nfse` do `servidor.mjs` faz o POST em Node (`viaPonte`, em
+  `api/financeiro.js`), com a chave e o certificado que o ERP manda na chamada, sem gravar. O binding
+  `NFSE_MTLS` ficou como reserva. Mexeu na ponte: empacotar, publicar e reiniciar o número do adm.
+- **O servidor já roda o leiaute da reforma (SefinNacional 1.6)**: exige `finNFSe` (0, regular) logo depois do
+  `tpEmit`, e o XSD 1.01 que serviu de base não tinha. O "Complemento" da rejeição diz qual elemento falhou —
+  é guardado na nota; **E1235 sozinho não diz nada**. `?recurso=nfse&acao=diagnostico` testa a conexão.
+- **`pTotTribSN` vai de 0 a 99,99**, e todo texto vai em Latin-1 (travessão e aspas curvas viram simples).
+
 **A publicação de 87efa60 subiu com a Action em verde e não foi servida** (09/11/2026): o `versao.txt`
 ficou no commit anterior por mais de 15 minutos. Um commit vazio republicou e resolveu. Mais uma razão
 para conferir o `versao.txt` depois de toda publicação.
