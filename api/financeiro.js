@@ -2547,6 +2547,122 @@ async function orcamento(req, res, tok) {
  * para devolver zero seriam metade das subrequisições do Worker gastas
  * em nada — e o zero de novembro, na planilha, é célula vazia.
  */
+
+/* O ANO, SIMPLES (08/11/2026, o Derek: "o resultado de cada mês, uma noção macro de quanto gastou em
+ * cada área, e depois do resultado quanto foi de retirada pelos sócios; se não foi retirado, quanto
+ * acumulou de lucro e quanto já tem acumulado; se tirou mais que o resultado, quanto saiu do caixa
+ * acumulado — um pré-balanço").
+ *
+ * Até setembro de 2026 os números são os da planilha "Controle Financeiro Completo" (fin_historico,
+ * 0132), mapeados para os grupos do plano de contas. Depois, o sistema: o que passou no banco mais os
+ * títulos em aberto da competência, somados por grupo do plano (0129); a margem dos carros vendidos é a
+ * receita; as retiradas são os lançamentos em categoria de retirada, por sócio. O acumulado segue a
+ * regra da planilha: o do mês anterior + o resultado − as retiradas. */
+async function anoGestao(req, res, tok) {
+  const hoje = hojeAqui();
+  const atual = competenciaDe(hoje);
+  const a = /^\d{4}$/.test(String(req.query.ano || "")) ? Number(req.query.ano) : Number(hoje.slice(0, 4));
+  const [hist, cats] = await Promise.all([
+    supa(`${base("fin_historico")}?select=competencia,grupo,linha,valor&order=competencia.asc&limit=20000`, { headers: cab(tok) }).catch(() => []),
+    supa(`${base("fin_categoria")}?select=id,nome,codigo,pai_id,grupo`, { headers: cab(tok) }),
+  ]);
+  const catPor = {}; (cats || []).forEach((c) => { catPor[c.id] = c; });
+  const grupos = (cats || []).filter((c) => !c.pai_id && /^[2-8]$/.test(String(c.codigo || ""))).sort((x, y) => Number(x.codigo) - Number(y.codigo))
+    .map((c) => ({ codigo: String(c.codigo), nome: c.nome }));
+  const histPor = {};
+  (hist || []).forEach((h) => { const m = String(h.competencia).slice(0, 10); (histPor[m] = histPor[m] || []).push(h); });
+  const ultimoHist = Object.keys(histPor).sort().pop() || null;
+
+  const vazio = () => ({ receita: 0, receita_linhas: {}, grupos: {}, linhas: {}, retiradas: {}, veiculos: 0, sem_categoria: 0 });
+  const doHistorico = (m) => {
+    const x = vazio(); x.fonte = "planilha";
+    histPor[m].forEach((h) => {
+      const v = Number(h.valor) || 0;
+      if (h.grupo === "receita") { x.receita += v; x.receita_linhas[h.linha] = v; }
+      else if (h.grupo === "veiculos") x.veiculos = v;
+      else if (h.grupo === "retirada") x.retiradas[h.linha] = (x.retiradas[h.linha] || 0) + v;
+      else if (h.grupo === "acumulado") x.acumulado_planilha = v;
+      else if (/^[2-8]$/.test(h.grupo)) { x.grupos[h.grupo] = (x.grupos[h.grupo] || 0) + v; (x.linhas[h.grupo] = x.linhas[h.grupo] || {})[h.linha] = v; }
+    });
+    return x;
+  };
+  const codGrupoDe = (catId) => {
+    const c = catPor[catId]; if (!c) return null;
+    const p = c.pai_id ? catPor[c.pai_id] : c;
+    const cod = String((p && p.codigo) || "").split(".")[0];
+    return /^[2-8]$/.test(cod) ? cod : null;
+  };
+  const doSistema = async (m) => {
+    const x = vazio(); x.fonte = m === atual ? "andamento" : "sistema";
+    const d = await dreDoMes(tok, m);
+    x.receita = Number(d.rentabilidade) || 0; x.receita_linhas["Margem dos carros"] = x.receita;
+    x.veiculos = d.carros_vendidos || 0;
+    x.sem_categoria = Number(d.sem_categoria) || 0;
+    const soma = (catId, v) => {
+      const g = codGrupoDe(catId); const c = catPor[catId];
+      if (!g) { x.sem_categoria += v; return; }
+      x.grupos[g] = (x.grupos[g] || 0) - v;
+      const n = c ? `${c.codigo ? c.codigo + " " : ""}${c.nome}` : "—";
+      (x.linhas[g] = x.linhas[g] || {})[n] = ((x.linhas[g] || {})[n] || 0) - v;
+    };
+    (d.linhas || []).forEach((l) => soma(l.id, Number(l.valor) || 0));
+    Object.keys(d.aberto_por_cat || {}).forEach((k) => soma(k, Number(d.aberto_por_cat[k]) || 0));
+    return x;
+  };
+
+  // Os meses do sistema que o acumulado precisa: do mês depois da planilha até o fim do ano pedido.
+  const meses = [];
+  const ini = ultimoHist ? (() => { const [y, mm] = ultimoHist.split("-").map(Number); return new Date(Date.UTC(y, mm, 1)).toISOString().slice(0, 10); })() : `${a}-01-01`;
+  // Começa no primeiro mês da planilha (sem custo: é leitura da memória), para o acumulado e o
+  // "acumulado no início do ano" virem certos em qualquer ano pedido.
+  const primeiro = Object.keys(histPor).sort()[0] || ini;
+  const comeco = [primeiro, `${a}-01-01`].sort()[0];
+  void ini;
+  for (let d0 = new Date(Date.parse(comeco)); ; d0.setUTCMonth(d0.getUTCMonth() + 1)) {
+    const m = d0.toISOString().slice(0, 10);
+    if (Number(m.slice(0, 4)) > a) break;
+    meses.push(m);
+  }
+  const porMes = {};
+  for (const m of meses) {
+    if (histPor[m]) porMes[m] = doHistorico(m);
+    else if (m <= atual && (!ultimoHist || m > ultimoHist)) porMes[m] = await doSistema(m);
+  }
+  // Retiradas do sistema: lançamentos em categoria de retirada, por quem recebeu.
+  const sist = meses.filter((m) => porMes[m] && porMes[m].fonte !== "planilha");
+  if (sist.length) {
+    const ret = await supa(`${base("fin_lancamento")}?select=competencia,debito,credito,favorecido,descricao,fin_favorecido(nome),fin_categoria!inner(grupo)` +
+      `&fin_categoria.grupo=eq.retirada&situacao=in.(aberto,efetivado)&competencia=gte.${sist[0]}&competencia=lte.${sist[sist.length - 1]}&limit=5000`, { headers: cab(tok) }).catch(() => []);
+    (ret || []).forEach((l) => {
+      const m = String(l.competencia).slice(0, 10); if (!porMes[m]) return;
+      const quem = (l.fin_favorecido && l.fin_favorecido.nome) || l.favorecido || "Sócios";
+      porMes[m].retiradas[quem] = (porMes[m].retiradas[quem] || 0) + (Number(l.debito) || 0) - (Number(l.credito) || 0);
+    });
+  }
+  // O resultado, o retido e o acumulado, em ordem.
+  let acumulado = null;
+  const r2 = (v) => Math.round(v * 100) / 100;
+  for (const m of meses) {
+    const x = porMes[m]; if (!x) continue;
+    const despesas = Object.values(x.grupos).reduce((t, v) => t + v, 0);
+    x.despesas = r2(despesas);
+    x.resultado = r2(x.receita + x.sem_categoria - despesas);
+    x.retirada_total = r2(Object.values(x.retiradas).reduce((t, v) => t + v, 0));
+    x.retido = r2(x.resultado - x.retirada_total);
+    if (x.fonte === "planilha" && x.acumulado_planilha != null) acumulado = x.acumulado_planilha;
+    else acumulado = r2((acumulado || 0) + x.retido);
+    x.acumulado = acumulado;
+    Object.keys(x.grupos).forEach((g) => { x.grupos[g] = r2(x.grupos[g]); });
+  }
+  const doAno = Array.from({ length: 12 }, (_, i) => `${a}-${String(i + 1).padStart(2, "0")}-01`);
+  const antes = meses.filter((m) => m < doAno[0] && porMes[m]).pop();
+  return res.status(200).json({
+    ano: a, grupos, ultimo_da_planilha: ultimoHist,
+    acumulado_inicio: antes ? porMes[antes].acumulado : null,
+    meses: doAno.map((m) => ({ competencia: m, ...(porMes[m] || { fonte: "futuro" }) })),
+  });
+}
+
 async function ano(req, res, tok) {
   const hoje = hojeAqui();
   const a = /^\d{4}$/.test(String(req.query.ano || "")) ? Number(req.query.ano) : Number(hoje.slice(0, 4));
@@ -3343,7 +3459,7 @@ async function cartao(req, res, tok) {
 const RECURSOS = { cartao, conta, categoria, funcionario, favorecido, lancamento, importar, dre, carros, vale, folha, remuneracao,
                    "contas-fixas": contasFixas, "config-folha": configFolha,
                    "perfil-remuneracao": perfilRemuneracao,
-                   fechamento, orcamento, ano, rateio, negociacao, titulo, fluxo, log, recibo, pendencias, recebimentos, saldos,
+                   fechamento, orcamento, ano: anoGestao, "ano-antigo": ano, rateio, negociacao, titulo, fluxo, log, recibo, pendencias, recebimentos, saldos,
                    estoque: estoqueLista };
 
 module.exports = async function handler(req, res) {

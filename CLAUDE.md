@@ -6322,3 +6322,23 @@ novo a ficha velha e desfaria a leitura.
 **A leitura falha em silêncio.** Sem rede o aparelho segue com o que
 tem — travar o atendimento por causa de uma consulta seria pior que a
 tela incompleta.
+
+### 70. O Ano é um pré-balanço, e até set/2026 vale a planilha (0132)
+
+O Derek, em 08/11/2026: a aba Ano mostra o resultado de cada mês, o gasto por área (os grupos 2–8 do
+plano de contas, 0129), as retiradas dos sócios e quanto ficou na empresa ou saiu do lucro acumulado.
+Os números até setembro de 2026 são os da planilha "Controle Financeiro Completo" (abas FLUXO DE CAIXA
+2025 e 2026), carregados em `fin_historico` — **os valores não ficam no repositório**, só a tabela. O
+mapeamento linha → grupo: Imposto e Royalties → 8; cautelar, despachante, cartório, comissão externa,
+correio, outros custos, combustíveis, manutenção de veículos → 2; comissões, salários fixos, processos
+trabalhistas, confraternizações, pró-labore, ajuda de custo, alimentação → 3; aluguel, água, energia,
+telefone, faxineira, reformas → 4; marketing online, offline, feirão → 5; contabilidade, despesas internas,
+cartão de crédito, sistemas, seguro, advogado, impressora, inesperadas, viagens → 6; empréstimo → 7.
+Em todos os 21 meses, receita − grupos = o lucro da planilha. **Em 2025, de junho a dezembro, a
+planilha lançou a distribuição aos sócios como despesa ("Pró-Labore … distribuição"); aqui ela é
+retirada** — o resultado sobe, a retirada sobe igual, e o acumulado é o da planilha. O acumulado de
+jan–mai/2025 não segue a regra (é como a planilha foi preenchida) e é respeitado. De outubro de 2026 em
+diante, o sistema: o que passou no banco + os títulos em aberto da competência, por grupo; retiradas são
+os lançamentos em categoria de retirada; acumulado = o do mês anterior + resultado − retiradas, partindo
+dos R$ 62.643,23 de setembro (o último da planilha). `anoGestao` em `api/financeiro.js`; o Ano antigo
+(por categoria) segue em `?recurso=ano-antigo`.
