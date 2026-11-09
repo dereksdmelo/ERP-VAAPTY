@@ -3449,23 +3449,19 @@ module.exports = async function handler(req, res) {
       if (/^[A-Za-z]{3}-?\d[A-Za-z0-9]\d{2}$/.test(q)) q = q.replace("-", "");
       q = q.replace(/[(),*%\\]/g, " ").trim();
       if (q.length < 3) return res.status(200).json({ mensagens: [] });
-      const e = encodeURIComponent(q);
-      const fil = [];
+      /* Pela função do banco (0143): índice de trigramas e a equipe
+       * conferida uma vez. Falhar aqui diz o que houve — antes era um
+       * "Falha interna" no alto da caixa. */
       const can = String(req.query.canal || "").replace(/[^\w-]/g, "");
-      if (can) fil.push(`wa_conversa.wa_canal.slug=eq.${encodeURIComponent(can)}`);
-      if (String(req.query.operacao || "") === "1") fil.push("wa_conversa.wa_canal.uso=eq.operacao");
-      if (String(req.query.comercial || "") === "1") fil.push("wa_conversa.wa_canal.comercial=eq.true");
-      if (String(req.query.negociacao || "") === "1") fil.push("wa_conversa.wa_canal.uso=eq.negociacao");
-      const so = String(req.query.tipo || "") === "arquivos" ? "&tipo=eq.midia" : "";
-      const ms = await banco(`${URL_BASE}/rest/v1/wa_mensagem?select=id,conversa_id,eco,tipo,texto,anexo,autor,quando,`
-        + `wa_conversa!inner(id,nome,telefone,grupo,ultima_em,primeira_em,ultima_de_fora,respondida_em,lida_em,nao_lida,anuncio,atendimento_id,lead_id,wa_canal!inner(slug,nome,atendente,comercial,uso))`
-        + `&or=(texto.ilike.*${e}*,anexo->>nome.ilike.*${e}*,leitura.ilike.*${e}*)${so}&${fil.join("&")}&order=quando.desc&limit=60`,
-        { headers: cabecalhos(tok) }) || [];
-      return res.status(200).json({ mensagens: ms.map((m) => {
-        const { wa_conversa, ...resto } = m;
-        const { wa_canal, ...cv } = wa_conversa || {};
-        return { ...resto, conversa: { ...cv, canal: wa_canal || null } };
-      }) });
+      const uso = String(req.query.operacao || "") === "1" ? "operacao" : String(req.query.negociacao || "") === "1" ? "negociacao" : null;
+      try {
+        const ms = await banco(`${URL_BASE}/rest/v1/rpc/wa_procurar`, { method: "POST", headers: json(tok),
+          body: JSON.stringify({ p_q: q, p_uso: uso, p_comercial: String(req.query.comercial || "") === "1" ? true : null,
+            p_canal: can || null, p_arquivos: String(req.query.tipo || "") === "arquivos", p_limite: 60 }) }) || [];
+        return res.status(200).json({ mensagens: ms });
+      } catch (e) {
+        return res.status(200).json({ mensagens: [], erro_busca: "A pesquisa demorou demais — tente uma palavra mais específica." });
+      }
     }
 
     const canal = String(req.query.canal || "").replace(/[^\w-]/g, "");
