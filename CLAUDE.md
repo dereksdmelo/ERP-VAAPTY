@@ -6363,3 +6363,20 @@ importação ignora quem está numa união.
 `categoria_antes_id` guarda a de antes para "tirar do carro". **Na sincronização, só o título da COMPRA
 marca o lado da compra como gerido** (era qualquer título não-venda): um custo atribuído à mão num carro
 de antes do corte puxaria a compra e os custos de outubro.
+
+### 72. Marketing, criativo por criativo (0135)
+
+Área própria (gerente e financeiro): Visão geral, Criativos e Contas de anúncio. O anúncio de "clique
+para o WhatsApp" vem em `wa_conversa.anuncio` (a ponte guarda o `referral` desde 26/09), e cada
+conversa segue a MESMA corrente da pré-venda (lead, agendado, na loja, fechou, carro, margem) — em
+`api/funil.js?recurso=marketing`, separada por anúncio. O investimento é o das contas 5 do financeiro,
+ou o gasto da Meta quando a conta está conectada. **O token da Meta não volta ao navegador**:
+`mkt_conexao` não tem leitura; o gerente grava por `mkt_conectar()` (o servidor confere o token na Meta
+antes) e o servidor lê por `mkt_token()`. **O banco devolve no máximo 1.000 linhas por consulta**: a
+primeira versão contou exatamente 1.000 conversas; as leituras do marketing vão em páginas.
+
+Na mesma leva: a aba **Carros** do financeiro somava títulos em aberto (e cancelados) como pagos — o
+título "Receber de…" do contrato (0119) dobrava o recebido (Siena MDX9I27, 26.500 de 13.250). Agora só
+conta o que passou no banco, e clicar na linha mostra os lançamentos de cada número. A **agenda da TV**
+(0136) mostra todos os horários do dia, com o estado de cada um (confirmou, veio?, veio, fechou, não
+veio, remarcou, cancelou), e a letra encolhe até caber.
