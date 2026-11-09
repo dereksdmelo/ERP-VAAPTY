@@ -1164,18 +1164,35 @@ async function abrirAnexoDut(id, aoErro) {
     if (aoErro) aoErro(e.message);
   }
 }
-async function waMensagens(id) {
-  const r = await fetchAut(`/api/atendimento?recurso=conversas&id=${encodeURIComponent(id)}`);
+async function waMensagens(id, foco) {
+  const r = await fetchAut(`/api/atendimento?recurso=conversas&id=${encodeURIComponent(id)}${foco ? `&foco=${encodeURIComponent(foco)}` : ""}`);
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.erro || "Não consegui abrir a conversa.");
   return d.mensagens || [];
 }
-async function waEnviar(id, texto) {
+async function waEnviar(id, texto, responde) {
   const r = await fetchAut(`/api/atendimento?recurso=conversas&acao=enviar&id=${encodeURIComponent(id)}`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ texto }),
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ texto, responde: responde || undefined }),
   });
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.erro || "Não consegui enviar.");
+  return d;
+}
+/* Pesquisar nas mensagens (09/11/2026): texto, nome do arquivo e a leitura
+ * da IA, nos mesmos números que a caixa mostra. */
+async function waProcurar({ q, canal, operacao, comercial, negociacao, tipo }) {
+  const p = comoQuery({ acao: "procurar", q, canal: canal || undefined, operacao: operacao ? "1" : undefined, comercial: comercial ? "1" : undefined, negociacao: negociacao ? "1" : undefined, tipo: tipo || undefined });
+  const r = await fetchAut(`/api/atendimento?recurso=conversas&${p}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui pesquisar.");
+  return d.mensagens || [];
+}
+async function waEncaminhar(mensagemId, conversas) {
+  const r = await fetchAut("/api/foto?recurso=wa-encaminhar", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mensagem_id: mensagemId, conversas }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui encaminhar.");
   return d;
 }
 /* Arquivo pela caixa (03/11/2026): comprovante, CRLV, foto, áudio — vai
@@ -10658,7 +10675,7 @@ function Avatar({ nome, tam }) {
   );
 }
 
-function ListaDeBaloes({ msgs }) {
+function ListaDeBaloes({ msgs, aoResponder, aoEncaminhar, foco }) {
   let ultimo = "", lado = null;
   return (msgs || []).map((m) => {
     const dia = diaDaMensagem(m.quando);
@@ -10678,18 +10695,24 @@ function ListaDeBaloes({ msgs }) {
             </span>
           </div>
         )}
-        <Balao m={m} primeiro={primeiro} />
+        <Balao m={m} primeiro={primeiro} aoResponder={aoResponder} aoEncaminhar={aoEncaminhar} foco={foco === m.id} />
       </React.Fragment>
     );
   });
 }
 
-function Balao({ m, primeiro = true }) {
+function Balao({ m, primeiro = true, aoResponder, aoEncaminhar, foco }) {
   const meu = !!m.eco;
   const anexo = m.anexo || {};
   const [url, setUrl] = useState("");
   const [indo, setIndo] = useState(false);
   const [erro, setErro] = useState("");
+  const [menu, setMenu] = useState(false);
+  // Encaminha-se o que a caixa tem: texto, ou arquivo guardado (desde 06/10/2026).
+  const daPraEncaminhar = m.tipo === "midia" ? !!anexo.chave : !!String(m.texto || "").trim();
+  const podeResponder = !!aoResponder && !!m.wa_id && !/^erp-/.test(String(m.wa_id)) && m.tipo !== "reacao";
+  const temMenu = podeResponder || (aoEncaminhar && daPraEncaminhar) || !!m.texto;
+  const citada = anexo.responde;
 
   const QUE = { audio: anexo.voz ? "áudio de voz" : "áudio", image: "foto", video: "vídeo",
                 document: anexo.nome || "documento", sticker: "figurinha" };
@@ -10708,9 +10731,33 @@ function Balao({ m, primeiro = true }) {
   };
 
   return (
-    <div className={`flex ${meu ? "justify-end pl-10" : "justify-start pr-10"}`} style={{ marginTop: primeiro ? 8 : 1 }}>
-      <div className={`relative max-w-[85%] rounded-lg px-2.5 pb-1.5 pt-1.5 ${primeiro ? (meu ? "rounded-tr-none" : "rounded-tl-none") : ""}`}
-        style={{ background: meu ? WA.meu : WA.dele, color: WA.texto, boxShadow: "0 1px 0.5px rgba(11,20,26,0.13)" }}>
+    <div data-msg={m.id} className={`flex ${meu ? "justify-end pl-10" : "justify-start pr-10"}`} style={{ marginTop: primeiro ? 8 : 1 }}>
+      <div className={`group relative max-w-[85%] rounded-lg px-2.5 pb-1.5 pt-1.5 ${primeiro ? (meu ? "rounded-tr-none" : "rounded-tl-none") : ""}`}
+        style={{ background: meu ? WA.meu : WA.dele, color: WA.texto, transition: "box-shadow .3s",
+          boxShadow: foco ? "0 0 0 3px #F5C518" : "0 1px 0.5px rgba(11,20,26,0.13)" }}
+        onMouseLeave={() => setMenu(false)}>
+        {/* O MENU DO BALÃO, como o do WhatsApp Web: a setinha no canto,
+            que acende ao passar o mouse (no celular fica à vista, meio
+            apagada). Responder cita; encaminhar manda para outra conversa. */}
+        {temMenu && (
+          <button onClick={() => setMenu((x) => !x)} aria-label="Opções da mensagem"
+            className="absolute right-1 top-1 z-10 rounded-full px-1 text-[13px] leading-none opacity-40 group-hover:opacity-100"
+            style={{ background: meu ? WA.meu : WA.dele, color: WA.mute }}>▾</button>
+        )}
+        {menu && (
+          <div className={`absolute top-6 z-20 min-w-[160px] overflow-hidden rounded-md py-1 text-[14px] ${meu ? "right-1" : "left-1"}`}
+            style={{ background: "#fff", boxShadow: "0 2px 5px rgba(11,20,26,.26)" }}>
+            {podeResponder && (
+              <button onClick={() => { setMenu(false); aoResponder(m); }} className="block w-full px-4 py-2 text-left hover:bg-[#F5F6F6]">Responder</button>
+            )}
+            {aoEncaminhar && daPraEncaminhar && (
+              <button onClick={() => { setMenu(false); aoEncaminhar(m); }} className="block w-full px-4 py-2 text-left hover:bg-[#F5F6F6]">Encaminhar</button>
+            )}
+            {!!m.texto && (
+              <button onClick={() => { setMenu(false); try { navigator.clipboard.writeText(m.texto); } catch (e) {} }} className="block w-full px-4 py-2 text-left hover:bg-[#F5F6F6]">Copiar texto</button>
+            )}
+          </div>
+        )}
         {/* o "rabinho" do balão, no canto de cima */}
         {primeiro && (
           <svg viewBox="0 0 8 13" width="8" height="13" className="absolute top-0" aria-hidden="true"
@@ -10730,6 +10777,15 @@ function Balao({ m, primeiro = true }) {
         {meu && (m.quem_mandou || String(m.quando) >= "2026-11-05T20:00") && (
           <div className="mb-0.5 text-[11.5px] font-semibold" style={{ color: m.quem_mandou ? "#7B3FA0" : WA.mute }}>
             {m.quem_mandou || "pelo celular / WhatsApp Web"}
+          </div>
+        )}
+        {anexo.encaminhada && (
+          <div className="mb-0.5 pr-4 text-[12px] italic" style={{ color: WA.mute }}>↪ Encaminhada</div>
+        )}
+        {citada && (
+          <div className="mb-1 mr-4 rounded-md px-2 py-1 text-[12.5px]" style={{ background: meu ? "#CFF0C7" : "#F0F2F5", borderLeft: "4px solid #06CF9C" }}>
+            {citada.autor && <div className="font-semibold" style={{ color: "#06CF9C" }}>{citada.autor}</div>}
+            <div className="line-clamp-3 whitespace-pre-wrap" style={{ color: WA.mute }}>{citada.texto || "mensagem"}</div>
           </div>
         )}
         {m.tipo === "midia" && (
@@ -10884,7 +10940,92 @@ function AtendimentoDaConversa({ telefone, nome, aoAbrir }) {
   );
 }
 
-function Conversa({ conversa, aoVoltar, aoVirarLead, equipe, aoMarcar, aoAbrir }) {
+/* ENCAMINHAR (09/11/2026): até cinco conversas do mesmo recorte da caixa
+ * (no adm, só as do número do adm), e vai o texto ou o arquivo. */
+function EncaminharMensagem({ m, escopo, aoFechar }) {
+  const [busca, setBusca] = useState("");
+  const [lista, setLista] = useState(null);
+  const [esc, setEsc] = useState([]);
+  const [indo, setIndo] = useState(false);
+  const [erro, setErro] = useState("");
+  const [feito, setFeito] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    const t = setTimeout(() => {
+      waConversas({ ...escopo, busca: busca.trim() || undefined })
+        .then((d) => { if (vivo) setLista(d); }).catch((e) => { if (vivo) setErro(e.message); });
+    }, busca ? 350 : 0);
+    return () => { vivo = false; clearTimeout(t); };
+  }, [busca]);
+  const alternar = (c) => setEsc((x) => (x.some((y) => y.id === c.id) ? x.filter((y) => y.id !== c.id) : x.length >= 5 ? x : x.concat([c])));
+  const mandar = async () => {
+    setIndo(true); setErro("");
+    try { setFeito(await waEncaminhar(m.id, esc.map((c) => c.id))); }
+    catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+  const an = m.anexo || {};
+  const nomeDe = (id) => { const c = esc.find((x) => x.id === id); return c ? waQuem(c) : "conversa"; };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(11,20,26,.45)" }}
+      onClick={(e) => { if (e.target === e.currentTarget) aoFechar(); }}>
+      <div className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-xl" style={{ background: "#fff" }}>
+        <div className="flex items-center gap-3 px-4 py-3" style={{ background: "#008069", color: "#fff" }}>
+          <button onClick={aoFechar} className="text-[18px] leading-none" aria-label="Fechar">✕</button>
+          <div className="text-[16px] font-semibold">Encaminhar mensagem</div>
+        </div>
+        <div className="truncate px-4 py-2 text-[12.5px]" style={{ background: WA.barra, color: WA.mute }}>
+          {m.tipo === "midia" ? `📎 ${an.nome || "arquivo"}${an.legenda ? ` — ${an.legenda}` : ""}` : String(m.texto || "").slice(0, 140)}
+        </div>
+        {feito ? (
+          <div className="space-y-1.5 p-4 text-[13.5px]">
+            {(feito.resultado || []).map((r) => (
+              <div key={r.conversa_id} style={{ color: r.ok ? C.verde : C.laranja }}>
+                {r.ok ? "✓ Encaminhada para " : "✗ Não foi para "}{nomeDe(r.conversa_id)}{r.ok ? "" : ` — ${r.erro}`}
+              </div>
+            ))}
+            <button onClick={aoFechar} className="mt-2 rounded-full px-4 py-1.5 text-[13px] font-semibold text-white" style={{ background: "#008069" }}>Fechar</button>
+          </div>
+        ) : (
+          <>
+            <div className="px-3 py-2">
+              <input autoFocus value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Pesquisar nome, grupo ou telefone"
+                className="w-full rounded-lg px-3 py-2 text-[14px] outline-none" style={{ background: WA.barra }} />
+            </div>
+            <div className="min-h-[180px] flex-1 overflow-y-auto">
+              {!lista && !erro && <p className="p-4 text-[13px]" style={{ color: WA.mute }}>carregando…</p>}
+              {lista && !lista.length && <p className="p-4 text-[13px]" style={{ color: WA.mute }}>Nenhuma conversa com esse nome.</p>}
+              {(lista || []).map((c) => {
+                const marcado = esc.some((y) => y.id === c.id);
+                return (
+                  <button key={c.id} onClick={() => alternar(c)} className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-[#F5F6F6]">
+                    <span className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded text-[12px] text-white"
+                      style={{ background: marcado ? "#008069" : "#fff", border: `2px solid ${marcado ? "#008069" : "#8696A0"}` }}>{marcado ? "✓" : ""}</span>
+                    <Avatar nome={waQuem(c)} tam={36} />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[14.5px]" style={{ color: WA.texto }}>{waQuem(c)}</div>
+                      <div className="truncate text-[12px]" style={{ color: WA.mute }}>{c.grupo ? "grupo" : foneBonito(c.telefone)}{c.canal ? ` · ${c.canal.nome}` : ""}</div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            {erro && <p className="px-4 pb-1 text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
+            <div className="flex items-center gap-2 px-4 py-2.5" style={{ background: WA.barra }}>
+              <span className="min-w-0 flex-1 truncate text-[12.5px]" style={{ color: WA.mute }}>
+                {esc.length ? esc.map(waQuem).join(", ") : "Escolha até 5 conversas"}
+              </span>
+              <button onClick={mandar} disabled={!esc.length || indo} className="rounded-full px-4 py-1.5 text-[13px] font-semibold text-white"
+                style={{ background: "#008069", opacity: !esc.length || indo ? 0.5 : 1 }}>{indo ? "encaminhando…" : "Encaminhar"}</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Conversa({ conversa, aoVoltar, aoVirarLead, equipe, aoMarcar, aoAbrir, foco, escopo }) {
   const [msgs, setMsgs] = useState(null);
   const [erro, setErro] = useState("");
   const [virando, setVirando] = useState(false);
@@ -10893,6 +11034,9 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe, aoMarcar, aoAbrir }
   const [rascunho, setRascunho] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [erroEnvio, setErroEnvio] = useState("");
+  const [respondendo, setRespondendo] = useState(null);
+  const [encaminhando, setEncaminhando] = useState(null);
+  const caixa = useRef(null);
   const fim = useRef(null);
   const campoArquivo = useRef(null);
   const ehGrupo = !!conversa.grupo;
@@ -10911,14 +11055,14 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe, aoMarcar, aoAbrir }
   };
   // Trocar de conversa não leva o rascunho junto: o texto de uma pessoa
   // mandado para outra é o pior erro que esta caixa pode cometer.
-  useEffect(() => { setRascunho(""); setErroEnvio(""); }, [conversa.id]);
+  useEffect(() => { setRascunho(""); setErroEnvio(""); setRespondendo(null); }, [conversa.id]);
   const enviar = async () => {
     const texto = rascunho.trim();
     if (!texto || enviando) return;
     setEnviando(true); setErroEnvio("");
     try {
-      await waEnviar(conversa.id, texto);
-      setRascunho("");
+      await waEnviar(conversa.id, texto, respondendo && respondendo.id);
+      setRascunho(""); setRespondendo(null);
       try { setMsgs(await waMensagens(conversa.id)); } catch (e) {}
     } catch (e) { setErroEnvio(e.message); }
     setEnviando(false);
@@ -10960,17 +11104,27 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe, aoMarcar, aoAbrir }
       if (!vivo) return;
       if (!primeira && document.visibilityState !== "visible") { t = setTimeout(volta, 8000); return; }
       primeira = false;
-      try { const d = await waMensagens(conversa.id); if (vivo) { setMsgs(d); setErro(""); } }
+      try { const d = await waMensagens(conversa.id, foco); if (vivo) { setMsgs(d); setErro(""); } }
       catch (e) { if (vivo) setErro(e.message); }
       if (vivo) t = setTimeout(volta, 8000);
     };
     setMsgs(null); volta();
     return () => { vivo = false; clearTimeout(t); };
-  }, [conversa.id]);
+  }, [conversa.id, foco]);
 
   // O fim é o que interessa: quem abre uma conversa quer o que foi
-  // dito agora, não o começo (mesma razão do quadro ao vivo, 45).
-  useEffect(() => { if (fim.current) fim.current.scrollIntoView({ block: "end" }); }, [msgs && msgs.length]);
+  // dito agora, não o começo (mesma razão do quadro ao vivo, 45). Vinda
+  // da pesquisa, ela abre NA mensagem achada, marcada em amarelo.
+  const focado = useRef("");
+  useEffect(() => {
+    const k = `${conversa.id}:${foco}`;
+    if (foco && msgs && focado.current !== k) {
+      const el = document.querySelector(`[data-msg="${foco}"]`);
+      if (el) { el.scrollIntoView({ block: "center" }); focado.current = k; return; }
+    }
+    if (foco && focado.current === k) return;
+    if (fim.current) fim.current.scrollIntoView({ block: "end" });
+  }, [msgs && msgs.length, foco]);
 
   const operacao = conversa.canal && conversa.canal.comercial === false;
   return (
@@ -11035,7 +11189,9 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe, aoMarcar, aoAbrir }
             para frente — o que é mais antigo que isso continua só no celular.
           </div>
         )}
-        <ListaDeBaloes msgs={msgs} />
+        <ListaDeBaloes msgs={msgs} foco={foco}
+          aoResponder={(m) => { setRespondendo(m); setTimeout(() => caixa.current && caixa.current.focus(), 0); }}
+          aoEncaminhar={(m) => setEncaminhando(m)} />
         <div ref={fim} />
       </div>
 
@@ -11046,13 +11202,28 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe, aoMarcar, aoAbrir }
           horas: é uma pessoa que assumiu (decisão 64). */}
       <div className="px-4 py-2.5" style={{ background: WA.barra, borderTop: `1px solid ${WA.linha}` }}>
         {erroEnvio && <div className="mb-1.5 text-[12.5px]" style={{ color: C.laranja }}>{erroEnvio}</div>}
+        {/* A RESPOSTA CITADA, acima da caixa, como no WhatsApp. Cita-se ao
+            mandar texto; o arquivo mandado com ela segue sem a citação. */}
+        {respondendo && (
+          <div className="mb-2 flex items-start gap-2 rounded-lg px-3 py-1.5" style={{ background: "#fff", borderLeft: "4px solid #06CF9C" }}>
+            <div className="min-w-0 flex-1 text-[12.5px]">
+              <div className="font-semibold" style={{ color: "#06CF9C" }}>
+                Respondendo {respondendo.eco ? "a você" : (String(respondendo.autor || "").split(" · ")[0] || waQuem(conversa))}
+              </div>
+              <div className="truncate" style={{ color: WA.mute }}>
+                {respondendo.texto || (respondendo.tipo === "midia" ? `📎 ${(respondendo.anexo && respondendo.anexo.nome) || "arquivo"}` : "mensagem")}
+              </div>
+            </div>
+            <button onClick={() => setRespondendo(null)} aria-label="Cancelar a resposta" className="px-1 text-[16px] leading-none" style={{ color: WA.mute }}>✕</button>
+          </div>
+        )}
         <div className="flex items-end gap-2">
           <input ref={campoArquivo} type="file" className="hidden" accept="application/pdf,image/*,audio/*,video/*"
             onChange={(e) => mandarArquivo(e.target.files && e.target.files[0])} />
           <button onClick={() => campoArquivo.current && campoArquivo.current.click()} disabled={enviando}
             title="Mandar arquivo (PDF, foto, áudio ou vídeo, até 10 MB). O texto digitado vai como legenda."
             className="shrink-0 rounded-full px-2.5 py-2 text-[16px] leading-none" style={{ color: WA.mute, border: `1px solid ${WA.linha}` }}>📎</button>
-          <textarea value={rascunho} rows={1} disabled={enviando}
+          <textarea ref={caixa} value={rascunho} rows={1} disabled={enviando}
             onChange={(e) => setRascunho(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); enviar(); } }}
             placeholder={`Mensagem pelo número ${conversa.canal ? conversa.canal.nome : ""}`}
@@ -11072,6 +11243,9 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe, aoMarcar, aoAbrir }
         </div>
       </div>
 
+      {encaminhando && (
+        <EncaminharMensagem m={encaminhando} escopo={escopo || {}} aoFechar={() => setEncaminhando(null)} />
+      )}
       {ligandoConv && (
         <Ligar para={conversa.telefone} nome={waQuem(conversa)}
           canalSugerido={conversa.canal && conversa.canal.slug}
@@ -11102,6 +11276,22 @@ function TelaConversas({ alvo, aoConsumirAlvo, operacao, negociacao, aoAbrir }) 
   const [aberta, setAberta] = useState(null);
   const [abrirPrimeira, setAbrirPrimeira] = useState(false);
   const [nova, setNova] = useState(false);
+  // A pesquisa também procura NAS MENSAGENS (09/11/2026): texto e nome de
+  // arquivo — "QIW6H49" acha o CRLV que o lojista mandou.
+  const [achadas, setAchadas] = useState(null);
+  const [soArquivos, setSoArquivos] = useState(false);
+  const [foco, setFoco] = useState(null);
+  const escopo = { operacao, negociacao, comercial: !operacao && !negociacao };
+  useEffect(() => {
+    const q = busca.trim();
+    const dig = q.replace(/\D/g, "");
+    if (q.length < 3 || (dig.length >= 8 && dig.length >= q.replace(/[\s().+-]/g, "").length)) { setAchadas(null); return; }
+    let vivo = true;
+    setAchadas(undefined);
+    waProcurar({ q, canal, ...escopo, tipo: soArquivos ? "arquivos" : undefined })
+      .then((d) => { if (vivo) setAchadas(d); }).catch((e) => { if (vivo) { setAchadas([]); setErro(e.message); } });
+    return () => { vivo = false; };
+  }, [busca, canal, soArquivos]);
 
   // A lista de números vem do mesmo lugar que a tela do gerente, mas
   // aqui ela é só um filtro: quem não é gerente leva 403 e fica sem o
@@ -11194,7 +11384,7 @@ function TelaConversas({ alvo, aoConsumirAlvo, operacao, negociacao, aoAbrir }) 
           <div className="space-y-2 px-3 py-2.5" style={{ background: "#fff", borderBottom: `1px solid ${WA.linha}` }}>
             <div className="flex items-center gap-2 rounded-lg px-3" style={{ background: WA.barra }}>
               <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill={WA.mute} d="M15.5 14h-.8l-.3-.3A6.5 6.5 0 1 0 9.5 16a6.5 6.5 0 0 0 4.2-1.6l.3.3v.8l5 5 1.5-1.5zm-6 0a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z" /></svg>
-              <input className="w-full bg-transparent py-2 text-[14px] outline-none" placeholder="Pesquisar nome ou telefone"
+              <input className="w-full bg-transparent py-2 text-[14px] outline-none" placeholder="Pesquisar nome, telefone, mensagem ou arquivo"
                 value={digitado} onChange={(e) => setDigitado(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") setBusca(digitado.trim()); }}
                 onBlur={() => { if (digitado.trim() !== busca) setBusca(digitado.trim()); }} />
@@ -11222,10 +11412,10 @@ function TelaConversas({ alvo, aoConsumirAlvo, operacao, negociacao, aoAbrir }) 
 
           <div className="min-h-0 flex-1 overflow-y-auto">
             {!lista && !erro && <p className="p-4 text-[14px]" style={{ color: WA.mute }}>carregando…</p>}
-            {lista && !mostradas.length && (
+            {lista && !mostradas.length && !(achadas && achadas.length) && achadas !== undefined && (
               <p className="p-5 text-center text-[13.5px] leading-relaxed" style={{ color: WA.mute }}>
                 {busca
-                  ? "Nenhuma conversa com esse número. O lead não chegou pelo WhatsApp, ou chegou antes de o número ser ligado."
+                  ? (achadas ? "Nada com isso — nem conversa, nem mensagem, nem arquivo." : "Nenhuma conversa com esse número. O lead não chegou pelo WhatsApp, ou chegou antes de o número ser ligado.")
                   : aba === "esperando"
                     ? "Ninguém esperando: toda mensagem que chegou já foi respondida."
                     : "As conversas entram sozinhas assim que alguém escreve para um dos números ligados."}
@@ -11235,7 +11425,7 @@ function TelaConversas({ alvo, aoConsumirAlvo, operacao, negociacao, aoAbrir }) 
               const sel = abertaViva && abertaViva.id === c.id;
               const op = c.canal && c.canal.comercial === false;
               return (
-                <button key={c.id} onClick={() => setAberta(c)}
+                <button key={c.id} onClick={() => { setFoco(null); setAberta(c); }}
                   className="flex w-full items-center gap-3 px-3 text-left"
                   style={{ background: sel ? WA.sel : "#fff" }}
                   onMouseEnter={(e) => { if (!sel) e.currentTarget.style.background = WA.hover; }}
@@ -11278,12 +11468,44 @@ function TelaConversas({ alvo, aoConsumirAlvo, operacao, negociacao, aoAbrir }) 
                 </button>
               );
             })}
+            {achadas !== null && (
+              <div>
+                <div className="flex items-center gap-2 px-4 pb-1 pt-3">
+                  <span className="text-[13px] font-semibold uppercase tracking-wide" style={{ color: "#008069" }}>Mensagens</span>
+                  <button onClick={() => setSoArquivos((x) => !x)} className="ml-auto rounded-full px-2.5 py-0.5 text-[12px]"
+                    style={soArquivos ? { background: "#E7FCE3", color: "#008069", fontWeight: 600 } : { background: WA.barra, color: WA.mute }}>📎 só arquivos</button>
+                </div>
+                {achadas === undefined && <p className="px-4 py-2 text-[13px]" style={{ color: WA.mute }}>procurando…</p>}
+                {achadas && !achadas.length && <p className="px-4 py-2 text-[13px]" style={{ color: WA.mute }}>Nenhuma mensagem{soArquivos ? " com arquivo" : ""} com “{busca}”.</p>}
+                {(achadas || []).map((m) => {
+                  const cv = m.conversa || {};
+                  const an = m.anexo || {};
+                  const sel = abertaViva && abertaViva.id === cv.id && foco === m.id;
+                  return (
+                    <button key={m.id} onClick={() => { setFoco(m.id); setAberta(cv); }}
+                      className="block w-full px-4 py-2 text-left" style={{ background: sel ? WA.sel : "#fff", borderBottom: `1px solid ${WA.linha}` }}
+                      onMouseEnter={(e) => { if (!sel) e.currentTarget.style.background = WA.hover; }}
+                      onMouseLeave={(e) => { if (!sel) e.currentTarget.style.background = "#fff"; }}>
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="truncate text-[14.5px]" style={{ color: WA.texto }}>{waQuem(cv)}{cv.grupo ? " · grupo" : ""}</span>
+                        <span className="shrink-0 text-[12px]" style={{ color: WA.mute }}>{rotuloDoDia(diaDaMensagem(m.quando))}</span>
+                      </div>
+                      <div className="truncate text-[13.5px]" style={{ color: WA.mute }}>
+                        {m.eco ? "Você: " : m.autor ? `${String(m.autor).split(" · ")[0]}: ` : ""}
+                        {m.tipo === "midia" ? `📎 ${an.nome || ({ image: "foto", audio: "áudio", video: "vídeo", document: "documento" })[an.tipo] || "arquivo"}${m.texto ? ` — ${m.texto}` : ""}` : m.texto}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
 
         <div className={`${abertaViva ? "flex" : "hidden lg:flex"} min-w-0 flex-1 flex-col`}>
           {abertaViva ? (
-            <Conversa conversa={abertaViva} aoVoltar={() => setAberta(null)} equipe={equipe} aoAbrir={aoAbrir}
+            <Conversa conversa={abertaViva} aoVoltar={() => { setAberta(null); setFoco(null); }} equipe={equipe} aoAbrir={aoAbrir}
+              foco={foco && achadas && achadas.some((x) => x.id === foco && x.conversa_id === abertaViva.id) ? foco : null} escopo={escopo}
               aoMarcar={(id, estavaEsperando) => marcar(id, estavaEsperando)}
               aoVirarLead={(id, lead) => setLista((ls) => (ls || []).map((x) =>
                 (x.id === id ? { ...x, lead_id: (lead && lead.id) || x.lead_id, lead: lead || x.lead } : x)))} />
@@ -13507,6 +13729,45 @@ function faixaDoPeriodo(p, comp, livre) {
   return comp ? faixaDoMes(comp) : {};
 }
 
+/**
+ * O carro que entrou no estoque com a compra PROVISÓRIA (0141, 09/11/2026, o Derek): o check list
+ * estava vazio e o valor fechado da negociação entrou no lugar do líquido ao cliente. A gestão vê
+ * todos; o negociador vê os dele, e é ele quem preenche o check list — quando preenche, o valor certo
+ * entra sozinho e o aviso some.
+ */
+function AvisoComprasProvisorias({ perfil, aoAbrir, todos }) {
+  const [l, setL] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    fetchAut("/api/veiculo?recurso=estoque&provisorias=1").then((r) => r.json()).then((d) => { if (vivo) setL(d.estoque || []); }).catch(() => {});
+    return () => { vivo = false; };
+  }, []);
+  if (!l || !l.length) return null;
+  const gestao = todos || (perfil && (perfil.papel === "gerente" || perfil.financeiro));
+  const eu = chaveNeg(perfil && perfil.nome), euPrimeiro = eu.split(" ")[0];
+  const meus = gestao ? l : l.filter((e) => { const n = chaveNeg(e.negociador_nome); return n && (n === eu || n.split(" ")[0] === euPrimeiro); });
+  if (!meus.length) return null;
+  return (
+    <div className="mb-3 rounded-xl px-3 py-2" style={{ background: AMARELO.fundo, border: `1px solid ${AMARELO.borda}` }}>
+      <div className="text-[13px] font-bold" style={{ color: AMARELO.texto }}>
+        {meus.length === 1 ? "1 carro" : `${meus.length} carros`} no estoque com o valor de compra provisório — falta preencher o check list
+      </div>
+      <div className="mt-0.5 text-[12px]" style={{ color: AMARELO.texto }}>
+        Entrou o valor fechado no lugar do líquido ao cliente. Preencha quitação, débitos e o líquido no check list do atendimento: o valor certo vai sozinho para o Estoque.
+      </div>
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {meus.map((e) => (
+          <button key={e.id} disabled={!aoAbrir || !e.atendimento_id} onClick={() => aoAbrir && e.atendimento_id && aoAbrir(e.atendimento_id)}
+            className="rounded-full px-2.5 py-1 text-[12px] font-semibold disabled:cursor-default" style={{ background: "#fff", border: `1px solid ${AMARELO.borda}`, color: C.ink }}>
+            {(e.veiculo && e.veiculo.placa) || "sem placa"} · {(e.veiculo && e.veiculo.marca_modelo) || "carro"} · {brl(e.valor_compra)}
+            {gestao && e.negociador_nome ? <span style={{ color: C.mute }}> · {e.negociador_nome}</span> : null}
+            {aoAbrir && e.atendimento_id ? <span style={{ color: C.roxo }}> · abrir</span> : null}
+          </button>))}
+      </div>
+    </div>
+  );
+}
+
 function CRM({ perfil, aoAbrir, mes }) {
   const { comp, setComp, MESES } = mes;
   const [lista, setLista] = useState([]);
@@ -13598,6 +13859,8 @@ function CRM({ perfil, aoAbrir, mes }) {
           + (neg ? ` · ${neg === "__sem__" ? "sem negociador" : neg}` : "")}
         mes={mes}
         acao={!novo && <BotaoPrimario onClick={() => setNovo(true)}>Novo atendimento</BotaoPrimario>} />
+
+      <AvisoComprasProvisorias perfil={perfil} aoAbrir={aoAbrir} />
 
       {/* O PERÍODO E A CONVERSÃO (05/11/2026). Conversão = fechados ÷
           atendimentos, contada no servidor (a lista tem teto). */}
@@ -14884,6 +15147,8 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
       // linha só de "Débitos do veículo" esconderia justamente o
       // desconto que se consegue numa multa e não na outra.
       const itensDeb = debitosItensDe(cl).filter((x) => x && (x.descricao || numeroBR(x.valor)));
+      const temConta = !!cl && (numeroBR(cl.valor_quitacao) > 0 || numeroBR(cl.valor_debitos) > 0 || numeroBR(cl.valor_cautelar) > 0 ||
+        itensDeb.some((x) => numeroBR(x.valor) > 0));
       const custos = [
         { tipo: "quitacao", descricao: "Quitação do financiamento", previsto: cl && cl.valor_quitacao },
         { tipo: "cautelar", descricao: "Perícia cautelar", previsto: cl && cl.valor_cautelar },
@@ -14903,7 +15168,9 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
         atendimento_id: a.id,
         // O que saiu para o cliente. `valor_cliente` é o líquido do
         // check list; sem check list, cai no valor fechado.
-        valor_compra: (cl && cl.valor_cliente) || a.valor_fechado,
+        valor_compra: (cl && cl.valor_cliente) || (temConta ? 0 : a.valor_fechado),
+        // 0141: sem o check list, o valor fechado entra marcado como provisório.
+        compra_provisoria: !(cl && numeroBR(cl.valor_cliente)) && !temConta && !!numeroBR(a.valor_fechado),
         negociador_nome: a.negociador_nome,
         meio_alcance: a.origem,
         prospector: a.prospec,
@@ -15238,6 +15505,8 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
                     de graça: R$ 0,00 ali enganava (05/11/2026). */}
                 {Number(e.valor_compra) > 0 || c.atual > 0 ? brl(c.atual)
                   : <span className="text-[11px] font-semibold" style={{ color: C.laranja, fontFamily: F.body }} title="Preencha o check list do negócio — o valor vem de lá">sem valor</span>}
+                {e.compra_provisoria && <span className="block text-[10px] font-semibold" style={{ color: AMARELO.texto, fontFamily: F.body }}
+                  title="Entrou o valor fechado no lugar do líquido ao cliente; some quando o check list for preenchido">provisório</span>}
               </span>
               <span className="hidden w-[108px] shrink-0 text-right text-[11px] sm:block">
                 {!!c.aberto && <span style={{ color: AMARELO.texto }}>{c.aberto} em aberto</span>}
@@ -19501,6 +19770,7 @@ function FinPendencias({ aoIr }) {
   useEffect(carregar, []);
   if (erro) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
   if (!d) return <p className="text-[13px]" style={{ color: C.mute }}>Conferindo o financeiro…</p>;
+  const avisoProvisorias = <AvisoComprasProvisorias todos />;
 
   const VERMELHO = "#C0281B";
   const val = (x) => rs2((Number(x.debito) || 0) + (Number(x.credito) || 0));
@@ -19556,6 +19826,7 @@ function FinPendencias({ aoIr }) {
 
   return (
     <div>
+      {avisoProvisorias}
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
         <p className="text-[13px]" style={{ color: C.mute }}>
           {comProblema.length
@@ -23319,7 +23590,8 @@ function FinBalanco({ aoIr }) {
                 <tbody>{d.carros.map((c) => (
                   <tr key={c.id} style={{ borderTop: `1px solid ${C.line}` }}>
                     <td className="px-2 py-1">{c.carro || "—"} <span style={{ color: C.mute }}>{c.placa}</span></td>
-                    <td className="px-2 py-1 text-right" style={{ color: c.compra ? C.ink : C.laranja }}>{c.compra ? num(c.compra) : "sem valor"}</td>
+                    <td className="px-2 py-1 text-right" style={{ color: c.provisoria ? AMARELO.texto : c.compra || c.custos ? C.ink : C.laranja }}>
+                      {c.compra || c.custos ? num(c.compra) : "sem valor"}{c.provisoria ? " (provisório)" : ""}</td>
                     <td className="px-2 py-1 text-right">{num(c.custos)}</td>
                     <td className="px-2 py-1 text-right font-semibold">{num(c.total)}</td>
                   </tr>))}</tbody>
@@ -23367,7 +23639,12 @@ function FinBalanco({ aoIr }) {
         ? <CadastroPatrimonio aoMudar={carregar} />
         : <p className="text-[12px]" style={{ color: C.laranja }}>O cadastro de imobilizado e empréstimos ainda não está no banco (migração 0140).</p>}
       {d.carros_sem_compra > 0 && (
-        <p className="text-[12px]" style={{ color: C.laranja }}>{d.carros_sem_compra} carro(s) no pátio sem valor de compra — entram no estoque só pelos custos. Corrija no Estoque.</p>
+        <p className="text-[12px]" style={{ color: C.laranja }}>{d.carros_sem_compra} carro(s) no pátio sem valor de compra e sem custo nenhum — entram no estoque por zero. Corrija no Estoque.</p>
+      )}
+      {d.carros.some((c) => c.provisoria) && (
+        <p className="text-[12px]" style={{ color: AMARELO.texto }}>
+          {d.carros.filter((c) => c.provisoria).length} carro(s) com a compra provisória (o valor fechado, até o negociador preencher o check list): {d.carros.filter((c) => c.provisoria).map((c) => c.placa).join(", ")}.
+        </p>
       )}
       <p className="text-[11px] leading-snug" style={{ color: C.mute }}>
         Retrato de hoje: saldo de cada conta desde a abertura, títulos em aberto (o que se lançou em Títulos financeiros,

@@ -1393,6 +1393,112 @@ async function waEnvio(req, res, tok) {
   return res.status(200).json({ ok: true, registrada: true });
 }
 
+/* ENCAMINHAR (09/11/2026, o administrativo: "no whats do ADM, no sistema,
+ * precisamos das opções de responder e encaminhar"). O CRLV que o lojista
+ * mandou vai para o grupo do despachante sem baixar e subir de novo.
+ *
+ * Mora aqui pelo mesmo motivo do `waEnvio`: arquivo guardado só se assina
+ * com a chave de serviço, e ela fica neste arquivo (decisão 9). A ordem é a
+ * mesma: a mensagem e cada conversa de destino são lidas com o TOKEN de
+ * quem encaminha — sem a RLS devolver, nada sai —, e só então a chave
+ * assina o link que a ponte baixa. O arquivo não é copiado: a mensagem
+ * nova aponta para a mesma chave no bucket. Cada destino sai pelo número
+ * da conversa de destino. */
+async function waEncaminhar(req, res, tok) {
+  if (req.method !== "POST") { res.setHeader("Allow", "POST"); return res.status(405).json({ erro: "Use POST." }); }
+  let c = req.body;
+  if (c && typeof Buffer !== "undefined" && Buffer.isBuffer(c)) c = c.toString("utf8");
+  if (typeof c === "string") { try { c = JSON.parse(c); } catch (e) { c = null; } }
+  if (!c || typeof c !== "object") return res.status(400).json({ erro: "Envio inválido." });
+  const mid = String(c.mensagem_id || "");
+  if (!RX_UUID.test(mid)) return res.status(400).json({ erro: "Mensagem inválida." });
+  const destinos = [...new Set((Array.isArray(c.conversas) ? c.conversas : []).map(String).filter((x) => RX_UUID.test(x)))];
+  if (!destinos.length) return res.status(400).json({ erro: "Escolha para quem encaminhar." });
+  if (destinos.length > 5) return res.status(400).json({ erro: "No máximo 5 conversas de cada vez." });
+
+  const m = ((await banco(`${REST("wa_mensagem")}?select=id,tipo,texto,anexo,conversa_id&id=eq.${mid}`, { headers: cabecalhos(tok) })) || [])[0];
+  if (!m) return res.status(404).json({ erro: "Mensagem não encontrada." });
+  const an = m.anexo && typeof m.anexo === "object" ? m.anexo : {};
+  const texto = String(m.texto || "").trim();
+  const ehArquivo = m.tipo === "midia";
+  if (ehArquivo && (!an.chave || String(an.chave).slice(0, PASTA_WA.length + 1) !== `${PASTA_WA}/`)) {
+    return res.status(409).json({ erro: "Este arquivo chegou antes de o sistema guardar arquivos — encaminhe pelo celular." });
+  }
+  if (!ehArquivo && !texto) return res.status(409).json({ erro: "Não há o que encaminhar nesta mensagem." });
+
+  const segredo = process.env.PONTE_SEGREDO || "";
+  const base = process.env.PONTE_URL || "";
+  if (!segredo || (!req.ponte && !base)) return res.status(503).json({ erro: "A ponte do WhatsApp não está configurada." });
+
+  let conteudo = null, anexo = null;
+  if (ehArquivo) {
+    const assinado = await arquivos(`${STORAGE()}/object/sign/${BUCKET_DOC}/${paraURL(an.chave)}`, {
+      method: "POST", headers: hArquivo({ "Content-Type": "application/json" }), body: JSON.stringify({ expiresIn: 3600 }),
+    });
+    const link = assinado && assinado.signedURL ? `${STORAGE()}${assinado.signedURL}` : "";
+    if (!link) return res.status(502).json({ erro: "Não consegui preparar o arquivo." });
+    const tipo = String(an.mime || "").split(";")[0];
+    const legenda = String(an.legenda || texto || "").slice(0, 1000);
+    const qual = an.tipo === "image" ? "image" : an.tipo === "video" ? "video" : an.tipo === "audio" && tipo === "audio/ogg" ? "audio" : "document";
+    conteudo = qual === "document"
+      ? { type: "document", document: { link, filename: an.nome || `arquivo.${TIPOS_WA[tipo] || "bin"}`, mime_type: tipo || "application/octet-stream", caption: legenda || undefined } }
+      : qual === "audio" ? { type: "audio", audio: { link } }
+      : { type: qual, [qual]: { link, caption: legenda || undefined } };
+    anexo = { ...an, legenda, encaminhada: true };
+  } else {
+    conteudo = { type: "text", text: { body: texto.slice(0, 4000) } };
+    anexo = { encaminhada: true };
+  }
+  conteudo.encaminhada = true;
+
+  // Quem encaminhou (0112): o login de quem estava na caixa.
+  let eu = null, euNome = null;
+  try {
+    const meio = String(tok).replace(/^Bearer\s+/, "").split(".")[1];
+    eu = meio ? JSON.parse(Buffer.from(meio.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8")).sub : null;
+    if (eu) euNome = ((await banco(`${REST("perfil")}?select=nome&id=eq.${eu}&limit=1`, { headers: cabecalhos(tok) }) || [])[0] || {}).nome || null;
+  } catch (e) {}
+
+  const resultado = [];
+  for (const cid of destinos) {
+    const cv = ((await banco(`${REST("wa_conversa")}?select=id,nome,telefone,grupo,wa_canal(slug,ativo)&id=eq.${cid}`, { headers: cabecalhos(tok) })) || [])[0];
+    const ca = cv && (Array.isArray(cv.wa_canal) ? cv.wa_canal[0] : cv.wa_canal);
+    if (!cv || !ca) { resultado.push({ conversa_id: cid, ok: false, erro: "conversa não encontrada" }); continue; }
+    if (ca.ativo === false) { resultado.push({ conversa_id: cid, ok: false, erro: "número desativado" }); continue; }
+    let d = {};
+    try {
+      const alvo = `${base || "https://ponte"}/enviar?canal=${encodeURIComponent(ca.slug)}`;
+      const pedido = {
+        method: "POST", signal: AbortSignal.timeout(60000),
+        headers: { "x-ponte-segredo": segredo, "Content-Type": "application/json" },
+        body: JSON.stringify({ para: cv.telefone, conteudo }),
+      };
+      const r = req.ponte ? await req.ponte.fetch(alvo, pedido) : await fetch(alvo, pedido);
+      d = await r.json().catch(() => ({ ok: false, erro: `a ponte respondeu ${r.status}` }));
+    } catch (e) { d = { ok: false, erro: "a ponte não respondeu" }; }
+    if (!d || !d.ok) { resultado.push({ conversa_id: cid, ok: false, erro: limpar((d && d.erro) || "a ponte não mandou") }); continue; }
+    const agora = Date.now();
+    const comum = { p_canal: ca.slug, p_wa_id: String(d.id || `erp-${agora}`), p_eco: true, p_tipo: ehArquivo ? "midia" : "texto",
+      p_texto: ehArquivo ? anexo.legenda : texto, p_anexo: anexo, p_quando: new Date(agora).toISOString(), p_segredo: process.env.IA_SEGREDO || "" };
+    let msgId = null;
+    try {
+      msgId = cv.grupo
+        ? await banco(`${URL_BASE}/rest/v1/rpc/wa_receber_grupo`, { method: "POST", headers: json(tok), body: JSON.stringify({ ...comum, p_grupo: cv.telefone, p_nome: "", p_autor: "" }) })
+        : await banco(`${URL_BASE}/rest/v1/rpc/wa_receber`, { method: "POST", headers: json(tok), body: JSON.stringify({ ...comum, p_telefone: cv.telefone, p_nome: "", p_anuncio: null }) });
+      if (eu && typeof msgId === "string" && RX_UUID.test(msgId)) {
+        await banco(`${REST("wa_mensagem")}?id=eq.${msgId}`, { method: "PATCH", headers: json(tok),
+          body: JSON.stringify({ enviado_por: eu, enviado_por_nome: euNome }) });
+      }
+    } catch (e) {}
+    resultado.push({ conversa_id: cid, ok: true, nome: cv.nome || cv.telefone, registrada: !!msgId });
+  }
+  const falhas = resultado.filter((x) => !x.ok);
+  return res.status(falhas.length === resultado.length ? 502 : 200).json({
+    ok: falhas.length < resultado.length, resultado,
+    ...(falhas.length === resultado.length ? { erro: `Não foi encaminhada: ${falhas[0].erro}.` } : {}),
+  });
+}
+
 async function waArquivo(req, res, tok) {
   const id = String(req.query.id || "");
   if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido" });
@@ -1473,6 +1579,11 @@ module.exports = async function handler(req, res) {
   if (String(req.query.recurso || "") === "wa-envio") {
     try { return await waEnvio(req, res, tok); }
     catch (e) { return res.status(502).json({ erro: limpar(e.message) || "Não consegui mandar o arquivo." }); }
+  }
+
+  if (String(req.query.recurso || "") === "wa-encaminhar") {
+    try { return await waEncaminhar(req, res, tok); }
+    catch (e) { return res.status(502).json({ erro: limpar(e.message) || "Não consegui encaminhar." }); }
   }
 
   if (String(req.query.recurso || "") === "wa-arquivo") {

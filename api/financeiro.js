@@ -3367,7 +3367,7 @@ async function balanco(req, res, tok) {
     supa(`${base("fin_lancamento")}?select=conta_id,data,debito,credito&situacao=eq.efetivado&conta_id=not.is.null&data=lte.${hoje}&limit=100000`, { headers: cab(tok) }),
     supa(`${base("fin_lancamento")}?select=id,descricao,favorecido,vencimento,competencia,debito,credito,estoque_id,tipo_negociacao,` +
       `fin_favorecido(nome),fin_categoria(nome,grupo,pede_funcionario)&situacao=eq.aberto&limit=20000`, { headers: cab(tok) }),
-    supa(`${base("estoque")}?select=id,entrou_em,valor_compra,natureza,veiculo(placa,marca_modelo),estoque_custo(tipo,previsto,realizado)` +
+    supa(`${base("estoque")}?select=id,entrou_em,valor_compra,compra_provisoria,natureza,veiculo(placa,marca_modelo),estoque_custo(tipo,previsto,realizado)` +
       `&situacao=eq.em_estoque&limit=2000`, { headers: cab(tok) }),
     // Sem a 0140 rodada, o balanço continua de pé sem os itens manuais.
     supa(`${base("fin_patrimonio")}?select=*&ativo=eq.true&order=nome.asc`, { headers: cab(tok) }).catch(() => null),
@@ -3431,9 +3431,11 @@ async function balanco(req, res, tok) {
     const custos = (e.estoque_custo || []).reduce((t, x) => t + val(x), 0);
     const compra = Number(e.valor_compra) || 0;
     return { id: e.id, placa: e.veiculo && e.veiculo.placa, carro: e.veiculo && e.veiculo.marca_modelo, entrou_em: e.entrou_em,
-      compra: r2(compra), custos: r2(custos), total: r2(compra + custos) };
+      compra: r2(compra), custos: r2(custos), total: r2(compra + custos), provisoria: !!e.compra_provisoria };
   }).sort((a, b) => b.total - a.total);
-  const semCompra = carros.filter((c) => !c.compra).length;
+  // Compra zero com quitação ou outro custo é o carro em que o cliente não recebeu nada — vale. Só o
+  // carro sem compra E sem custo entra por zero, e esse é o que precisa de correção.
+  const semCompra = carros.filter((c) => !c.compra && !c.custos).length;
 
   const soma = (xs, k) => r2(xs.reduce((t, x) => t + (Number(x[k]) || 0), 0));
   const caixaPos = caixa.filter((c) => c.saldo >= 0), caixaNeg = caixa.filter((c) => c.saldo < 0);

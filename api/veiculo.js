@@ -464,6 +464,12 @@ async function estoque(req, res, tok) {
         { headers: cab });
       return res.status(200).json({ estoque: (linha || [])[0] || null, veiculo_id: ids[0] });
     }
+    // Os carros com compra provisória (0141): o alerta da gestão e do negociador.
+    if (req.query.provisorias) {
+      const l = await supa(`${base("estoque")}?select=id,atendimento_id,entrou_em,valor_compra,negociador_nome,veiculo(placa,marca_modelo)` +
+        `&compra_provisoria=eq.true&order=entrou_em.asc&limit=200`, { headers: cab }).catch(() => []);
+      return res.status(200).json({ estoque: l || [] });
+    }
     const sit = SITUACOES.indexOf(String(req.query.situacao || "")) >= 0
       ? `&situacao=eq.${req.query.situacao}` : "";
     const lista = await supa(
@@ -502,6 +508,8 @@ async function estoque(req, res, tok) {
       veiculo_id: veiculoId,
       atendimento_id: RX_ID.test(String(c.atendimento_id || "")) ? c.atendimento_id : null,
       valor_compra: decimal(c.valor_compra),
+      // 0141: sem o líquido do check list, a tela manda o valor fechado e diz que é provisório.
+      ...(c.compra_provisoria ? { compra_provisoria: true } : {}),
       observacoes: texto(c.observacoes),
       negociador_nome: texto(c.negociador_nome),
       meio_alcance: texto(c.meio_alcance),
@@ -604,6 +612,9 @@ async function estoque(req, res, tok) {
       mud.baixado_em = c.situacao === "baixado" ? new Date().toISOString() : null;
     }
     if (c.valor_compra !== undefined) mud.valor_compra = decimal(c.valor_compra);
+    // Quem digita a compra à mão a está confirmando: sai o "provisório" (0141), a não ser que diga o contrário.
+    if (c.compra_provisoria !== undefined) mud.compra_provisoria = !!c.compra_provisoria;
+    else if (c.valor_compra !== undefined) mud.compra_provisoria = false;
     if (c.valor_venda !== undefined) mud.valor_venda = decimal(c.valor_venda);
     if (c.vendido_em !== undefined) {
       mud.vendido_em = dataISO(c.vendido_em);
@@ -997,17 +1008,31 @@ async function titulosDoCarro(tok, estoqueId) {
 }
 module.exports.titulosDoCarro = titulosDoCarro;
 
+// O check list tem a conta do negócio (quitação, débitos ou cautelar): o líquido ao cliente que está
+// nele vale, mesmo zero.
+function checklistTemConta(cl) {
+  if (!cl) return false;
+  const n = (x) => decimal(x) || 0;
+  return n(cl.valor_quitacao) > 0 || n(cl.valor_debitos) > 0 || n(cl.valor_cautelar) > 0 ||
+    (Array.isArray(cl.debitos_itens) && cl.debitos_itens.some((x) => x && n(x.valor) > 0));
+}
 async function puxarDoChecklist(tok, atendimentoId) {
   const cab = { headers: cabecalhos(tok) };
-  const e = ((await supa(`${base("estoque")}?select=id,valor_compra,situacao,estoque_custo(id,do_fechamento)` +
+  const e = ((await supa(`${base("estoque")}?select=id,valor_compra,compra_provisoria,situacao,estoque_custo(id,do_fechamento)` +
     `&atendimento_id=eq.${atendimentoId}&order=entrou_em.desc&limit=1`, cab)) || [])[0];
   if (!e) return { ok: true, nada: true };
   const cl = ((await supa(`${base("checklist")}?select=*&atendimento_id=eq.${atendimentoId}&limit=1`, cab)) || [])[0];
   if (!cl) return { ok: true, sem_checklist: true };
   const feito = {};
   if (!(Number(e.valor_compra) > 0) && decimal(cl.valor_cliente)) {
-    await supa(`${base("estoque")}?id=eq.${e.id}`, { method: "PATCH", headers: cabecalhos(tok), body: JSON.stringify({ valor_compra: decimal(cl.valor_cliente) }) });
+    await supa(`${base("estoque")}?id=eq.${e.id}`, { method: "PATCH", headers: cabecalhos(tok), body: JSON.stringify({ valor_compra: decimal(cl.valor_cliente), compra_provisoria: false }) });
     feito.valor_compra = decimal(cl.valor_cliente);
+  } else if (e.compra_provisoria && (decimal(cl.valor_cliente) || checklistTemConta(cl))) {
+    // O check list foi preenchido: o líquido ao cliente entra no lugar do valor fechado provisório
+    // (0141). Zero vale — é o carro em que a quitação levou tudo e o cliente não recebeu nada.
+    const v = decimal(cl.valor_cliente) || 0;
+    await supa(`${base("estoque")}?id=eq.${e.id}`, { method: "PATCH", headers: cabecalhos(tok), body: JSON.stringify({ valor_compra: v, compra_provisoria: false }) });
+    feito.valor_compra = v;
   }
   if (!(e.estoque_custo || []).some((x) => x.do_fechamento)) {
     const linhas = previstoDoChecklist(cl, e.id);
@@ -1037,7 +1062,11 @@ async function entrarAoFechar(tok, atendimentoId) {
     method: "POST", headers: cabecalhos(tok, { Prefer: "return=representation" }),
     body: JSON.stringify({
       veiculo_id: v.id, atendimento_id: at.id,
-      valor_compra: decimal(cl.valor_cliente) || decimal(at.valor_fechado),
+      // Check list com a conta feita vale como está, mesmo com o cliente recebendo zero (a quitação
+      // levou tudo); só sem conta nenhuma o valor fechado entra, e provisório.
+      valor_compra: decimal(cl.valor_cliente) || (checklistTemConta(cl) ? 0 : decimal(at.valor_fechado)),
+      // O valor fechado no lugar do líquido ao cliente é provisório até o check list ser preenchido (0141).
+      compra_provisoria: !decimal(cl.valor_cliente) && !checklistTemConta(cl) && !!decimal(at.valor_fechado),
       negociador_nome: texto(at.negociador_nome), meio_alcance: texto(at.origem), prospector: texto(at.prospec),
       observacoes: "Entrou sozinho ao fechar o atendimento.",
     }),

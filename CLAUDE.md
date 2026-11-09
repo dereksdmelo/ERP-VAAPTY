@@ -6451,3 +6451,13 @@ empréstimos"*).** `fin_patrimonio`, editado embaixo do próprio balanço (`Cada
 já estão em Títulos financeiros** — essas o balanço já conta em "a pagar", e a tela avisa. Desativar
 tira do balanço sem apagar (quitou, vendeu). Sem a tabela, o balanço continua de pé e diz que falta a
 migração.
+
+**A compra provisória (0141, no mesmo dia).** O Balanço acusou 4 carros "sem valor de compra"; dois
+eram o carro em que a quitação levou tudo (Palio MGG1E91, Toro RMT1I81 — o custo é a quitação, e a
+compra zero está certa: o aviso agora só pega compra zero **e** custo zero). Os outros dois (Pajero
+IWG8C85, Mobi TDF2A27) tinham o check list vazio: o Derek mandou pôr o valor fechado da negociação,
+provisório, com alerta. `estoque.compra_provisoria` marca isso: nasce quando o carro entra sem o
+líquido ao cliente nem conta no check list (`entrarAoFechar` e a entrada à mão), e sai sozinha quando o
+check list é preenchido (`puxarDoChecklist`: o líquido entra no lugar, mesmo zero) ou quando alguém
+digita a compra. `AvisoComprasProvisorias` mostra os carros em Atendimentos (o negociador vê os dele, a
+gestão vê todos, com "abrir") e nas Pendências do financeiro; o Estoque e o Balanço marcam "provisório".

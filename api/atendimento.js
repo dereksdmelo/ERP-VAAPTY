@@ -2832,7 +2832,10 @@ async function ponte(req, res) {
     if (!tipo) return res.status(200).json({ ok: true, pulado: "tipo não tratado" });
     // Botão e mídia viajam inteiros em `anexo`: o formato é da ponte e
     // pode crescer sem migration nova.
-    const anexo = c.tipo === "midia" ? (c.midia || null) : c.tipo === "botao" ? (c.botao || null) : c.tipo === "reacao" ? (c.reacao || null) : null;
+    const anexo = c.tipo === "midia" ? (c.midia || null) : c.tipo === "botao" ? (c.botao || null) : c.tipo === "reacao" ? (c.reacao || null)
+      // Texto que responde a outro (a ponte manda o trecho citado, 09/11/2026).
+      : c.tipo === "texto" && c.responde && typeof c.responde === "object"
+        ? { responde: { wa_id: String(c.responde.wa_id || "").slice(0, 80), texto: String(c.responde.texto || "").slice(0, 300) } } : null;
     const texto = c.tipo === "texto" ? String(c.texto || "")
       : c.tipo === "botao" ? String((c.botao && c.botao.title) || "")
       : c.tipo === "midia" ? String((c.midia && c.midia.legenda) || "") : "";
@@ -3276,20 +3279,39 @@ module.exports = async function handler(req, res) {
       const texto = String((c && c.texto) || "").replace(/\r/g, "").trim();
       if (!texto) return res.status(400).json({ erro: "Escreva a mensagem." });
       if (texto.length > 4000) return res.status(400).json({ erro: "Mensagem longa demais (o limite é 4.000 caracteres)." });
-      const cv = (await banco(`${REST_CV}?select=id,telefone,wa_canal(slug,nome,ativo)&id=eq.${id}`, { headers: cabecalhos(tok) }) || [])[0];
+      const cv = (await banco(`${REST_CV}?select=id,telefone,grupo,wa_canal(slug,nome,ativo)&id=eq.${id}`, { headers: cabecalhos(tok) }) || [])[0];
       if (!cv || !cv.wa_canal) return res.status(404).json({ erro: "Conversa não encontrada." });
       if (cv.wa_canal.ativo === false) return res.status(409).json({ erro: "Este número está desativado." });
       const segredo = process.env.PONTE_SEGREDO || "";
       const base = process.env.PONTE_URL || "";
       if (!segredo || (!req.ponte && !base)) return res.status(503).json({ erro: "A ponte do WhatsApp não está configurada." });
       const slug = cv.wa_canal.slug;
+      /* RESPONDER CITANDO (09/11/2026, o administrativo: "precisamos das
+       * opções de responder e encaminhar"). A mensagem citada é lida com o
+       * token e DENTRO desta conversa — não se cita o que é de outra. A
+       * ponte monta a citação do WhatsApp com o id dela (`responde`); aqui
+       * fica o trecho, para o balão mostrar a que se respondeu. No grupo,
+       * a citação precisa de quem escreveu: o telefone que veio no `autor`. */
+      let responde = null, citada = null;
+      const rid = String((c && c.responde) || "");
+      if (RX_UUID.test(rid)) {
+        const q = (await banco(`${URL_BASE}/rest/v1/wa_mensagem?select=id,wa_id,eco,tipo,texto,anexo,autor&id=eq.${rid}&conversa_id=eq.${id}`, { headers: cabecalhos(tok) }) || [])[0];
+        if (q && q.wa_id && !/^erp-/.test(q.wa_id)) {
+          const an = q.anexo && typeof q.anexo === "object" ? q.anexo : {};
+          const trecho = String(q.texto || (q.tipo === "midia" ? `📎 ${an.nome || "arquivo"}` : "") || "").slice(0, 300);
+          const foneAutor = (String(q.autor || "").match(/(\d{10,15})\s*$/) || [])[1] || "";
+          responde = { id: q.wa_id, deMim: !!q.eco, texto: trecho,
+            participante: cv.grupo && !q.eco && foneAutor ? `${foneAutor}@s.whatsapp.net` : undefined };
+          citada = { id: q.id, texto: trecho, autor: q.eco ? "Você" : (String(q.autor || "").split(" · ")[0] || "") };
+        }
+      }
       let d = {};
       try {
         const alvo = `${base || "https://ponte"}/enviar?canal=${encodeURIComponent(slug)}`;
         const pedido = {
           method: "POST", signal: AbortSignal.timeout(30000),
           headers: { "x-ponte-segredo": segredo, "Content-Type": "application/json" },
-          body: JSON.stringify({ para: cv.telefone, conteudo: { type: "text", text: { body: texto } } }),
+          body: JSON.stringify({ para: cv.telefone, conteudo: { type: "text", text: { body: texto }, ...(responde ? { responde } : {}) } }),
         };
         const r = req.ponte ? await req.ponte.fetch(alvo, pedido) : await fetch(alvo, pedido);
         d = await r.json().catch(() => ({ ok: false, erro: `a ponte respondeu ${r.status}` }));
@@ -3298,11 +3320,13 @@ module.exports = async function handler(req, res) {
       const agora = Date.now();
       let msgId = null;
       try {
-        msgId = await banco(`${URL_BASE}/rest/v1/rpc/wa_receber`, {
-          method: "POST", headers: json(tok),
-          body: JSON.stringify({ p_canal: slug, p_telefone: cv.telefone, p_nome: "", p_wa_id: String(d.id || `erp-${agora}`),
-            p_eco: true, p_tipo: "texto", p_texto: texto, p_anexo: null, p_quando: new Date(agora).toISOString(), p_anuncio: null, p_segredo: process.env.IA_SEGREDO || "" }),
-        });
+        // Grupo grava pela função de grupo: pela `wa_receber` o id
+        // `…@g.us` viraria um telefone e a resposta cairia em outra conversa.
+        const comum = { p_canal: slug, p_wa_id: String(d.id || `erp-${agora}`), p_eco: true, p_tipo: "texto", p_texto: texto,
+          p_anexo: citada ? { responde: citada } : null, p_quando: new Date(agora).toISOString(), p_segredo: process.env.IA_SEGREDO || "" };
+        msgId = cv.grupo
+          ? await banco(`${URL_BASE}/rest/v1/rpc/wa_receber_grupo`, { method: "POST", headers: json(tok), body: JSON.stringify({ ...comum, p_grupo: cv.telefone, p_nome: "", p_autor: "" }) })
+          : await banco(`${URL_BASE}/rest/v1/rpc/wa_receber`, { method: "POST", headers: json(tok), body: JSON.stringify({ ...comum, p_telefone: cv.telefone, p_nome: "", p_anuncio: null }) });
       } catch (e) { /* saiu para o cliente; só não ficou registrada aqui */ }
       await marcarAutor(tok, msgId);
       if (msgId) {
@@ -3377,9 +3401,25 @@ module.exports = async function handler(req, res) {
 
     // A conversa aberta: as mensagens, em ordem de relógio.
     if (RX_UUID.test(id)) {
-      const msgs = await banco(
-        `${URL_BASE}/rest/v1/wa_mensagem?select=*&conversa_id=eq.${id}&order=quando.asc&limit=500`,
-        { headers: cabecalhos(tok) }) || [];
+      /* AS 500 MAIS RECENTES (09/11/2026). Era `order=quando.asc&limit=500`:
+       * num grupo do adm com mais de 500 mensagens, vinham as 500 PRIMEIRAS
+       * e o que chegou hoje não aparecia. E a mensagem achada na pesquisa
+       * (`foco`), se for mais antiga que isso, vem junto com as do dia dela. */
+      let msgs = (await banco(
+        `${URL_BASE}/rest/v1/wa_mensagem?select=*&conversa_id=eq.${id}&order=quando.desc&limit=500`,
+        { headers: cabecalhos(tok) }) || []).reverse();
+      const foco = String(req.query.foco || "");
+      if (RX_UUID.test(foco) && !msgs.some((m) => m.id === foco)) {
+        try {
+          const f = (await banco(`${URL_BASE}/rest/v1/wa_mensagem?select=quando&id=eq.${foco}&conversa_id=eq.${id}`, { headers: cabecalhos(tok) }) || [])[0];
+          if (f) {
+            const de = new Date(Date.parse(f.quando) - 86400000).toISOString();
+            const perto = await banco(`${URL_BASE}/rest/v1/wa_mensagem?select=*&conversa_id=eq.${id}&quando=gte.${encodeURIComponent(de)}&order=quando.asc&limit=200`, { headers: cabecalhos(tok) }) || [];
+            const ja = new Set(msgs.map((m) => m.id));
+            msgs = perto.filter((m) => !ja.has(m.id)).concat(msgs).sort((a, b) => String(a.quando).localeCompare(String(b.quando)));
+          }
+        } catch (e) {}
+      }
       /* QUEM MANDOU cada mensagem da loja (0112): o login gravado no
        * envio pelo ERP; a Flávia pelos ids que o WhatsApp deu ao que ela
        * mandou (`ia_resposta.wa_ids`); o resto saiu direto do aparelho. */
@@ -3391,6 +3431,36 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ mensagens: msgs.map((m) => (!m.eco ? m : {
         ...m, quem_mandou: m.enviado_por_nome || (daIA[String(m.wa_id)] ? "IA Flávia" : null),
       })) });
+    }
+
+    /* PESQUISAR NAS MENSAGENS (09/11/2026, o administrativo: "a opção de
+     * buscar/pesquisar… por exemplo, procurar um documento de um veículo no
+     * whats"). Procura no texto, no nome do arquivo ("CRLVE_QIW6H49_2026.pdf")
+     * e na leitura da IA (0073), com os mesmos recortes de número da lista —
+     * a pessoa do adm só acha o que é do número dela. Placa com traço vira
+     * sem traço, que é como ela aparece no nome do arquivo. */
+    if (req.method === "GET" && String(req.query.acao || "") === "procurar") {
+      let q = String(req.query.q || "").trim().slice(0, 80);
+      if (/^[A-Za-z]{3}-?\d[A-Za-z0-9]\d{2}$/.test(q)) q = q.replace("-", "");
+      q = q.replace(/[(),*%\\]/g, " ").trim();
+      if (q.length < 3) return res.status(200).json({ mensagens: [] });
+      const e = encodeURIComponent(q);
+      const fil = [];
+      const can = String(req.query.canal || "").replace(/[^\w-]/g, "");
+      if (can) fil.push(`wa_conversa.wa_canal.slug=eq.${encodeURIComponent(can)}`);
+      if (String(req.query.operacao || "") === "1") fil.push("wa_conversa.wa_canal.uso=eq.operacao");
+      if (String(req.query.comercial || "") === "1") fil.push("wa_conversa.wa_canal.comercial=eq.true");
+      if (String(req.query.negociacao || "") === "1") fil.push("wa_conversa.wa_canal.uso=eq.negociacao");
+      const so = String(req.query.tipo || "") === "arquivos" ? "&tipo=eq.midia" : "";
+      const ms = await banco(`${URL_BASE}/rest/v1/wa_mensagem?select=id,conversa_id,eco,tipo,texto,anexo,autor,quando,`
+        + `wa_conversa!inner(id,nome,telefone,grupo,ultima_em,primeira_em,ultima_de_fora,respondida_em,lida_em,nao_lida,anuncio,atendimento_id,lead_id,wa_canal!inner(slug,nome,atendente,comercial,uso))`
+        + `&or=(texto.ilike.*${e}*,anexo->>nome.ilike.*${e}*,leitura.ilike.*${e}*)${so}&${fil.join("&")}&order=quando.desc&limit=60`,
+        { headers: cabecalhos(tok) }) || [];
+      return res.status(200).json({ mensagens: ms.map((m) => {
+        const { wa_conversa, ...resto } = m;
+        const { wa_canal, ...cv } = wa_conversa || {};
+        return { ...resto, conversa: { ...cv, canal: wa_canal || null } };
+      }) });
     }
 
     const canal = String(req.query.canal || "").replace(/[^\w-]/g, "");

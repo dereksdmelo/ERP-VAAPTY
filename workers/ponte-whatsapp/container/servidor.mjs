@@ -250,6 +250,17 @@ async function traduzir(msg) {
       const b = (n && bts[n - 1]) || bts.find((x) => x.title.toLowerCase() === t.toLowerCase());
       if (b) return Object.assign(base, { tipo: "botao", botao: { id: b.id, title: b.title } });
     }
+    /* O CLIENTE RESPONDEU CITANDO (09/11/2026): vai o trecho citado, para a caixa mostrar a que ele respondeu. */
+    try {
+      const ci = m.extendedTextMessage && m.extendedTextMessage.contextInfo;
+      if (ci && ci.stanzaId) {
+        const qm = conteudoDe(ci.quotedMessage || {}) || {};
+        const qt = qm.conversation || (qm.extendedTextMessage && qm.extendedTextMessage.text)
+          || (qm.imageMessage && (qm.imageMessage.caption || "📷 foto")) || (qm.documentMessage && ("📎 " + (qm.documentMessage.fileName || "documento")))
+          || (qm.audioMessage && "🎤 áudio") || (qm.videoMessage && "🎥 vídeo") || "";
+        base.responde = { wa_id: String(ci.stanzaId), texto: String(qt).slice(0, 300) };
+      }
+    } catch (e) {}
     return Object.assign(base, { tipo: "texto", texto });
   }
   if (m.reactionMessage) return Object.assign(base, { tipo: "reacao", reacao: { emoji: m.reactionMessage.text || "", ao: (m.reactionMessage.key && m.reactionMessage.key.id) || "" } });
@@ -407,11 +418,18 @@ async function enviar(para, c) {
     try { await sock.sendPresenceUpdate("composing", jid); await new Promise((ok) => setTimeout(ok, Math.min(8000, Number(c.digitando)))); await sock.sendPresenceUpdate("paused", jid); } catch (e) {}
   }
   let r;
-  if (c.type === "text") r = await sock.sendMessage(jid, { text: c.text.body });
-  else if (c.type === "image") r = await sock.sendMessage(jid, { image: { url: c.image.link }, caption: c.image.caption || undefined });
-  else if (c.type === "video") r = await sock.sendMessage(jid, { video: { url: c.video.link }, caption: c.video.caption || undefined });
-  else if (c.type === "audio") r = await sock.sendMessage(jid, { audio: { url: c.audio.link }, mimetype: "audio/ogg; codecs=opus", ptt: true });
-  else if (c.type === "document") r = await sock.sendMessage(jid, { document: { url: c.document.link }, fileName: c.document.filename || "arquivo", mimetype: c.document.mime_type || "application/octet-stream", caption: c.document.caption || undefined });
+  /* RESPONDER CITANDO E ENCAMINHAR (09/11/2026, o administrativo). `responde` e o id do WhatsApp da mensagem
+     citada (e, no grupo, quem a escreveu): a citacao se monta so com a chave e um trecho, sem precisar da
+     mensagem inteira. `encaminhada` poe a marca "Encaminhada" do proprio WhatsApp. */
+  const op = {};
+  if (c.responde && c.responde.id) op.quoted = { key: { remoteJid: jid, fromMe: !!c.responde.deMim, id: String(c.responde.id),
+    participant: c.responde.participante || undefined }, message: { conversation: String(c.responde.texto || "") } };
+  const enc = c.encaminhada ? { contextInfo: { isForwarded: true, forwardingScore: 1 } } : {};
+  if (c.type === "text") r = await sock.sendMessage(jid, { text: c.text.body, ...enc }, op);
+  else if (c.type === "image") r = await sock.sendMessage(jid, { image: { url: c.image.link }, caption: c.image.caption || undefined, ...enc }, op);
+  else if (c.type === "video") r = await sock.sendMessage(jid, { video: { url: c.video.link }, caption: c.video.caption || undefined, ...enc }, op);
+  else if (c.type === "audio") r = await sock.sendMessage(jid, { audio: { url: c.audio.link }, mimetype: "audio/ogg; codecs=opus", ptt: true, ...enc }, op);
+  else if (c.type === "document") r = await sock.sendMessage(jid, { document: { url: c.document.link }, fileName: c.document.filename || "arquivo", mimetype: c.document.mime_type || "application/octet-stream", caption: c.document.caption || undefined, ...enc }, op);
   else if (c.type === "interactive" && c.interactive.type === "button" && BOTOES_COMO !== "nativo" && NATIVO_PARA.indexOf(String(para).replace(/\D/g, "")) < 0) {
     /* OPCOES NUMERADAS (24/09/2026). O formato de botao "nativeFlow" foi ACEITO pelo servidor do
        WhatsApp e NUNCA CHEGOU no celular do Derek — descartado calado, sem erro. Mensagem que some
