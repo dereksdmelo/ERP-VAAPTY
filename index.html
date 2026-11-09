@@ -19196,7 +19196,7 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
    * favorecido ainda se editam dentro de Lançamentos, e um grupo com um
    * atalho para a mesma tela seria menu que promete o que não tem. */
   const TITULO = { pendencias: "Pendências", lancamentos: "Conciliação bancária", recebimentos: "Recebimentos", contas: "Títulos financeiros", cartoes: "Cartões de crédito", notas: "Notas fiscais",
-    carros: "Carros", fechamento: "Fechamento", dre: "DRE", ano: "Ano", folha: "Folha", caixas: "Contas e caixas",
+    carros: "Carros", fechamento: "Fechamento", dre: "DRE", ano: "Ano", balanco: "Balanço patrimonial", folha: "Folha", caixas: "Contas e caixas",
     fixas: "Contas fixas", plano: "Plano de contas" };
   const SUB = {
     notas: "Nota fiscal de serviço, direto na Receita.",
@@ -19209,6 +19209,7 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
     fechamento: "Previsto × realizado do mês.",
     dre: "O resultado: quanto entrou, quanto custou, quanto sobrou.",
     ano: "Os doze meses lado a lado, como o fluxo de caixa da planilha.",
+    balanco: "O que a empresa tem, o que deve e o que sobra — hoje.",
     folha: "Salário, comissão, bonificação e vales.",
     caixas: "Os bancos e o dinheiro em espécie: quanto tem em cada lugar.",
     fixas: "O que sai todo mês: gera os títulos do mês e entra na projeção do DRE.",
@@ -19219,7 +19220,7 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
   const irPara = (a, c) => { if (c && aoMudarMes) aoMudarMes(competenciaDe(c)); if (aoIrPara) aoIrPara(a); };
   return (
     <div>
-      <Cabecalho titulo={TITULO[aba] || "Financeiro"} mes={aba === "pendencias" || aba === "caixas" || aba === "cartoes" || aba === "notas" || aba === "ano" || aba === "plano" ? null : mes} sub={SUB[aba]} />
+      <Cabecalho titulo={TITULO[aba] || "Financeiro"} mes={aba === "pendencias" || aba === "caixas" || aba === "cartoes" || aba === "notas" || aba === "ano" || aba === "balanco" || aba === "plano" ? null : mes} sub={SUB[aba]} />
       {aba === "pendencias" && <FinPendencias aoIr={irPara} />}
       {aba === "lancamentos" && <FinLancamentos comp={comp} aoIrTitulos={() => irPara("contas")} />}
       {aba === "recebimentos" && <FinRecebimentos comp={comp} />}
@@ -19227,6 +19228,7 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
       {aba === "fechamento" && <FinFechamento comp={comp} />}
       {aba === "dre" && <FinDRE comp={comp} />}
       {aba === "ano" && <FinAno comp={comp} aoIr={irPara} />}
+      {aba === "balanco" && <FinBalanco aoIr={irPara} />}
       {aba === "carros" && <FinCarros comp={comp} />}
       {aba === "cartoes" && <FinCartoes />}
       {aba === "notas" && <FinNotas />}
@@ -23105,6 +23107,148 @@ function FinFechamento({ comp }) {
  * **Tocar no nome do mês abre o Fechamento daquele mês** — é onde se
  * digita o previsto e se reclassifica uma categoria.
  */
+function FinBalanco({ aoIr }) {
+  /* O BALANÇO PATRIMONIAL (09/11/2026, o Derek). Retrato de hoje, montado do que o sistema já sabe
+     (`?recurso=balanco`): contas, títulos em aberto e carros no pátio pelo custo. Nada se digita aqui;
+     o que estiver errado se corrige na tela de onde o número vem, e cada bloco leva até ela. */
+  const [d, setD] = useState(null); const [erro, setErro] = useState("");
+  const [aberto, setAberto] = useState({});
+  const [ano, setAno] = useState(null); const [lendoAno, setLendoAno] = useState(false);
+  useEffect(() => { fin("balanco").then(setD).catch((e) => setErro(e.message)); }, []);
+  if (erro) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
+  if (!d) return <p className="text-[13px]" style={{ color: C.mute }}>Montando o balanço…</p>;
+  const abre = (k) => setAberto((a) => ({ ...a, [k]: !a[k] }));
+  const dataBR = (v) => { const x = String(v || "").slice(0, 10); return x ? `${x.slice(8, 10)}/${x.slice(5, 7)}/${x.slice(0, 4)}` : ""; };
+  const compararAno = async () => {
+    setLendoAno(true);
+    try {
+      const r = await fin("ano", { ano: Number(d.hoje.slice(0, 4)) });
+      const com = (r.meses || []).filter((m) => m.fonte && m.fonte !== "futuro");
+      setAno(com.length ? com[com.length - 1].acumulado : null);
+    } catch (e) { setAno(undefined); }
+    setLendoAno(false);
+  };
+  const num = (v) => <span style={{ fontVariantNumeric: "tabular-nums" }}>{rs2(v)}</span>;
+  const linha = (k, rot, v, o = {}) => (
+    <div key={k} style={{ borderBottom: `1px solid ${C.line}` }}>
+      <div className="flex items-baseline gap-2 px-3 py-1.5 text-[13px]" style={{ paddingLeft: o.sub ? 24 : 12, background: o.fundo }}>
+        {o.detalhe
+          ? <button onClick={() => abre(k)} className="flex-1 text-left" style={{ fontWeight: o.forte ? 700 : 400 }}>{aberto[k] ? "▾ " : "▸ "}{rot}</button>
+          : <span className="flex-1" style={{ fontWeight: o.forte ? 700 : 400 }}>{rot}</span>}
+        {o.nota && <span className="text-[11px]" style={{ color: o.notaCor || C.mute }}>{o.nota}</span>}
+        <span className="w-32 text-right" style={{ fontWeight: o.forte ? 700 : 400, color: o.cor }}>{num(v)}</span>
+      </div>
+      {o.detalhe && aberto[k] && <div className="px-3 pb-2" style={{ paddingLeft: o.sub ? 36 : 24 }}>{o.detalhe}</div>}
+    </div>
+  );
+  const tabelaTitulos = (ts) => (
+    <div className="max-h-72 overflow-y-auto rounded-lg" style={{ border: `1px solid ${C.line}` }}>
+      <table className="w-full text-[12px]" style={{ borderCollapse: "collapse" }}>
+        <tbody>{ts.map((t) => (
+          <tr key={t.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+            <td className="px-2 py-1">{t.descricao || "—"}{t.quem ? <span style={{ color: C.mute }}> · {t.quem}</span> : null}</td>
+            <td className="whitespace-nowrap px-2 py-1" style={{ color: t.vencido ? C.laranja : C.mute }}>{t.vencimento ? `${t.vencido ? "venceu " : "vence "}${dataBR(t.vencimento)}` : "sem vencimento"}</td>
+            <td className="whitespace-nowrap px-2 py-1 text-right">{num(t.valor)}</td>
+          </tr>))}</tbody>
+      </table>
+    </div>
+  );
+  const ir = (rot, aba) => <button onClick={() => aoIr && aoIr(aba)} className="mt-1 text-[12px] font-semibold" style={{ color: C.roxo }}>{rot} →</button>;
+  const coluna = (titulo, total, corpo, cor) => (
+    <div className="flex-1 overflow-hidden rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}`, minWidth: 320 }}>
+      <div className="flex items-baseline px-3 py-2" style={{ borderBottom: `2px solid ${cor}` }}>
+        <span className="flex-1 text-[12px] font-bold uppercase tracking-[0.06em]" style={{ color: cor }}>{titulo}</span>
+        <span className="text-[16px] font-bold" style={{ color: cor }}>{num(total)}</span>
+      </div>
+      {corpo}
+    </div>
+  );
+  const faixa = (rot) => <div className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-[0.08em]" style={{ color: C.mute }}>{rot}</div>;
+  const contasPos = d.contas.filter((c) => c.saldo >= 0), contasNeg = d.contas.filter((c) => c.saldo < 0);
+  const cartoesDeve = d.cartoes.filter((c) => c.saldo < 0);
+  const vencidoReceber = d.receber.reduce((t, g) => t + g.vencido, 0);
+  const vencidoPagar = d.pagar.reduce((t, g) => t + g.vencido, 0);
+  const pl = d.patrimonio_liquido;
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-2">
+        {[["Ativo", d.ativo.total, C.ink], ["Passivo", d.passivo.total, C.laranja], ["Patrimônio líquido", pl, pl >= 0 ? C.verde : "#C0281B"]].map(([r, v, cor]) => (
+          <div key={r} className="rounded-xl px-3 py-2" style={{ background: C.paper, border: `1px solid ${C.line}`, minWidth: 180 }}>
+            <span className="block text-[11px] font-semibold uppercase tracking-[0.04em]" style={{ color: C.mute }}>{r}</span>
+            <span className="block text-[20px] font-bold" style={{ fontVariantNumeric: "tabular-nums", color: cor }}>{rs2(v)}</span>
+          </div>))}
+        <div className="flex items-center px-2 text-[12px]" style={{ color: C.mute }}>retrato de {dataBR(d.hoje)}</div>
+      </div>
+
+      <div className="flex flex-wrap gap-3">
+        {coluna("Ativo", d.ativo.total, <div>
+          {faixa("Disponível")}
+          {contasPos.map((c) => linha("c" + c.id, c.nome, c.saldo, { sub: true, nota: c.tipo === "dinheiro" ? "espécie" : null }))}
+          {!contasPos.length && <p className="px-6 py-1 text-[12px]" style={{ color: C.mute }}>Nenhuma conta com saldo.</p>}
+          {linha("disp", "Total disponível", d.ativo.disponivel, { forte: true, fundo: C.bg })}
+          {faixa("A receber")}
+          {d.receber.map((g) => linha("r" + g.chave, g.rotulo, g.total, { sub: true,
+            nota: `${g.qtd} título${g.qtd === 1 ? "" : "s"}${g.vencido ? ` · ${rs2(g.vencido)} vencido` : ""}`, notaCor: g.vencido ? C.laranja : C.mute,
+            detalhe: <div>{tabelaTitulos(g.titulos)}{ir("Títulos financeiros", "contas")}</div> }))}
+          {!d.receber.length && <p className="px-6 py-1 text-[12px]" style={{ color: C.mute }}>Nenhum título a receber em aberto.</p>}
+          {linha("rec", "Total a receber", d.ativo.receber, { forte: true, fundo: C.bg })}
+          {faixa("Estoque")}
+          {linha("est", `Carros no pátio (${d.carros.length})`, d.ativo.estoque, { sub: true, nota: "pelo custo",
+            detalhe: <div className="max-h-72 overflow-y-auto rounded-lg" style={{ border: `1px solid ${C.line}` }}>
+              <table className="w-full text-[12px]" style={{ borderCollapse: "collapse" }}>
+                <thead><tr style={{ color: C.mute }}><th className="px-2 py-1 text-left font-semibold">Carro</th><th className="px-2 py-1 text-right font-semibold">Compra</th><th className="px-2 py-1 text-right font-semibold">Custos</th><th className="px-2 py-1 text-right font-semibold">Total</th></tr></thead>
+                <tbody>{d.carros.map((c) => (
+                  <tr key={c.id} style={{ borderTop: `1px solid ${C.line}` }}>
+                    <td className="px-2 py-1">{c.carro || "—"} <span style={{ color: C.mute }}>{c.placa}</span></td>
+                    <td className="px-2 py-1 text-right" style={{ color: c.compra ? C.ink : C.laranja }}>{c.compra ? num(c.compra) : "sem valor"}</td>
+                    <td className="px-2 py-1 text-right">{num(c.custos)}</td>
+                    <td className="px-2 py-1 text-right font-semibold">{num(c.total)}</td>
+                  </tr>))}</tbody>
+              </table>
+            </div> })}
+          {linha("tat", "TOTAL DO ATIVO", d.ativo.total, { forte: true, fundo: C.roxoFraco })}
+        </div>, C.ink)}
+
+        {coluna("Passivo e patrimônio líquido", d.passivo.total + pl, <div>
+          {faixa("A pagar")}
+          {d.pagar.map((g) => linha("p" + g.chave, g.rotulo, g.total, { sub: true,
+            nota: `${g.qtd} título${g.qtd === 1 ? "" : "s"}${g.vencido ? ` · ${rs2(g.vencido)} vencido` : ""}`, notaCor: g.vencido ? C.laranja : C.mute,
+            detalhe: <div>{tabelaTitulos(g.titulos)}{ir("Títulos financeiros", "contas")}</div> }))}
+          {!d.pagar.length && <p className="px-6 py-1 text-[12px]" style={{ color: C.mute }}>Nenhum título a pagar em aberto.</p>}
+          {cartoesDeve.map((c) => linha("k" + c.id, `Cartão · ${c.nome}`, -c.saldo, { sub: true, nota: "saldo devedor" }))}
+          {contasNeg.map((c) => linha("n" + c.id, `${c.nome} (saldo negativo)`, -c.saldo, { sub: true }))}
+          {linha("tps", "TOTAL DO PASSIVO", d.passivo.total, { forte: true, fundo: C.bg })}
+          {faixa("Patrimônio líquido")}
+          {linha("pl", "Ativo − passivo", pl, { sub: true, cor: pl >= 0 ? C.verde : "#C0281B" })}
+          <div className="px-6 py-1.5 text-[12px]" style={{ color: C.mute }}>
+            {ano === null && <button onClick={compararAno} disabled={lendoAno} className="font-semibold" style={{ color: C.roxo }}>{lendoAno ? "lendo o Ano…" : "comparar com o lucro acumulado da aba Ano"}</button>}
+            {ano === undefined && "Não consegui ler a aba Ano."}
+            {typeof ano === "number" && <span>Lucro acumulado na aba Ano: <b style={{ color: C.ink }}>{rs2(ano)}</b> · diferença {rs2(pl - ano)} — o que não fecha é lançamento sem categoria, título que falta ou capital que entrou.</span>}
+          </div>
+          {linha("tpp", "TOTAL PASSIVO + PL", d.passivo.total + pl, { forte: true, fundo: C.roxoFraco })}
+        </div>, C.laranja)}
+      </div>
+
+      {(vencidoReceber > 0 || vencidoPagar > 0) && (
+        <p className="text-[12px]" style={{ color: C.laranja }}>
+          {vencidoReceber > 0 && <>Vencido a receber: <b>{rs2(vencidoReceber)}</b>. </>}
+          {vencidoPagar > 0 && <>Vencido a pagar: <b>{rs2(vencidoPagar)}</b>. </>}
+          Título vencido que já foi pago ou recebido é título que falta ligar ao extrato.
+        </p>
+      )}
+      {d.carros_sem_compra > 0 && (
+        <p className="text-[12px]" style={{ color: C.laranja }}>{d.carros_sem_compra} carro(s) no pátio sem valor de compra — entram no estoque só pelos custos. Corrija no Estoque.</p>
+      )}
+      <p className="text-[11px] leading-snug" style={{ color: C.mute }}>
+        Retrato de hoje: saldo de cada conta desde a abertura, títulos em aberto (o que se lançou em Títulos financeiros,
+        os do contrato de cada carro e as contas fixas geradas) e carros no pátio pelo custo — compra mais os custos, realizado
+        ou previsto. O patrimônio líquido é a diferença. Não entram: imobilizado (móveis, equipamentos), empréstimos sem título
+        lançado, e o que lojistas devem de vendas anteriores a 01/11/2026, que não têm título.
+      </p>
+    </div>
+  );
+}
+
 function FinAno({ comp, aoIr }) {
   /* O ANO COMO PRÉ-BALANÇO (08/11/2026, o Derek): o resultado de cada mês, o gasto por área (os grupos
      do plano de contas), as retiradas dos sócios e quanto ficou ou saiu do lucro acumulado. Até setembro
@@ -28666,6 +28810,7 @@ function destinosPara(perfil) {
       { id: "fin_fechamento",  rot: "Fechamento",        curto: "Financ.", area: "financeiro", aba: "fechamento",  grupo: "fim do mês", icone: "financeiro" },
       { id: "fin_dre",         rot: "DRE",               curto: "Financ.", area: "financeiro", aba: "dre",         grupo: "fim do mês", icone: "financeiro" },
       { id: "fin_ano",         rot: "Ano",               curto: "Financ.", area: "financeiro", aba: "ano",         grupo: "fim do mês", icone: "financeiro" },
+      { id: "fin_balanco",     rot: "Balanço patrimonial", curto: "Financ.", area: "financeiro", aba: "balanco",   grupo: "fim do mês", icone: "financeiro" },
       { id: "fin_folha",       rot: "Folha",             curto: "Financ.", area: "financeiro", aba: "folha",       grupo: "fim do mês", icone: "financeiro" },
       { id: "fin_fixas",       rot: "Contas fixas",      curto: "Financ.", area: "financeiro", aba: "fixas",       grupo: "fim do mês", icone: "financeiro" },
       { id: "fin_caixas",      rot: "Contas e caixas",   curto: "Financ.", area: "financeiro", aba: "caixas",      grupo: "cadastros",  icone: "financeiro" },
@@ -32125,7 +32270,7 @@ function TelaGestao({ perfil, comp }) {
 // razão: o menu e o roteador precisam concordar.
 const ABA_FIN = {
   fin_pendencias: "pendencias", fin_lancamentos: "lancamentos", fin_recebimentos: "recebimentos", fin_contas: "contas", fin_cartoes: "cartoes", fin_notas: "notas",
-  fin_carros: "carros", fin_fechamento: "fechamento", fin_dre: "dre", fin_ano: "ano", fin_folha: "folha", fin_caixas: "caixas",
+  fin_carros: "carros", fin_fechamento: "fechamento", fin_dre: "dre", fin_ano: "ano", fin_balanco: "balanco", fin_folha: "folha", fin_caixas: "caixas",
   fin_fixas: "fixas", fin_plano: "plano",
 };
 const DESTINO_FIN = Object.fromEntries(Object.entries(ABA_FIN).map(([d, a]) => [a, d]));

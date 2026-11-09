@@ -6426,3 +6426,19 @@ DANFSe (PDF) e o cancelamento.
 **A publicação de 87efa60 subiu com a Action em verde e não foi servida** (09/11/2026): o `versao.txt`
 ficou no commit anterior por mais de 15 minutos. Um commit vazio republicou e resolveu. Mais uma razão
 para conferir o `versao.txt` depois de toda publicação.
+
+### 75. O balanço patrimonial é o retrato de hoje, montado do que já existe
+
+O Derek, em 09/11/2026: *"preciso de uma aba de balanço patrimonial no financeiro"*. Financeiro → fim
+do mês → Balanço patrimonial (`FinBalanco`, `?recurso=balanco` em `api/financeiro.js`). **Nada se
+digita ali**: ativo é o saldo de cada conta de banco e dinheiro (o mesmo corte da abertura, decisão 58),
+os títulos a receber em aberto e os carros no pátio pelo custo de hoje (compra + custos, realizado ou
+previsto — decisão 23; comissão de indicação não entra); passivo é os títulos a pagar em aberto
+(separados em compra de carros, folha, retiradas e fornecedores), o saldo devedor dos cartões e conta
+de banco negativa; o patrimônio líquido é a diferença. O carro entra pelo custo inteiro e o que falta
+pagar ao cliente está no passivo pelo título da compra (0119), então os dois se compensam.
+
+**Só hoje, não uma data passada**: título em aberto não guarda quando esteve em aberto, e o balanço
+de uma data antiga sairia inventado. **O que não entra, e a tela diz**: imobilizado, empréstimo sem
+título, e o que lojistas devem de vendas anteriores a 01/11/2026 (sem título). "Comparar com o lucro
+acumulado da aba Ano" lê o Ano sob demanda — a diferença é o que falta classificar ou lançar.

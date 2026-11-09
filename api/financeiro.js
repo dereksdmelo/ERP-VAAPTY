@@ -3274,6 +3274,121 @@ async function recebimentos(req, res, tok) {
  * tela "Contas e caixas" mostra ao lado de cada uma — quanto tem na
  * gaveta, quanto tem na casa do Derek, quanto tem no banco.
  */
+/**
+ * ===== o balanço patrimonial =====
+ *
+ * O Derek, em 09/11/2026: *"preciso de uma aba de balanço patrimonial no
+ * financeiro"*. É o retrato de HOJE, montado do que o sistema já sabe —
+ * nada é digitado aqui:
+ *
+ *   ativo   = o saldo de cada conta (banco e dinheiro, o mesmo cálculo
+ *             do `saldos`), os títulos a receber em aberto e os carros no
+ *             pátio pelo custo (compra + custos, realizado ou previsto,
+ *             como o "custo hoje" da decisão 23);
+ *   passivo = os títulos a pagar em aberto e o saldo devedor dos cartões;
+ *   PL      = ativo − passivo.
+ *
+ * **É retrato de hoje, não de uma data passada**: título em aberto não
+ * guarda quando estava em aberto, então "o balanço de 31/08" não sai sem
+ * inventar. O carro no pátio e o título da compra se compensam: o carro
+ * entra pelo custo inteiro e o que ainda não foi pago ao cliente está no
+ * passivo. Venda de antes de 01/11/2026 não tem título (0119), então o
+ * que um lojista ainda deve desse tempo não aparece — a tela diz isso.
+ */
+async function balanco(req, res, tok) {
+  if (req.method !== "GET") { res.setHeader("Allow", "GET"); return res.status(405).json({ erro: "Use GET." }); }
+  const hoje = hojeAqui();
+  const [contas, movs, abertos, estoque] = await Promise.all([
+    supa(`${base("fin_conta")}?select=id,nome,tipo,ativa,saldo_inicial,saldo_inicial_em&order=nome.asc`, { headers: cab(tok) }),
+    supa(`${base("fin_lancamento")}?select=conta_id,data,debito,credito&situacao=eq.efetivado&conta_id=not.is.null&data=lte.${hoje}&limit=100000`, { headers: cab(tok) }),
+    supa(`${base("fin_lancamento")}?select=id,descricao,favorecido,vencimento,competencia,debito,credito,estoque_id,tipo_negociacao,` +
+      `fin_favorecido(nome),fin_categoria(nome,grupo,pede_funcionario)&situacao=eq.aberto&limit=20000`, { headers: cab(tok) }),
+    supa(`${base("estoque")}?select=id,entrou_em,valor_compra,natureza,veiculo(placa,marca_modelo),estoque_custo(tipo,previsto,realizado)` +
+      `&situacao=eq.em_estoque&limit=2000`, { headers: cab(tok) }),
+  ]);
+
+  // Contas: o mesmo corte da abertura (decisão 58).
+  const por = {};
+  (contas || []).forEach((c) => {
+    por[c.id] = { id: c.id, nome: c.nome, tipo: c.tipo || "banco", ativa: c.ativa !== false,
+      saldo: Number(c.saldo_inicial) || 0, inicio: c.saldo_inicial_em ? String(c.saldo_inicial_em).slice(0, 10) : "" };
+  });
+  (movs || []).forEach((m) => {
+    const c = por[m.conta_id];
+    if (!c || (c.inicio && String(m.data) < c.inicio)) return;
+    c.saldo += (Number(m.credito) || 0) - (Number(m.debito) || 0);
+  });
+  const lista = Object.values(por).map((c) => ({ ...c, saldo: r2(c.saldo) }))
+    .filter((c) => c.ativa || Math.abs(c.saldo) > 0.004);
+  const caixa = lista.filter((c) => c.tipo !== "cartao");
+  const cartoes = lista.filter((c) => c.tipo === "cartao");
+
+  // Títulos em aberto, separados pelo que são.
+  const linhaTit = (l) => ({
+    id: l.id, descricao: l.descricao, quem: (l.fin_favorecido && l.fin_favorecido.nome) || l.favorecido || null,
+    vencimento: l.vencimento, valor: r2((Number(l.credito) || 0) + (Number(l.debito) || 0)),
+    vencido: !!(l.vencimento && String(l.vencimento) < hoje),
+  });
+  const grupos = {};
+  const poe = (lado, chave, rot, l) => {
+    const k = `${lado}:${chave}`;
+    const g = grupos[k] = grupos[k] || { lado, chave, rotulo: rot, total: 0, vencido: 0, qtd: 0, titulos: [] };
+    const t = linhaTit(l);
+    g.total += t.valor; g.qtd += 1; if (t.vencido) g.vencido += t.valor;
+    g.titulos.push(t);
+  };
+  (abertos || []).forEach((l) => {
+    const c = l.fin_categoria || {};
+    const receber = (Number(l.credito) || 0) > 0;
+    const doCarro = c.grupo === "negociacao" || !!l.estoque_id;
+    if (receber) {
+      if (doCarro) poe("receber", "carros", "Venda de carros a receber (lojistas)", l);
+      else poe("receber", "outros", "Outros valores a receber", l);
+    } else {
+      if (doCarro) poe("pagar", "carros", "Compra de carros a pagar (clientes, quitações, débitos)", l);
+      else if (c.grupo === "retirada") poe("pagar", "retiradas", "Retiradas dos sócios a pagar", l);
+      else if (c.pede_funcionario) poe("pagar", "folha", "Folha a pagar", l);
+      else poe("pagar", "fornecedores", "Fornecedores e contas a pagar", l);
+    }
+  });
+  const fecha = (lado) => Object.values(grupos).filter((g) => g.lado === lado)
+    .map((g) => ({ ...g, total: r2(g.total), vencido: r2(g.vencido),
+      titulos: g.titulos.sort((a, b) => String(a.vencimento || "9").localeCompare(String(b.vencimento || "9"))) }))
+    .sort((a, b) => b.total - a.total);
+  const receber = fecha("receber"), pagar = fecha("pagar");
+
+  // Carros no pátio, pelo custo de hoje.
+  const val = (x) => (x.realizado == null ? Number(x.previsto) || 0 : Number(x.realizado) || 0);
+  const carros = (estoque || []).filter((e) => (e.natureza || "compra") === "compra").map((e) => {
+    const custos = (e.estoque_custo || []).reduce((t, x) => t + val(x), 0);
+    const compra = Number(e.valor_compra) || 0;
+    return { id: e.id, placa: e.veiculo && e.veiculo.placa, carro: e.veiculo && e.veiculo.marca_modelo, entrou_em: e.entrou_em,
+      compra: r2(compra), custos: r2(custos), total: r2(compra + custos) };
+  }).sort((a, b) => b.total - a.total);
+  const semCompra = carros.filter((c) => !c.compra).length;
+
+  const soma = (xs, k) => r2(xs.reduce((t, x) => t + (Number(x[k]) || 0), 0));
+  const caixaPos = caixa.filter((c) => c.saldo >= 0), caixaNeg = caixa.filter((c) => c.saldo < 0);
+  const cartaoDeve = cartoes.filter((c) => c.saldo < 0);
+  const ativo = {
+    disponivel: soma(caixaPos, "saldo"),
+    receber: soma(receber, "total"),
+    estoque: soma(carros, "total"),
+  };
+  ativo.total = r2(ativo.disponivel + ativo.receber + ativo.estoque);
+  const passivo = {
+    pagar: soma(pagar, "total"),
+    cartoes: r2(-soma(cartaoDeve, "saldo")),
+    contas_negativas: r2(-soma(caixaNeg, "saldo")),
+  };
+  passivo.total = r2(passivo.pagar + passivo.cartoes + passivo.contas_negativas);
+
+  return res.status(200).json({
+    hoje, ativo, passivo, patrimonio_liquido: r2(ativo.total - passivo.total),
+    contas: caixa, cartoes, receber, pagar, carros, carros_sem_compra: semCompra,
+  });
+}
+
 async function saldos(req, res, tok) {
   if (req.method !== "GET") { res.setHeader("Allow", "GET"); return res.status(405).json({ erro: "Use GET." }); }
   const hoje = hojeAqui();
@@ -3718,7 +3833,7 @@ async function nfse(req, res, tok) {
 const RECURSOS = { nfse, cartao, conta, categoria, funcionario, favorecido, lancamento, importar, dre, carros, vale, folha, remuneracao,
                    "contas-fixas": contasFixas, "config-folha": configFolha,
                    "perfil-remuneracao": perfilRemuneracao,
-                   fechamento, orcamento, ano: anoGestao, "ano-antigo": ano, rateio, negociacao, titulo, fluxo, log, recibo, pendencias, recebimentos, saldos,
+                   fechamento, orcamento, ano: anoGestao, "ano-antigo": ano, rateio, negociacao, titulo, fluxo, log, recibo, pendencias, recebimentos, saldos, balanco,
                    estoque: estoqueLista };
 
 module.exports = async function handler(req, res) {
