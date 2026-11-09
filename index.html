@@ -5362,8 +5362,11 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
       // A hora em que a janela do "Chegou" registrou o cliente (0074)
       // preenche a hora de chegada da Abordagem — só se ela estiver
       // vazia: o que alguém digitou aqui não muda sozinho (decisão 43).
-      const hc = atendimento && atendimento.chegada_em
-        ? new Date(atendimento.chegada_em).toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" })
+      // Sem o "Chegou" (atendimento aberto direto pelo negociador), vale a hora em que ele foi aberto:
+      // "chegou às" é dado do sistema (09/11/2026, o Derek), não campo para lembrar de preencher.
+      const quandoChegou = atendimento && (atendimento.chegada_em || atendimento.criado_em);
+      const hc = quandoChegou
+        ? new Date(quandoChegou).toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" })
         : "";
       if (hc && !(fRef.current || {}).chegada) {
         fRef.current = { ...(fRef.current || VAZIO), chegada: hc };
@@ -5573,6 +5576,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
      digital do pré-contrato"). Ela já existia (decisão 42), mas só aparecia depois de imprimir. Agora
      o botão gera o documento sem a impressora e já cria o link para o cliente assinar no celular. */
   const [assinarDireto, setAssinarDireto] = useState(null);
+  const [corrigirChegada, setCorrigirChegada] = useState(false);
   const assinarDigital = async (tipo, rotulo, html) => {
     setAssinarDireto({ indo: true });
     const reg = await gerarDocumento(tipo, rotulo, html, null, { semJanela: true });
@@ -6591,11 +6595,20 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               )}
               {erroNeg && <p className="text-[11.5px]" style={{ color: C.laranja }}>{erroNeg}</p>}
               <Campo label="Chegou às">
-                <div className="flex gap-1.5">
-                  <input type="time" className={inputCls} style={inputSty} value={f.chegada} onChange={(e) => set("chegada", e.target.value)} />
-                  <button onClick={() => set("chegada", new Date().toTimeString().slice(0, 5))}
-                    className="shrink-0 rounded-md border px-2 text-[12px] font-semibold" style={{ borderColor: C.line, color: C.roxo }}>Agora</button>
-                </div>
+                {/* DADO DO SISTEMA (09/11/2026): a hora do "Chegou" da pré-venda ou a de abertura do
+                    atendimento. Fica o "corrigir" para quem abriu o atendimento depois de o cliente chegar. */}
+                {f.chegada && !corrigirChegada ? (
+                  <div className="flex h-[38px] items-center gap-2 rounded-md px-2.5 text-[14px]" style={{ background: C.bg, fontFamily: F.mono }}>
+                    <span className="font-semibold">{f.chegada}</span>
+                    <button onClick={() => setCorrigirChegada(true)} className="ml-auto text-[11px] font-semibold" style={{ color: C.mute, fontFamily: F.body }}>corrigir</button>
+                  </div>
+                ) : (
+                  <div className="flex gap-1.5">
+                    <input type="time" className={inputCls} style={inputSty} value={f.chegada} onChange={(e) => set("chegada", e.target.value)} />
+                    <button onClick={() => { set("chegada", new Date().toTimeString().slice(0, 5)); setCorrigirChegada(false); }}
+                      className="shrink-0 rounded-md border px-2 text-[12px] font-semibold" style={{ borderColor: C.line, color: C.roxo }}>Agora</button>
+                  </div>
+                )}
               </Campo>
               <Toggle label="Combinei o tempo do processo" nota="“A avaliação leva uns 40 minutos, tudo bem?”" valor={f.tempoCombinado} onChange={(v) => set("tempoCombinado", v)} />
               {/* A autorização da escuta é pedida aqui, no primeiro contato, e vale para o atendimento inteiro. */}
