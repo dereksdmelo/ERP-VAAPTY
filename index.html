@@ -5745,7 +5745,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   const blocoCliente = (
     <Bloco titulo="Dados do cliente" sub="Só o que se pergunta de saída. RG e endereço ficam para o fechamento — saem do CRLV e da CNH anexados abaixo.">
       <div className="space-y-2">
-        <div className="grid items-end gap-2 lg:grid-cols-[1.6fr_1fr_1fr_auto]">
+        <div className="grid items-end gap-2 lg:grid-cols-[1.6fr_1fr_1fr]">
         <Campo label="Nome completo" req>
           <input className={inputCls} style={inputSty} value={cliente.cliente_nome}
             onChange={(e) => setCliente({ ...cliente, cliente_nome: e.target.value })} />
@@ -5758,12 +5758,12 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
           <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="tel"
             value={cliente.cliente_telefone} onChange={(e) => setCliente({ ...cliente, cliente_telefone: e.target.value })} />
         </Campo>
-        <button onClick={salvarCliente} disabled={salvandoCliente}
-          className="rounded-md px-4 py-2 text-[13px] font-semibold lg:py-1.5"
-          style={{ background: salvandoCliente ? C.line : C.roxo, color: "#fff" }}>
-          {salvandoCliente ? "Salvando…" : "Salvar cliente"}
-        </button>
         </div>
+        {/* SEM BOTÃO (09/11/2026, o Derek: "não dá pra salvar direto só de adicionar os dados?"): já salvava
+            sozinho 1,5 s depois de parar de digitar; o botão só confundia. Fica o aviso de que salvou. */}
+        <p className="text-[11px]" style={{ color: erroCliente ? C.laranja : C.mute }}>
+          {salvandoCliente ? "salvando…" : clienteSalvoEm ? `✓ salvo às ${clienteSalvoEm.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : "salva sozinho ao digitar"}
+        </p>
         {erroCliente && <p className="text-[12px]" style={{ color: C.laranja }}>{erroCliente}</p>}
         {!podeImprimir && (
           <p className="text-[11px]" style={{ color: AMARELO.texto }}>
@@ -7865,11 +7865,9 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                     <input className={inputCls} style={inputSty} inputMode="email" value={cliente.cliente_email}
                       onChange={(e) => setCliente({ ...cliente, cliente_email: e.target.value })} />
                   </Campo>
-                  <button onClick={salvarCliente} disabled={salvandoCliente}
-                    className="w-full rounded-md border py-2 text-[12px] font-semibold"
-                    style={{ borderColor: C.line, color: C.roxo }}>
-                    {salvandoCliente ? "Salvando…" : clienteSalvoEm ? `Salvo às ${clienteSalvoEm.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })} — salva sozinho ao digitar` : "Salvar dados do cliente"}
-                  </button>
+                  <p className="text-[11px]" style={{ color: C.mute }}>
+                    {salvandoCliente ? "salvando…" : clienteSalvoEm ? `✓ salvo às ${clienteSalvoEm.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : "salva sozinho ao digitar"}
+                  </p>
                   {erroCliente && <p className="text-[11.5px]" style={{ color: C.laranja }}>{erroCliente}</p>}
 
                   {(() => {
