@@ -30038,6 +30038,22 @@ function PainelGestor({ perfil, comp, aoAbrir }) {
                     <span style={{ fontFamily: F.mono, color: C.verde }}>{brl(a.valor_fechado)}</span>
                   ) : null}
                 </div>
+                {/* O QUE O NEGOCIADOR ESCREVEU (08/11/2026, o Derek: "kd as observações dos negociadores?"):
+                    as observações internas da ficha e as duas anotações mais novas, no próprio cartão. */}
+                {(() => {
+                  const fi = (x.viva && x.viva.ficha) || {};
+                  const internas = String(fi.internas || "").trim();
+                  const notas = String(a.observacoes || "").split("\n").map((t) => t.trim()).filter(Boolean).reverse();
+                  if (!internas && !notas.length && !fi.motivo && !fi.objecao) return null;
+                  return (
+                    <div className="mt-1.5 space-y-0.5 text-[12px] leading-snug" style={{ color: C.ink }}>
+                      {(fi.motivo || fi.objecao) && <div style={{ color: C.mute }}>{fi.motivo ? `vende por: ${fi.motivo}` : ""}{fi.motivo && fi.objecao ? " · " : ""}{fi.objecao ? `objeção: ${fi.objecao}` : ""}</div>}
+                      {internas && <div className="rounded px-1.5 py-0.5" style={{ background: "#FBF7FD" }}><b style={{ color: C.roxo }}>interna:</b> {internas.length > 220 ? internas.slice(0, 220) + "…" : internas}</div>}
+                      {notas.slice(0, 2).map((t, j) => <div key={j}>· {t.length > 200 ? t.slice(0, 200) + "…" : t}</div>)}
+                      {notas.length > 2 && <div className="text-[11px]" style={{ color: C.mute }}>+{notas.length - 2} anotação(ões) — abra o cartão</div>}
+                    </div>
+                  );
+                })()}
                 {revisado && (
                   <p className="mt-1.5 line-clamp-2 text-[12px] leading-snug" style={{ color: C.ink }}>
                     “{x.revisao.feedback}”
