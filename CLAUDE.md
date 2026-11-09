@@ -6394,3 +6394,35 @@ pedaço por pedaço) até alguém editar. O logo é guardado como data URL (até
 impresso o embute. Os documentos ficam no bucket privado em `empresa/`, por `api/foto.js?recurso=
 empresa-anexo` (decisão 9: a linha pelo token, a chave só no Storage). A conta bancária do contrato do
 lojista nasce do cadastro; o que o aparelho lembrou ainda manda.
+
+### 74. Nota fiscal de serviço direto na API nacional (0138, 0139)
+
+O Derek, em 09/11/2026: *"não dá pra criar a nossa própria PlugNotas?"*. Dá, porque Joinville emite só
+pelo Emissor Nacional desde 20/07/2026 e todo município aderiu ao padrão nacional: uma API só. Financeiro →
+Notas fiscais (rascunho → emitir → XML), a configuração fiscal em Cadastro da empresa, e o serviço é
+intermediação de venda (`cTribNac` 100501, LC 116 item 10.05). **Só o ambiente de testes (produção
+restrita) por enquanto** — a tela nem oferece produção até uma nota de teste ser aceita.
+
+O que está em `regras/nfse.js`, conferido contra o XSD 1.01 oficial e o Anexo I (relatório de pesquisa
+de 09/11/2026): a DPS 1.01 gerada **sem espaço entre as tags** (assim o texto já é a forma canônica);
+Id `DPS` + cLocEmi(7) + 2 + CNPJ(14) + série(5) + nDPS(15); tpEmit 1; nDPS sem zero à esquerda; série
+de software próprio 1–49999; dhEmi em −03:00 um minuto antes; totTrib pelo regime (não optante =
+vTotTrib, ME/EPP = pTotTribSN, MEI = indTotTrib); sem pAliq (convênio ativo). **Assinatura: C14N
+EXCLUSIVA, RSA-SHA256, SHA-256, só o certificado final no KeyInfo** — a inclusiva do manual de 2022 é
+recusada (E0714). Assinada pelo WebCrypto do Worker, sem biblioteca; conferida à parte (o digest bate
+com o `xmllint --exc-c14n` e o `openssl` verifica a assinatura). **O XSD oficial escreve os padrões com
+`^…$`, e o libxml2 lê isso como literal**: para validar aqui, use uma cópia sem os dois sinais.
+
+O envio é POST `{base}/nfse` com `{"dpsXmlGZipB64"}` por mTLS. **O certificado A1 nunca passa pelo banco
+nem pelo navegador**: a chave e o certificado são segredos do Worker (`NFSE_KEY_PEM`, `NFSE_CERT_PEM`) e
+a conexão é o binding `NFSE_MTLS` (mtls_certificates) — instalados por `worker/instalar-certificado-nfse.sh`,
+que pede a senha no terminal. O número da DPS é reservado no banco (`nfse_reservar_numero`), por
+ambiente; rejeitada não gasta número, e reenviar a mesma nota usa o mesmo número.
+
+**Em aberto:** confirmar no primeiro envio o prefixo do endereço (`/API/SefinNacional` vs
+`/SefinNacional`), os parâmetros de Joinville para 100501 (`/parametros_municipais/4209102/100501`), o
+DANFSe (PDF) e o cancelamento.
+
+**A publicação de 87efa60 subiu com a Action em verde e não foi servida** (09/11/2026): o `versao.txt`
+ficou no commit anterior por mais de 15 minutos. Um commit vazio republicou e resolveu. Mais uma razão
+para conferir o `versao.txt` depois de toda publicação.
