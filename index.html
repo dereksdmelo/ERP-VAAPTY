@@ -2869,16 +2869,23 @@ const REGISTROS_DA_FICHA = {
 };
 
 /* A RODADA FANTASMA SAI (09/11/2026). O defeito da chave antiga deixou
- * atendimentos com uma rodada que ninguém imprimiu: sem `em` (é de antes),
- * e depois de uma rodada cujos 5 minutos nunca correram — o fluxo não deixa
- * imprimir o extrato seguinte antes disso, então essa só pode ser a cópia. */
-function sanearRodadas(lista) {
+ * atendimentos com uma rodada que ninguém imprimiu, e uma página aberta
+ * antes da correção continua devolvendo essa cópia. Ela se reconhece: sem
+ * `em` (a rodada nova nasce com ele), sem contra, e SEM o extrato impresso
+ * daquela posição — imprimir é o que cria a rodada, e a impressão fica em
+ * `documentos`. Sem a lista de documentos, vale a regra dos 5 minutos: o
+ * fluxo não deixa imprimir o extrato seguinte antes de eles correrem. */
+function sanearRodadas(lista, documentos) {
   const R = Array.isArray(lista) ? lista : [];
-  return R.filter((r, i) => !(i > 0 && r && !r.em && !r.contra && R[i - 1] && !R[i - 1].esperaEm));
+  const D = Array.isArray(documentos) ? documentos : null;
+  return R.filter((r, i) => {
+    if (!(i > 0 && r && !r.em && !r.contra)) return true;
+    if (D) return D.some((d) => d && d.tipo === "extrato_ofertas" && Number(d.rodada) === i + 1);
+    return !!(R[i - 1] && R[i - 1].esperaEm);
+  });
 }
 function unirDaFicha(k, local, remoto) {
-  const u = unirRegistros(local, remoto, REGISTROS_DA_FICHA[k]);
-  return k === "rodadas" ? sanearRodadas(u) : u;
+  return unirRegistros(local, remoto, REGISTROS_DA_FICHA[k]);
 }
 
 function unirRegistros(local, remoto, chaveDe) {
@@ -2933,6 +2940,7 @@ function mesclarAoVivo(base, local, remoto) {
     }
     if (igualNaFicha(local[k], b[k])) out[k] = remoto[k];
   });
+  if (Array.isArray(out.rodadas)) out.rodadas = sanearRodadas(out.rodadas, out.documentos);
   return out;
 }
 
@@ -2956,6 +2964,7 @@ function reconciliar(base, local, remoto) {
     if (remoto[k] === undefined) return;
     n[k] = unirDaFicha(k, local[k], remoto[k]);
   });
+  if (Array.isArray(n.rodadas)) n.rodadas = sanearRodadas(n.rodadas, n.documentos);
   return n;
 }
 

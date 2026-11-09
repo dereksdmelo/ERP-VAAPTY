@@ -173,5 +173,19 @@ const VAZIO = { km: "", chassi: "", cor: "", pneus: ["","","",""], opcionais: []
   eq("campos juntos", [r.rodadas.length, r.rodadas[0].contra, r.rodadas[0].esperaEm], [1, "35000", 123]);
 }
 
+// 18. O fantasma volta de uma pagina velha DEPOIS dos 5 minutos: sem o extrato 2 impresso, sai.
+{
+  const docs = [{ tipo: "extrato_ofertas", rodada: 1, protocolo: "P1" }];
+  const boa = { impresso: "27000", contra: "42200", esperaEm: 111 };
+  const fantasma = { impresso: "27000", contra: "", esperaEm: null };
+  const r = reconciliar({ ...VAZIO, rodadas: [boa], documentos: docs }, { ...VAZIO, rodadas: [boa], documentos: docs },
+    { ...VAZIO, rodadas: [boa, fantasma], documentos: docs });
+  eq("fantasma depois dos 5 min sai", r.rodadas.length, 1);
+  const docs2 = docs.concat([{ tipo: "extrato_ofertas", rodada: 2, protocolo: "P2" }]);
+  const r2 = reconciliar({ ...VAZIO, rodadas: [boa], documentos: docs }, { ...VAZIO, rodadas: [boa], documentos: docs },
+    { ...VAZIO, rodadas: [boa, { impresso: "29000", contra: "", esperaEm: null }], documentos: docs2 });
+  eq("extrato 2 impresso de verdade fica", r2.rodadas.length, 2);
+}
+
 console.log(falhas ? "\n" + falhas + " FALHA(S)" : "\ntodos passaram");
 process.exit(falhas ? 1 : 0);
