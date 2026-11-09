@@ -5574,6 +5574,15 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   ];
   const faltamCliente = OBRIG_CLIENTE.filter(([k]) => !String(cliente[k] || "").trim());
   const podeImprimir = faltamCliente.length === 0;
+  /* O QUE FALTA É LINK (09/11/2026, o Derek: "ao clicar no item que falta ele me leva onde eu posso
+     preencher"): cada nome leva ao campo, na Pesquisa, e o acende. */
+  const ROTULO_CAMPO_CLIENTE = { cliente_nome: "Nome completo", cliente_cpf: "CPF" };
+  function linksFalta(sep) {
+    return faltamCliente.map(([k, r], i) => (
+      <React.Fragment key={k}>{i ? sep : ""}<button type="button" onClick={() => irParaCampo(ROTULO_CAMPO_CLIENTE[k] || r, "P")}
+        className="font-semibold underline" title="Ir para o campo">{r}</button></React.Fragment>
+    ));
+  }
 
   /**
    * `manual` distingue o clique do negociador da transição automática.
@@ -5767,7 +5776,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         {erroCliente && <p className="text-[12px]" style={{ color: C.laranja }}>{erroCliente}</p>}
         {!podeImprimir && (
           <p className="text-[11px]" style={{ color: AMARELO.texto }}>
-            Falta {faltamCliente.map((x) => x[1]).join(" · ")} para liberar a impressão.
+            Falta {linksFalta(" · ")} para liberar a impressão.
           </p>
         )}
       </div>
@@ -7530,7 +7539,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 ))}
                 {!podeImprimir && (
                   <p className="text-[11px]" style={{ color: AMARELO.texto }}>
-                    Falta {faltamCliente.map((x) => x[1]).join(" · ")} do cliente — preencha na etapa Pesquisa para liberar a impressão.
+                    Falta {linksFalta(" · ")} do cliente para liberar a impressão — toque para preencher.
                   </p>
                 )}
                 {podeImprimir && !f.valorFechado && (
@@ -7734,8 +7743,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                             pré-contrato" era isto, e não o laudo. */}
                         {!podeImprimir && (
                           <p className="text-[11px]" style={{ color: AMARELO.texto }}>
-                            Falta {faltamCliente.map(([, r]) => r).join(" e ")} do cliente — preencha na
-                            etapa Pesquisa para liberar a impressão.
+                            Falta {linksFalta(" e ")} do cliente para liberar a impressão — toque para preencher.
                           </p>
                         )}
                         {podeImprimir && !f.valorFechado && (
