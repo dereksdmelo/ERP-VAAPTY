@@ -22261,6 +22261,143 @@ function TitulosDoMes({ comp, abas }) {
 /* ===================== NOTAS FISCAIS DE SERVIÇO (0138) =====================
  * Direto na API nacional da NFS-e. Por enquanto só no ambiente de testes da Receita: nada sai em
  * produção antes de uma nota de teste aprovada. */
+/* O DANFSe (09/11/2026). A Receita SUSPENDEU a API que gerava o PDF (NT 008, desde 03/08/2026): quem emite
+ * gera o documento a partir do XML da NFS-e, no modelo do Anexo I da NT 008 v1.02 — A4 retrato numa página,
+ * os blocos na ordem do modelo, títulos 7 pt em caixa alta, rótulos 6 pt, conteúdo 7 pt, cinza 5% nos títulos,
+ * QR Code para https://www.nfse.gov.br/ConsultaPublica/?tpc=1&chave=<chave>, e "NFS-e SEM VALIDADE JURÍDICA"
+ * em vermelho quando tpAmb = 2. Só se imprime o que está no XML (item 2.1). Sai pela janela de imprimir:
+ * "Salvar como PDF" dá o arquivo. */
+function danfseHtml(xmlTexto, cancelada) {
+  const doc = new DOMParser().parseFromString(xmlTexto, "application/xml");
+  const um = (raiz, caminho) => {
+    let n = raiz;
+    for (const p of caminho.split("/")) { if (!n) return ""; n = Array.from(n.children || []).find((c) => c.localName === p); }
+    return n ? n.textContent.trim() : "";
+  };
+  const inf = Array.from(doc.getElementsByTagNameNS("*", "infNFSe"))[0];
+  const dps = Array.from(doc.getElementsByTagNameNS("*", "infDPS"))[0];
+  if (!inf || !dps) return null;
+  const esc = (t) => String(t == null ? "" : t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const chave = String(inf.getAttribute("Id") || "").replace(/^NFS/, "");
+  const dh = (v) => (v ? `${v.slice(8, 10)}/${v.slice(5, 7)}/${v.slice(0, 4)} ${v.slice(11, 19)}` : "-");
+  const dia = (v) => (v ? `${v.slice(8, 10)}/${v.slice(5, 7)}/${v.slice(0, 4)}` : "-");
+  const din = (v) => (v === "" || v == null ? "-" : `R$ ${Number(v).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+  const doc_ = (x) => { const d = String(x || "").replace(/\D/g, "");
+    return d.length === 14 ? d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5") : d.length === 11 ? d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4") : (x || "-"); };
+  const cep = (c) => (c && c.length === 8 ? `${c.slice(0, 5)}-${c.slice(5)}` : c || "-");
+  const fone = (f) => { const d = String(f || "").replace(/\D/g, ""); return d.length >= 10 ? `(${d.slice(0, 2)}) ${d.slice(2, d.length - 4)}-${d.slice(-4)}` : (f || "-"); };
+  const corta = (t, n) => (t && t.length > n ? `${t.slice(0, n - 3)}...` : t || "-");
+  const tpAmb = um(dps, "tpAmb") || um(inf, "ambGer");
+  const pessoa = (no, oQue) => {
+    if (!no) return null;
+    const end = Array.from(no.children).find((c) => c.localName === "end") || Array.from(no.children).find((c) => c.localName === "enderNac");
+    const nac = end && (end.localName === "enderNac" ? end : Array.from(end.children).find((c) => c.localName === "endNac"));
+    const g = (n, p) => (n ? um(n, p) : "");
+    return {
+      doc: doc_(g(no, "CNPJ") || g(no, "CPF") || g(no, "NIF")), im: g(no, "IM") || "-", fone: fone(g(no, "fone")),
+      nome: corta(g(no, "xNome"), 77), cMun: g(nac, "cMun"), uf: g(nac, "UF") || g(end, "UF"), cep: cep(g(nac, "CEP")),
+      end: corta([g(end, "xLgr"), g(end, "nro"), g(end, "xCpl"), g(end, "xBairro")].filter(Boolean).join(", "), 77), email: corta(g(no, "email"), 77),
+    };
+  };
+  const filho = (r, n) => Array.from(r.children).find((c) => c.localName === n);
+  const emitXml = filho(inf, "emit");
+  const prest = pessoa(emitXml) || pessoa(filho(dps, "prest"));
+  const toma = pessoa(filho(dps, "toma"));
+  const interm = pessoa(filho(dps, "interm"));
+  const regTrib = filho(filho(dps, "prest") || dps, "regTrib");
+  const SN = { 1: "Não Optante", 2: "Optante - Microempreendedor Individual (MEI)", 3: "Optante - Microempresa ou Empresa de Pequeno Porte (ME/EPP)" };
+  const APUR = { 1: "Regime de apuração dos tributos federais e municipal pelo SN", 2: "Federais pelo SN e ISSQN por fora do SN", 3: "Federais e municipal por fora do SN" };
+  const EMITENTE = { 1: "Prestador", 2: "Tomador", 3: "Intermediário" };
+  const SIT = { 100: "NFS-e Gerada", 101: "NFS-e de Substituição Gerada", 102: "NFS-e de Decisão Judicial", 103: "NFS-e Avulsa" };
+  const FIN = { 0: "NFS-e regular" };
+  const TRIB = { 1: "Operação Tributável", 2: "Imunidade", 3: "Exportação de serviço", 4: "Não Incidência" };
+  const RET = { 1: "Não Retido", 2: "Retido pelo Tomador", 3: "Retido pelo Intermediário" };
+  const serv = filho(dps, "serv"), val = filho(dps, "valores"), trib = val && filho(val, "trib"), tm = trib && filho(trib, "tribMun");
+  const vInf = filho(inf, "valores");
+  const cTrib = serv ? um(serv, "cServ/cTribNac") : "";
+  const cMunEmi = prest ? prest.cMun : "";
+  const vServ = val ? um(val, "vServPrest/vServ") : "";
+  const vLiq = vInf ? um(vInf, "vLiq") : vServ;
+  const pTot = trib ? um(trib, "totTrib/pTotTribSN") : "";
+  const vTotTrib = trib ? [um(trib, "totTrib/vTotTrib/vTotTribFed"), um(trib, "totTrib/vTotTrib/vTotTribEst"), um(trib, "totTrib/vTotTrib/vTotTribMun")] : [];
+  const totTxt = pTot ? `Totais aproximados dos tributos: ${String(pTot).replace(".", ",")}% (Lei 12.741/2012)`
+    : vTotTrib.some(Boolean) ? `Totais aproximados dos tributos (Lei 12.741/2012): federais ${din(vTotTrib[0])}, estaduais ${din(vTotTrib[1])}, municipais ${din(vTotTrib[2])}` : "";
+  const campo = (rot, v, cls) => `<div class="c ${cls || ""}"><b>${esc(rot)}</b><span>${esc(v === "" || v == null ? "-" : v)}</span></div>`;
+  const bloco = (titulo, corpo) => `<div class="bl"><div class="t">${esc(titulo)}</div><div class="g">${corpo}</div></div>`;
+  const blPessoa = (titulo, p, vazio) => (p ? bloco(titulo,
+    campo("CNPJ / CPF / NIF", p.doc) + campo("Indicador Municipal", p.im) + campo("Telefone", p.fone) + campo("", "", "") +
+    campo("Nome / Nome Empresarial", p.nome, "d2") + campo("E-mail", p.email, "d2") +
+    campo("Endereço", p.end, "d2") + campo("Município / Sigla UF", `${p.cMun === "4209102" ? "Joinville" : p.cMun || "-"}${p.uf ? ` / ${p.uf}` : ""}`) + campo("Código IBGE / CEP", `${p.cMun || "-"} / ${p.cep}`))
+    : `<div class="bl"><div class="t vz">${esc(vazio)}</div></div>`);
+  const qr = `https://www.nfse.gov.br/ConsultaPublica/?tpc=1&chave=${chave}`;
+  return `<!doctype html><html><head><meta charset="utf-8"><title>DANFSe ${esc(um(inf, "nNFSe"))}</title>
+<style>
+@page{size:A4 portrait;margin:0.18cm}
+*{box-sizing:border-box}body{margin:0;font-family:"Microsoft Sans Serif",Arial,sans-serif;font-size:7pt;color:#000}
+.pg{border:1pt solid #000;width:20.64cm;min-height:29.0cm;position:relative}
+.cab{display:grid;grid-template-columns:4cm 1fr 5.1cm;align-items:center;background:#f2f2f2;border-bottom:.5pt solid #000;height:1.16cm;padding:0 .2cm}
+.cab .logo{font:bold 15pt Arial;color:#1351b4;letter-spacing:-.5px}.cab .meio{text-align:center;font:bold 9pt Arial}.cab .mun{font-size:8pt;text-align:right}.cab .amb{font-size:6pt;text-align:right}
+.sv{color:#e00;font:bold 9pt Arial}
+.ident{display:grid;grid-template-columns:1fr 3.4cm;border-bottom:.5pt solid #000}
+.g{display:grid;grid-template-columns:repeat(4,1fr)}
+.c{padding:.06cm .15cm;min-height:.63cm;overflow:hidden}.c b{display:block;font:bold 6pt Arial}.c span{display:block;word-break:break-word}
+.ident .c b{font-size:7pt;text-transform:uppercase}
+.d2{grid-column:span 2}.d4{grid-column:span 4}
+.bl{border-bottom:.5pt solid #000}.t{background:#f2f2f2;font:bold 7pt Arial;text-transform:uppercase;padding:.05cm .15cm;border-bottom:.5pt solid #000}
+.t.vz{border-bottom:none;padding:.15cm}
+.qr{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:.1cm;border-left:.5pt solid #000}
+.qr p{font-size:6pt;text-align:center;margin:.08cm 0 0;line-height:1.15}
+.ch{font-size:8pt;letter-spacing:.3px}
+.cinza{background:#f2f2f2}
+.desc{min-height:2.2cm;white-space:pre-wrap}
+.canc{position:absolute;top:11cm;left:0;right:0;text-align:center;font:bold 60pt Arial;color:rgba(220,0,0,.22);transform:rotate(-25deg)}
+@media print{.naoimprime{display:none}}
+</style></head><body>
+<div class="naoimprime" style="font:13px Arial;padding:8px;background:#fff8d6">Para o PDF: na janela de imprimir, escolha <b>Salvar como PDF</b>.</div>
+<div class="pg">
+${cancelada ? '<div class="canc">CANCELADA</div>' : ""}
+<div class="cab"><div class="logo">NFS-e</div>
+<div class="meio">DANFSe v2.0<br>Documento Auxiliar da NFS-e${tpAmb === "2" ? '<div class="sv">NFS-e SEM VALIDADE JURÍDICA</div>' : ""}</div>
+<div><div class="mun">${esc(um(inf, "xLocEmi"))}${prest && prest.uf ? ` / ${esc(prest.uf)}` : ""}</div>
+<div class="amb">Ambiente gerador: ${um(inf, "ambGer") === "2" ? "Sistema Nacional NFS-e" : "Emissor próprio"}</div>
+<div class="amb">${tpAmb === "1" ? "Produção" : "Produção Restrita (homologação)"}</div></div></div>
+<div class="ident"><div class="g">
+${campo("Chave de Acesso da NFS-e", chave, "d4 ch")}
+${campo("Número da NFS-e", um(inf, "nNFSe"))}${campo("Competência da NFS-e", dia(um(dps, "dCompet")))}${campo("Data e Hora da emissão da NFS-e", dh(um(inf, "dhProc")))}${campo("Número da DPS", um(dps, "nDPS"))}
+${campo("Série da DPS", um(dps, "serie"))}${campo("Data e Hora da emissão da DPS", dh(um(dps, "dhEmi")))}${campo("Emitente da NFS-e", EMITENTE[um(dps, "tpEmit")] || "-", "cinza")}${campo("Situação da NFS-e", cancelada ? "NFS-e Cancelada" : (SIT[um(inf, "cStat")] || um(inf, "cStat")))}
+${campo("Finalidade", FIN[um(dps, "finNFSe")] || "NFS-e regular", "d2")}
+</div><div class="qr"><div id="qr"></div><p>A autenticidade desta NFS-e pode ser verificada pela leitura deste código QR ou pela consulta da chave de acesso no portal nacional da NFS-e</p></div></div>
+${bloco("Prestador / Fornecedor",
+  campo("CNPJ / CPF / NIF", prest.doc) + campo("Indicador Municipal", prest.im) + campo("Telefone", prest.fone) + campo("", "") +
+  campo("Nome / Nome Empresarial", prest.nome, "d2") + campo("E-mail", prest.email, "d2") +
+  campo("Endereço", prest.end, "d2") + campo("Município / Sigla UF", `${um(inf, "xLocEmi") || "-"} / ${prest.uf || "-"}`) + campo("Código IBGE / CEP", `${prest.cMun || "-"} / ${prest.cep}`) +
+  campo("Simples Nacional na Data de Competência", SN[regTrib ? um(regTrib, "opSimpNac") : ""] || "-", "d2") + campo("Regime de Apuração Tributária pelo SN", APUR[regTrib ? um(regTrib, "regApTribSN") : ""] || "-", "d2"))}
+${blPessoa("Tomador / Adquirente", toma, "TOMADOR/ADQUIRENTE DA OPERAÇÃO NÃO IDENTIFICADO NA NFS-e")}
+<div class="bl"><div class="t vz">O DESTINATÁRIO É O PRÓPRIO TOMADOR/ADQUIRENTE DA OPERAÇÃO</div></div>
+${blPessoa("Intermediário da Operação", interm, "INTERMEDIÁRIO DA OPERAÇÃO NÃO IDENTIFICADO NA NFS-e")}
+${bloco("Serviço Prestado",
+  campo("Código de Tributação Nacional", cTrib ? `${cTrib.slice(0, 2)}.${cTrib.slice(2, 4)}.${cTrib.slice(4)}` : "-") + campo("Código de Tributação Municipal", serv ? um(serv, "cServ/cTribMun") : "") + campo("Código da NBS", serv ? um(serv, "cServ/cNBS") : "") +
+  campo("Local da Prestação", `${um(inf, "xLocPrestacao") || "-"} / ${prest.uf || ""} / Brasil`) +
+  campo("Descrição do Código de Tributação Nacional", um(inf, "xTribNac"), "d4") +
+  campo("Descrição do Serviço", serv ? um(serv, "cServ/xDescServ") : "", "d4 desc"))}
+${bloco("Tributação Municipal (ISSQN)",
+  campo("Tributação do ISSQN", TRIB[tm ? um(tm, "tribISSQN") : ""] || "-") + campo("Município de Incidência do ISSQN", `${um(inf, "xLocIncid") || "-"} / ${prest.uf || ""} / Brasil`) + campo("Regime Especial de Tributação", "Nenhum") + campo("Retenção do ISSQN", RET[tm ? um(tm, "tpRetISSQN") : ""] || "-") +
+  campo("BC ISSQN", din(vInf ? um(vInf, "vBC") : "")) + campo("Alíquota Aplicada", vInf && um(vInf, "pAliqAplic") ? `${um(vInf, "pAliqAplic").replace(".", ",")}%` : "-") + campo("ISSQN Apurado", din(vInf ? um(vInf, "vISSQN") : "")) +
+  campo("", regTrib && um(regTrib, "regApTribSN") === "1" ? "ISSQN recolhido no DAS (Simples Nacional)" : ""))}
+${bloco("Tributação Federal (exceto CBS)",
+  campo("IRRF", din(trib ? um(trib, "tribFed/vRetIRRF") : "")) + campo("Contribuição Previdenciária - Retida", din(trib ? um(trib, "tribFed/vRetCP") : "")) + campo("Contribuições Sociais - Retidas", din(trib ? um(trib, "tribFed/vRetCSLL") : "")) + campo("PIS / COFINS - Débito Apuração Própria", "-"))}
+<div class="bl"><div class="t vz">TRIBUTAÇÃO IBS / CBS - NÃO INFORMADA NESTA NFS-e</div></div>
+${bloco("Valor Total da NFS-e",
+  campo("Valor da Operação / Serviço", din(vServ)) + campo("Desconto Incondicionado", din(val ? um(val, "vDescCondIncond/vDescIncond") : "")) + campo("Desconto Condicionado", din(val ? um(val, "vDescCondIncond/vDescCond") : "")) + campo("Total das Retenções", din(vInf ? um(vInf, "vTotalRet") : "")) +
+  campo("Valor Líquido da NFS-e", din(vLiq), "d2") + campo("Total do IBS/CBS", "-") + campo("Valor Líquido da NFS-e + IBS/CBS", din(vLiq), "cinza"))}
+${bloco("Informações Complementares", campo("", [totTxt, serv ? um(serv, "infoCompl/xInfComp") : ""].filter(Boolean).join("\n"), "d4 desc"))}
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><\/script>
+<script>try{new QRCode(document.getElementById("qr"),{text:${JSON.stringify(qr)},width:96,height:96,correctLevel:QRCode.CorrectLevel.M});}catch(e){}
+setTimeout(function(){window.print()},700);<\/script>
+</body></html>`;
+}
+
 function FinNotas() {
   const [d, setD] = useState(null); const [erro, setErro] = useState(""); const [nova, setNova] = useState(null);
   const [carros, setCarros] = useState([]); const [indo, setIndo] = useState(""); const [xml, setXml] = useState(null);
@@ -22305,15 +22442,17 @@ function FinNotas() {
     try { await fin("nfse", { id: n.id }, { method: "DELETE" }); carregar(); } catch (e) { setErro(e.message); }
   };
   const verXml = async (n) => { try { setXml(await fin("nfse", { acao: "xml", id: n.id })); } catch (e) { setErro(e.message); } };
-  /* O PDF (DANFSe) vem da Receita em base64 e abre numa aba; a aba é aberta NO CLIQUE (decisão 15). */
+  /* O PDF (DANFSe): montado aqui a partir do XML da nota (a API da Receita foi suspensa — NT 008). A janela
+     abre NO CLIQUE (decisão 15) e recebe o documento depois de ler o XML. */
   const verPdf = async (n) => {
     const j = window.open("", "_blank");
     setErro(""); setIndo(`pdf${n.id}`);
     try {
-      const d = await fin("nfse", { acao: "pdf", id: n.id });
-      const bytes = Uint8Array.from(atob(d.pdf), (c) => c.charCodeAt(0));
-      const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
-      if (j) j.location.href = url; else setErro("O navegador bloqueou a janela. Permita pop-ups para este site.");
+      const x = await fin("nfse", { acao: "xml", id: n.id });
+      const html = x.nfse_xml && danfseHtml(x.nfse_xml, n.situacao === "cancelada");
+      if (!html) throw new Error("Esta nota não tem o XML da Receita guardado.");
+      if (!j) throw new Error("O navegador bloqueou a janela. Permita pop-ups para este site.");
+      j.document.open(); j.document.write(html); j.document.close();
     } catch (e) { if (j) j.close(); setErro(e.message); }
     setIndo("");
   };

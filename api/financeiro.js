@@ -3867,26 +3867,6 @@ async function nfse(req, res, tok) {
     }
     return res.status(200).json({ certificado: certificado(), testes: out });
   }
-  /* O PDF DA NOTA (DANFSe), do Ambiente de Dados Nacional, pela chave. Vem pela ponte, como o envio
-   * (a mesma renegociação TLS), em base64. */
-  if (req.method === "GET" && acao === "pdf") {
-    const id = idOuNulo(req.query.id);
-    const n = id && um(await supa(`${base("nfse")}?select=ambiente,chave_acesso,situacao,numero_nfse&id=eq.${id}`, { headers: cab(tok) }));
-    if (!n || !n.chave_acesso) return res.status(404).json({ erro: "Esta nota ainda não tem chave: emita antes." });
-    const vp = await viaPonte(req, tok);
-    if (!vp) return res.status(503).json({ erro: "O certificado ou a ponte não estão configurados." });
-    const A = nfseRegras.ADN[n.ambiente] || nfseRegras.ADN.restrita;
-    const tentativas = [`${A}/danfse/${n.chave_acesso}`, `${A}/contribuintes/danfse/${n.chave_acesso}`];
-    const visto = [];
-    for (const u of tentativas) {
-      try {
-        const r = await vp.fetch(u, { method: "GET", headers: { Accept: "application/pdf" }, binario: true });
-        if (r.status === 200 && r.base64 && /^JVBER/.test(r.base64)) return res.status(200).json({ pdf: r.base64, nome: `NFS-e ${n.numero_nfse || ""} ${n.chave_acesso}.pdf` });
-        visto.push(`${u.replace(A, "")}: ${r.status}`);
-      } catch (x) { visto.push(`${u.replace(A, "")}: ${x.message}`); }
-    }
-    return res.status(502).json({ erro: `A Receita não devolveu o PDF (${visto.join(" · ")}).` });
-  }
   /* CANCELAR (evento 101101). Só a nota emitida; o motivo vai escrito (15 a 255 letras). Recusado, a nota
    * continua emitida e o motivo da recusa fica nos erros dela. */
   if (req.method === "POST" && acao === "cancelar") {
