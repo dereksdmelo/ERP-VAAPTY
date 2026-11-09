@@ -4020,7 +4020,7 @@ async function nfse(req, res, tok) {
       ? { situacao: "emitida", chave_acesso: r.chave, numero_nfse: r.numero || null, nfse_xml: r.nfseXml || null, dps_xml: r.assinado, erros: null, emitida_em: new Date().toISOString() }
       : { situacao: "rejeitada", erros: (r.erros || [{ descricao: `A Receita respondeu ${r.status}` }]).concat(r.bruto ? [{ codigo: "resposta", descricao: r.bruto }] : []), dps_xml: r.assinado };
     await supa(`${base("nfse")}?id=eq.${id}`, { method: "PATCH", headers: cab(tok), body: JSON.stringify(mud) });
-    return res.status(r.ok ? 200 : 422).json({ ok: r.ok, ...mud });
+    return res.status(r.ok ? 200 : 422).json({ ok: r.ok, ...mud, ...(r.ok ? {} : { erro: "A Receita recusou a nota — o motivo está embaixo dela, na lista." }) });
   }
   if (req.method === "DELETE") {
     const id = idOuNulo(req.query.id);

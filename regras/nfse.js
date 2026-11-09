@@ -84,11 +84,13 @@ function montarDps(e, n, serie, numero, agora) {
   // retenção (E0617, E0625, E0635). Retenção pelo tomador não é emitida por aqui ainda.
   const xml = `<DPS xmlns="${NS}" versao="1.01"><infDPS Id="${id}">` +
     `<tpAmb>${amb}</tpAmb><dhEmi>${dh}</dhEmi><verAplic>VAAPTY-ERP-1.0</verAplic>` +
-    `<serie>${esc(String(Number(so(serie))))}</serie><nDPS>${esc(String(numero))}</nDPS><dCompet>${dh.slice(0, 10)}</dCompet>` +
+    `<serie>${esc(String(Number(so(serie))))}</serie><nDPS>${esc(String(numero))}</nDPS><dCompet>${n.competencia && String(n.competencia).slice(0, 10) <= dh.slice(0, 10) ? String(n.competencia).slice(0, 10) : dh.slice(0, 10)}</dCompet>` +
     `<tpEmit>1</tpEmit>` +
     // finNFSe (09/11/2026): o servidor (SefinNacional 1.6) já usa o leiaute da reforma tributária e exige a
     // finalidade logo depois do tpEmit — 0 é a NFS-e regular. O XSD 1.01 que serviu de base ainda não o tinha.
-    `<finNFSe>0</finNFSe><cLocEmi>${cLoc}</cLocEmi>` +
+    // E a PRODUÇÃO ainda roda o leiaute anterior e RECUSA o finNFSe (E1235, a 1ª nota de produção,
+    // 09/11/2026): ele só vai na produção restrita. Quando a produção migrar, a recusa volta pedindo o campo.
+    `${amb === 2 || amb === "2" ? "<finNFSe>0</finNFSe>" : ""}<cLocEmi>${cLoc}</cLocEmi>` +
     `<prest><CNPJ>${so(e.cnpj)}</CNPJ>${tag("IM", e.inscricao_municipal)}${regTrib}</prest>` +
     toma +
     `<serv><locPrest><cLocPrestacao>${cLoc}</cLocPrestacao></locPrest><cServ><cTribNac>${pad(so(e.servico_ctribnac), 6)}</cTribNac>` +
