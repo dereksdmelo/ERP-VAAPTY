@@ -6380,3 +6380,17 @@ título "Receber de…" do contrato (0119) dobrava o recebido (Siena MDX9I27, 26
 conta o que passou no banco, e clicar na linha mostra os lançamentos de cada número. A **agenda da TV**
 (0136) mostra todos os horários do dia, com o estado de cada um (confirmou, veio?, veio, fechou, não
 veio, remarcou, cancelou), e a letra encolhe até caber.
+
+### 73. O cadastro da empresa (0137)
+
+Gestão → Cadastro da empresa (gerente edita; financeiro vê): razão social, nome da unidade, CNPJ,
+inscrições, endereço, contato, representante legal, conta para receber dos lojistas, o logo e os
+documentos da unidade (contrato social, cartão CNPJ, alvará, certidões com validade). É a base para
+vender o sistema a outras unidades: **os papéis leem daqui** — `emp()` e `logoEmpresa()` no
+`index.html` — em vez do CNPJ e do endereço escritos à mão em nove lugares. Só os DADOS vêm do cadastro;
+o texto das cláusulas continua o da casa (decisão 7). O que estiver vazio cai em `EMPRESA_PADRAO`, que
+são os valores de até 09/11/2026 e os do cadastro inicial: os contratos saem idênticos (conferido
+pedaço por pedaço) até alguém editar. O logo é guardado como data URL (até 500 KB), porque o papel
+impresso o embute. Os documentos ficam no bucket privado em `empresa/`, por `api/foto.js?recurso=
+empresa-anexo` (decisão 9: a linha pelo token, a chave só no Storage). A conta bancária do contrato do
+lojista nasce do cadastro; o que o aparelho lembrou ainda manda.

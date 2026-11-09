@@ -741,6 +741,46 @@ function configDaLinha(l) {
   return c;
 }
 
+/* O CADASTRO DA EMPRESA (0137): a linha única da unidade. A equipe lê (os contratos usam); o gerente
+ * grava. O logo vai como data URL, porque os papéis impressos o embutem. */
+const CAMPOS_EMPRESA = ["razao_social", "nome_fantasia", "nome_unidade", "cnpj", "inscricao_estadual", "inscricao_municipal",
+  "logradouro", "numero", "complemento", "bairro", "cidade", "uf", "cep", "telefone", "whatsapp", "email", "site",
+  "rep_nome", "rep_cpf", "rep_cargo", "banco", "agencia", "conta", "pix", "favorecido"];
+async function empresa(req, res, tok) {
+  const base = `${URL_BASE}/rest/v1/empresa`;
+  const cab = { apikey: ANON, Authorization: tok };
+  if (req.method === "GET") {
+    const r = await fetch(`${base}?select=*&id=eq.1`, { headers: cab });
+    if (!r.ok) return res.status(200).json({ empresa: null, padrao: true });
+    const d = await r.json().catch(() => []);
+    return res.status(200).json({ empresa: (Array.isArray(d) ? d[0] : d) || null });
+  }
+  if (req.method === "PUT") {
+    const c = await lerCorpo(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    const linha = { id: 1, atualizado_em: new Date().toISOString(), atualizado_por: donoDoToken(tok) };
+    CAMPOS_EMPRESA.forEach((k) => { if (k in c) linha[k] = texto(c[k]) ? String(c[k]).trim().slice(0, 300) : null; });
+    if ("logo" in c) {
+      const lg = String(c.logo || "");
+      if (lg && !/^data:image\/(png|jpeg|webp|svg\+xml);base64,/.test(lg)) return res.status(400).json({ erro: "O logo precisa ser PNG, JPEG, WEBP ou SVG." });
+      if (lg.length > 690000) return res.status(413).json({ erro: "O logo passou de 500 KB. Use uma imagem menor." });
+      linha.logo = lg || null;
+    }
+    if (linha.uf) linha.uf = linha.uf.toUpperCase().slice(0, 2);
+    const r = await fetch(`${base}?on_conflict=id`, {
+      method: "POST", headers: { ...cab, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=representation" },
+      body: JSON.stringify(linha),
+    });
+    if (!r.ok) return res.status(r.status === 401 ? 401 : 502).json({ erro: "O banco recusou a gravação." });
+    const d = await r.json().catch(() => []);
+    const salvo = Array.isArray(d) ? d[0] : d;
+    if (!salvo) return res.status(403).json({ erro: "Só o gerente muda o cadastro da empresa." });
+    return res.status(200).json({ ok: true, empresa: salvo });
+  }
+  res.setHeader("Allow", "GET, PUT");
+  return res.status(405).json({ erro: "Use GET ou PUT." });
+}
+
 async function configLoja(req, res, tok) {
   const base = `${URL_BASE}/rest/v1/config_loja`;
   const cab = { apikey: ANON, Authorization: tok };
@@ -928,6 +968,10 @@ module.exports = async function handler(req, res) {
     catch (e) { return res.status(502).json({ erro: "Não consegui falar com o banco." }); }
   }
 
+  if (String(req.query.recurso || "") === "empresa") {
+    try { return await empresa(req, res, tok); }
+    catch (e) { return res.status(502).json({ erro: "Falhou o cadastro da empresa." }); }
+  }
   if (String(req.query.recurso || "") === "config-loja") {
     try { return await configLoja(req, res, tok); }
     catch (e) { return res.status(502).json({ erro: "Não consegui falar com o banco." }); }

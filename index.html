@@ -3146,7 +3146,7 @@ function moldura({ titulo, corpo, protocolo, logo, paisagem }) {
   table td.num.sub { font-size: 8pt; color: #4A4453; padding-left: 4px; }
 </style></head><body>
 ${logo
-  ? `<img class="logo" src="${LOGO_VAAPTY}" alt="Vaapty">`
+  ? `<img class="logo" src="${logoEmpresa()}" alt="${emp().razao}">`
   : `<div class="marca">VAAPTY</div><div class="sub">Joinville · Santa Catarina</div>`}
 ${corpo}
 <div class="rodape"><span>Protocolo ${protocolo}</span><span>Gerado em ${dataExtenso()} às ${hora()}</span></div>
@@ -3195,7 +3195,20 @@ const DUAS_TESTEMUNHAS = `<p style="margin-top:22px;font-size:9.5pt">Testemunhas
       <td>Nome: ${vazio("nome")}<br>CPF: ${vazio("CPF")}<br><br>Assinatura: ______________________</td></tr>
 </table>`;
 
-const VAAPTY_PJ = "Vaapty Intermediação Veicular LTDA · CNPJ 34.840.903/0001-00 · Rua Anita Garibaldi, 705 — Anita Garibaldi, Joinville/SC";
+/* O CADASTRO DA EMPRESA (0137). Os papéis leem daqui; o que estiver vazio cai nos valores escritos
+ * até 09/11/2026 — que são os do cadastro inicial —, então nenhum contrato muda até alguém editar.
+ * Só os DADOS vêm do cadastro: o texto das cláusulas continua o da casa (decisão 7). */
+const EMPRESA_PADRAO = { razao_social: "Vaapty Intermediação Veicular LTDA", nome_fantasia: "Vaapty", nome_unidade: "VAAPTY JOINVILLE",
+  cnpj: "34.840.903/0001-00", logradouro: "Rua Anita Garibaldi", numero: "705", bairro: "Anita Garibaldi", cidade: "Joinville", uf: "SC", cep: "89.203-300" };
+let EMPRESA = { ...EMPRESA_PADRAO };
+function emp() {
+  const v = (k) => (EMPRESA[k] && String(EMPRESA[k]).trim()) || EMPRESA_PADRAO[k] || "";
+  const razao = v("razao_social");
+  return { razao, RAZAO: razao.toUpperCase(), RAZAO_SA: semAcento(razao).toUpperCase(), unidade: v("nome_unidade"), cnpj: v("cnpj"),
+    rua: v("logradouro"), numero: v("numero"), bairro: v("bairro"), cidade: v("cidade"), uf: v("uf"), cep: v("cep") };
+}
+const logoEmpresa = () => EMPRESA.logo || LOGO_VAAPTY;
+const vaaptyPJ = () => { const e = emp(); return `${e.razao} · CNPJ ${e.cnpj} · ${e.rua}, ${e.numero} — ${e.bairro}, ${e.cidade}/${e.uf}`; };
 
 /* ---------------- 0. recibo ---------------- */
 
@@ -3282,11 +3295,11 @@ const dataPorExtenso = (iso) => {
  */
 function reciboDoc(r) {
   const recebedor = r.direcao === "recebemos"
-    ? { nome: "Vaapty Intermediação Veicular LTDA", doc: "34.840.903/0001-00" }
+    ? { nome: emp().razao, doc: emp().cnpj }
     : { nome: r.outra_parte, doc: r.outra_parte_doc || "" };
   const pagador = r.direcao === "recebemos"
     ? { nome: r.outra_parte, doc: r.outra_parte_doc || "" }
-    : { nome: "Vaapty Intermediação Veicular LTDA", doc: "34.840.903/0001-00" };
+    : { nome: emp().razao, doc: emp().cnpj };
 
   const corpo = `
 <div style="text-align:right;font-family:system-ui,sans-serif;font-size:10pt">
@@ -3310,13 +3323,13 @@ da importância acima, para que produza os seus efeitos legais.</p>
   <tr><td class="r">Data do pagamento</td><td>${dataPorExtenso(r.emitido_em_data)}</td></tr>
 </table>
 
-<p style="margin-top:26px">Joinville/SC, ${dataPorExtenso(r.emitido_em_data)}.</p>
+<p style="margin-top:26px">${emp().cidade}/${emp().uf}, ${dataPorExtenso(r.emitido_em_data)}.</p>
 
 <div class="assinatura">
   <div class="linha">${escDoc(recebedor.nome)}${recebedor.doc ? `<br>${escDoc(recebedor.doc)}` : ""}</div>
 </div>
 
-<p style="margin-top:26px;font-size:9pt;color:#6B6478">${VAAPTY_PJ}</p>`;
+<p style="margin-top:26px;font-size:9pt;color:#6B6478">${vaaptyPJ()}</p>`;
 
   return moldura({ titulo: `Recibo ${r.numero}/${r.ano}`, corpo, protocolo: r.protocolo });
 }
@@ -3453,9 +3466,9 @@ function aceiteProposta(f, cl) {
 
 <p><strong>IDENTIFICAÇÃO DAS PARTES</strong></p>
 
-<p><strong>CONTRATADA:</strong> VAAPTY INTERMEDIACAO VEICULAR LTDA – VAAPTY JOINVILLE, pessoa
-jurídica de direito privado, inscrita no CNPJ sob n. 34.840.903/0001-00, com sede em Joinville/SC,
-bairro: Anita Garibaldi, Anita Garibaldi – 705, CEP: 89.203-300, doravante denominada simplesmente
+<p><strong>CONTRATADA:</strong> ${emp().RAZAO_SA} – ${emp().unidade}, pessoa
+jurídica de direito privado, inscrita no CNPJ sob n. ${emp().cnpj}, com sede em ${emp().cidade}/${emp().uf},
+bairro: ${emp().bairro}, ${emp().rua.replace(/^(Rua|Avenida|Av\.|R\.)\s+/i, "")} – ${emp().numero}, CEP: ${emp().cep}, doravante denominada simplesmente
 <strong>“VAAPTY”</strong>.</p>
 
 <p><strong>CONTRATANTE:</strong></p>
@@ -3744,9 +3757,9 @@ function contratoLojista(d) {
 
 <p><strong>IDENTIFICAÇÃO DAS PARTES.</strong></p>
 
-<p><strong>CONTRATADA:</strong> VAAPTY INTERMEDIACAO VEICULAR LTDA - VAAPTY JOINVILLE, pessoa jurídica de direito
-privado, inscrita no CNPJ sob n.34.840.903/0001-00, com sede em Joinville/SC, bairro: Anita Garibaldi,
-Anita Garibaldi - 705 CEP: 89.203-300, doravante denominada simplesmente <strong>“VAAPTY”</strong>.</p>
+<p><strong>CONTRATADA:</strong> ${emp().RAZAO_SA} - ${emp().unidade}, pessoa jurídica de direito
+privado, inscrita no CNPJ sob n.${emp().cnpj}, com sede em ${emp().cidade}/${emp().uf}, bairro: ${emp().bairro},
+${emp().rua.replace(/^(Rua|Avenida|Av\.|R\.)\s+/i, "")} - ${emp().numero} CEP: ${emp().cep}, doravante denominada simplesmente <strong>“VAAPTY”</strong>.</p>
 
 <p><strong>CONTRATANTE:</strong></p>
 <table class="dados">
@@ -3823,8 +3836,8 @@ adquire o veículo qualificado no preâmbulo, no valor bruto a seguir descrito:<
 
 <p><strong>DADOS BANCÁRIOS</strong></p>
 <table class="dados">
-  <tr><td class="r">Favorecido</td><td>VAAPTY INTERMEDIACAO VEICULAR LTDA - VAAPTY JOINVILLE</td></tr>
-  <tr><td class="r">CPF/CNPJ</td><td>34.840.903/0001-00</td></tr>
+  <tr><td class="r">Favorecido</td><td>${(EMPRESA.favorecido && String(EMPRESA.favorecido).trim()) || `${emp().RAZAO_SA} - ${emp().unidade}`}</td></tr>
+  <tr><td class="r">CPF/CNPJ</td><td>${emp().cnpj}</td></tr>
   <tr><td class="r">Banco</td><td>${ou(B.banco, "")}</td></tr>
   <tr><td class="r">Agência</td><td>${ou(B.agencia, "")}</td></tr>
   <tr><td class="r">Conta</td><td>${ou(B.conta, "")}</td></tr>
@@ -4066,9 +4079,9 @@ function contratoFinal(f, cl) {
 
 <p>Pelo presente instrumento particular, de um lado:</p>
 
-<p><strong>INTERMEDIADORA:</strong> Vaapty Intermediação Veicular LTDA, pessoa jurídica de
-direito privado, inscrita no CNPJ nº 34.840.903/0001-00, com sede à Rua Anita Garibaldi,
-705 – Anita Garibaldi, Joinville/SC, neste ato representada na forma de seu Contrato Social,
+<p><strong>INTERMEDIADORA:</strong> ${emp().razao}, pessoa jurídica de
+direito privado, inscrita no CNPJ nº ${emp().cnpj}, com sede à ${emp().rua},
+${emp().numero} – ${emp().bairro}, ${emp().cidade}/${emp().uf}, neste ato representada na forma de seu Contrato Social,
 doravante denominada simplesmente INTERMEDIADORA.</p>
 
 <p><strong>COMPRADOR:</strong> ${ou(f.comprador_nome, "nome do comprador")}, nacionalidade
@@ -4392,9 +4405,9 @@ ${CLAUSULA_ASSINATURA}
 <p style="margin-top:16px">Por estarem justos e contratados, assinam o presente instrumento em
 2 vias de igual teor e forma.</p>
 
-<p>Joinville, ${diaDoc()[0]} de ${MESES_DOC[Number(diaDoc()[1]) - 1]} de ${diaDoc()[2]}.</p>
+<p>${emp().cidade}, ${diaDoc()[0]} de ${MESES_DOC[Number(diaDoc()[1]) - 1]} de ${diaDoc()[2]}.</p>
 
-${assinaturas("CONTRATANTE", "VAAPTY INTERMEDIAÇÃO VEICULAR<br>CNPJ: 34.840.903/0001-00")}
+${assinaturas("CONTRATANTE", `${emp().RAZAO.replace(/\s+LTDA\.?$/, "")}<br>CNPJ: ${emp().cnpj}`)}
 ${DUAS_TESTEMUNHAS}`;
 
   return moldura({
@@ -4452,9 +4465,8 @@ function preContrato(f) {
 <p>Pelo presente instrumento, de um lado, ${ou(f.cliente_nome, "nome do declarante")}, inscrito(a)
 no CPF sob n. ${ou(f.cliente_cpf, "CPF")}, residente e domiciliado(a) na
 ${ou(f.cliente_endereco, "endereço")}, doravante
-denominada simplesmente <strong>“DECLARANTE”</strong>, e de outro, <strong>Vaapty Intermediação
-Veicular LTDA</strong>, pessoa jurídica de direito privado, inscrita no CNPJ sob
-n. 34.840.903/0001-00, com sede em Rua Anita Garibaldi, 705 – Anita Garibaldi, doravante
+denominada simplesmente <strong>“DECLARANTE”</strong>, e de outro, <strong>${emp().razao}</strong>, pessoa jurídica de direito privado, inscrita no CNPJ sob
+n. ${emp().cnpj}, com sede em ${emp().rua}, ${emp().numero} – ${emp().bairro}, doravante
 denominada simplesmente <strong>“VAAPTY”</strong>.</p>
 
 <p><strong>DADOS DO VEÍCULO</strong></p>
@@ -9231,7 +9243,7 @@ function SimuladorPropostas({ alvoPadrao, veiculo, negociador, aoImprimir, rotul
 
             {/* o resumo, como na planilha */}
             <div style={{ flex: "1 1 240px", minWidth: 240 }}>
-              <img src={LOGO_VAAPTY} alt="Vaapty" style={{ height: 34, marginBottom: 18 }} />
+              <img src={logoEmpresa()} alt="logo" style={{ height: 34, marginBottom: 18 }} />
 
               <div className="flex items-center gap-3">
                 <span className="text-[13px]" style={{ fontWeight: 700, fontStyle: "italic" }}>Veículo</span>
@@ -25194,7 +25206,9 @@ function ContratoDoLojista({ e, valor, aoFechar }) {
     km: v.km_atual || v.km_entrada || "", categoria: "Particular", cor: v.cor || "", alienacao: false, situacao: "",
   });
   const lembrado = (() => { try { return JSON.parse(localStorage.getItem("vaapty:recebe-lojista") || "{}"); } catch (x) { return {}; } })();
-  const [B, setB] = useState({ banco: "", agencia: "", conta: "", tipo: "", pix: "", obs: "", ...lembrado });
+  // A conta da unidade vem do cadastro da empresa (0137); o que este aparelho lembrou ainda manda.
+  const daEmpresa = Object.fromEntries(["banco", "agencia", "conta", "pix"].map((k) => [k, EMPRESA[k] || ""]).filter(([, v]) => v));
+  const [B, setB] = useState({ banco: "", agencia: "", conta: "", tipo: "", pix: "", obs: "", ...daEmpresa, ...lembrado });
   const [forma, setForma] = useState(lembrado.forma || "PIX");
   const [val, setVal] = useState(String(valor || e.valor_venda || ""));
   const [erro, setErro] = useState("");
@@ -28508,6 +28522,7 @@ function destinosPara(perfil) {
     // O combinado pronto para mais de uma pessoa (0082). A RLS é do
     // financeiro e do gerente, como a ficha.
     (gerente || (perfil && perfil.financeiro)) ? { id: "remuneracao", rot: "Perfis de remuneração", curto: "Remuner.", area: "gestao" } : null,
+    (gerente || (perfil && perfil.financeiro)) ? { id: "empresa", rot: "Cadastro da empresa", curto: "Empresa", area: "gestao" } : null,
     // Ligar um número da loja é ato de gerente — e o servidor confere
     // de novo, porque esconder o item é conveniência, não controle. Mora
     // em Gestão desde 28/10/2026 (o Derek): é cadastro da loja, não
@@ -32060,10 +32075,166 @@ class RedeDeErro extends React.Component {
   }
 }
 
+/* ===================== CADASTRO DA EMPRESA (0137) =====================
+ * O Derek, em 09/11/2026: "um lugar de cadastro da empresa… os dados da nossa unidade, o logo, que vai
+ * servir pra todos os lugares onde aparece o logo, os documentos da unidade, CNPJ, endereço e tudo o
+ * que for necessário pra aparecer nos contratos… vai ser uma base importante pra quando começarmos a
+ * vender esse aplicativo pra outras unidades". Os papéis leem daqui (emp(), logoEmpresa()). */
+async function carregarEmpresa() {
+  try {
+    const r = await fetchAut("/api/perfil?recurso=empresa");
+    const d = await r.json().catch(() => ({}));
+    if (r.ok && d.empresa) EMPRESA = { ...EMPRESA_PADRAO, ...Object.fromEntries(Object.entries(d.empresa).filter(([, v]) => v != null && v !== "")) };
+    return d.empresa || null;
+  } catch (e) { return null; }
+}
+
+const GRUPOS_EMPRESA = [
+  ["Identificação", [["razao_social", "Razão social", 2], ["nome_fantasia", "Nome fantasia"], ["nome_unidade", "Nome da unidade (nos contratos)"],
+    ["cnpj", "CNPJ"], ["inscricao_estadual", "Inscrição estadual"], ["inscricao_municipal", "Inscrição municipal"]]],
+  ["Endereço", [["logradouro", "Rua / avenida", 2], ["numero", "Número"], ["complemento", "Complemento"], ["bairro", "Bairro"],
+    ["cidade", "Cidade"], ["uf", "UF"], ["cep", "CEP"]]],
+  ["Contato", [["telefone", "Telefone"], ["whatsapp", "WhatsApp"], ["email", "E-mail"], ["site", "Site"]]],
+  ["Representante legal", [["rep_nome", "Nome", 2], ["rep_cpf", "CPF"], ["rep_cargo", "Cargo"]]],
+  ["Dados bancários (para receber dos lojistas)", [["favorecido", "Favorecido", 2], ["banco", "Banco"], ["agencia", "Agência"], ["conta", "Conta"], ["pix", "Chave PIX", 2]]],
+];
+
+function TelaEmpresa({ perfil }) {
+  const gerente = !!(perfil && perfil.papel === "gerente");
+  const [d, setD] = useState(null); const [f, setF] = useState({}); const [erro, setErro] = useState(""); const [msg, setMsg] = useState(""); const [indo, setIndo] = useState(false);
+  const [docs, setDocs] = useState(null); const [rotulos, setRotulos] = useState([]); const [rot, setRot] = useState("Contrato social"); const [validade, setValidade] = useState(""); const [subindo, setSubindo] = useState(false);
+  const arquivoRef = useRef(null); const logoRef = useRef(null);
+  const lerDocs = () => fetchAut("/api/foto?recurso=empresa-anexo").then((r) => r.json()).then((x) => { setDocs(x.anexos || []); if (x.rotulos) setRotulos(x.rotulos); }).catch(() => setDocs([]));
+  useEffect(() => {
+    fetchAut("/api/perfil?recurso=empresa").then((r) => r.json()).then((x) => { const e = x.empresa || {}; setD(e); setF({ ...EMPRESA_PADRAO, ...Object.fromEntries(Object.entries(e).filter(([, v]) => v != null)) }); })
+      .catch((e) => setErro(e.message));
+    lerDocs();
+  }, []);
+  const mudou = d && Object.keys(f).some((k) => k !== "atualizado_em" && String(f[k] == null ? "" : f[k]) !== String(d[k] == null ? (EMPRESA_PADRAO[k] || "") : d[k]));
+  const salvar = async () => {
+    setIndo(true); setErro(""); setMsg("");
+    try {
+      const corpo = {}; GRUPOS_EMPRESA.forEach(([, cs]) => cs.forEach(([k]) => { corpo[k] = f[k] || ""; })); corpo.logo = f.logo || "";
+      const r = await fetchAut("/api/perfil?recurso=empresa", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo) });
+      const x = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(x.erro || "Não consegui salvar.");
+      setD(x.empresa); await carregarEmpresa(); setMsg("Salvo. Os próximos contratos e documentos já saem com estes dados.");
+    } catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+  const escolherLogo = (ev) => {
+    const arq = ev.target.files && ev.target.files[0]; ev.target.value = "";
+    if (!arq) return;
+    if (arq.size > 500 * 1024) { setErro("O logo passou de 500 KB. Use uma imagem menor (PNG com fundo transparente é o ideal)."); return; }
+    const leitor = new FileReader(); leitor.onload = () => setF((x) => ({ ...x, logo: leitor.result })); leitor.readAsDataURL(arq);
+  };
+  const anexar = (ev) => {
+    const arq = ev.target.files && ev.target.files[0]; ev.target.value = "";
+    if (!arq) return;
+    if (arq.size > 10 * 1024 * 1024) { setErro("Arquivo maior que 10 MB."); return; }
+    setSubindo(true); setErro("");
+    const leitor = new FileReader();
+    leitor.onload = async () => {
+      try {
+        const r = await fetchAut("/api/foto?recurso=empresa-anexo", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tipo: arq.type, dados: leitor.result, nome: arq.name, rotulo: rot, validade: validade || null }) });
+        const x = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(x.erro || "Não consegui anexar.");
+        setValidade(""); lerDocs();
+      } catch (e) { setErro(e.message); }
+      setSubindo(false);
+    };
+    leitor.readAsDataURL(arq);
+  };
+  const apagarDoc = async (a) => {
+    if (!window.confirm(`Apagar "${a.nome || a.rotulo}"? O arquivo sai do sistema e não volta.`)) return;
+    try { const r = await fetchAut(`/api/foto?recurso=empresa-anexo&id=${a.id}`, { method: "DELETE" }); const x = await r.json().catch(() => ({})); if (!r.ok) throw new Error(x.erro || "Não consegui apagar."); lerDocs(); }
+    catch (e) { setErro(e.message); }
+  };
+  const hoje = hojeEmSP();
+  const campo = ([k, rotulo, larg]) => (
+    <label key={k} className={`block ${larg === 2 ? "sm:col-span-2" : ""}`}><Rotulo>{rotulo}</Rotulo>
+      <input className={inputCls} style={inputSty} value={f[k] || ""} disabled={!gerente} onChange={(e) => setF({ ...f, [k]: e.target.value })} />
+    </label>
+  );
+  return (
+    <>
+      <Cabecalho titulo="Cadastro da empresa" sub="Os dados da unidade: saem nos contratos, nos recibos e em todo lugar que mostra o logo." />
+      {!d ? <p className="text-[13px]" style={{ color: erro ? C.laranja : C.mute }}>{erro || "Lendo…"}</p> : (
+        <div className="grid gap-3 lg:grid-cols-[1fr_340px]">
+          <div className="space-y-3">
+            {GRUPOS_EMPRESA.map(([titulo, cs]) => (
+              <Bloco key={titulo} titulo={titulo}>
+                <div className="grid gap-2 sm:grid-cols-4">{cs.map(campo)}</div>
+              </Bloco>
+            ))}
+            {gerente && (
+              <div className="sticky bottom-3 flex items-center gap-3 rounded-xl px-3 py-2" style={{ background: C.paper, border: `1px solid ${mudou ? C.roxo : C.line}`, boxShadow: mudou ? "0 4px 14px rgba(24,18,33,.12)" : "none" }}>
+                <BotaoPrimario onClick={salvar} disabled={indo || !mudou}>{indo ? "Salvando…" : "Salvar o cadastro"}</BotaoPrimario>
+                <span className="text-[12px]" style={{ color: erro ? C.laranja : msg ? C.verde : C.mute }}>{erro || msg || (mudou ? "Há mudanças não salvas." : "Nada mudou.")}</span>
+              </div>
+            )}
+            {!gerente && <p className="text-[12px]" style={{ color: C.mute }}>Só o gerente edita o cadastro.</p>}
+          </div>
+          <div className="space-y-3">
+            <Bloco titulo="Logo" sub="Aparece nos contratos, recibos e documentos impressos.">
+              <div className="grid h-[120px] place-items-center rounded-lg" style={{ background: C.bg, border: `1px dashed ${C.line}` }}>
+                <img src={f.logo || LOGO_VAAPTY} alt="logo" style={{ maxHeight: 96, maxWidth: "90%" }} />
+              </div>
+              {gerente && (
+                <div className="mt-2 flex items-center gap-3 text-[12px]">
+                  <button onClick={() => logoRef.current && logoRef.current.click()} className="font-semibold" style={{ color: C.roxo }}>trocar o logo</button>
+                  {f.logo && <button onClick={() => setF({ ...f, logo: "" })} style={{ color: C.mute }}>voltar ao logo padrão</button>}
+                  <input ref={logoRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" className="hidden" onChange={escolherLogo} />
+                </div>
+              )}
+              <p className="mt-1 text-[11px]" style={{ color: C.mute }}>PNG com fundo transparente, até 500 KB. Vale depois de salvar o cadastro.</p>
+            </Bloco>
+            <Bloco titulo="Documentos da empresa" sub="Contrato social, cartão CNPJ, alvará, certidões.">
+              {gerente && (
+                <div className="grid gap-1.5">
+                  <div className="flex gap-1.5">
+                    <select value={rot} onChange={(e) => setRot(e.target.value)} className="min-w-0 flex-1 rounded-md border px-2 py-1.5 text-[12.5px] outline-none" style={inputSty}>
+                      {(rotulos.length ? rotulos : ["Contrato social", "Cartão CNPJ", "Alvará", "Outro"]).map((x) => <option key={x}>{x}</option>)}
+                    </select>
+                    <input type="date" value={validade} onChange={(e) => setValidade(e.target.value)} title="Validade (opcional, para certidões)" className="w-[136px] rounded-md border px-1.5 py-1.5 text-[12px] outline-none" style={inputSty} />
+                  </div>
+                  <button onClick={() => arquivoRef.current && arquivoRef.current.click()} disabled={subindo} className="rounded-md py-1.5 text-[12.5px] font-semibold text-white" style={{ background: C.roxo }}>{subindo ? "Enviando…" : "Anexar arquivo"}</button>
+                  <input ref={arquivoRef} type="file" accept="application/pdf,image/jpeg,image/png,image/webp" className="hidden" onChange={anexar} />
+                  <span className="text-[10.5px]" style={{ color: C.mute }}>PDF ou foto, até 10 MB. A validade é opcional — a lista avisa quando vence.</span>
+                </div>
+              )}
+              <div className="mt-2 space-y-1">
+                {docs === null ? <p className="text-[12px]" style={{ color: C.mute }}>Lendo…</p>
+                  : !docs.length ? <p className="text-[12px]" style={{ color: C.mute }}>Nenhum documento anexado.</p>
+                  : docs.map((a) => {
+                    const vencido = a.validade && a.validade < hoje;
+                    return (
+                      <div key={a.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px]" style={{ background: C.bg }}>
+                        <div className="min-w-0 flex-1">
+                          <a href={a.url || "#"} target="_blank" rel="noopener noreferrer" className="block truncate font-semibold" style={{ color: C.roxo }}>{a.rotulo}</a>
+                          <span className="block truncate text-[11px]" style={{ color: vencido ? C.laranja : C.mute }}>
+                            {a.nome || ""}{a.validade ? ` · ${vencido ? "venceu" : "vale até"} ${diaBR(a.validade)}` : ""}</span>
+                        </div>
+                        {gerente && <button onClick={() => apagarDoc(a)} className="text-[11px]" style={{ color: C.mute }}>apagar</button>}
+                      </div>
+                    );
+                  })}
+              </div>
+            </Bloco>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function App() {
   const [estado, setEstado] = useState("carregando");   // carregando | fora | esperando | dentro | erro
   const [perfil, setPerfil] = useState(null);
   const [erro, setErro] = useState("");
+  // O cadastro da empresa (0137): lido uma vez ao entrar, para os papéis saírem com os dados da unidade.
+  useEffect(() => { if (perfil) carregarEmpresa(); }, [perfil && perfil.id]);
   const [aberto, setAberto] = useState(null);           // atendimento em foco, ou a lista
   // A página atual e o mês. O mês mora aqui porque vale para mais de
   // uma página — a lista de atendimentos e o painel medem o mesmo mês.
@@ -32285,6 +32456,7 @@ function App() {
       {MODO_ADM[tela] && <TelaADM perfil={perfil} comp={compOuAtual} mes={mes} modo={MODO_ADM[tela]} />}
       {tela === "gestao" && <TelaGestao perfil={perfil} comp={compOuAtual} />}
       {tela === "remuneracao" && <TelaPerfisRemuneracao />}
+      {tela === "empresa" && <TelaEmpresa perfil={perfil} />}
       {tela === "adm_whats" && <TelaConversas key="adm" operacao />}
       {tela === "whats_neg" && <TelaConversas key="neg" negociacao aoAbrir={abrir} alvo={conversaAlvoNeg} aoConsumirAlvo={() => setConversaAlvoNeg(null)} />}
       {tela === "adm_transf" && <TelaTransferencias />}
