@@ -6342,3 +6342,24 @@ diante, o sistema: o que passou no banco + os títulos em aberto da competência
 os lançamentos em categoria de retirada; acumulado = o do mês anterior + resultado − retiradas, partindo
 dos R$ 62.643,23 de setembro (o último da planilha). `anoGestao` em `api/financeiro.js`; o Ano antigo
 (por categoria) segue em `?recurso=ano-antigo`.
+
+### 71. Unir títulos num pagamento só, e o custo que vai para o carro (0134)
+
+O Derek, em 08/11/2026, com o relatório de cautelares da TMH: as cautelares das negociações já estão
+nos títulos do contrato (9.01), as que viraram custo não estão, e tudo é pago numa transferência só.
+**A união é uma capa (`fin_uniao`), não um título novo**: os títulos de dentro (`uniao_id`) continuam
+inteiros, cada um com a categoria, o carro e o item do contrato dele — por isso o DRE, a projeção e a
+sincronização com o carro não mudam. Em Títulos financeiros marca-se os títulos a pagar (ou "marcar os
+N da lista" depois de procurar "cautelar") e "Unir em um título": fornecedor, vencimento, o valor de cada
+um corrigido pelo relatório (no título `custo:` do contrato, o valor novo vai para o `realizado` do custo
+do carro, senão a sincronização devolveria o antigo; compra e venda não mudam aqui) e "+ item" para o
+que não estava em título nenhum, com categoria ou carro. Pagar a união: "baixar" (todos de uma vez) ou
+"vincular ao extrato", que é o `dividir` da Conciliação com os títulos dela. O casamento automático da
+importação ignora quem está numa união.
+
+**Custo do carro**: no título a pagar (aberto ou pago), "Atribuir ao carro" cria a linha de
+`estoque_custo` — no pátio entra no custo, vendido entra na rentabilidade — e o título vira o item dela
+(`custo:<id>`) em Negociação, fora do DRE: no carro e na categoria seria o mesmo dinheiro duas vezes.
+`categoria_antes_id` guarda a de antes para "tirar do carro". **Na sincronização, só o título da COMPRA
+marca o lado da compra como gerido** (era qualquer título não-venda): um custo atribuído à mão num carro
+de antes do corte puxaria a compra e os custos de outubro.

@@ -563,7 +563,7 @@ async function importar(req, res, tok) {
   // com o que se digitou, e casar por nome erraria mais que acertaria.
   const abertos = await supa(
     `${base("fin_lancamento")}?select=id,debito,credito,vencimento,descricao,favorecido,conta_id,conta_fixa_id,categoria_id,competencia,` +
-    `favorecido_id,funcionario_id,estoque_id,tipo_negociacao,observacao,item_contrato,fin_conta_fixa(nome,favorecido,valor_livre)&situacao=eq.aberto&limit=2000`,
+    `favorecido_id,funcionario_id,estoque_id,tipo_negociacao,observacao,item_contrato,fin_conta_fixa(nome,favorecido,valor_livre)&situacao=eq.aberto&uniao_id=is.null&limit=2000`,
     { headers: cab(tok) });
   const casados = [];
   const usados = {};
@@ -1207,7 +1207,9 @@ async function sincronizarTitulosDoCarro(tok, estoqueId, forcar) {
    * compra e os custos de outubro (que "já passou", o Derek). O lado da
    * compra só é gerido se o carro entrou depois do corte, se já tem
    * título da compra/custos, ou se foi forçado; o da venda, idem. */
-  const temCompra = existentes.some((x) => !String(x.item_contrato).startsWith("venda:"));
+  // Só o título da COMPRA marca o lado como gerido: um custo atribuído ao carro à mão (0134) num carro
+  // de antes do corte não pode puxar a compra e os custos de outubro.
+  const temCompra = existentes.some((x) => String(x.item_contrato).startsWith("compra:"));
   const temVenda = existentes.some((x) => String(x.item_contrato).startsWith("venda:"));
   const doCorteCompra = forcar || temCompra || (entrou && entrou >= CORTE_TITULOS);
   const doCorteVenda = forcar || temVenda || (vendeu && vendeu >= CORTE_TITULOS);
@@ -1666,6 +1668,113 @@ async function soltarTitulos(tok, linhaId) {
   return ts.length;
 }
 
+/* O CUSTO DO TÍTULO VAI PARA O CARRO (0134, 08/11/2026, o Derek: "deve ser possível atribuir o
+ * custo de um título a um carro… o custo deve ir para o carro, lá no estoque, ou se já tiver saído
+ * do estoque, vai pro custo, na planilha de rentabilidade"). Vira uma linha de estoque_custo — é
+ * dela que sai o custo do pátio e a rentabilidade do vendido — e o título passa a ser o item dela
+ * (`custo:<id>`), em Negociação, fora do DRE: o carro já desconta, e a categoria contaria de novo. */
+const TIPO_CUSTO_DE = (t) => /cautelar|vistoria|laudo|per[ií]cia/i.test(t) ? "cautelar"
+  : /despach|documenta|cart[oó]rio|transfer[eê]ncia|detran/i.test(t) ? "documentacao"
+  : /guincho|transporte|frete|cegonha/i.test(t) ? "transporte"
+  : /reparo|mec[aâ]nic|funilar|pneu|pe[cç]a|oficina|lavag|polim/i.test(t) ? "reparo" : "outro";
+async function catNegociacao(tok) {
+  return um(await supa(`${base("fin_categoria")}?select=id&grupo=eq.negociacao&ativa=eq.true&order=ordem&limit=1`, { headers: cab(tok) }));
+}
+async function atribuirAoCarro(tok, t, estoqueId, catAntes) {
+  if (!(Number(t.debito) > 0)) throw new Error("Só um título a pagar vira custo do carro.");
+  if (t.item_contrato) throw new Error("Este título já é um item do contrato do carro.");
+  if ((t.fin_rateio || []).length) throw new Error("Este título está repartido em categorias: desfaça a repartição antes.");
+  const e = um(await supa(`${base("estoque")}?select=id&id=eq.${estoqueId}`, { headers: cab(tok) }));
+  if (!e) throw new Error("Carro não encontrado no estoque.");
+  const valor = Number(t.debito) || 0;
+  const pago = t.situacao === "efetivado";
+  const desc = texto(t.descricao) || "Custo";
+  const custo = um(await supa(base("estoque_custo"), { method: "POST", headers: cab(tok, REP), body: JSON.stringify({
+    estoque_id: estoqueId, tipo: TIPO_CUSTO_DE(desc), descricao: desc, previsto: valor,
+    realizado: pago ? valor : null, pago_em: pago ? t.data : null, do_fechamento: false,
+  }) }));
+  if (!custo) throw new Error("O banco recusou o custo do carro.");
+  const neg = await catNegociacao(tok);
+  await supa(`${base("fin_lancamento")}?id=eq.${t.id}`, { method: "PATCH", headers: cab(tok), body: JSON.stringify({
+    estoque_id: estoqueId, item_contrato: `custo:${custo.id}`, tipo_negociacao: "outro",
+    categoria_id: neg ? neg.id : t.categoria_id, atribuido_ao_carro: true,
+    categoria_antes_id: catAntes !== undefined ? catAntes : t.categoria_id || null,
+  }) });
+  return custo;
+}
+async function tirarDoCarro(tok, t) {
+  const k = String(t.item_contrato || "");
+  if (!t.atribuido_ao_carro || !k.startsWith("custo:")) throw new Error("Este custo não foi atribuído ao carro por aqui: ele é do contrato.");
+  const cid = idOuNulo(k.slice(6));
+  if (cid) {
+    const apagou = await supa(`${base("estoque_custo")}?id=eq.${cid}`, { method: "DELETE", headers: cab(tok, REP) }).catch(() => null);
+    // Apagar custo é do gerente (0019): sem poder, a linha fica zerada — some da conta do carro.
+    if (!um(apagou)) await supa(`${base("estoque_custo")}?id=eq.${cid}`, { method: "PATCH", headers: cab(tok),
+      body: JSON.stringify({ previsto: 0, realizado: 0, descricao: `${t.descricao || "Custo"} (tirado do carro)` }) }).catch(() => null);
+  }
+  await supa(`${base("fin_lancamento")}?id=eq.${t.id}`, { method: "PATCH", headers: cab(tok), body: JSON.stringify({
+    estoque_id: null, item_contrato: null, tipo_negociacao: null, categoria_id: t.categoria_antes_id || null,
+    atribuido_ao_carro: false, categoria_antes_id: null,
+  }) });
+}
+
+/* UNIR TÍTULOS (0134). A união é uma capa sobre títulos a pagar que continuam inteiros. Junta os
+ * escolhidos, corrige o valor de cada um (o do contrato do carro corrige o custo do carro junto,
+ * senão a sincronização devolveria o número antigo) e cria os itens que faltam — cada um com a
+ * categoria dele, e com o carro quando o custo é do carro. */
+async function unirTitulos(tok, c) {
+  const ids = Array.from(new Set((Array.isArray(c.titulos) ? c.titulos : []).map(idOuNulo).filter(Boolean)));
+  const valores = c.valores && typeof c.valores === "object" ? c.valores : {};
+  const itens = (Array.isArray(c.itens) ? c.itens : []).map((x) => ({
+    descricao: texto(x && x.descricao), categoria_id: idOuNulo(x && x.categoria_id),
+    estoque_id: idOuNulo(x && x.estoque_id), valor: Math.abs(decimal(x && x.valor) || 0),
+  })).filter((x) => x.valor > 0);
+  const uid = idOuNulo(c.uniao_id);
+  if (!uid && ids.length + itens.length < 2) return [400, { erro: "Uma união precisa de ao menos dois títulos (escolhidos ou novos)." }];
+  if (itens.some((x) => !x.descricao)) return [400, { erro: "Descreva cada item novo." }];
+  const ts = ids.length ? await supa(`${base("fin_lancamento")}?select=id,situacao,debito,credito,item_contrato,uniao_id,fin_rateio(id)&id=in.(${ids.join(",")})`, { headers: cab(tok) }) || [] : [];
+  if (ts.length !== ids.length || ts.some((t) => t.situacao !== "aberto")) return [409, { erro: "Algum título não está mais em aberto. Recarregue a lista." }];
+  if (ts.some((t) => !(Number(t.debito) > 0))) return [400, { erro: "Só títulos a pagar se unem." }];
+  if (ts.some((t) => t.uniao_id && t.uniao_id !== uid)) return [409, { erro: "Algum título já está em outra união: tire-o de lá antes." }];
+  const mudar = [];
+  for (const t of ts) {
+    const bruto = valores[t.id];
+    if (bruto == null || bruto === "") continue;
+    const nv = Math.abs(decimal(bruto) || 0);
+    if (Math.abs(nv - (Number(t.debito) || 0)) < 0.005) continue;
+    if (nv <= 0) return [400, { erro: "Valor zerado: para tirar um título, desmarque-o." }];
+    const k = String(t.item_contrato || "");
+    if (k.startsWith("compra:") || k.startsWith("venda:") || k.indexOf("#") >= 0) return [400, { erro: "O valor do pagamento ao cliente ou da venda muda no contrato do carro, não aqui." }];
+    if ((t.fin_rateio || []).length) return [400, { erro: "Um título repartido em categorias não muda de valor aqui: abra-o." }];
+    mudar.push({ t, nv, custo: k.startsWith("custo:") ? idOuNulo(k.slice(6)) : null });
+  }
+  const venc = dataISO(c.vencimento) || hojeAqui();
+  const capa = { descricao: texto(c.descricao), favorecido: texto(c.favorecido), favorecido_id: idOuNulo(c.favorecido_id),
+    vencimento: venc, conta_id: idOuNulo(c.conta_id) };
+  let u;
+  if (uid) u = um(await supa(`${base("fin_uniao")}?id=eq.${uid}`, { method: "PATCH", headers: cab(tok, REP), body: JSON.stringify(capa) }));
+  else u = um(await supa(base("fin_uniao"), { method: "POST", headers: cab(tok, REP), body: JSON.stringify(capa) }));
+  if (!u) return [403, { erro: "O banco recusou a união (é do financeiro)." }];
+  for (const m of mudar) {
+    if (m.custo) await supa(`${base("estoque_custo")}?id=eq.${m.custo}`, { method: "PATCH", headers: cab(tok), body: JSON.stringify({ realizado: m.nv }) });
+    await supa(`${base("fin_lancamento")}?id=eq.${m.t.id}&situacao=eq.aberto`, { method: "PATCH", headers: cab(tok), body: JSON.stringify({ debito: m.nv }) });
+  }
+  if (ids.length) await supa(`${base("fin_lancamento")}?id=in.(${ids.join(",")})&situacao=eq.aberto`, { method: "PATCH", headers: cab(tok), body: JSON.stringify({ uniao_id: u.id }) });
+  const comp = competenciaDe(c.competencia) || competenciaDe(venc);
+  let criados = 0;
+  for (const x of itens) {
+    const novo = um(await supa(base("fin_lancamento"), { method: "POST", headers: cab(tok, REP), body: JSON.stringify({
+      situacao: "aberto", origem: "uniao", descricao: x.descricao, categoria_id: x.categoria_id, debito: x.valor, credito: 0,
+      favorecido: capa.favorecido, favorecido_id: capa.favorecido_id, vencimento: venc, data: venc, competencia: comp,
+      conta_id: capa.conta_id, uniao_id: u.id,
+    }) }));
+    if (!novo) continue;
+    criados += 1;
+    if (x.estoque_id) await atribuirAoCarro(tok, novo, x.estoque_id, x.categoria_id);
+  }
+  return [200, { ok: true, uniao_id: u.id, criados, valores_mudados: mudar.length }];
+}
+
 async function titulo(req, res, tok) {
   /* OS TÍTULOS FINANCEIROS DO MÊS (07/11/2026, o Derek: "deveria ter
    * outra tela de títulos financeiros… essa tela tem como vincular a um
@@ -1715,7 +1824,16 @@ async function titulo(req, res, tok) {
     const lista = await supa(`${base("fin_lancamento")}?select=${CAMPOS_LANC}&situacao=in.(aberto,efetivado)${filtroComp}` +
       `&order=vencimento.asc.nullslast,data.asc&limit=8000`, { headers: cab(tok) }) || [];
     await anexarTitulos(tok, lista.filter((l) => l.situacao === "efetivado"));
-    return res.status(200).json({ competencia: comp, titulos: lista, truncado: lista.length >= 8000 });
+    // As uniões (0134) dos títulos que vieram, com TODOS os títulos de cada uma (alguns podem cair
+    // fora do período escolhido).
+    const uids = Array.from(new Set(lista.map((l) => l.uniao_id).filter(Boolean)));
+    let unioes = [];
+    if (uids.length) {
+      unioes = await supa(`${base("fin_uniao")}?select=*,fin_conta(id,nome)&id=in.(${uids.join(",")})`, { headers: cab(tok) }).catch(() => []) || [];
+      const filhos = await supa(`${base("fin_lancamento")}?select=id,uniao_id,situacao,debito,credito,descricao,competencia&uniao_id=in.(${uids.join(",")})&situacao=in.(aberto,efetivado)`, { headers: cab(tok) }).catch(() => []) || [];
+      unioes.forEach((u) => { u.titulos = filhos.filter((f) => f.uniao_id === u.id); });
+    }
+    return res.status(200).json({ competencia: comp, titulos: lista, unioes, truncado: lista.length >= 8000 });
   }
   // As linhas do banco que podem ser o pagamento deste título: mesmo
   // lado, mesma conta (se o título tem), até 60 dias do vencimento, e
@@ -1962,6 +2080,49 @@ async function titulo(req, res, tok) {
       body: JSON.stringify({ situacao: "aberto", data: t.vencimento || t.data, conciliado: false, revisar: false }) });
     if (!um(r)) return recusado(res);
     return res.status(200).json({ ok: true, lancamento: um(r) });
+  }
+  /* A UNIÃO (0134): unir, tirar um título dela, desfazer, e pagar à mão de uma vez. Ligar a uma
+   * linha do banco é o "dividir" da Conciliação, com os títulos da união. */
+  if (req.method === "POST" && String(req.query.acao || "") === "unir") {
+    const [st, corpo] = await unirTitulos(tok, await corpoDe(req) || {});
+    return res.status(st).json(corpo);
+  }
+  if (req.method === "POST" && String(req.query.acao || "") === "sair_uniao") {
+    const id = idOuNulo(req.query.id);
+    if (!id) return res.status(400).json({ erro: "id inválido." });
+    await supa(`${base("fin_lancamento")}?id=eq.${id}&situacao=eq.aberto`, { method: "PATCH", headers: cab(tok), body: JSON.stringify({ uniao_id: null }) });
+    return res.status(200).json({ ok: true });
+  }
+  if (req.method === "POST" && String(req.query.acao || "") === "desunir") {
+    const id = idOuNulo(req.query.id);
+    if (!id) return res.status(400).json({ erro: "id inválido." });
+    await supa(`${base("fin_lancamento")}?uniao_id=eq.${id}&situacao=eq.aberto`, { method: "PATCH", headers: cab(tok), body: JSON.stringify({ uniao_id: null }) });
+    const resta = await supa(`${base("fin_lancamento")}?select=id&uniao_id=eq.${id}&limit=1`, { headers: cab(tok) }) || [];
+    if (!resta.length) await supa(`${base("fin_uniao")}?id=eq.${id}`, { method: "DELETE", headers: cab(tok) });
+    return res.status(200).json({ ok: true });
+  }
+  if (req.method === "POST" && String(req.query.acao || "") === "baixar_uniao") {
+    const id = idOuNulo(req.query.id);
+    const c = await corpoDe(req) || {};
+    const contaId = idOuNulo(c.conta_id);
+    if (!id || !contaId) return res.status(400).json({ erro: "Escolha de qual banco saiu." });
+    const r = await supa(`${base("fin_lancamento")}?uniao_id=eq.${id}&situacao=eq.aberto`, { method: "PATCH", headers: cab(tok, REP),
+      body: JSON.stringify({ situacao: "efetivado", conta_id: contaId, data: dataISO(c.data) || hojeAqui(), conciliado: !!c.conciliado, revisar: false }) }) || [];
+    return res.status(200).json({ ok: true, baixados: r.length });
+  }
+  if (req.method === "POST" && ["atribuir_carro", "tirar_carro"].indexOf(String(req.query.acao || "")) >= 0) {
+    const id = idOuNulo(req.query.id);
+    const c = await corpoDe(req) || {};
+    if (!id) return res.status(400).json({ erro: "id inválido." });
+    const t = um(await supa(`${base("fin_lancamento")}?select=*,fin_rateio(id)&id=eq.${id}`, { headers: cab(tok) }));
+    if (!t || t.situacao === "cancelado") return res.status(404).json({ erro: "Título não encontrado." });
+    try {
+      if (String(req.query.acao) === "tirar_carro") { await tirarDoCarro(tok, t); return res.status(200).json({ ok: true }); }
+      const eid = idOuNulo(c.estoque_id);
+      if (!eid) return res.status(400).json({ erro: "Escolha o carro." });
+      const custo = await atribuirAoCarro(tok, t, eid);
+      return res.status(200).json({ ok: true, custo });
+    } catch (x) { return res.status(400).json({ erro: x.message }); }
   }
   if (req.method === "POST" && String(req.query.acao || "") === "baixar") {
     const id = idOuNulo(req.query.id);
