@@ -1829,7 +1829,7 @@ async function titulo(req, res, tok) {
     const uids = Array.from(new Set(lista.map((l) => l.uniao_id).filter(Boolean)));
     let unioes = [];
     if (uids.length) {
-      unioes = await supa(`${base("fin_uniao")}?select=*,fin_conta(id,nome)&id=in.(${uids.join(",")})`, { headers: cab(tok) }).catch(() => []) || [];
+      unioes = await supa(`${base("fin_uniao")}?select=*,fin_conta!fin_uniao_conta_id_fkey(id,nome)&id=in.(${uids.join(",")})`, { headers: cab(tok) }).catch(() => []) || [];
       const filhos = await supa(`${base("fin_lancamento")}?select=id,uniao_id,situacao,debito,credito,descricao,competencia&uniao_id=in.(${uids.join(",")})&situacao=in.(aberto,efetivado)`, { headers: cab(tok) }).catch(() => []) || [];
       unioes.forEach((u) => { u.titulos = filhos.filter((f) => f.uniao_id === u.id); });
     }
