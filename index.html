@@ -19195,10 +19195,11 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
    * **Sem grupo de "cadastros" por enquanto**: conta, categoria e
    * favorecido ainda se editam dentro de Lançamentos, e um grupo com um
    * atalho para a mesma tela seria menu que promete o que não tem. */
-  const TITULO = { pendencias: "Pendências", lancamentos: "Conciliação bancária", recebimentos: "Recebimentos", contas: "Títulos financeiros", cartoes: "Cartões de crédito",
+  const TITULO = { pendencias: "Pendências", lancamentos: "Conciliação bancária", recebimentos: "Recebimentos", contas: "Títulos financeiros", cartoes: "Cartões de crédito", notas: "Notas fiscais",
     carros: "Carros", fechamento: "Fechamento", dre: "DRE", ano: "Ano", folha: "Folha", caixas: "Contas e caixas",
     fixas: "Contas fixas", plano: "Plano de contas" };
   const SUB = {
+    notas: "Nota fiscal de serviço, direto na Receita.",
     pendencias: "Tudo que pede ação, num lugar só.",
     lancamentos: "O extrato do banco: cada linha ligada ao título a que se refere, ou lançada direto.",
     recebimentos: "Toda venda tem que aparecer no extrato — ou ter um motivo escrito.",
@@ -19218,7 +19219,7 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
   const irPara = (a, c) => { if (c && aoMudarMes) aoMudarMes(competenciaDe(c)); if (aoIrPara) aoIrPara(a); };
   return (
     <div>
-      <Cabecalho titulo={TITULO[aba] || "Financeiro"} mes={aba === "pendencias" || aba === "caixas" || aba === "cartoes" || aba === "ano" || aba === "plano" ? null : mes} sub={SUB[aba]} />
+      <Cabecalho titulo={TITULO[aba] || "Financeiro"} mes={aba === "pendencias" || aba === "caixas" || aba === "cartoes" || aba === "notas" || aba === "ano" || aba === "plano" ? null : mes} sub={SUB[aba]} />
       {aba === "pendencias" && <FinPendencias aoIr={irPara} />}
       {aba === "lancamentos" && <FinLancamentos comp={comp} aoIrTitulos={() => irPara("contas")} />}
       {aba === "recebimentos" && <FinRecebimentos comp={comp} />}
@@ -19228,6 +19229,7 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
       {aba === "ano" && <FinAno comp={comp} aoIr={irPara} />}
       {aba === "carros" && <FinCarros comp={comp} />}
       {aba === "cartoes" && <FinCartoes />}
+      {aba === "notas" && <FinNotas />}
       {aba === "folha" && <FinFolha comp={comp} />}
       {aba === "caixas" && <FinCaixas />}
       {aba === "fixas" && <FinContasFixas comp={comp} />}
@@ -21919,6 +21921,111 @@ function TitulosDoMes({ comp, abas }) {
  * O cartão é uma conta: cada compra é um lançamento (categoria, fornecedor, competência — o que o DRE
  * soma). A fatura é o total de um ciclo, e pagá-la é uma transferência da conta principal para o cartão
  * (fora do DRE): a despesa já foi lançada compra a compra. */
+/* ===================== NOTAS FISCAIS DE SERVIÇO (0138) =====================
+ * Direto na API nacional da NFS-e. Por enquanto só no ambiente de testes da Receita: nada sai em
+ * produção antes de uma nota de teste aprovada. */
+function FinNotas() {
+  const [d, setD] = useState(null); const [erro, setErro] = useState(""); const [nova, setNova] = useState(null);
+  const [carros, setCarros] = useState([]); const [indo, setIndo] = useState(""); const [xml, setXml] = useState(null);
+  const carregar = () => fin("nfse").then(setD).catch((e) => setErro(e.message));
+  useEffect(() => { carregar(); fin("estoque").then((x) => setCarros(x.estoque || [])).catch(() => {}); }, []);
+  const comCarro = (id) => {
+    const c = carros.find((x) => x.id === id);
+    setNova((n) => ({ ...n, estoque_id: id || null,
+      descricao: c ? `${EMPRESA.servico_descricao || "Intermediação de venda de veículo automotor"} — ${[c.carro, c.placa].filter(Boolean).join(" · ")}` : n.descricao }));
+  };
+  const criar = async () => {
+    setErro(""); setIndo("criar");
+    try { await fin("nfse", null, finJson("POST", nova)); setNova(null); carregar(); } catch (e) { setErro(e.message); }
+    setIndo("");
+  };
+  const emitir = async (n) => {
+    if (!window.confirm(`Emitir a nota de ${rs2(n.valor)} para ${n.tomador_nome}? (ambiente de TESTES da Receita — não vale como nota)`)) return;
+    setErro(""); setIndo(n.id);
+    try { await fin("nfse", { acao: "emitir", id: n.id }, finJson("POST", {})); }
+    catch (e) { setErro(e.message); }
+    setIndo(""); carregar();
+  };
+  const apagar = async (n) => {
+    if (!window.confirm("Apagar esta nota (rascunho ou rejeitada)?")) return;
+    try { await fin("nfse", { id: n.id }, { method: "DELETE" }); carregar(); } catch (e) { setErro(e.message); }
+  };
+  const verXml = async (n) => { try { setXml(await fin("nfse", { acao: "xml", id: n.id })); } catch (e) { setErro(e.message); } };
+  const COR = { rascunho: [C.bg, C.mute], enviando: [AMARELO.fundo, AMARELO.texto], emitida: ["#E8F3EE", C.verde], rejeitada: ["#FBEAE8", "#B42318"], cancelada: [C.bg, C.mute] };
+  if (!d) return <p className="text-[13px]" style={{ color: erro ? C.laranja : C.mute }}>{erro || "Lendo as notas…"}</p>;
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-[12.5px]" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
+        <b>Ambiente de TESTES da Receita.</b> As notas daqui não têm valor fiscal.
+        <span>{d.certificado ? "✓ certificado instalado" : "Certificado digital ainda não instalado no servidor: dá para montar e conferir a nota, não para enviar."}</span>
+        {!d.configurada && <span>· Falta a configuração fiscal em Gestão → Cadastro da empresa.</span>}
+      </div>
+      <div className="flex items-center gap-2">
+        <button onClick={() => setNova({ tomador_doc: "", tomador_nome: "", tomador_email: "", valor: "", descricao: EMPRESA.servico_descricao || "Intermediação de venda de veículo automotor", estoque_id: null })}
+          className="rounded-md px-3 py-1.5 text-[12.5px] font-semibold text-white" style={{ background: C.roxo }}>+ nota</button>
+        {erro && <span className="text-[12.5px]" style={{ color: C.laranja }}>{erro}</span>}
+      </div>
+      {nova && (
+        <div className="rounded-xl p-3" style={{ background: C.paper, border: `1px solid ${C.roxo}` }}>
+          <div className="grid gap-2 lg:grid-cols-4">
+            <label className="block lg:col-span-2"><Rotulo>Carro (opcional)</Rotulo><SeletorCarro valor={nova.estoque_id} carros={carros} aoMudar={comCarro} /></label>
+            <label className="block"><Rotulo>CPF ou CNPJ do tomador</Rotulo><input className={inputCls} style={inputSty} value={nova.tomador_doc} onChange={(e) => setNova({ ...nova, tomador_doc: e.target.value })} /></label>
+            <label className="block"><Rotulo>Valor do serviço</Rotulo><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal" value={nova.valor} onChange={(e) => setNova({ ...nova, valor: e.target.value })} /></label>
+            <label className="block lg:col-span-2"><Rotulo>Nome do tomador</Rotulo><input className={inputCls} style={inputSty} value={nova.tomador_nome} onChange={(e) => setNova({ ...nova, tomador_nome: e.target.value })} /></label>
+            <label className="block lg:col-span-2"><Rotulo>E-mail do tomador (opcional)</Rotulo><input className={inputCls} style={inputSty} value={nova.tomador_email} onChange={(e) => setNova({ ...nova, tomador_email: e.target.value })} /></label>
+            {String(nova.tomador_doc || "").replace(/\D/g, "").length === 14 && (<>
+              <label className="block"><Rotulo>CEP</Rotulo><input className={inputCls} style={inputSty} value={nova.tomador_cep || ""} onChange={(e) => setNova({ ...nova, tomador_cep: e.target.value })} /></label>
+              <label className="block lg:col-span-2"><Rotulo>Rua</Rotulo><input className={inputCls} style={inputSty} value={nova.tomador_logradouro || ""} onChange={(e) => setNova({ ...nova, tomador_logradouro: e.target.value })} /></label>
+              <label className="block"><Rotulo>Número</Rotulo><input className={inputCls} style={inputSty} value={nova.tomador_numero || ""} onChange={(e) => setNova({ ...nova, tomador_numero: e.target.value })} /></label>
+              <label className="block lg:col-span-2"><Rotulo>Bairro</Rotulo><input className={inputCls} style={inputSty} value={nova.tomador_bairro || ""} onChange={(e) => setNova({ ...nova, tomador_bairro: e.target.value })} /></label>
+              <label className="block lg:col-span-2"><Rotulo>Município (código IBGE — vazio é Joinville)</Rotulo><input className={inputCls} style={inputSty} value={nova.tomador_cmun || ""} onChange={(e) => setNova({ ...nova, tomador_cmun: e.target.value })} /></label>
+            </>)}
+            <label className="block lg:col-span-4"><Rotulo>Descrição do serviço</Rotulo><input className={inputCls} style={inputSty} value={nova.descricao} onChange={(e) => setNova({ ...nova, descricao: e.target.value })} /></label>
+          </div>
+          <div className="mt-2 flex items-center gap-3">
+            <BotaoPrimario onClick={criar} disabled={indo === "criar"}>{indo === "criar" ? "Salvando…" : "Salvar rascunho"}</BotaoPrimario>
+            <button onClick={() => setNova(null)} className="text-[12.5px]" style={{ color: C.mute }}>cancelar</button>
+          </div>
+        </div>
+      )}
+      <div className="rolar overflow-x-auto rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        <table className="w-full text-[12.5px]" style={{ borderCollapse: "collapse", minWidth: 820 }}>
+          <thead><tr>{["Criada", "Nº", "Tomador", "Serviço", "Valor", "Situação", ""].map((h, i) => (
+            <th key={i} className="px-2 py-2 text-[11px] font-semibold uppercase tracking-[0.04em]" style={{ color: C.mute, textAlign: i === 4 ? "right" : "left", borderBottom: `1px solid ${C.line}` }}>{h}</th>))}</tr></thead>
+          <tbody>
+            {d.notas.map((n) => (
+              <tr key={n.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                <td className="whitespace-nowrap px-2 py-1.5" style={{ color: C.mute }}>{diaBR(n.criado_em)}</td>
+                <td className="whitespace-nowrap px-2 py-1.5" style={{ fontFamily: F.mono }}>{n.numero_nfse || (n.numero_dps ? `DPS ${n.serie}/${n.numero_dps}` : "—")}</td>
+                <td className="px-2 py-1.5"><b>{n.tomador_nome}</b><span className="block text-[11px]" style={{ color: C.mute, fontFamily: F.mono }}>{n.tomador_doc}</span></td>
+                <td className="px-2 py-1.5">{n.descricao}{n.estoque && n.estoque.veiculo ? <span className="block text-[11px]" style={{ color: C.roxo }}>{n.estoque.veiculo.placa}</span> : null}
+                  {n.situacao === "rejeitada" && (n.erros || []).map((x, i) => <span key={i} className="block text-[11px]" style={{ color: "#B42318" }}>{x.codigo ? `${x.codigo}: ` : ""}{x.descricao || x.mensagem}</span>)}
+                  {n.chave_acesso && <span className="block text-[10.5px]" style={{ color: C.mute, fontFamily: F.mono }}>chave {n.chave_acesso}</span>}</td>
+                <td className="whitespace-nowrap px-2 py-1.5 text-right font-semibold" style={{ fontVariantNumeric: "tabular-nums" }}>{rs2(n.valor)}</td>
+                <td className="px-2 py-1.5"><span className="rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ background: COR[n.situacao][0], color: COR[n.situacao][1] }}>{n.situacao}</span></td>
+                <td className="whitespace-nowrap px-2 py-1.5 text-right text-[12px]">
+                  {(n.situacao === "rascunho" || n.situacao === "rejeitada") && <button disabled={!!indo} onClick={() => emitir(n)} className="mr-2 font-semibold" style={{ color: C.roxo }}>{indo === n.id ? "enviando…" : n.situacao === "rejeitada" ? "tentar de novo" : "emitir"}</button>}
+                  <button onClick={() => verXml(n)} className="mr-2" style={{ color: C.mute }}>XML</button>
+                  {n.situacao !== "emitida" && <button onClick={() => apagar(n)} style={{ color: C.laranja }}>apagar</button>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!d.notas.length && <p className="px-3 py-6 text-center text-[13px]" style={{ color: C.mute }}>Nenhuma nota ainda.</p>}
+      </div>
+      {xml && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4" style={{ background: "rgba(24,18,33,0.45)" }} onClick={() => setXml(null)}>
+          <div className="w-full max-w-4xl rounded-xl p-4" style={{ background: C.paper }} onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between"><b>XML</b><button onClick={() => setXml(null)} style={{ color: C.mute }}>fechar</button></div>
+            <pre className="mt-2 max-h-[70vh] overflow-auto whitespace-pre-wrap break-all rounded p-2 text-[11px]" style={{ background: C.bg, fontFamily: F.mono }}>{xml.nfse_xml || xml.dps_xml || "Ainda não montado: aperte emitir."}</pre>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FinCartoes() {
   const [d, setD] = useState(null); const [erro, setErro] = useState("");
   const [cartaoId, setCartaoId] = useState(""); const [ref, setRef] = useState("");
@@ -28554,6 +28661,7 @@ function destinosPara(perfil) {
       { id: "fin_recebimentos", rot: "Recebimentos",     curto: "Financ.", area: "financeiro", aba: "recebimentos", grupo: "todo dia",  icone: "financeiro" },
       { id: "fin_contas",      rot: "Títulos financeiros", curto: "Financ.", area: "financeiro", aba: "contas",      grupo: "todo dia",   icone: "financeiro" },
       { id: "fin_cartoes",     rot: "Cartões",           curto: "Financ.", area: "financeiro", aba: "cartoes",     grupo: "todo dia",   icone: "financeiro" },
+      { id: "fin_notas",       rot: "Notas fiscais",     curto: "Financ.", area: "financeiro", aba: "notas",       grupo: "todo dia",   icone: "financeiro" },
       { id: "fin_carros",      rot: "Carros",            curto: "Financ.", area: "financeiro", aba: "carros",      grupo: "todo dia",   icone: "financeiro" },
       { id: "fin_fechamento",  rot: "Fechamento",        curto: "Financ.", area: "financeiro", aba: "fechamento",  grupo: "fim do mês", icone: "financeiro" },
       { id: "fin_dre",         rot: "DRE",               curto: "Financ.", area: "financeiro", aba: "dre",         grupo: "fim do mês", icone: "financeiro" },
@@ -32016,7 +32124,7 @@ function TelaGestao({ perfil, comp }) {
 // Destino → aba do financeiro. Mesmo desenho do ABA_PV, pela mesma
 // razão: o menu e o roteador precisam concordar.
 const ABA_FIN = {
-  fin_pendencias: "pendencias", fin_lancamentos: "lancamentos", fin_recebimentos: "recebimentos", fin_contas: "contas", fin_cartoes: "cartoes",
+  fin_pendencias: "pendencias", fin_lancamentos: "lancamentos", fin_recebimentos: "recebimentos", fin_contas: "contas", fin_cartoes: "cartoes", fin_notas: "notas",
   fin_carros: "carros", fin_fechamento: "fechamento", fin_dre: "dre", fin_ano: "ano", fin_folha: "folha", fin_caixas: "caixas",
   fin_fixas: "fixas", fin_plano: "plano",
 };
@@ -32097,6 +32205,16 @@ const GRUPOS_EMPRESA = [
   ["Contato", [["telefone", "Telefone"], ["whatsapp", "WhatsApp"], ["email", "E-mail"], ["site", "Site"]]],
   ["Representante legal", [["rep_nome", "Nome", 2], ["rep_cpf", "CPF"], ["rep_cargo", "Cargo"]]],
   ["Dados bancários (para receber dos lojistas)", [["favorecido", "Favorecido", 2], ["banco", "Banco"], ["agencia", "Agência"], ["conta", "Conta"], ["pix", "Chave PIX", 2]]],
+  // A NOTA FISCAL DE SERVIÇO (0138): o que a declaração à Receita pede da unidade. Os códigos vêm do
+  // contador; os valores iniciais são sugestão, não decisão fiscal.
+  ["Nota fiscal de serviço", [
+    ["opcao_simples", "Simples Nacional", 2, [["", "— escolha —"], ["1", "Não optante"], ["2", "MEI"], ["3", "Optante ME/EPP"]]],
+    ["regime_apuracao_sn", "Apuração no Simples (ME/EPP)", 2, [["1", "Tudo pelo Simples"], ["2", "Federais pelo Simples, ISS fora"], ["3", "Tudo fora do Simples"]]],
+    ["perc_tot_trib_sn", "% de tributos do Simples (ME/EPP)"], ["aliquota_iss", "Alíquota do ISS (%)"], ["ibge_municipio", "Município (IBGE)"],
+    ["servico_ctribnac", "Código do serviço (nacional)"], ["servico_descricao", "Descrição do serviço", 3],
+    // Só o de testes, por ora: a produção é liberada depois da primeira nota de teste aprovada.
+    ["nfse_ambiente", "Ambiente", 2, [["restrita", "Testes (produção restrita)"]]],
+    ["nfse_serie_restrita", "Série de teste"], ["nfse_serie_producao", "Série de produção"]]],
 ];
 
 function TelaEmpresa({ perfil }) {
@@ -32152,9 +32270,12 @@ function TelaEmpresa({ perfil }) {
     catch (e) { setErro(e.message); }
   };
   const hoje = hojeEmSP();
-  const campo = ([k, rotulo, larg]) => (
-    <label key={k} className={`block ${larg === 2 ? "sm:col-span-2" : ""}`}><Rotulo>{rotulo}</Rotulo>
-      <input className={inputCls} style={inputSty} value={f[k] || ""} disabled={!gerente} onChange={(e) => setF({ ...f, [k]: e.target.value })} />
+  const campo = ([k, rotulo, larg, opcoes]) => (
+    <label key={k} className={`block ${larg === 2 ? "sm:col-span-2" : larg === 3 ? "sm:col-span-3" : ""}`}><Rotulo>{rotulo}</Rotulo>
+      {opcoes
+        ? <select className={inputCls} style={inputSty} value={f[k] == null ? "" : String(f[k])} disabled={!gerente} onChange={(e) => setF({ ...f, [k]: e.target.value })}>
+            {opcoes.map(([v, r]) => <option key={v} value={v}>{r}</option>)}</select>
+        : <input className={inputCls} style={inputSty} value={f[k] == null ? "" : f[k]} disabled={!gerente} onChange={(e) => setF({ ...f, [k]: e.target.value })} />}
     </label>
   );
   return (

@@ -3619,7 +3619,103 @@ async function cartao(req, res, tok) {
   return res.status(405).json({ erro: "Use GET ou POST." });
 }
 
-const RECURSOS = { cartao, conta, categoria, funcionario, favorecido, lancamento, importar, dre, carros, vale, folha, remuneracao,
+/* ===================== NOTA FISCAL DE SERVIÇO (0138) =====================
+ * Direto na API nacional (Sefin Nacional), sem intermediária. A montagem e a assinatura da declaração
+ * (DPS) moram em regras/nfse.js. O certificado A1 nunca passa por aqui: a chave privada é segredo do
+ * Worker (NFSE_KEY_PEM / NFSE_CERT_PEM) e a conexão vai pelo binding mTLS (req.nfse). */
+const nfseRegras = require("../regras/nfse.js");
+async function nfse(req, res, tok) {
+  const acao = String(req.query.acao || "");
+  const emp = async () => um(await supa(`${base("empresa")}?select=*&id=eq.1`, { headers: cab(tok) }));
+  const certificado = () => !!(process.env.NFSE_KEY_PEM && process.env.NFSE_CERT_PEM && req.nfse);
+  if (req.method === "GET" && acao === "xml") {
+    const id = idOuNulo(req.query.id);
+    const n = id && um(await supa(`${base("nfse")}?select=dps_xml,nfse_xml&id=eq.${id}`, { headers: cab(tok) }));
+    if (!n) return res.status(404).json({ erro: "Nota não encontrada." });
+    return res.status(200).json(n);
+  }
+  if (req.method === "GET") {
+    const comp = competenciaDe(req.query.competencia);
+    const filtro = comp ? `&criado_em=gte.${comp}T00:00:00&criado_em=lte.${fimDoMes(comp)}T23:59:59` : "";
+    const [lista, e] = await Promise.all([
+      supa(`${base("nfse")}?select=id,ambiente,serie,numero_dps,estoque_id,tomador_tipo,tomador_doc,tomador_nome,descricao,valor,competencia,situacao,chave_acesso,numero_nfse,erros,emitida_em,cancelada_em,criado_em,` +
+        `estoque(veiculo(placa,marca_modelo))&order=criado_em.desc&limit=500${filtro}`, { headers: cab(tok) }),
+      emp(),
+    ]);
+    return res.status(200).json({ notas: lista || [], ambiente: (e && e.nfse_ambiente) || "restrita", certificado: certificado(),
+      configurada: !!(e && e.cnpj && e.ibge_municipio && e.servico_ctribnac && e.opcao_simples) });
+  }
+  if (req.method === "POST" && !acao) {
+    const c = await corpoDe(req) || {};
+    const e = await emp();
+    if (!e) return res.status(409).json({ erro: "Preencha o cadastro da empresa antes." });
+    const doc = String(c.tomador_doc || "").replace(/\D/g, "");
+    const tipo = doc.length === 14 ? "cnpj" : doc.length === 11 ? "cpf" : null;
+    if (!tipo) return res.status(400).json({ erro: "CPF ou CNPJ do tomador inválido." });
+    const valor = Math.abs(decimal(c.valor) || 0);
+    if (!(valor > 0)) return res.status(400).json({ erro: "Digite o valor do serviço." });
+    if (!texto(c.tomador_nome)) return res.status(400).json({ erro: "Digite o nome do tomador." });
+    const linha = { ambiente: e.nfse_ambiente || "restrita", tomador_tipo: tipo, tomador_doc: doc, tomador_nome: texto(c.tomador_nome),
+      tomador_email: texto(c.tomador_email), descricao: texto(c.descricao) || e.servico_descricao || "Intermediação de venda de veículo",
+      valor, competencia: competenciaDe(c.competencia) || competenciaDe(hojeAqui()), estoque_id: idOuNulo(c.estoque_id),
+      tomador_cep: String(c.tomador_cep || "").replace(/\D/g, "") || null, tomador_logradouro: texto(c.tomador_logradouro),
+      tomador_numero: texto(c.tomador_numero), tomador_bairro: texto(c.tomador_bairro),
+      tomador_cmun: String(c.tomador_cmun || "").replace(/\D/g, "") || null };
+    // Tomador CNPJ precisa de endereço completo (E0235): cMun de 7 dígitos, CEP de 8, rua e bairro.
+    if (tipo === "cnpj" && !(linha.tomador_cep && linha.tomador_cep.length === 8 && linha.tomador_logradouro && linha.tomador_bairro
+      && (!linha.tomador_cmun || linha.tomador_cmun.length === 7))) {
+      return res.status(400).json({ erro: "Tomador com CNPJ precisa do endereço: CEP, rua, bairro (e o código IBGE do município, se não for Joinville)." });
+    }
+    const r = um(await supa(base("nfse"), { method: "POST", headers: cab(tok, REP), body: JSON.stringify(linha) }));
+    if (!r) return recusado(res);
+    return res.status(201).json({ ok: true, nota: r });
+  }
+  if (req.method === "POST" && acao === "emitir") {
+    const id = idOuNulo(req.query.id);
+    const n = id && um(await supa(`${base("nfse")}?select=*&id=eq.${id}`, { headers: cab(tok) }));
+    if (!n) return res.status(404).json({ erro: "Nota não encontrada." });
+    if (n.situacao === "emitida" || n.situacao === "cancelada") return res.status(409).json({ erro: "Esta nota já foi emitida." });
+    if (n.ambiente !== "restrita") return res.status(409).json({ erro: "Por enquanto só se emite no ambiente de testes." });
+    const e = await emp();
+    const falta = nfseRegras.faltaNaEmpresa(e);
+    if (falta.length) return res.status(409).json({ erro: `Falta no cadastro da empresa: ${falta.join(", ")}.` });
+    // O número da DPS é reservado no banco antes de montar: reenviar a mesma nota usa o mesmo número.
+    const reserva = um(await supa(`${base("rpc/nfse_reservar_numero")}`, { method: "POST", headers: cab(tok), body: JSON.stringify({ p_nfse: id }) }));
+    if (!reserva) return res.status(502).json({ erro: "Não consegui reservar o número da nota." });
+    const dps = nfseRegras.montarDps(e, n, reserva.serie, reserva.numero, new Date());
+    if (!certificado()) {
+      await supa(`${base("nfse")}?id=eq.${id}`, { method: "PATCH", headers: cab(tok), body: JSON.stringify({ dps_xml: dps.xml }) });
+      return res.status(412).json({ erro: "O certificado digital ainda não foi instalado no servidor. A declaração foi montada (veja o XML), mas não foi enviada.", dps_xml: dps.xml });
+    }
+    await supa(`${base("nfse")}?id=eq.${id}`, { method: "PATCH", headers: cab(tok), body: JSON.stringify({ situacao: "enviando" }) });
+    let r;
+    try {
+      const assinado = await nfseRegras.assinar(dps.xml, dps.id, process.env.NFSE_KEY_PEM, process.env.NFSE_CERT_PEM);
+      r = await nfseRegras.enviar(assinado, n.ambiente, req.nfse);
+      r.assinado = assinado;
+    } catch (x) {
+      await supa(`${base("nfse")}?id=eq.${id}`, { method: "PATCH", headers: cab(tok), body: JSON.stringify({ situacao: "rejeitada", erros: [{ descricao: x.message }] }) });
+      return res.status(502).json({ erro: x.message });
+    }
+    const mud = r.ok
+      ? { situacao: "emitida", chave_acesso: r.chave, numero_nfse: r.numero || null, nfse_xml: r.nfseXml || null, dps_xml: r.assinado, erros: null, emitida_em: new Date().toISOString() }
+      : { situacao: "rejeitada", erros: r.erros || [{ descricao: `A Receita respondeu ${r.status}` }], dps_xml: r.assinado };
+    await supa(`${base("nfse")}?id=eq.${id}`, { method: "PATCH", headers: cab(tok), body: JSON.stringify(mud) });
+    return res.status(r.ok ? 200 : 422).json({ ok: r.ok, ...mud });
+  }
+  if (req.method === "DELETE") {
+    const id = idOuNulo(req.query.id);
+    const n = id && um(await supa(`${base("nfse")}?select=situacao,numero_dps&id=eq.${id}`, { headers: cab(tok) }));
+    if (!n) return res.status(404).json({ erro: "Nota não encontrada." });
+    if (n.situacao === "emitida") return res.status(409).json({ erro: "Nota emitida não se apaga: cancele." });
+    await supa(`${base("nfse")}?id=eq.${id}`, { method: "DELETE", headers: cab(tok) });
+    return res.status(200).json({ ok: true });
+  }
+  res.setHeader("Allow", "GET, POST, DELETE");
+  return res.status(405).json({ erro: "Use GET, POST ou DELETE." });
+}
+
+const RECURSOS = { nfse, cartao, conta, categoria, funcionario, favorecido, lancamento, importar, dre, carros, vale, folha, remuneracao,
                    "contas-fixas": contasFixas, "config-folha": configFolha,
                    "perfil-remuneracao": perfilRemuneracao,
                    fechamento, orcamento, ano: anoGestao, "ano-antigo": ano, rateio, negociacao, titulo, fluxo, log, recibo, pendencias, recebimentos, saldos,

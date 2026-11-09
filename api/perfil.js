@@ -745,7 +745,10 @@ function configDaLinha(l) {
  * grava. O logo vai como data URL, porque os papéis impressos o embutem. */
 const CAMPOS_EMPRESA = ["razao_social", "nome_fantasia", "nome_unidade", "cnpj", "inscricao_estadual", "inscricao_municipal",
   "logradouro", "numero", "complemento", "bairro", "cidade", "uf", "cep", "telefone", "whatsapp", "email", "site",
-  "rep_nome", "rep_cpf", "rep_cargo", "banco", "agencia", "conta", "pix", "favorecido"];
+  "rep_nome", "rep_cpf", "rep_cargo", "banco", "agencia", "conta", "pix", "favorecido",
+  // A configuração fiscal (0138).
+  "ibge_municipio", "opcao_simples", "regime_especial", "nfse_ambiente", "nfse_serie_restrita", "nfse_serie_producao",
+  "servico_ctribnac", "servico_descricao", "aliquota_iss", "regime_apuracao_sn", "perc_tot_trib_sn"];
 async function empresa(req, res, tok) {
   const base = `${URL_BASE}/rest/v1/empresa`;
   const cab = { apikey: ANON, Authorization: tok };
@@ -767,6 +770,11 @@ async function empresa(req, res, tok) {
       linha.logo = lg || null;
     }
     if (linha.uf) linha.uf = linha.uf.toUpperCase().slice(0, 2);
+    if ("nfse_ambiente" in linha && ["restrita", "producao"].indexOf(linha.nfse_ambiente) < 0) linha.nfse_ambiente = "restrita";
+    if ("perc_tot_trib_sn" in linha) linha.perc_tot_trib_sn = linha.perc_tot_trib_sn ? Number(String(linha.perc_tot_trib_sn).replace(",", ".")) || null : null;
+    if ("aliquota_iss" in linha) linha.aliquota_iss = linha.aliquota_iss ? Number(String(linha.aliquota_iss).replace(",", ".")) || null : null;
+    // Nenhum dos dois pode ficar vazio: a coluna é not null.
+    ["nfse_serie_restrita", "nfse_serie_producao"].forEach((k) => { if (k in linha && !linha[k]) delete linha[k]; });
     const r = await fetch(`${base}?on_conflict=id`, {
       method: "POST", headers: { ...cab, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=representation" },
       body: JSON.stringify(linha),

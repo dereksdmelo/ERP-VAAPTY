@@ -139,6 +139,9 @@ export default {
          audio que o cliente manda (api/atendimento.js, lerMidias). Na
          Vercel nao existe, e la o audio fica sem leitura -- dito. */
       ai: env.AI || null,
+      /* O CERTIFICADO A1 NA CONEXÃO COM A RECEITA (0138): a API nacional da NFS-e exige mTLS, e o
+         certificado do cliente é um binding da Cloudflare (mtls_certificates), nunca um arquivo. */
+      nfse: env.NFSE_MTLS || null,
     };
 
     const { res, espera } = resposta();
