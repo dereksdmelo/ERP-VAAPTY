@@ -31,10 +31,14 @@ unset SENHA SENHA_PFX
 
 echo "Certificado:"; "$OSSL" x509 -in "$TMP/cert.pem" -noout -subject -enddate
 
-# O wrangler instalado limpo numa pasta própria (o do npx desta máquina quebra no workerd).
-W="$HOME/.vaapty-wrangler"
-[ -x "$W/node_modules/.bin/wrangler" ] || { mkdir -p "$W"; (cd "$W" && npm init -y >/dev/null && npm i wrangler@4.143.1 >/dev/null 2>&1); }
-WR="$W/node_modules/.bin/wrangler"
+# O wrangler da ponte, que já está instalado e logado (o do npx desta máquina quebra no workerd).
+# Sem ele, um instalado limpo numa pasta própria — de nome sem ponto: o npm recusa ".vaapty-wrangler".
+WR="$(pwd)/../workers/ponte-whatsapp/node_modules/.bin/wrangler"
+if [ ! -x "$WR" ]; then
+  W="$HOME/vaapty-wrangler"
+  [ -x "$W/node_modules/.bin/wrangler" ] || { mkdir -p "$W"; (cd "$W" && npm init -y >/dev/null && npm i wrangler@4.143.1 >/dev/null 2>&1); }
+  WR="$W/node_modules/.bin/wrangler"
+fi
 
 echo "Subindo o certificado mTLS…"
 SAIDA="$("$WR" mtls-certificate upload --cert "$TMP/cert.pem" --key "$TMP/key.pem" --name "vaapty-nfse-$(date +%Y%m%d)" 2>&1)"
