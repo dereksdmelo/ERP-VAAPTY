@@ -302,7 +302,9 @@
     var aplica = function () { lista.style.gridTemplateColumns = "repeat(" + c + ", 1fr)"; for (var k = 0; k < itens.length; k++) itens[k].style.fontSize = f.toFixed(2) + "vh"; };
     for (var volta = 0; volta < 40 && caixa.scrollHeight > caixa.clientHeight + 1; volta++) {
       if (f > 1.15 || c >= 3) f -= 0.08; else { c = 3; f = Math.min(fonte, 1.6); }
-      if (f < 0.85) break;
+      if (f < 0.7) break;
+      lista.style.gap = "0.2vh 1vw";
+      for (var k2 = 0; k2 < itens.length; k2++) itens[k2].style.padding = "0.1vh 0 0.1vh 0.5vw";
       aplica();
     }
   }
