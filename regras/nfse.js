@@ -168,7 +168,10 @@ async function enviar(xmlAssinado, ambiente, mtls) {
   // As chaves vêm com maiúscula na rejeição (Codigo/Descricao), apesar do Swagger dizer o contrário.
   const erros = (j && (j.erros || j.Erros || j.erro)) || [{ descricao: (txt || "").slice(0, 400) || `HTTP ${r.status}` }];
   return { ok: false, status: r.status, erros: (Array.isArray(erros) ? erros : [erros]).map((x) => ({
-    codigo: x.Codigo || x.codigo || null, descricao: x.Descricao || x.descricao || x.mensagem || JSON.stringify(x) })) };
+    codigo: x.Codigo || x.codigo || null,
+    // O "Complemento" é o que diz QUAL elemento falhou (E1235 sozinho é só "falha no esquema").
+    descricao: [x.Descricao || x.descricao || x.mensagem || "", x.Complemento || x.complemento || ""].filter(Boolean).join(" — ") || JSON.stringify(x) })),
+    bruto: (txt || "").slice(0, 2000) };
 }
 
 module.exports = { NS, BASE, faltaNaEmpresa, montarDps, idDps, dhAgora, assinar, enviar, gzipB64, gunzipTexto, esc, tag, dinheiro, so };

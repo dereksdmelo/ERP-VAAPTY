@@ -3980,7 +3980,7 @@ async function nfse(req, res, tok) {
     }
     const mud = r.ok
       ? { situacao: "emitida", chave_acesso: r.chave, numero_nfse: r.numero || null, nfse_xml: r.nfseXml || null, dps_xml: r.assinado, erros: null, emitida_em: new Date().toISOString() }
-      : { situacao: "rejeitada", erros: r.erros || [{ descricao: `A Receita respondeu ${r.status}` }], dps_xml: r.assinado };
+      : { situacao: "rejeitada", erros: (r.erros || [{ descricao: `A Receita respondeu ${r.status}` }]).concat(r.bruto ? [{ codigo: "resposta", descricao: r.bruto }] : []), dps_xml: r.assinado };
     await supa(`${base("nfse")}?id=eq.${id}`, { method: "PATCH", headers: cab(tok), body: JSON.stringify(mud) });
     return res.status(r.ok ? 200 : 422).json({ ok: r.ok, ...mud });
   }
