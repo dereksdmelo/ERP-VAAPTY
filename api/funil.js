@@ -426,14 +426,24 @@ async function marketing(req, res, tok, de, ate) {
   catch (e) { return res.status(403).json({ erro: "O marketing é do gerente e do financeiro." }); }
 
   const compDe = de.slice(0, 7) + "-01", compAte = ate.slice(0, 7) + "-01";
+  // O banco devolve no máximo 1.000 linhas por consulta: lê em páginas até acabar.
+  const tudo = async (url) => {
+    const fora = [];
+    for (let off = 0; off < 20000; off += 1000) {
+      const pg = await puxar(`${url}&limit=1000&offset=${off}`);
+      fora.push(...pg);
+      if (pg.length < 1000) break;
+    }
+    return fora;
+  };
   const [convs, leads, ats, gastos] = await Promise.all([
-    puxar(`${URL_BASE}/rest/v1/wa_conversa?select=telefone,lead_id,primeira_em,anuncio,wa_canal!inner(slug,nome,comercial)` +
-          `&wa_canal.comercial=is.true&grupo=is.false&primeira_em=gte.${de}&primeira_em=lte.${ate}T23:59:59&limit=${TETO * 3}`).catch(() => []),
-    puxar(`${URL_BASE}/rest/v1/lead?select=id,telefone,status,agendado_para,atendimento_id,criado_em&order=criado_em.desc&limit=${TETO * 2}`).catch(() => []),
-    puxar(`${URL_BASE}/rest/v1/atendimento?select=id,cliente_telefone,status,data&data=gte.${de}&limit=${TETO}`).catch(() => []),
+    tudo(`${URL_BASE}/rest/v1/wa_conversa?select=telefone,lead_id,primeira_em,anuncio,wa_canal!inner(slug,nome,comercial)` +
+          `&wa_canal.comercial=is.true&grupo=is.false&primeira_em=gte.${de}&primeira_em=lte.${ate}T23:59:59&order=primeira_em`).catch(() => []),
+    tudo(`${URL_BASE}/rest/v1/lead?select=id,telefone,status,agendado_para,atendimento_id,criado_em&order=criado_em.desc`).catch(() => []),
+    tudo(`${URL_BASE}/rest/v1/atendimento?select=id,cliente_telefone,status,data&data=gte.${de}&order=data`).catch(() => []),
     // O que foi APLICADO em marketing, pelas contas 5.x do plano de contas.
-    puxar(`${URL_BASE}/rest/v1/fin_lancamento?select=debito,credito,situacao,competencia,fin_categoria!fin_lancamento_categoria_id_fkey!inner(codigo,nome)` +
-          `&fin_categoria.codigo=like.5.*&situacao=in.(efetivado,aberto)&competencia=gte.${compDe}&competencia=lte.${compAte}&limit=5000`).catch(() => null),
+    tudo(`${URL_BASE}/rest/v1/fin_lancamento?select=id,debito,credito,situacao,competencia,fin_categoria!fin_lancamento_categoria_id_fkey!inner(codigo,nome)` +
+          `&fin_categoria.codigo=like.5.*&situacao=in.(efetivado,aberto)&competencia=gte.${compDe}&competencia=lte.${compAte}&order=id`).catch(() => null),
   ]);
 
   let porAtendimento = {};
@@ -551,7 +561,7 @@ async function marketing(req, res, tok, de, ate) {
     gasto_por_dia: meta ? meta.porDia : [],
     criativos,
     meta: con ? { conectado: true, conta: con.conta, nome: con.nome, conectado_em: con.conectado_em, erro: metaErro } : { conectado: false },
-    truncado: convs.length >= TETO * 3,
+    truncado: convs.length >= 20000,
   });
 }
 
