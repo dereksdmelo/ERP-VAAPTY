@@ -6443,6 +6443,13 @@ depois de três descobertas que valem para quem mexer aqui:
   `tpEmit`, e o XSD 1.01 que serviu de base não tinha. O "Complemento" da rejeição diz qual elemento falhou —
   é guardado na nota; **E1235 sozinho não diz nada**. `?recurso=nfse&acao=diagnostico` testa a conexão.
 - **`pTotTribSN` vai de 0 a 99,99**, e todo texto vai em Latin-1 (travessão e aspas curvas viram simples).
+- **O PDF (DANFSe) é nosso**: a API da Receita que gerava o PDF foi suspensa em 03/08/2026 (NT 008 v1.02).
+  `danfseHtml()` monta o documento a partir do `nfse_xml`, no modelo do Anexo I (A4, uma página, blocos na
+  ordem, QR para `https://www.nfse.gov.br/ConsultaPublica/?tpc=1&chave=`, "NFS-e SEM VALIDADE JURÍDICA" em
+  vermelho quando tpAmb = 2) e abre na janela de imprimir — "Salvar como PDF". Só imprime o que está no XML.
+- **Cancelar** é o evento 101101 (`montarCancelamento`, Id `PRE` + chave + `101101`), assinado sobre o
+  `infPedReg` e enviado a `/nfse/{chave}/eventos` pela mesma ponte. Recusado, a nota continua emitida e o
+  motivo fica nos erros dela.
 
 **A publicação de 87efa60 subiu com a Action em verde e não foi servida** (09/11/2026): o `versao.txt`
 ficou no commit anterior por mais de 15 minutos. Um commit vazio republicou e resolveu. Mais uma razão
