@@ -1317,8 +1317,13 @@ async function estadoDaFila(tok, ignorar) {
     // A pessoa é o LOGIN; a meta ligada a ele (decisão 10) dá a
     // confiabilidade e mais um nome — atendimento importado só tem nome.
     const meta = mes.metas.find((n) => n.perfil_id === p.id);
-    const nomes = [caixaAlta(p.nome)].concat(meta ? [caixaAlta(meta.nome)] : []);
-    const dele = (a) => a.negociador_id === p.id || nomes.indexOf(caixaAlta(a.negociador_nome)) >= 0;
+    /* SEM ACENTO (09/11/2026, o André Ricardo atendendo o Sorento e "livre"
+     * na fila): a meta dele é "ANDRE RICARDO" e o atendimento veio da
+     * pré-venda como "ANDRÉ RICARDO", sem o id. Em caixa alta só, os dois
+     * não casavam — nem para dizer que ele está na mesa, nem para contar o
+     * fluxo e as vendas do índice. */
+    const nomes = [chaveNome(p.nome)].concat(meta ? [chaveNome(meta.nome)] : []);
+    const dele = (a) => a.negociador_id === p.id || nomes.indexOf(chaveNome(a.negociador_nome)) >= 0;
     const conta = (de, ateOntem) => {
       const lista = mes.doMes.filter((a) => dele(a) && String(a.data).slice(0, 7) === de.slice(0, 7) &&
         (!ateOntem || String(a.data) < hoje));
