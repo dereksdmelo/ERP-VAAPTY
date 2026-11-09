@@ -23244,6 +23244,7 @@ function CreditoSolto({ c, vendas, aoMudou }) {
 
 function FinCarros({ comp }) {
   const [d, setD] = useState(null); const [erro, setErro] = useState("");
+  const [aberto, setAberto] = useState("");
   useEffect(() => { setD(null); fin("carros", { competencia: comp }).then(setD).catch((e) => setErro(e.message)); }, [comp]);
   if (erro) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
   if (!d) return <p className="text-[13px]" style={{ color: C.mute }}>Cruzando estoque e lançamentos…</p>;
@@ -23260,8 +23261,9 @@ function FinCarros({ comp }) {
         <thead><tr>{["Entrou", "Carro", "Placa", "Comprador", "Pago ao cliente", "Quitação", "Débitos", "Recebido do lojista"].map((h, i) => (
           <th key={h} className="whitespace-nowrap px-2 py-2 text-[11px] font-semibold uppercase tracking-[0.04em]" style={{ color: C.mute, textAlign: i >= 4 ? "right" : "left", borderBottom: `1px solid ${C.line}` }}>{h}</th>))}</tr></thead>
         <tbody>
-          {d.carros.map((c) => (
-            <tr key={c.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+          {d.carros.map((c) => [
+            <tr key={c.id} onClick={() => setAberto(aberto === c.id ? "" : c.id)} className="cursor-pointer hover:bg-[#FBF9FD]"
+              title="Ver os lançamentos que formam estes números" style={{ borderBottom: aberto === c.id ? "none" : `1px solid ${C.line}`, background: aberto === c.id ? "#F7F3FB" : undefined }}>
               <td className="whitespace-nowrap px-2 py-1.5 text-[12px]">{diaBR(c.entrou_em)}</td>
               <td className="px-2 py-1.5 text-[12px]">{c.carro || "—"}</td>
               <td className="px-2 py-1.5 text-[12px]" style={{ fontFamily: F.mono }}>{c.placa || "—"}</td>
@@ -23270,12 +23272,38 @@ function FinCarros({ comp }) {
               <td className="px-2 py-1.5 text-right text-[12px]">{par(c.quitacao.previsto, c.quitacao.pago)}</td>
               <td className="px-2 py-1.5 text-right text-[12px]">{par(c.debitos.previsto, c.debitos.pago)}</td>
               <td className="px-2 py-1.5 text-right text-[12px]">{par(c.lojista.previsto, c.lojista.recebido)}</td>
-            </tr>
-          ))}
+            </tr>,
+            aberto === c.id ? (
+              <tr key={`${c.id}-l`} style={{ borderBottom: `1px solid ${C.line}`, background: "#F7F3FB" }}>
+                <td colSpan={8} className="px-3 pb-3 pt-1">
+                  {/* A INVESTIGAÇÃO (08/11/2026, o Derek: "como eu faço pra descobrir o que deu de errado aqui?"):
+                      cada lançamento ligado ao carro, com a parte do negócio em que ele entrou na conta. */}
+                  {!c.lancamentos.length ? <p className="text-[12px]" style={{ color: C.mute }}>Nenhum lançamento ligado a este carro.</p> : (
+                    <table className="w-full text-[12px]" style={{ fontVariantNumeric: "tabular-nums" }}>
+                      <thead><tr>{["Data", "Lançamento", "Entra em", "Situação", "Saiu", "Entrou"].map((h, i) => (
+                        <th key={h} className="px-1.5 py-1 text-[10.5px] font-semibold uppercase" style={{ color: C.mute, textAlign: i >= 4 ? "right" : "left" }}>{h}</th>))}</tr></thead>
+                      <tbody>{c.lancamentos.map((l, i) => (
+                        <tr key={l.id + "-" + i} style={{ borderTop: `1px solid ${C.line}`, opacity: l.situacao === "aberto" ? 0.75 : 1 }}>
+                          <td className="whitespace-nowrap px-1.5 py-1">{diaBR(l.data)}</td>
+                          <td className="px-1.5 py-1">{l.descricao || "—"}</td>
+                          <td className="px-1.5 py-1">{l.tipo_negociacao ? (TIPOS_NEG_ROT[l.tipo_negociacao] || l.tipo_negociacao) : <span style={{ color: C.laranja }}>sem parte — não entra em coluna nenhuma</span>}</td>
+                          <td className="px-1.5 py-1">{l.situacao === "aberto"
+                            ? <span className="rounded-full px-1.5 py-0.5 text-[10.5px] font-semibold" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>título em aberto · não conta</span>
+                            : <span style={{ color: C.verde }}>passou no banco</span>}</td>
+                          <td className="px-1.5 py-1 text-right">{l.debito ? rs2(l.debito) : ""}</td>
+                          <td className="px-1.5 py-1 text-right">{l.credito ? rs2(l.credito) : ""}</td>
+                        </tr>))}</tbody>
+                    </table>
+                  )}
+                  <p className="mt-1.5 text-[11px]" style={{ color: C.mute }}>Título em aberto que já foi pago aparece aqui ao lado dos pagamentos: ligue os pagamentos a ele em Títulos financeiros ("vincular ao extrato"), senão ele continua previsto.</p>
+                </td>
+              </tr>
+            ) : null,
+          ])}
         </tbody>
       </table>
       {!d.carros.length && <p className="px-3 py-6 text-center text-[13px]" style={{ color: C.mute }}>Nenhum carro entrou ou foi vendido em {rotuloMes(comp)}.</p>}
-      <p className="px-3 py-2 text-[11px]" style={{ color: C.mute }}>pago / combinado. Verde bate; laranja nada pago; amarelo parcial. O vínculo vem da placa na descrição do lançamento.</p>
+      <p className="px-3 py-2 text-[11px]" style={{ color: C.mute }}>pago / combinado. Verde bate; laranja nada pago; amarelo parcial. Só conta o que passou no banco. Clique na linha para ver os lançamentos.</p>
     </div>
   );
 }

@@ -1553,7 +1553,7 @@ async function carros(req, res, tok) {
   // embutido dentro de `or=` ("failed to parse logic tree" — a aba
   // Carros ficou assim até 28/10/2026). Uma pelo cabeçalho, outra pelos
   // lançamentos que algum rateio liga a estes carros; o id junta as duas.
-  const SEL = `select=id,estoque_id,tipo_negociacao,data,debito,credito,descricao,fin_rateio(valor,estoque_id,tipo_negociacao,descricao)`;
+  const SEL = `select=id,estoque_id,tipo_negociacao,data,vencimento,situacao,debito,credito,descricao,fin_rateio(valor,estoque_id,tipo_negociacao,descricao)&situacao=in.(efetivado,aberto)`;
   let lanc = [];
   if (ids.length) {
     const lista = ids.join(",");
@@ -1574,7 +1574,7 @@ async function carros(req, res, tok) {
       if (!p.estoque_id) return;
       const cred = Number(l.credito) || 0;
       (porEstoque[p.estoque_id] = porEstoque[p.estoque_id] || []).push({
-        id: l.id, data: l.data, descricao: l.descricao, tipo_negociacao: p.tipo_negociacao,
+        id: l.id, data: l.situacao === "aberto" ? (l.vencimento || l.data) : l.data, situacao: l.situacao, descricao: l.descricao, tipo_negociacao: p.tipo_negociacao,
         debito: cred > 0 ? 0 : Math.abs(p.valor), credito: cred > 0 ? Math.abs(p.valor) : 0,
       });
     });
@@ -1583,7 +1583,9 @@ async function carros(req, res, tok) {
   const val = (l) => (l.realizado == null ? Number(l.previsto) || 0 : Number(l.realizado) || 0);
   const linhas = (est || []).map((e) => {
     const ls = porEstoque[e.id] || [];
-    const pago = (tipo, lado) => ls.filter((l) => l.tipo_negociacao === tipo).reduce((t, l) => t + (Number(l[lado]) || 0), 0);
+    // Só o que passou no banco é pago: o título em aberto do contrato (0119) dobrava o número
+    // (o Siena MDX9I27, 08/11/2026: 26.500 "recebidos" de 13.250).
+    const pago = (tipo, lado) => ls.filter((l) => l.tipo_negociacao === tipo && l.situacao === "efetivado").reduce((t, l) => t + (Number(l[lado]) || 0), 0);
     const quitPrev = (e.estoque_custo || []).filter((x) => x.tipo === "quitacao").reduce((t, x) => t + val(x), 0);
     const debPrev = (e.estoque_custo || []).filter((x) => x.tipo === "debitos").reduce((t, x) => t + val(x), 0);
     return {
