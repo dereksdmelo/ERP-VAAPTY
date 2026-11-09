@@ -30999,6 +30999,13 @@ function PainelGestor({ perfil, comp, aoAbrir }) {
   const [aba, setAba] = useState("agora");     // agora | voltas | revisar
   const [fila, setFila] = useState(null);
   const [voltas, setVoltas] = useState(null);
+  /* O FILTRO DO NEGOCIADOR (09/11/2026, o Derek: "coloque o filtro do
+   * consultor neste também"). Vale para as três abas e fica guardado no
+   * aparelho. Compara sem acento: "ANDRE BRUNO" e "ANDRÉ BRUNO" são a mesma
+   * pessoa (decisão 25). */
+  const [negF, setNegF] = useState(() => { try { return localStorage.getItem("vaapty:gestor:neg") || ""; } catch (e) { return ""; } });
+  const escolherNeg = (v) => { setNegF(v); setFoco(null); try { localStorage.setItem("vaapty:gestor:neg", v); } catch (e) {} };
+  const doNeg = (nome) => !negF || chaveNeg(nome) === negF;
 
   // A lista é relida de 20 em 20 s: uma falha de rede no meio não pode
   // deixar "Failed to fetch" pregado na tela depois que a rede voltou.
@@ -31025,18 +31032,31 @@ function PainelGestor({ perfil, comp, aoAbrir }) {
     lerVoltas().then(setVoltas).catch(() => {});
   }, [aba]);
   const recarregarVoltas = () => lerVoltas().then(setVoltas).catch(() => {});
-  const atrasadas = (voltas || []).filter((v) => v.atrasada || v.sem_data).length;
+  const voltasF = (voltas || []).filter((v) => doNeg(v.negociador_nome));
+  const atrasadas = voltasF.filter((v) => v.atrasada || v.sem_data).length;
 
   // Negócio já fechado não está "em andamento" — foi a primeira coisa
   // que o Derek viu no painel. Ele sai daqui e aparece na fila de
   // revisão, que é onde ele passa a importar.
-  const emAndamento = (lista || []).filter((n) => ((n.atendimento || {}).status || "") !== "fechado");
+  const emAndamento = (lista || []).filter((n) => ((n.atendimento || {}).status || "") !== "fechado" && doNeg((n.atendimento || {}).negociador_nome));
+  const filaF = (fila || []).filter((x) => doNeg(x.atendimento.negociador_nome));
+  // As opções saem de quem aparece nas três listas, com a grafia mais usada.
+  const opcoesNeg = useMemo(() => {
+    const m = {};
+    const por = (nome) => { const k = chaveNeg(nome); if (!k) return; m[k] = m[k] || {}; m[k][nome] = (m[k][nome] || 0) + 1; };
+    (lista || []).forEach((n) => por((n.atendimento || {}).negociador_nome));
+    (voltas || []).forEach((v) => por(v.negociador_nome));
+    (fila || []).forEach((x) => por(x.atendimento.negociador_nome));
+    if (negF && !m[negF]) m[negF] = { [negF]: 1 };
+    return Object.keys(m).map((k) => [k, Object.entries(m[k]).sort((a, b) => b[1] - a[1] || (/[À-ú]/.test(b[0]) ? 1 : -1))[0][0]])
+      .sort((a, b) => a[1].localeCompare(b[1], "pt-BR"));
+  }, [lista, voltas, fila, negF]);
 
   const aberto = aba === "agora"
     ? emAndamento.filter((n) => n.atendimento_id === foco)[0]
-    : aba === "voltas" ? (voltas || []).filter((x) => x.id === foco)[0]
-    : (fila || []).filter((x) => x.atendimento.id === foco)[0];
-  const pendentes = (fila || []).filter((x) => !x.revisao).length;
+    : aba === "voltas" ? voltasF.filter((x) => x.id === foco)[0]
+    : filaF.filter((x) => x.atendimento.id === foco)[0];
+  const pendentes = filaF.filter((x) => !x.revisao).length;
 
   /**
    * O atendimento aberto é puxado de perto (0050).
@@ -31086,11 +31106,11 @@ function PainelGestor({ perfil, comp, aoAbrir }) {
   // Quem já foi revisado desce. A fila existe para ser esvaziada de
   // cima para baixo, e o que já tem retorno só atrapalha quem procura
   // o próximo. Dentro de cada grupo, o mais recente primeiro.
-  const filaOrdenada = useMemo(() => (fila || []).slice().sort((a, b) => {
+  const filaOrdenada = useMemo(() => filaF.slice().sort((a, b) => {
     const ra = a.revisao ? 1 : 0, rb = b.revisao ? 1 : 0;
     if (ra !== rb) return ra - rb;
     return String(b.atendimento.data || "").localeCompare(String(a.atendimento.data || ""));
-  }), [fila]);
+  }), [fila, negF]);
 
   return (
     <div>
@@ -31125,10 +31145,19 @@ function PainelGestor({ perfil, comp, aoAbrir }) {
             ))}
           </span>
         )}
-        <span className="ml-auto text-[12px]" style={{ color: C.mute }}>
+        {aba !== "sala" && (
+          <select value={negF} onChange={(e) => escolherNeg(e.target.value)} aria-label="Negociador"
+            className="ml-auto rounded-full px-3 py-1.5 text-[13px] outline-none"
+            style={{ background: negF ? C.roxoFraco : C.paper, color: negF ? C.roxo : C.ink, border: `1px solid ${negF ? C.roxo : C.line}`, fontWeight: negF ? 600 : 400 }}>
+            <option value="">Todos os negociadores</option>
+            {opcoesNeg.map(([k, nome]) => <option key={k} value={k}>{nome}</option>)}
+          </select>
+        )}
+        <span className={`${aba === "sala" ? "ml-auto " : ""}text-[12px]`} style={{ color: C.mute }}>
           {aba === "agora"
             ? (lista ? `${emAndamento.length} em andamento` : "")
-            : (fila ? `${pendentes} sem retorno de ${fila.length}` : "")}
+            : aba === "voltas" ? (voltas ? `${voltasF.length} com retorno` : "")
+            : aba === "revisar" ? (fila ? `${pendentes} sem retorno de ${filaF.length}` : "") : ""}
         </span>
       </div>
 
@@ -31232,11 +31261,11 @@ function PainelGestor({ perfil, comp, aoAbrir }) {
           })}
 
           {/* ---- quem prometeu voltar ---- */}
-          {aba === "voltas" && (voltas || []).map((v) => (
+          {aba === "voltas" && voltasF.map((v) => (
             <CartaoVolta key={v.id} v={v} emFoco={v.id === foco} aoClicar={() => setFoco(v.id === foco ? null : v.id)} />
           ))}
 
-          {aba === "voltas" && voltas && !voltas.length && (
+          {aba === "voltas" && voltas && !voltasF.length && (
             <div className="rounded-xl px-4 py-8 text-center" style={{ background: C.paper, border: `1px dashed ${C.line}` }}>
               <p className="text-[15px] font-semibold">Ninguém com retorno marcado</p>
               <p className="mt-1 text-[13px]" style={{ color: C.mute }}>
@@ -31245,7 +31274,7 @@ function PainelGestor({ perfil, comp, aoAbrir }) {
             </div>
           )}
 
-          {aba === "revisar" && fila && !fila.length && (
+          {aba === "revisar" && fila && !filaF.length && (
             <div className="rounded-xl px-4 py-8 text-center" style={{ background: C.paper, border: `1px dashed ${C.line}` }}>
               <p className="text-[15px] font-semibold">Nenhum atendimento neste mês</p>
               <p className="mt-1 text-[13px]" style={{ color: C.mute }}>Troque o mês no cabeçalho.</p>
