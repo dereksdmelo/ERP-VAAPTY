@@ -88,6 +88,16 @@
   .lista div { font-size: 2vh; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0.4vh 0; border-bottom: 1px solid var(--linha); }
   .lista b { font-weight: 900; margin-right: 0.6vw; }
   .lista .ok { color: var(--verde); } .lista .veio { color: var(--roxo2); } .lista .faltou { color: var(--laranja); text-decoration: line-through; }
+  /* Os estados da Agenda da pré-venda (0136): cor E palavra, como no sistema. */
+  .lista div.ag { border-bottom: none; border-left: 0.35vw solid var(--linha); padding: 0.25vh 0 0.25vh 0.6vw; border-radius: 0.3vw; background: rgba(255,255,255,0.03); }
+  .lista .tag { float: right; font-size: 0.8em; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; margin-left: 0.5vw; }
+  .ag.e-confirmado { border-left-color: #3BB273; } .ag.e-confirmado .tag { color: #3BB273; }
+  .ag.e-passou { border-left-color: #E0A21B; background: rgba(224,162,27,0.10); } .ag.e-passou .tag { color: #E0A21B; }
+  .ag.e-veio { border-left-color: #A47CF0; background: rgba(164,124,240,0.14); } .ag.e-veio .tag { color: #C3A6FF; }
+  .ag.e-fechou { border-left-color: #3BB273; background: rgba(59,178,115,0.20); } .ag.e-fechou .tag { color: #6FDCA0; }
+  .ag.e-naoVeio { border-left-color: #E05252; background: rgba(224,82,82,0.12); } .ag.e-naoVeio .tag { color: #FF8A8A; }
+  .ag.e-remarcou, .ag.e-cancelou { opacity: 0.55; } .ag.e-remarcou .tag, .ag.e-cancelou .tag { color: var(--mudo); }
+  .ag.e-cancelou { text-decoration: line-through; }
   footer { display: grid; grid-template-columns: repeat(5, auto) 1fr; gap: 2vw; align-items: center; }
   .kpi b { display: block; font-size: 4.2vh; font-weight: 900; line-height: 1; }
   .kpi span { font-size: 1.4vh; color: var(--mudo); text-transform: uppercase; letter-spacing: 0.12em; font-weight: 800; }
@@ -271,15 +281,22 @@
     var foco = dias.indexOf(hoje) >= 0 ? hoje : dias[0];
     $("agendaTitulo").textContent = foco === hoje ? "Agenda de hoje" : "Agenda de amanhã · " + new Date(foco + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
     $("semana").innerHTML = dias.map(function (d, i) {
-      return "<div class='" + (d === foco ? "hoje" : "") + "'><b>" + ((porDia[d] || []).length) + "</b><span>" + DIAS[i] + " " + d.slice(8, 10) + "</span></div>";
+      return "<div class='" + (d === foco ? "hoje" : "") + "'><b>" + ((porDia[d] || []).filter(function (x) { return x.estado !== "remarcou" && x.estado !== "cancelou"; }).length) + "</b><span>" + DIAS[i] + " " + d.slice(8, 10) + "</span></div>";
     }).join("");
     var doDia = porDia[foco] || [];
-    var cabe = 8;
-    $("agendaLista").innerHTML = doDia.length ? doDia.slice(0, doDia.length > cabe ? cabe - 1 : cabe).map(function (x) {
-      var cls = x.status === "confirmado" ? "ok" : x.status === "compareceu" ? "veio" : x.status === "nao_compareceu" ? "faltou" : "";
-      var marca = x.status === "confirmado" ? " ✓" : x.status === "compareceu" ? " · veio" : "";
-      return "<div class='" + cls + "'><b>" + esc(x.hora) + "</b>" + esc(x.carro || "carro a confirmar") + marca + (x.agendou ? " <span style='color:var(--mudo)'>· " + esc(primeiro(String(x.agendou).replace(/\s*-\s*/g, " ").replace(/^Celular ·.*/, "celular"))) + "</span>" : "") + "</div>";
-    }).join("") + (doDia.length > cabe ? "<div style='color:var(--mudo)'>+ " + (doDia.length - cabe + 1) + " agendamentos</div>" : "") : "<div style='color:var(--mudo)'>Nenhum agendamento.</div>";
+    /* TODOS os horários do dia (08/11/2026, o Derek: "nem que diminuísse um pouco"): a letra e as
+       colunas se ajustam à quantidade. */
+    var n = doDia.length, cols = n > 26 ? 3 : 2, fonte = n <= 10 ? 2 : n <= 18 ? 1.65 : n <= 26 ? 1.4 : 1.25;
+    var lista = $("agendaLista");
+    lista.style.gridTemplateColumns = "repeat(" + cols + ", 1fr)";
+    lista.style.gap = (n > 18 ? 0.35 : 0.6) + "vh 1.2vw";
+    var ROT = { agendado: "", confirmado: "confirmou", passou: "veio?", veio: "veio", fechou: "fechou", naoVeio: "não veio", remarcou: "remarcou", cancelou: "cancelou" };
+    lista.innerHTML = n ? doDia.map(function (x) {
+      var e = x.estado || (x.status === "confirmado" ? "confirmado" : x.status === "compareceu" ? "veio" : x.status === "nao_compareceu" ? "naoVeio" : "agendado");
+      var quem = x.agendou ? " <span style='color:var(--mudo)'>· " + esc(primeiro(String(x.agendou).replace(/\s*-\s*/g, " ").replace(/^Celular ·.*/, "celular"))) + "</span>" : "";
+      return "<div class='ag e-" + e + "' style='font-size:" + fonte + "vh'>" + (ROT[e] ? "<span class='tag'>" + ROT[e] + "</span>" : "") +
+        "<b>" + esc(x.hora) + "</b>" + esc(x.carro || "carro a confirmar") + quem + "</div>";
+    }).join("") : "<div style='color:var(--mudo)'>Nenhum agendamento.</div>";
   }
   function lerAgenda() {
     if (cfg.agenda !== true) { $("agendaCaixa").style.display = "none"; $("direita").className = "direita so"; return; }
