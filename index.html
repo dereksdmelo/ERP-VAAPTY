@@ -32420,6 +32420,7 @@ function FichaColaborador({ pe, aoFechar, tirarAcessoEMeta }) {
   const [enviando, setEnviando] = useState(false);
   const [folha, setFolha] = useState(null);
   const [versaoSalva, setVersaoSalva] = useState(0);
+  const nomeAntes = useRef("");
 
   const lerAnexos = (cid) => fetchAut(`/api/foto?recurso=colaborador-anexo&colaborador_id=${cid}`).then((r) => r.json())
     .then((d) => { setAnexos(d.anexos || []); if (d.rotulos) setRotulos(d.rotulos); }).catch(() => {});
@@ -32429,6 +32430,8 @@ function FichaColaborador({ pe, aoFechar, tirarAcessoEMeta }) {
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.erro || "Não consegui ler a ficha.");
       const c = d.colaborador || { perfil_id: a ? a.id : null, negociador_id: n ? n.id : null, nome_completo: nome };
+      if (!c.nome_sistema) c.nome_sistema = (n && n.nome) || (a && a.nome) || "";
+      nomeAntes.current = c.nome_sistema;
       setF(c);
       if (c.id) lerAnexos(c.id);
     }).catch((e) => { setErro(e.message); setF({}); });
@@ -32445,7 +32448,22 @@ function FichaColaborador({ pe, aoFechar, tirarAcessoEMeta }) {
       const r = await fetchAut("/api/perfil?recurso=colaborador", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.erro || "Não consegui salvar a ficha.");
-      setF(d.colaborador); setAviso("Ficha salva."); setVersaoSalva((x) => x + 1);
+      /* O NOME NO SISTEMA (0142): mudou, troca o login, a meta e o histórico
+         de uma vez. Recarregar mostra o nome novo nas outras telas. */
+      let avisoNome = "";
+      const ns = String(f.nome_sistema || "").trim();
+      if (ns && ns !== String(nomeAntes.current || "").trim() && d.colaborador && d.colaborador.id) {
+        const rr = await fetchAut("/api/perfil?recurso=renomear", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ colaborador_id: d.colaborador.id, nome: ns }) });
+        const dd = await rr.json().catch(() => ({}));
+        if (!rr.ok) throw new Error(dd.erro || "A ficha foi salva, mas o nome não foi trocado.");
+        nomeAntes.current = dd.nome || ns;
+        d.colaborador.nome_sistema = dd.nome || ns;
+        const tot = (dd.atendimentos || 0) + (dd.carros || 0) + (dd.documentos || 0) + (dd.leads || 0) + (dd.indicacoes || 0) + (dd.mensagens || 0);
+        avisoNome = ` Nome trocado para ${dd.nome || ns} no login, na meta e em ${tot} registro(s).`
+          + ((dd.ambiguos || []).length ? ` Registros antigos com "${dd.ambiguos.join('", "')}" ficaram como estão: esse nome também é de outra pessoa.` : "");
+      }
+      setF(d.colaborador); setAviso("Ficha salva." + avisoNome); setVersaoSalva((x) => x + 1);
       // O nome da folha acompanha o nome completo da ficha (07/11/2026):
       // trocar o nome aqui não pode deixar a folha com o nome velho.
       const fid = d.colaborador && d.colaborador.fin_funcionario_id;
@@ -32545,7 +32563,8 @@ function FichaColaborador({ pe, aoFechar, tirarAcessoEMeta }) {
           <div className="grid gap-3 lg:grid-cols-2">
             {secao("Dados pessoais", (
               <div className="grid grid-cols-2 gap-2">
-                {campo("nome_completo", "Nome completo", { cls: "col-span-2" })}
+                {campo("nome_sistema", "Nome no sistema — o que aparece em tudo", { cls: "col-span-2", ph: "ex.: ANDRÉ RICARDO" })}
+                {campo("nome_completo", "Nome completo (documentos e folha)", { cls: "col-span-2" })}
                 {campo("cpf", "CPF", { ph: "só números" })}
                 {campo("rg", "RG")}
                 {campo("nascimento", "Nascimento", { tipo: "date" })}

@@ -995,6 +995,26 @@ module.exports = async function handler(req, res) {
     catch (e) { return res.status(502).json({ erro: "Não consegui falar com o banco." }); }
   }
 
+  /* O NOME NO SISTEMA (0142, 09/11/2026, o Derek: "tudo deve seguir apenas
+   * um nome: o nome do cadastro na pessoa da equipe"). Troca o login, a meta
+   * e o histórico em texto de uma vez, pela função do banco — que confere se
+   * quem pede é gerente ou financeiro e não reescreve nome de outra pessoa. */
+  if (String(req.query.recurso || "") === "renomear" && req.method === "POST") {
+    const c = (await lerCorpo(req)) || {};
+    if (!RX_UUID.test(String(c.colaborador_id || ""))) return res.status(400).json({ erro: "Salve a ficha antes." });
+    const r = await fetch(`${URL_BASE}/rest/v1/rpc/renomear_pessoa`, {
+      method: "POST", headers: { apikey: ANON, Authorization: tok, "Content-Type": "application/json" },
+      body: JSON.stringify({ p_colaborador: c.colaborador_id, p_nome: String(c.nome || "") }),
+    });
+    const t = await r.text();
+    if (!r.ok) {
+      let m = ""; try { m = JSON.parse(t).message || ""; } catch (e) {}
+      return res.status(r.status === 401 ? 401 : 409).json({ erro: m || "Não consegui trocar o nome." });
+    }
+    let d = null; try { d = JSON.parse(t); } catch (e) {}
+    return res.status(200).json({ ok: true, ...(d || {}) });
+  }
+
   if (String(req.query.recurso || "") === "colaborador") {
     try { return await colaborador(req, res, tok); }
     catch (e) { return res.status(502).json({ erro: "Não consegui falar com o banco." }); }
