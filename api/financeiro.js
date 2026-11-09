@@ -3910,12 +3910,15 @@ async function nfse(req, res, tok) {
    * carro). Quem é o tomador, e qual o valor, é escolha de quem emite — a tela
    * só preenche. E diz quais já têm nota. */
   if (req.method === "GET" && acao === "carros") {
+    // Com competência, os carros que ENTRARAM naquele mês (é quando a intermediação aconteceu); sem, os 90 dias.
+    const compC = competenciaDe(req.query.competencia);
     const de = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
+    const periodo = compC ? `entrou_em=gte.${compC}&entrou_em=lte.${fimDoMes(compC)}` : `or=(entrou_em.gte.${de},vendido_em.gte.${de})`;
     const [lista, notas] = await Promise.all([
       supa(`${base("estoque")}?select=id,situacao,natureza,entrou_em,vendido_em,valor_compra,valor_venda,` +
         `veiculo(placa,marca_modelo,ano_modelo),comprador(nome,tipo,documento,email,endereco,bairro,cep,cidade,uf),` +
         `atendimento(cliente_nome,cliente_cpf,cliente_email,cliente_endereco,cliente_bairro,cliente_cep,cliente_cidade,cliente_uf,checklist(comissao_vaapty,modo_conta)),` +
-        `estoque_custo(tipo,previsto,realizado)&or=(entrou_em.gte.${de},vendido_em.gte.${de})&situacao=neq.baixado&order=entrou_em.desc&limit=300`, { headers: cab(tok) }),
+        `estoque_custo(tipo,previsto,realizado)&${periodo}&situacao=neq.baixado&order=entrou_em.desc&limit=300`, { headers: cab(tok) }),
       supa(`${base("nfse")}?select=estoque_id,tomador_doc,situacao&estoque_id=not.is.null&situacao=neq.cancelada&limit=2000`, { headers: cab(tok) }),
     ]);
     const jaTem = {};
@@ -3946,7 +3949,8 @@ async function nfse(req, res, tok) {
   }
   if (req.method === "GET") {
     const comp = competenciaDe(req.query.competencia);
-    const filtro = comp ? `&criado_em=gte.${comp}T00:00:00&criado_em=lte.${fimDoMes(comp)}T23:59:59` : "";
+    // Pela COMPETÊNCIA da nota (o mês do serviço), não pelo dia em que foi criada.
+    const filtro = comp ? `&competencia=eq.${comp}` : "";
     const [lista, e] = await Promise.all([
       supa(`${base("nfse")}?select=id,ambiente,serie,numero_dps,estoque_id,tomador_tipo,tomador_doc,tomador_nome,descricao,valor,competencia,situacao,chave_acesso,numero_nfse,erros,emitida_em,cancelada_em,criado_em,` +
         `estoque(veiculo(placa,marca_modelo))&order=criado_em.desc&limit=500${filtro}`, { headers: cab(tok) }),
