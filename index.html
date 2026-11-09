@@ -2854,25 +2854,49 @@ const igualNaFicha = (a, b) =>
  * quando o computador mandasse a lista dele, que é justamente o
  * dado que dói perder.
  */
+/* A RODADA É A MESMA ENQUANTO A POSIÇÃO E O VALOR IMPRESSO FOREM OS MESMOS
+ * (09/11/2026, o MARCOS no Honda Fit: "não está continuando certinho o
+ * fluxo"). A chave antiga era impresso + contra: registrar a contraproposta
+ * num aparelho mudava a chave, e a cópia de antes (sem contra) voltava do
+ * outro como se fosse uma segunda rodada — "2º extrato R$ 27.000" sem ninguém
+ * ter impresso, e o fluxo pulando os 5 minutos. A rodada nova nasce com `em`;
+ * a antiga, sem ele, é reconhecida pela posição. E os campos se juntam: a
+ * contra e o relógio que um lado soube não se perdem porque o outro não sabia. */
 const REGISTROS_DA_FICHA = {
-  rodadas: (r) => (r && r.em) || `${(r || {}).impresso}|${(r || {}).contra}`,
+  rodadas: (r, i) => (r && r.em) || `#${i}|${(r || {}).impresso}`,
   documentos: (d) => (d && (d.protocolo || d.em)) || JSON.stringify(d),
   revisoes: (v) => (v && v.em) || JSON.stringify(v),
 };
+
+/* A RODADA FANTASMA SAI (09/11/2026). O defeito da chave antiga deixou
+ * atendimentos com uma rodada que ninguém imprimiu: sem `em` (é de antes),
+ * e depois de uma rodada cujos 5 minutos nunca correram — o fluxo não deixa
+ * imprimir o extrato seguinte antes disso, então essa só pode ser a cópia. */
+function sanearRodadas(lista) {
+  const R = Array.isArray(lista) ? lista : [];
+  return R.filter((r, i) => !(i > 0 && r && !r.em && !r.contra && R[i - 1] && !R[i - 1].esperaEm));
+}
+function unirDaFicha(k, local, remoto) {
+  const u = unirRegistros(local, remoto, REGISTROS_DA_FICHA[k]);
+  return k === "rodadas" ? sanearRodadas(u) : u;
+}
 
 function unirRegistros(local, remoto, chaveDe) {
   const a = Array.isArray(local) ? local : [];
   const b = Array.isArray(remoto) ? remoto : [];
   const vistos = {}; const out = [];
-  [...a, ...b].forEach((x) => {
-    const k = String(chaveDe(x));
+  [...a.map((x, i) => [x, i]), ...b.map((x, i) => [x, i])].forEach(([x, pos]) => {
+    const k = String(chaveDe(x, pos));
     if (k in vistos) {
       // O mesmo registro dos dois lados: o que um aparelho SOUBE depois
-      // (que foi ao banco, e com que id) não se perde porque o outro
-      // ainda não sabia (04/11/2026, o termo sem link).
+      // (que foi ao banco, e com que id; a contra do cliente; o relógio
+      // dos 5 minutos) não se perde porque o outro ainda não sabia
+      // (04/11/2026, o termo sem link; 09/11/2026, a rodada repetida).
       const i = vistos[k], y = out[i];
-      if (y && x && typeof y === "object" && typeof x === "object" && (x.noBanco || x.docId) && !(y.noBanco && y.docId)) {
-        out[i] = { ...y, noBanco: y.noBanco || x.noBanco, docId: y.docId || x.docId };
+      if (y && x && typeof y === "object" && typeof x === "object") {
+        const junto = { ...y };
+        Object.keys(x).forEach((c) => { const v = junto[c]; if (v === undefined || v === null || v === "" || v === false) junto[c] = x[c]; });
+        out[i] = junto;
       }
       return;
     }
@@ -2889,7 +2913,7 @@ function mesclarAoVivo(base, local, remoto) {
   const out = { ...local };
   Object.keys(remoto).forEach((k) => {
     if (REGISTROS_DA_FICHA[k]) {
-      out[k] = unirRegistros(local[k], remoto[k], REGISTROS_DA_FICHA[k]);
+      out[k] = unirDaFicha(k, local[k], remoto[k]);
       return;
     }
     // Canal aberto é visto para sempre: a etapa P só fecha depois de
@@ -2930,7 +2954,7 @@ function reconciliar(base, local, remoto) {
   const n = base ? mesclarAoVivo(base, local, remoto) : mesclarFicha(local, remoto);
   Object.keys(REGISTROS_DA_FICHA).forEach((k) => {
     if (remoto[k] === undefined) return;
-    n[k] = unirRegistros(local[k], remoto[k], REGISTROS_DA_FICHA[k]);
+    n[k] = unirDaFicha(k, local[k], remoto[k]);
   });
   return n;
 }
@@ -7409,7 +7433,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                   alvoPadrao={f.por || f.fipe} veiculo={f.modelo} negociador={f.negociador}
                   rotuloImprimir={`Imprimir o ${n + 1}º extrato e seguir`}
                   aoImprimir={(r) => {
-                    set("rodadas", [...f.rodadas, { impresso: String(r.melhor), contra: "", esperaEm: null }]);
+                    set("rodadas", [...f.rodadas, { impresso: String(r.melhor), contra: "", esperaEm: null, em: new Date().toISOString() }]);
                     gerarDocumento("extrato_ofertas", `Extrato de ofertas ${n + 1}`, extratoOfertas(dadosDoc, r, n + 1), n + 1);
                   }} />
               </Bloco>

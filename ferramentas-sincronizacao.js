@@ -149,5 +149,29 @@ const VAZIO = { km: "", chassi: "", cor: "", pneus: ["","","",""], opcionais: []
   eq("sem remoto devolve o local", reconciliar(null, local, null), local);
 }
 
+// 15. A contra registrada num aparelho nao vira uma segunda rodada (09/11/2026, o Honda Fit).
+{
+  const velha = { impresso: "27000", contra: "", esperaEm: null };
+  const comContra = { impresso: "27000", contra: "42200", esperaEm: null };
+  const r = reconciliar({ ...VAZIO, rodadas: [velha] }, { ...VAZIO, rodadas: [comContra] }, { ...VAZIO, rodadas: [velha] });
+  eq("contra sem duplicar: uma rodada", r.rodadas.length, 1);
+  eq("contra sem duplicar: a contra fica", r.rodadas[0].contra, "42200");
+}
+
+// 16. A rodada fantasma que o defeito deixou some ao sincronizar.
+{
+  const doente = [{ impresso: "27000", contra: "42200", esperaEm: null }, { impresso: "27000", contra: "", esperaEm: null }];
+  const r = reconciliar({ ...VAZIO, rodadas: doente }, { ...VAZIO, rodadas: doente }, { ...VAZIO, rodadas: doente });
+  eq("fantasma sai", r.rodadas.length, 1);
+}
+
+// 17. Rodada nova (com em): a contra de um lado e o relogio do outro se juntam.
+{
+  const a = { impresso: "30000", contra: "35000", esperaEm: null, em: "T1" };
+  const b = { impresso: "30000", contra: "", esperaEm: 123, em: "T1" };
+  const r = reconciliar({ ...VAZIO }, { ...VAZIO, rodadas: [a] }, { ...VAZIO, rodadas: [b] });
+  eq("campos juntos", [r.rodadas.length, r.rodadas[0].contra, r.rodadas[0].esperaEm], [1, "35000", 123]);
+}
+
 console.log(falhas ? "\n" + falhas + " FALHA(S)" : "\ntodos passaram");
 process.exit(falhas ? 1 : 0);
