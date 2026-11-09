@@ -23249,7 +23249,9 @@ function FinCarros({ comp }) {
   if (!d) return <p className="text-[13px]" style={{ color: C.mute }}>Cruzando estoque e lançamentos…</p>;
   const par = (p, pago) => {
     const ok = p > 0 && Math.abs(pago - p) < 1;
-    const cor = p === 0 && pago === 0 ? C.mute : ok ? C.verde : pago === 0 ? C.laranja : AMARELO.texto;
+    // Nada combinado e nada pago: um traço, para o zero não poluir nem parecer conta a fazer.
+    if (!(Math.abs(p) >= 0.005) && !(Math.abs(pago) >= 0.005)) return <span style={{ color: C.line }}>—</span>;
+    const cor = ok ? C.verde : pago === 0 ? C.laranja : AMARELO.texto;
     return <span style={{ color: cor, fontVariantNumeric: "tabular-nums" }}>{rs2(pago)}<span style={{ color: C.mute }}> / {rs2(p)}</span></span>;
   };
   return (
