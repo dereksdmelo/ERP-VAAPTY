@@ -3295,17 +3295,85 @@ async function recebimentos(req, res, tok) {
  * passivo. Venda de antes de 01/11/2026 não tem título (0119), então o
  * que um lojista ainda deve desse tempo não aparece — a tela diz isso.
  */
+/**
+ * O que o balanço não sabe sozinho (0140): imobilizado e empréstimos, digitados.
+ *   GET                 todos, com o valor que entra no balanço hoje
+ *   POST · PATCH ?id=   cria e edita
+ *   DELETE ?id=         apaga (o caminho normal é desativar: ativo=false)
+ * O imobilizado com vida útil deprecia em linha reta desde a data de aquisição; sem vida útil,
+ * vale o valor atual digitado (ou o original). O empréstimo vale o saldo devedor digitado.
+ */
+const TIPOS_PATRIMONIO = { imobilizado: "ativo", outro_ativo: "ativo", emprestimo: "passivo", outro_passivo: "passivo" };
+function valorNoBalanco(x, hoje) {
+  const orig = Number(x.valor_original) || 0;
+  if (x.tipo === "imobilizado" && x.vida_util_meses && x.data) {
+    const [a, m] = String(x.data).slice(0, 7).split("-").map(Number);
+    const [ha, hm] = String(hoje).slice(0, 7).split("-").map(Number);
+    const meses = Math.max(0, (ha - a) * 12 + (hm - m));
+    const deprec = Math.min(orig, orig * meses / Number(x.vida_util_meses));
+    return { valor: r2(orig - deprec), depreciado: r2(deprec), meses };
+  }
+  return { valor: r2(x.valor_atual == null ? orig : Number(x.valor_atual) || 0), depreciado: 0, meses: null };
+}
+async function patrimonio(req, res, tok) {
+  const hoje = hojeAqui();
+  const id = idOuNulo(req.query.id);
+  if (req.method === "GET") {
+    const lista = await supa(`${base("fin_patrimonio")}?select=*&order=lado.asc,tipo.asc,nome.asc`, { headers: cab(tok) }) || [];
+    return res.status(200).json({ itens: lista.map((x) => ({ ...x, ...valorNoBalanco(x, hoje) })) });
+  }
+  if (req.method === "DELETE") {
+    if (!id) return res.status(400).json({ erro: "Diga qual item." });
+    const r = await supa(`${base("fin_patrimonio")}?id=eq.${id}`, { method: "DELETE", headers: cab(tok, REP) });
+    if (!um(r)) return recusado(res);
+    return res.status(200).json({ ok: true });
+  }
+  if (req.method !== "POST" && req.method !== "PATCH") { res.setHeader("Allow", "GET, POST, PATCH, DELETE"); return res.status(405).json({ erro: "Use GET, POST, PATCH ou DELETE." }); }
+  const c = await corpoDe(req);
+  if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+  const l = {};
+  if (c.tipo !== undefined) {
+    if (!TIPOS_PATRIMONIO[c.tipo]) return res.status(400).json({ erro: "Tipo desconhecido." });
+    l.tipo = c.tipo; l.lado = TIPOS_PATRIMONIO[c.tipo];
+  }
+  if (c.nome !== undefined) { l.nome = texto(c.nome); if (!l.nome) return res.status(400).json({ erro: "Dê um nome ao item." }); }
+  if (c.valor_original !== undefined) l.valor_original = decimal(c.valor_original) || 0;
+  if (c.valor_atual !== undefined) l.valor_atual = decimal(c.valor_atual);
+  if (c.data !== undefined) l.data = dataISO(c.data);
+  if (c.vida_util_meses !== undefined) { const v = parseInt(c.vida_util_meses, 10); l.vida_util_meses = v > 0 ? v : null; }
+  if (c.credor !== undefined) l.credor = texto(c.credor);
+  if (c.parcela_valor !== undefined) l.parcela_valor = decimal(c.parcela_valor);
+  if (c.parcelas_restantes !== undefined) { const v = parseInt(c.parcelas_restantes, 10); l.parcelas_restantes = v >= 0 ? v : null; }
+  if (c.observacao !== undefined) l.observacao = texto(c.observacao);
+  if (c.ativo !== undefined) l.ativo = !!c.ativo;
+  l.atualizado_em = new Date().toISOString();
+  if (req.method === "POST") {
+    if (!l.tipo || !l.nome) return res.status(400).json({ erro: "Diga o tipo e o nome." });
+    const r = await supa(base("fin_patrimonio"), { method: "POST", headers: cab(tok, REP), body: JSON.stringify(l) });
+    if (!um(r)) return recusado(res);
+    return res.status(200).json({ ok: true, item: um(r) });
+  }
+  if (!id) return res.status(400).json({ erro: "Diga qual item." });
+  const r = await supa(`${base("fin_patrimonio")}?id=eq.${id}`, { method: "PATCH", headers: cab(tok, REP), body: JSON.stringify(l) });
+  if (!um(r)) return recusado(res);
+  return res.status(200).json({ ok: true, item: um(r) });
+}
+
 async function balanco(req, res, tok) {
   if (req.method !== "GET") { res.setHeader("Allow", "GET"); return res.status(405).json({ erro: "Use GET." }); }
   const hoje = hojeAqui();
-  const [contas, movs, abertos, estoque] = await Promise.all([
+  const [contas, movs, abertos, estoque, manuais] = await Promise.all([
     supa(`${base("fin_conta")}?select=id,nome,tipo,ativa,saldo_inicial,saldo_inicial_em&order=nome.asc`, { headers: cab(tok) }),
     supa(`${base("fin_lancamento")}?select=conta_id,data,debito,credito&situacao=eq.efetivado&conta_id=not.is.null&data=lte.${hoje}&limit=100000`, { headers: cab(tok) }),
     supa(`${base("fin_lancamento")}?select=id,descricao,favorecido,vencimento,competencia,debito,credito,estoque_id,tipo_negociacao,` +
       `fin_favorecido(nome),fin_categoria(nome,grupo,pede_funcionario)&situacao=eq.aberto&limit=20000`, { headers: cab(tok) }),
     supa(`${base("estoque")}?select=id,entrou_em,valor_compra,natureza,veiculo(placa,marca_modelo),estoque_custo(tipo,previsto,realizado)` +
       `&situacao=eq.em_estoque&limit=2000`, { headers: cab(tok) }),
+    // Sem a 0140 rodada, o balanço continua de pé sem os itens manuais.
+    supa(`${base("fin_patrimonio")}?select=*&ativo=eq.true&order=nome.asc`, { headers: cab(tok) }).catch(() => null),
   ]);
+  const itens = (manuais || []).map((x) => ({ id: x.id, lado: x.lado, tipo: x.tipo, nome: x.nome, credor: x.credor, ...valorNoBalanco(x, hoje) }));
+  const somaTipo = (t) => r2(itens.filter((x) => x.tipo === t).reduce((s, x) => s + x.valor, 0));
 
   // Contas: o mesmo corte da abertura (decisão 58).
   const por = {};
@@ -3374,18 +3442,23 @@ async function balanco(req, res, tok) {
     disponivel: soma(caixaPos, "saldo"),
     receber: soma(receber, "total"),
     estoque: soma(carros, "total"),
+    imobilizado: somaTipo("imobilizado"),
+    outros: somaTipo("outro_ativo"),
   };
-  ativo.total = r2(ativo.disponivel + ativo.receber + ativo.estoque);
+  ativo.total = r2(ativo.disponivel + ativo.receber + ativo.estoque + ativo.imobilizado + ativo.outros);
   const passivo = {
     pagar: soma(pagar, "total"),
     cartoes: r2(-soma(cartaoDeve, "saldo")),
     contas_negativas: r2(-soma(caixaNeg, "saldo")),
+    emprestimos: somaTipo("emprestimo"),
+    outros: somaTipo("outro_passivo"),
   };
-  passivo.total = r2(passivo.pagar + passivo.cartoes + passivo.contas_negativas);
+  passivo.total = r2(passivo.pagar + passivo.cartoes + passivo.contas_negativas + passivo.emprestimos + passivo.outros);
 
   return res.status(200).json({
     hoje, ativo, passivo, patrimonio_liquido: r2(ativo.total - passivo.total),
     contas: caixa, cartoes, receber, pagar, carros, carros_sem_compra: semCompra,
+    manuais: itens, manuais_ligado: manuais != null,
   });
 }
 
@@ -3833,7 +3906,7 @@ async function nfse(req, res, tok) {
 const RECURSOS = { nfse, cartao, conta, categoria, funcionario, favorecido, lancamento, importar, dre, carros, vale, folha, remuneracao,
                    "contas-fixas": contasFixas, "config-folha": configFolha,
                    "perfil-remuneracao": perfilRemuneracao,
-                   fechamento, orcamento, ano: anoGestao, "ano-antigo": ano, rateio, negociacao, titulo, fluxo, log, recibo, pendencias, recebimentos, saldos, balanco,
+                   fechamento, orcamento, ano: anoGestao, "ano-antigo": ano, rateio, negociacao, titulo, fluxo, log, recibo, pendencias, recebimentos, saldos, balanco, patrimonio,
                    estoque: estoqueLista };
 
 module.exports = async function handler(req, res) {

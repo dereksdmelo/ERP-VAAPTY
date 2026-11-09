@@ -6442,3 +6442,12 @@ pagar ao cliente está no passivo pelo título da compra (0119), então os dois 
 de uma data antiga sairia inventado. **O que não entra, e a tela diz**: imobilizado, empréstimo sem
 título, e o que lojistas devem de vendas anteriores a 01/11/2026 (sem título). "Comparar com o lucro
 acumulado da aba Ano" lê o Ano sob demanda — a diferença é o que falta classificar ou lançar.
+
+**O cadastro manual (0140, no mesmo dia, o Derek: *"faz o cadastro manual de imobilizado e
+empréstimos"*).** `fin_patrimonio`, editado embaixo do próprio balanço (`CadastroPatrimonio`,
+`?recurso=patrimonio`): imobilizado, outro ativo, empréstimo e outra obrigação. **O imobilizado com vida
+útil deprecia sozinho**, em linha reta desde o mês de aquisição até zero (`valorNoBalanco`); sem vida
+útil, vale o valor de hoje digitado. **O empréstimo vale o saldo devedor digitado, fora das parcelas que
+já estão em Títulos financeiros** — essas o balanço já conta em "a pagar", e a tela avisa. Desativar
+tira do balanço sem apagar (quitou, vendeu). Sem a tabela, o balanço continua de pé e diz que falta a
+migração.

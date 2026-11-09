@@ -23107,6 +23107,124 @@ function FinFechamento({ comp }) {
  * **Tocar no nome do mês abre o Fechamento daquele mês** — é onde se
  * digita o previsto e se reclassifica uma categoria.
  */
+const TIPOS_PATRIMONIO = [
+  ["imobilizado", "Imobilizado", "móveis, equipamentos, veículo da loja, reforma"],
+  ["outro_ativo", "Outro ativo", "caução, depósito, adiantamento"],
+  ["emprestimo", "Empréstimo", "banco, financiamento, sócio"],
+  ["outro_passivo", "Outra obrigação", "acordo, parcelamento de imposto"],
+];
+function CadastroPatrimonio({ aoMudar }) {
+  /* O cadastro manual do balanço (0140): imobilizado e empréstimos, que nenhuma outra tela sabe. O
+     imobilizado com vida útil deprecia em linha reta sozinho; o empréstimo vale o saldo devedor digitado —
+     sem as parcelas que já estiverem em Títulos financeiros, senão contam duas vezes. */
+  const [itens, setItens] = useState(null); const [erro, setErro] = useState("");
+  const [ed, setEd] = useState(null); const [salvando, setSalvando] = useState(false);
+  const [verInativos, setVerInativos] = useState(false);
+  const ler = () => fin("patrimonio").then((r) => setItens(r.itens || [])).catch((e) => setErro(e.message));
+  useEffect(() => { ler(); }, []);
+  const novo = (tipo) => setEd({ tipo, nome: "", valor_original: "", valor_atual: "", data: "", vida_util_meses: "", credor: "", parcela_valor: "", parcelas_restantes: "", observacao: "" });
+  const salvar = async () => {
+    setSalvando(true); setErro("");
+    try {
+      const corpo = { ...ed }; delete corpo.id; delete corpo.lado; delete corpo.valor; delete corpo.depreciado; delete corpo.meses; delete corpo.criado_em; delete corpo.atualizado_em;
+      if (ed.id) await fin("patrimonio", { id: ed.id }, finJson("PATCH", corpo));
+      else await fin("patrimonio", {}, finJson("POST", corpo));
+      setEd(null); await ler(); aoMudar && aoMudar();
+    } catch (e) { setErro(e.message); }
+    setSalvando(false);
+  };
+  const alterna = async (x) => {
+    setErro("");
+    try { await fin("patrimonio", { id: x.id }, finJson("PATCH", { ativo: !x.ativo })); await ler(); aoMudar && aoMudar(); }
+    catch (e) { setErro(e.message); }
+  };
+  const apagar = async (x) => {
+    if (!window.confirm(`Apagar "${x.nome}"? Para tirar do balanço sem perder o registro, use "desativar".`)) return;
+    try { await fin("patrimonio", { id: x.id }, { method: "DELETE" }); await ler(); aoMudar && aoMudar(); }
+    catch (e) { setErro(e.message); }
+  };
+  const campo = (k, rot, o = {}) => (
+    <label className="block text-[11px]" style={{ color: C.mute }}>{rot}
+      <input value={ed[k] == null ? "" : ed[k]} onChange={(e) => setEd({ ...ed, [k]: e.target.value })} type={o.tipo || "text"} placeholder={o.ph || ""}
+        className="mt-0.5 w-full rounded-md border px-2 py-1 text-[13px]" style={{ borderColor: C.line, color: C.ink }} />
+    </label>
+  );
+  const rotTipo = (t) => (TIPOS_PATRIMONIO.find((x) => x[0] === t) || [, t])[1];
+  const mostrar = (itens || []).filter((x) => verInativos || x.ativo);
+  const inativos = (itens || []).filter((x) => !x.ativo).length;
+  return (
+    <div className="rounded-xl p-3" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <b className="text-[14px]">Imobilizado e empréstimos</b>
+        <span className="text-[12px]" style={{ color: C.mute }}>o que o balanço não sabe sozinho</span>
+        <div className="ml-auto flex flex-wrap gap-1">
+          {TIPOS_PATRIMONIO.map(([t, r]) => (
+            <button key={t} onClick={() => novo(t)} className="rounded-full px-3 py-1 text-[12px] font-semibold" style={{ background: C.roxoFraco, color: C.roxo }}>+ {r}</button>))}
+        </div>
+      </div>
+      {!!erro && <p className="mb-2 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+      {ed && (
+        <div className="mb-3 rounded-lg p-3" style={{ background: C.bg, border: `1px solid ${C.line}` }}>
+          <div className="mb-2 text-[13px] font-semibold">{ed.id ? "Editar" : "Novo"} · {rotTipo(ed.tipo)}</div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {campo("nome", "Nome", { ph: ed.tipo === "emprestimo" ? "Capital de giro Itaú" : "Móveis do escritório" })}
+            {campo("valor_original", ed.tipo === "emprestimo" ? "Valor contratado" : "Valor de aquisição", { ph: "0,00" })}
+            {campo("data", ed.tipo === "emprestimo" ? "Contratado em" : "Adquirido em", { tipo: "date" })}
+            {ed.tipo === "imobilizado" && campo("vida_util_meses", "Vida útil (meses) — deprecia sozinho", { ph: "60", tipo: "number" })}
+            {ed.tipo === "imobilizado" && !ed.vida_util_meses && campo("valor_atual", "Valor de hoje (sem vida útil)", { ph: "igual ao de aquisição" })}
+            {(ed.tipo === "emprestimo" || ed.tipo === "outro_passivo") && campo("valor_atual", "Saldo devedor de hoje", { ph: "0,00" })}
+            {ed.tipo === "outro_ativo" && campo("valor_atual", "Valor de hoje", { ph: "igual ao original" })}
+            {(ed.tipo === "emprestimo" || ed.tipo === "outro_passivo") && campo("credor", "Credor", { ph: "Banco, pessoa" })}
+            {ed.tipo === "emprestimo" && campo("parcela_valor", "Valor da parcela", { ph: "0,00" })}
+            {ed.tipo === "emprestimo" && campo("parcelas_restantes", "Parcelas que faltam", { tipo: "number" })}
+            {campo("observacao", "Observação")}
+          </div>
+          {(ed.tipo === "emprestimo" || ed.tipo === "outro_passivo") && (
+            <p className="mt-2 text-[11px]" style={{ color: C.mute }}>
+              O saldo devedor é o que falta pagar <b>fora</b> das parcelas que já estão lançadas como título em Títulos financeiros — essas o balanço já conta em "a pagar".
+            </p>)}
+          <div className="mt-2 flex gap-2">
+            <button onClick={salvar} disabled={salvando || !String(ed.nome || "").trim()} className="rounded-full px-4 py-1.5 text-[13px] font-semibold disabled:opacity-40" style={{ background: C.roxo, color: "#fff" }}>{salvando ? "Salvando…" : "Salvar"}</button>
+            <button onClick={() => setEd(null)} className="px-2 text-[13px]" style={{ color: C.mute }}>cancelar</button>
+          </div>
+        </div>
+      )}
+      {itens === null ? <p className="text-[12px]" style={{ color: C.mute }}>Lendo…</p> : !mostrar.length ? (
+        <p className="text-[12px]" style={{ color: C.mute }}>Nada cadastrado ainda.</p>
+      ) : (
+        <table className="w-full text-[12.5px]" style={{ borderCollapse: "collapse" }}>
+          <thead><tr style={{ color: C.mute }}>
+            <th className="px-2 py-1 text-left text-[11px] font-semibold uppercase">Item</th>
+            <th className="px-2 py-1 text-left text-[11px] font-semibold uppercase">Tipo</th>
+            <th className="px-2 py-1 text-right text-[11px] font-semibold uppercase">Original</th>
+            <th className="px-2 py-1 text-right text-[11px] font-semibold uppercase">No balanço</th>
+            <th></th>
+          </tr></thead>
+          <tbody>{mostrar.map((x) => (
+            <tr key={x.id} style={{ borderTop: `1px solid ${C.line}`, opacity: x.ativo ? 1 : 0.5 }}>
+              <td className="px-2 py-1.5">{x.nome}
+                <span className="block text-[11px]" style={{ color: C.mute }}>
+                  {[x.credor, x.data && `desde ${String(x.data).slice(8, 10)}/${String(x.data).slice(5, 7)}/${String(x.data).slice(0, 4)}`,
+                    x.vida_util_meses && `vida útil ${x.vida_util_meses} meses`, x.depreciado ? `depreciado ${rs2(x.depreciado)}` : null,
+                    x.parcelas_restantes != null && x.parcela_valor ? `${x.parcelas_restantes} × ${rs2(x.parcela_valor)}` : null,
+                    x.observacao].filter(Boolean).join(" · ")}
+                </span></td>
+              <td className="px-2 py-1.5" style={{ color: C.mute }}>{rotTipo(x.tipo)}</td>
+              <td className="px-2 py-1.5 text-right" style={{ fontVariantNumeric: "tabular-nums" }}>{rs2(x.valor_original)}</td>
+              <td className="px-2 py-1.5 text-right font-semibold" style={{ fontVariantNumeric: "tabular-nums", color: x.lado === "passivo" ? C.laranja : C.ink }}>{x.ativo ? rs2(x.valor) : "fora"}</td>
+              <td className="whitespace-nowrap px-2 py-1.5 text-right text-[12px]">
+                <button onClick={() => setEd({ ...x })} className="font-semibold" style={{ color: C.roxo }}>editar</button>
+                <button onClick={() => alterna(x)} className="ml-2" style={{ color: C.mute }}>{x.ativo ? "desativar" : "reativar"}</button>
+                <button onClick={() => apagar(x)} className="ml-2" style={{ color: C.mute }}>apagar</button>
+              </td>
+            </tr>))}</tbody>
+        </table>
+      )}
+      {inativos > 0 && <button onClick={() => setVerInativos((v) => !v)} className="mt-2 text-[12px]" style={{ color: C.mute }}>{verInativos ? "esconder desativados" : `ver ${inativos} desativado(s)`}</button>}
+    </div>
+  );
+}
+
 function FinBalanco({ aoIr }) {
   /* O BALANÇO PATRIMONIAL (09/11/2026, o Derek). Retrato de hoje, montado do que o sistema já sabe
      (`?recurso=balanco`): contas, títulos em aberto e carros no pátio pelo custo. Nada se digita aqui;
@@ -23114,7 +23232,8 @@ function FinBalanco({ aoIr }) {
   const [d, setD] = useState(null); const [erro, setErro] = useState("");
   const [aberto, setAberto] = useState({});
   const [ano, setAno] = useState(null); const [lendoAno, setLendoAno] = useState(false);
-  useEffect(() => { fin("balanco").then(setD).catch((e) => setErro(e.message)); }, []);
+  const carregar = () => fin("balanco").then(setD).catch((e) => setErro(e.message));
+  useEffect(() => { carregar(); }, []);
   if (erro) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
   if (!d) return <p className="text-[13px]" style={{ color: C.mute }}>Montando o balanço…</p>;
   const abre = (k) => setAberto((a) => ({ ...a, [k]: !a[k] }));
@@ -23206,6 +23325,10 @@ function FinBalanco({ aoIr }) {
                   </tr>))}</tbody>
               </table>
             </div> })}
+          {faixa("Imobilizado e outros")}
+          {d.manuais.filter((x) => x.lado === "ativo").map((x) => linha("m" + x.id, x.nome, x.valor, { sub: true,
+            nota: x.tipo === "imobilizado" ? (x.depreciado ? `depreciado ${rs2(x.depreciado)}` : "imobilizado") : "outro ativo" }))}
+          {!d.manuais.some((x) => x.lado === "ativo") && <p className="px-6 py-1 text-[12px]" style={{ color: C.mute }}>Nada cadastrado — use o cadastro abaixo.</p>}
           {linha("tat", "TOTAL DO ATIVO", d.ativo.total, { forte: true, fundo: C.roxoFraco })}
         </div>, C.ink)}
 
@@ -23217,6 +23340,10 @@ function FinBalanco({ aoIr }) {
           {!d.pagar.length && <p className="px-6 py-1 text-[12px]" style={{ color: C.mute }}>Nenhum título a pagar em aberto.</p>}
           {cartoesDeve.map((c) => linha("k" + c.id, `Cartão · ${c.nome}`, -c.saldo, { sub: true, nota: "saldo devedor" }))}
           {contasNeg.map((c) => linha("n" + c.id, `${c.nome} (saldo negativo)`, -c.saldo, { sub: true }))}
+          {faixa("Empréstimos e outros")}
+          {d.manuais.filter((x) => x.lado === "passivo").map((x) => linha("m" + x.id, x.nome, x.valor, { sub: true,
+            nota: x.credor || (x.tipo === "emprestimo" ? "empréstimo" : "outra obrigação") }))}
+          {!d.manuais.some((x) => x.lado === "passivo") && <p className="px-6 py-1 text-[12px]" style={{ color: C.mute }}>Nada cadastrado — use o cadastro abaixo.</p>}
           {linha("tps", "TOTAL DO PASSIVO", d.passivo.total, { forte: true, fundo: C.bg })}
           {faixa("Patrimônio líquido")}
           {linha("pl", "Ativo − passivo", pl, { sub: true, cor: pl >= 0 ? C.verde : "#C0281B" })}
@@ -23236,14 +23363,17 @@ function FinBalanco({ aoIr }) {
           Título vencido que já foi pago ou recebido é título que falta ligar ao extrato.
         </p>
       )}
+      {d.manuais_ligado
+        ? <CadastroPatrimonio aoMudar={carregar} />
+        : <p className="text-[12px]" style={{ color: C.laranja }}>O cadastro de imobilizado e empréstimos ainda não está no banco (migração 0140).</p>}
       {d.carros_sem_compra > 0 && (
         <p className="text-[12px]" style={{ color: C.laranja }}>{d.carros_sem_compra} carro(s) no pátio sem valor de compra — entram no estoque só pelos custos. Corrija no Estoque.</p>
       )}
       <p className="text-[11px] leading-snug" style={{ color: C.mute }}>
         Retrato de hoje: saldo de cada conta desde a abertura, títulos em aberto (o que se lançou em Títulos financeiros,
         os do contrato de cada carro e as contas fixas geradas) e carros no pátio pelo custo — compra mais os custos, realizado
-        ou previsto. O patrimônio líquido é a diferença. Não entram: imobilizado (móveis, equipamentos), empréstimos sem título
-        lançado, e o que lojistas devem de vendas anteriores a 01/11/2026, que não têm título.
+        ou previsto. Imobilizado e empréstimos vêm do cadastro manual. O patrimônio líquido é a diferença. Não entra o que
+        lojistas devem de vendas anteriores a 01/11/2026, que não têm título.
       </p>
     </div>
   );
