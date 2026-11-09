@@ -22322,7 +22322,8 @@ function danfseHtml(xmlTexto, cancelada) {
   const vTotTrib = trib ? [um(trib, "totTrib/vTotTrib/vTotTribFed"), um(trib, "totTrib/vTotTrib/vTotTribEst"), um(trib, "totTrib/vTotTrib/vTotTribMun")] : [];
   const totTxt = pTot ? `Totais aproximados dos tributos: ${String(pTot).replace(".", ",")}% (Lei 12.741/2012)`
     : vTotTrib.some(Boolean) ? `Totais aproximados dos tributos (Lei 12.741/2012): federais ${din(vTotTrib[0])}, estaduais ${din(vTotTrib[1])}, municipais ${din(vTotTrib[2])}` : "";
-  const campo = (rot, v, cls) => `<div class="c ${cls || ""}"><b>${esc(rot)}</b><span>${esc(v === "" || v == null ? "-" : v)}</span></div>`;
+  const campo = (rot, v, cls) => (!rot && (v === "" || v == null) ? `<div class="c ${cls || ""}"></div>`
+    : `<div class="c ${cls || ""}"><b>${esc(rot)}</b><span>${esc(v === "" || v == null ? "-" : v)}</span></div>`);
   const bloco = (titulo, corpo) => `<div class="bl"><div class="t">${esc(titulo)}</div><div class="g">${corpo}</div></div>`;
   const blPessoa = (titulo, p, vazio) => (p ? bloco(titulo,
     campo("CNPJ / CPF / NIF", p.doc) + campo("Indicador Municipal", p.im) + campo("Telefone", p.fone) + campo("", "", "") +
