@@ -29833,8 +29833,8 @@ function ConversaResumida({ viva, verTexto, setVerTexto }) {
   return (
     <>
       <div className="flex items-baseline justify-between gap-2">
-        <span className="text-[11px]" style={{ color: C.verde, fontWeight: 600 }}>
-          Escuta autorizada{viva.escuta_em ? ` ${horaCurta(viva.escuta_em)}` : ""}
+        <span className="text-[11px]" style={{ color: viva.escuta_ok ? C.verde : C.mute, fontWeight: 600 }}>
+          {viva.escuta_ok ? `Escuta autorizada${viva.escuta_em ? ` ${horaCurta(viva.escuta_em)}` : ""}` : "Sem escuta: nada para resumir"}
           {/* Aceite anterior a 16/09/2026 autoriza a transcrição e não
               autoriza ouvir a sala (decisão 45). O gestor precisa ver
               isso aqui, e não descobrir depois. */}
