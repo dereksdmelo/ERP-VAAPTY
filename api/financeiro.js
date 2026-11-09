@@ -3814,6 +3814,30 @@ async function cartao(req, res, tok) {
  * (DPS) moram em regras/nfse.js. O certificado A1 nunca passa por aqui: a chave privada é segredo do
  * Worker (NFSE_KEY_PEM / NFSE_CERT_PEM) e a conexão vai pelo binding mTLS (req.nfse). */
 const nfseRegras = require("../regras/nfse.js");
+/* O CAMINHO ATÉ A RECEITA (09/11/2026): pelo container da ponte, que fala Node e
+ * sabe a renegociação TLS que o servidor IIS da Receita exige — o fetch do Worker
+ * não sabe e devolvia 520. Por um número de operação ativo (o do adm), que está
+ * sempre ligado. Devolve um objeto com `fetch`, o mesmo formato do binding mTLS. */
+async function viaPonte(req, tok) {
+  if (!req.ponte || !process.env.PONTE_SEGREDO || !process.env.NFSE_KEY_PEM || !process.env.NFSE_CERT_PEM) return null;
+  const cs = await supa(`${base("wa_canal")}?select=slug,uso,ativo&ativo=eq.true&order=uso.desc`, { headers: cab(tok) }).catch(() => []);
+  const canal = ((cs || []).find((c) => c.uso === "operacao") || (cs || [])[0] || {}).slug;
+  if (!canal) return null;
+  return {
+    fetch: async (url, init) => {
+      const r = await req.ponte.fetch(`https://ponte/nfse?canal=${encodeURIComponent(canal)}`, {
+        method: "POST", signal: AbortSignal.timeout(45000),
+        headers: { "x-ponte-segredo": process.env.PONTE_SEGREDO, "Content-Type": "application/json" },
+        body: JSON.stringify({ url, method: (init && init.method) || "POST", headers: (init && init.headers) || {}, body: (init && init.body) || "",
+          key: process.env.NFSE_KEY_PEM, cert: process.env.NFSE_CERT_PEM }),
+      });
+      const d = await r.json().catch(() => ({ ok: false, erro: `a ponte respondeu ${r.status}` }));
+      if (!d.ok) throw new Error(`Não cheguei à Receita: ${d.erro || "a ponte não respondeu"}.`);
+      return new Response(d.corpo || "", { status: d.status >= 200 && d.status <= 599 ? d.status : 502 });
+    },
+  };
+}
+
 async function nfse(req, res, tok) {
   const acao = String(req.query.acao || "");
   const emp = async () => um(await supa(`${base("empresa")}?select=*&id=eq.1`, { headers: cab(tok) }));
@@ -3834,9 +3858,11 @@ async function nfse(req, res, tok) {
     };
     const urls = [`${N.BASE.restrita}/nfse`, `${N.BASE.restrita.replace("/API/", "/")}/nfse`];
     const out = [];
+    const vp = await viaPonte(req, tok);
     for (const u of urls) {
       out.push(await teste("sem certificado", (a, b) => fetch(a, b), u));
       if (req.nfse) out.push(await teste("com certificado", (a, b) => req.nfse.fetch(a, b), u));
+      if (vp) out.push(await teste("pela ponte, com certificado", (a, b) => vp.fetch(a, b), u));
     }
     return res.status(200).json({ certificado: certificado(), testes: out });
   }
@@ -3946,7 +3972,7 @@ async function nfse(req, res, tok) {
     let r;
     try {
       const assinado = await nfseRegras.assinar(dps.xml, dps.id, process.env.NFSE_KEY_PEM, process.env.NFSE_CERT_PEM);
-      r = await nfseRegras.enviar(assinado, n.ambiente, req.nfse);
+      r = await nfseRegras.enviar(assinado, n.ambiente, (await viaPonte(req, tok)) || req.nfse);
       r.assinado = assinado;
     } catch (x) {
       await supa(`${base("nfse")}?id=eq.${id}`, { method: "PATCH", headers: cab(tok), body: JSON.stringify({ situacao: "rejeitada", erros: [{ descricao: x.message }] }) });

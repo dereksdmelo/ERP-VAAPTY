@@ -13,6 +13,7 @@
  *
  * Uma instancia deste programa = um numero (`canal`). */
 import http from "node:http";
+import https from "node:https";
 import makeWASocket, { DisconnectReason, BufferJSON, initAuthCreds, proto, fetchLatestBaileysVersion,
   downloadMediaMessage, generateWAMessageFromContent } from "baileys";
 import pino from "pino";
@@ -492,6 +493,26 @@ http.createServer(async (req, res) => {
       const grupos = Object.values(g || {}).map((x) => ({ id: x.id, nome: x.subject || "(sem nome)", membros: (x.participants || []).length }))
         .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
       return json(res, 200, { ok: true, grupos });
+    }
+    /* A NOTA FISCAL PASSA POR AQUI (09/11/2026). O servidor da Receita (IIS) pede o certificado no meio da
+       conexao, por renegociacao TLS, e o fetch do Worker do Cloudflare nao sabe renegociar: a conexao caia e
+       voltava "error code: 520" — ate sem certificado. O Node daqui renegocia. A chave e o certificado chegam
+       do ERP nesta chamada (Worker -> Worker -> container, dentro do Cloudflare), sao usados nesta conexao e
+       nao ficam gravados em lugar nenhum. So vai para o dominio da NFS-e nacional. */
+    if (u.pathname === "/nfse" && req.method === "POST") {
+      const b = JSON.parse(await lerCorpo(req) || "{}");
+      let alvo; try { alvo = new URL(String(b.url || "")); } catch (e) { return json(res, 400, { ok: false, erro: "url inválida" }); }
+      if (alvo.protocol !== "https:" || !/(^|\.)nfse\.gov\.br$/.test(alvo.hostname)) return json(res, 400, { ok: false, erro: "só o domínio da NFS-e nacional" });
+      const resp = await new Promise((ok) => {
+        const r2 = https.request(alvo, { method: b.method || "POST", headers: b.headers || {}, key: b.key, cert: b.cert, timeout: 30000 }, (rr) => {
+          const partes = []; rr.on("data", (x) => partes.push(x)); rr.on("end", () => ok({ ok: true, status: rr.statusCode, corpo: Buffer.concat(partes).toString("utf8") }));
+        });
+        r2.on("timeout", () => { r2.destroy(new Error("a Receita não respondeu em 30 s")); });
+        r2.on("error", (e) => ok({ ok: false, erro: String((e && e.message) || e).slice(0, 300) }));
+        if (b.body) r2.write(b.body);
+        r2.end();
+      });
+      return json(res, 200, resp);
     }
     if (u.pathname === "/sair" && req.method === "POST") { try { await sock.logout(); } catch (e) {} await authZerar(); return json(res, 200, { ok: true }); }
     return json(res, 404, { ok: false, erro: "caminho desconhecido" });
