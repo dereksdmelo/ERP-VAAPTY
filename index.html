@@ -190,6 +190,20 @@ const ESPERA_SEG = 15 * 60;
 // estava pronto.
 const RODADA_SEG = 5 * 60;
 
+/* A PLACA COM LETRA NO LUGAR DO NÚMERO (09/11/2026, o André Ricardo: as
+ * fotos "só ficam carregando e não vão"). Ele digitou FILOD14 — a letra O
+ * onde vai o zero —, a placa não era válida, a ficha do carro não nascia e
+ * a foto, que precisa dela (decisão 6), ficava em "Aguarda" para sempre.
+ * Placa é LLL N L/N NN: nas posições de número, O vira 0 e I vira 1; nas
+ * de letra, o contrário. Só troca o que a posição não aceita. */
+const RX_PLACA = /^[A-Z]{3}\d[A-Z0-9]\d{2}$/;
+function ajustarPlaca(v) {
+  const t = String(v || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 7).split("");
+  const num = { O: "0", Q: "0", D: "0", I: "1", L: "1", Z: "2", S: "5", B: "8", G: "6" };
+  const let_ = { 0: "O", 1: "I", 2: "Z", 5: "S", 8: "B", 6: "G" };
+  return t.map((c, i) => (i < 3 ? (let_[c] || c) : (i === 3 || i >= 5) ? (num[c] || c) : c)).join("");
+}
+
 /* ===================== sessão ===================== */
 
 /**
@@ -7048,9 +7062,16 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                   </div>
                   {!veiculoId && fotos.some((p) => p.estado === "aguardando") && (
                     <p className="mt-2 text-[11px]" style={{ color: C.mute }}>
-                      {/^[A-Z]{3}\d[A-Z0-9]\d{2}$/.test(placaFicha)
+                      {RX_PLACA.test(placaFicha)
                         ? "Subindo as fotos…"
-                        : "As fotos sobem assim que a placa estiver preenchida (na Pesquisa). Até lá ficam só neste aparelho."}
+                        : placaFicha
+                          ? <span style={{ color: C.laranja, fontWeight: 600 }}>
+                              As fotos estão esperando: a placa “{f.placa}” não é válida.{" "}
+                              {RX_PLACA.test(ajustarPlaca(placaFicha))
+                                ? <button type="button" onClick={() => set("placa", ajustarPlaca(placaFicha))} className="underline">Corrigir para {ajustarPlaca(placaFicha)}</button>
+                                : "Corrija na Pesquisa."}
+                            </span>
+                          : "As fotos sobem assim que a placa estiver preenchida (na Pesquisa). Até lá ficam só neste aparelho."}
                     </p>
                   )}
                   {fotos.some((p) => p.estado === "erro") && (
@@ -7087,7 +7108,17 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                   </Campo>
                   <Campo label="KM atual" req><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.km} onChange={(e) => set("km", e.target.value)} /></Campo>
                   <Campo label="KM quando o cliente pegou"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.kmEntrada} onChange={(e) => set("kmEntrada", e.target.value)} /></Campo>
-                  <Campo label="Placa" req><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} value={f.placa} onChange={(e) => set("placa", e.target.value.toUpperCase())} /></Campo>
+                  <Campo label="Placa" req><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono, borderColor: placaFicha.length >= 7 && !RX_PLACA.test(placaFicha) ? C.laranja : undefined }} value={f.placa}
+                    onChange={(e) => set("placa", e.target.value.toUpperCase())}
+                    onBlur={() => { const a = ajustarPlaca(f.placa); if (a !== placaFicha && RX_PLACA.test(a)) set("placa", a); }} />
+                  {placaFicha.length >= 7 && !RX_PLACA.test(placaFicha) && (
+                    <span className="mt-1 block text-[11px]" style={{ color: C.laranja }}>
+                      Placa inválida — sem ela a ficha não grava e as fotos não sobem.
+                      {RX_PLACA.test(ajustarPlaca(placaFicha)) && ajustarPlaca(placaFicha) !== placaFicha && (
+                        <> <button type="button" onClick={() => set("placa", ajustarPlaca(placaFicha))} className="font-semibold underline">Corrigir para {ajustarPlaca(placaFicha)}</button></>
+                      )}
+                    </span>
+                  )}</Campo>
                   <Campo label="Cor"><input className={inputCls} style={inputSty} value={f.cor} onChange={(e) => set("cor", e.target.value)} /></Campo>
                   <Campo label="Renavam"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.renavam} onChange={(e) => set("renavam", e.target.value)} placeholder="do CRLV" /></Campo>
                   <Campo label="FIPE" req><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.fipe} onChange={(e) => set("fipe", e.target.value)} /></Campo>
