@@ -37,6 +37,9 @@ function faltaNaEmpresa(e) {
   if (!e.opcao_simples) f.push("opção pelo Simples Nacional");
   if (!so(e.servico_ctribnac)) f.push("código do serviço");
   if (e.opcao_simples === "3" && !e.perc_tot_trib_sn) f.push("percentual de tributos do Simples (para a nota)");
+  // O XSD aceita de 0 a 99,99 (pTotTribSN). 100,00 foi o primeiro teste (09/11/2026): E1235, a nota inteira recusada.
+  if (e.opcao_simples === "3" && e.perc_tot_trib_sn && !(Number(e.perc_tot_trib_sn) >= 0 && Number(e.perc_tot_trib_sn) < 100))
+    f.push(`percentual de tributos do Simples válido (está ${String(e.perc_tot_trib_sn).replace(".", ",")}%; a Receita aceita de 0 a 99,99 — confira com o contador)`);
   return f;
 }
 
