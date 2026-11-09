@@ -22264,8 +22264,25 @@ function TitulosDoMes({ comp, abas }) {
 function FinNotas() {
   const [d, setD] = useState(null); const [erro, setErro] = useState(""); const [nova, setNova] = useState(null);
   const [carros, setCarros] = useState([]); const [indo, setIndo] = useState(""); const [xml, setXml] = useState(null);
-  const carregar = () => fin("nfse").then(setD).catch((e) => setErro(e.message));
+  const [negociados, setNegociados] = useState(null);
+  const carregar = () => {
+    fin("nfse").then(setD).catch((e) => setErro(e.message));
+    fin("nfse", { acao: "carros" }).then((x) => setNegociados(x.carros || [])).catch(() => setNegociados([]));
+  };
   useEffect(() => { carregar(); fin("estoque").then((x) => setCarros(x.estoque || [])).catch(() => {}); }, []);
+  /* A NOTA JÁ PREENCHIDA a partir do carro (09/11/2026): o cliente que
+     vendeu (comissão) ou o lojista que comprou (margem). Tudo editável
+     antes de salvar — o valor e o tomador são de quem emite. */
+  const JOINVILLE = /joinville/i;
+  const montar = (c, quem) => {
+    const t = c[quem];
+    setNova({ estoque_id: c.id, tomador_doc: t.doc, tomador_nome: t.nome, tomador_email: t.email,
+      valor: t.valor ? String(t.valor).replace(".", ",") : "",
+      descricao: `${EMPRESA.servico_descricao || "Intermediação de venda de veículo automotor"} — ${[c.carro, c.placa].filter(Boolean).join(" · ")}`,
+      tomador_cep: t.cep, tomador_logradouro: t.logradouro, tomador_numero: t.numero, tomador_bairro: t.bairro,
+      tomador_cmun: "", _cidade: t.cidade && !JOINVILLE.test(t.cidade) ? `${t.cidade}${""}` : "" });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
   const comCarro = (id) => {
     const c = carros.find((x) => x.id === id);
     setNova((n) => ({ ...n, estoque_id: id || null,
@@ -22315,7 +22332,8 @@ function FinNotas() {
               <label className="block lg:col-span-2"><Rotulo>Rua</Rotulo><input className={inputCls} style={inputSty} value={nova.tomador_logradouro || ""} onChange={(e) => setNova({ ...nova, tomador_logradouro: e.target.value })} /></label>
               <label className="block"><Rotulo>Número</Rotulo><input className={inputCls} style={inputSty} value={nova.tomador_numero || ""} onChange={(e) => setNova({ ...nova, tomador_numero: e.target.value })} /></label>
               <label className="block lg:col-span-2"><Rotulo>Bairro</Rotulo><input className={inputCls} style={inputSty} value={nova.tomador_bairro || ""} onChange={(e) => setNova({ ...nova, tomador_bairro: e.target.value })} /></label>
-              <label className="block lg:col-span-2"><Rotulo>Município (código IBGE — vazio é Joinville)</Rotulo><input className={inputCls} style={inputSty} value={nova.tomador_cmun || ""} onChange={(e) => setNova({ ...nova, tomador_cmun: e.target.value })} /></label>
+              <label className="block lg:col-span-2"><Rotulo>Município (código IBGE — vazio é Joinville)</Rotulo><input className={inputCls} style={inputSty} value={nova.tomador_cmun || ""} onChange={(e) => setNova({ ...nova, tomador_cmun: e.target.value })} />
+                {nova._cidade && !nova.tomador_cmun && <span className="mt-0.5 block text-[11px]" style={{ color: C.laranja }}>O cadastro diz {nova._cidade}: digite o código IBGE dessa cidade (vazio vira Joinville).</span>}</label>
             </>)}
             <label className="block lg:col-span-4"><Rotulo>Descrição do serviço</Rotulo><input className={inputCls} style={inputSty} value={nova.descricao} onChange={(e) => setNova({ ...nova, descricao: e.target.value })} /></label>
           </div>
@@ -22323,6 +22341,50 @@ function FinNotas() {
             <BotaoPrimario onClick={criar} disabled={indo === "criar"}>{indo === "criar" ? "Salvando…" : "Salvar rascunho"}</BotaoPrimario>
             <button onClick={() => setNova(null)} className="text-[12.5px]" style={{ color: C.mute }}>cancelar</button>
           </div>
+        </div>
+      )}
+      {!nova && negociados && !!negociados.length && (
+        <div className="rounded-xl p-3" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+          <div className="mb-2 flex items-baseline gap-2">
+            <b className="text-[14px]">Carros negociados</b>
+            <span className="text-[12px]" style={{ color: C.mute }}>últimos 90 dias · escolha para quem é a nota e ela vem preenchida</span>
+          </div>
+          <div className="rolar max-h-[360px] overflow-auto">
+            <table className="w-full text-[12.5px]" style={{ borderCollapse: "collapse", minWidth: 760 }}>
+              <tbody>
+                {negociados.map((c) => {
+                  const tem = (doc) => c.notas.some((n) => doc && n.doc === doc);
+                  const botao = (quem, rot) => {
+                    const t = c[quem];
+                    if (!t) return <span style={{ color: C.mute }}>—</span>;
+                    if (tem(t.doc)) return <span className="font-semibold" style={{ color: C.verde }}>✓ nota para {t.nome.split(" ")[0] || rot}</span>;
+                    const falta = !t.doc ? "sem CPF/CNPJ" : t.doc.length === 14 && !(t.cep && t.bairro && t.logradouro) ? "falta o endereço" : "";
+                    return (
+                      <button onClick={() => montar(c, quem)} className="text-left" title={falta ? `Vai faltar preencher: ${falta}` : ""}>
+                        <span className="font-semibold" style={{ color: C.roxo }}>{rot}: {t.nome || "sem nome"}</span>
+                        <span className="block text-[11px]" style={{ color: falta ? C.laranja : C.mute }}>
+                          {t.valor ? rs2(t.valor) : "valor a digitar"}{falta ? ` · ${falta}` : ""}
+                        </span>
+                      </button>
+                    );
+                  };
+                  return (
+                    <tr key={c.id} style={{ borderTop: `1px solid ${C.line}` }}>
+                      <td className="px-2 py-1.5"><b>{c.carro || "—"}</b><span className="ml-1.5 text-[11px]" style={{ color: C.mute, fontFamily: F.mono }}>{c.placa}</span>
+                        <span className="block text-[11px]" style={{ color: C.mute }}>
+                          {c.natureza === "indicacao" ? "comissão de indicação" : c.situacao === "vendido" ? `vendido ${c.vendido_em ? diaBR(c.vendido_em) : ""}` : `no pátio desde ${diaBR(c.entrou_em)}`}
+                        </span></td>
+                      <td className="px-2 py-1.5">{botao("cliente", "Cliente")}</td>
+                      <td className="px-2 py-1.5">{botao("lojista", "Lojista")}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-1.5 text-[11px]" style={{ color: C.mute }}>
+            Cliente: o valor sugerido é a comissão do check list. Lojista: é a margem bruta do carro (venda − compra − débitos e quitação). Confira com o contador qual é o seu caso — tudo pode ser editado antes de salvar.
+          </p>
         </div>
       )}
       <div className="rolar overflow-x-auto rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>

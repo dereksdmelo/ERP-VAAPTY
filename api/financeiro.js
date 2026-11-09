@@ -3824,6 +3824,49 @@ async function nfse(req, res, tok) {
     if (!n) return res.status(404).json({ erro: "Nota não encontrada." });
     return res.status(200).json(n);
   }
+  /* OS CARROS NEGOCIADOS, PRONTOS PARA A NOTA (09/11/2026, o Derek: "esse
+   * ambiente deve puxar automaticamente os carros negociados com os dados do
+   * cliente pra já preencher a nota"). Os dos últimos 90 dias (entrada ou
+   * venda), com os dois tomadores possíveis já montados: o cliente que vendeu
+   * (CPF e endereço do atendimento; valor = a comissão do check list) e o
+   * lojista que comprou (o cadastro do comprador; valor = a margem bruta do
+   * carro). Quem é o tomador, e qual o valor, é escolha de quem emite — a tela
+   * só preenche. E diz quais já têm nota. */
+  if (req.method === "GET" && acao === "carros") {
+    const de = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
+    const [lista, notas] = await Promise.all([
+      supa(`${base("estoque")}?select=id,situacao,natureza,entrou_em,vendido_em,valor_compra,valor_venda,` +
+        `veiculo(placa,marca_modelo,ano_modelo),comprador(nome,tipo,documento,email,endereco,bairro,cep,cidade,uf),` +
+        `atendimento(cliente_nome,cliente_cpf,cliente_email,cliente_endereco,cliente_bairro,cliente_cep,cliente_cidade,cliente_uf,checklist(comissao_vaapty,modo_conta)),` +
+        `estoque_custo(tipo,previsto,realizado)&or=(entrou_em.gte.${de},vendido_em.gte.${de})&situacao=neq.baixado&order=entrou_em.desc&limit=300`, { headers: cab(tok) }),
+      supa(`${base("nfse")}?select=estoque_id,tomador_doc,situacao&estoque_id=not.is.null&situacao=neq.cancelada&limit=2000`, { headers: cab(tok) }),
+    ]);
+    const jaTem = {};
+    (notas || []).forEach((n) => { (jaTem[n.estoque_id] = jaTem[n.estoque_id] || []).push({ doc: n.tomador_doc, situacao: n.situacao }); });
+    // "Rua das Flores, 123" → rua e número; sem vírgula, o número fica em branco.
+    const partir = (end) => {
+      const t = String(end || "").trim();
+      const m = /^(.*?)[,\s]+(n[ºo°.]*\s*)?(\d+[A-Za-z]?)\b(.*)$/.exec(t);
+      return m ? { rua: m[1].trim(), numero: m[3] } : { rua: t, numero: "" };
+    };
+    const um1 = (x) => (Array.isArray(x) ? x[0] : x) || null;
+    return res.status(200).json({ carros: (lista || []).map((e) => {
+      const v = um1(e.veiculo) || {}, at = um1(e.atendimento), cp = um1(e.comprador), cl = at && um1(at.checklist);
+      const r = rentabilidadeDe(e);
+      const ec = partir(at && at.cliente_endereco), el = partir(cp && cp.endereco);
+      return {
+        id: e.id, situacao: e.situacao, natureza: e.natureza, entrou_em: e.entrou_em, vendido_em: e.vendido_em,
+        carro: [v.marca_modelo, v.ano_modelo].filter(Boolean).join(" "), placa: v.placa || "",
+        notas: jaTem[e.id] || [],
+        cliente: at ? { nome: at.cliente_nome || "", doc: String(at.cliente_cpf || "").replace(/\D/g, ""), email: at.cliente_email || "",
+          cep: at.cliente_cep || "", logradouro: ec.rua, numero: ec.numero, bairro: at.cliente_bairro || "", cidade: at.cliente_cidade || "",
+          valor: cl && cl.modo_conta !== "limpo" ? Number(cl.comissao_vaapty) || 0 : 0 } : null,
+        lojista: cp && e.situacao === "vendido" ? { nome: cp.nome || "", doc: String(cp.documento || "").replace(/\D/g, ""), email: cp.email || "",
+          cep: cp.cep || "", logradouro: el.rua, numero: el.numero, bairro: cp.bairro || "", cidade: cp.cidade || "",
+          valor: Math.max(0, Math.round(r.bruta * 100) / 100) } : null,
+      };
+    }) });
+  }
   if (req.method === "GET") {
     const comp = competenciaDe(req.query.competencia);
     const filtro = comp ? `&criado_em=gte.${comp}T00:00:00&criado_em=lte.${fimDoMes(comp)}T23:59:59` : "";
