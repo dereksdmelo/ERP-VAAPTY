@@ -26695,6 +26695,7 @@ const ICONE = {
   prevendas: "M5 4h3l2 5-2 1a11 11 0 0 0 6 6l1-2 5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2zM17 3v4M15 5h4",
   estoque: "M3 13l2-5a2 2 0 0 1 2-1h10a2 2 0 0 1 2 1l2 5v5a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H6v1a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-5zm4 2h.01M17 15h.01",
   painel: "M4 20V10m6 10V4m6 16v-7",
+  marketing: "M3 11v2a1 1 0 0 0 1 1h2l6 4V6L6 10H4a1 1 0 0 0-1 1zM16 9a3 3 0 0 1 0 6M19 6a7 7 0 0 1 0 12",
   rentabilidade: "M4 18l5-6 4 3 7-9M15 6h5v5",
   financeiro: "M3 7h18v12H3zM3 11h18M7 15h3",
   lojistas: "M4 9h16l-1 11H5zM4 9l2-5h12l2 5M9 13v4M15 13v4",
@@ -27421,6 +27422,7 @@ const AREAS = [
   ["prevendas",  "Pré-vendas",     "prevendas"],
   ["negociacao", "Negociação",     "atendimentos"],
   ["gestao",     "Gestão",         "painel"],
+  ["marketing",  "Marketing",      "marketing"],
   ["financeiro", "Financeiro",     "financeiro"],
   ["adm",        "Administrativo", "adm"],
 ];
@@ -28356,6 +28358,12 @@ function destinosPara(perfil) {
      * página: dois níveis de navegação para a mesma coisa, e o de cima
      * sumia quando a pessoa rolava. `grupo` é o rótulo que o painel
      * escreve acima dos itens (todo dia / fim do mês). */
+    // ---- marketing (0135): do gerente e do financeiro ----
+    ...((perfil && (perfil.financeiro || gerente)) ? [
+      { id: "mkt",           rot: "Visão geral",       curto: "Mkt",       area: "marketing", icone: "marketing" },
+      { id: "mkt_criativos", rot: "Criativos",         curto: "Criativos", area: "marketing", icone: "marketing" },
+      { id: "mkt_conexao",   rot: "Contas de anúncio", curto: "Contas",    area: "marketing", icone: "marketing" },
+    ] : []),
     ...((perfil && (perfil.financeiro || gerente)) ? [
       { id: "fin_pendencias",  rot: "Pendências",        curto: "Financ.", area: "financeiro", aba: "pendencias",  grupo: "todo dia",   icone: "financeiro" },
       { id: "fin_lancamentos", rot: "Conciliação bancária", curto: "Financ.", area: "financeiro", aba: "lancamentos", grupo: "todo dia",   icone: "financeiro" },
@@ -28397,6 +28405,310 @@ const Logotipo = () => (
     <span className="text-[15px] tracking-tight" style={{ fontFamily: F.disp, fontWeight: 800 }}>Vaapty</span>
   </span>
 );
+
+/* ===================== MARKETING (0135, 08/11/2026) =====================
+ * O Derek: "mais uma aba principal para marketing… imitar a do Camisetas Já, mas trazer um cenário
+ * um pouco mais completo, criativo por criativo". Três destinos: a visão geral (quanto se investiu e
+ * o que voltou), os criativos (cada anúncio de "clique para o WhatsApp" da conversa até o carro e a
+ * margem) e a conexão com a conta de anúncios da Meta. A conta é a mesma corrente da pré-venda
+ * (conversa → agendado → na loja → fechou → margem), separada por anúncio. */
+const rs0 = (v) => (v == null || !isFinite(v) ? "—" : `R$ ${Math.round(Number(v)).toLocaleString("pt-BR")}`);
+const pctTxt = (v) => (v == null ? "—" : `${String(v).replace(".", ",")}%`);
+const xTxt = (v) => (v == null || !isFinite(v) ? "—" : `${v.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}×`);
+const inteiro = (v) => (Number(v) || 0).toLocaleString("pt-BR");
+
+function useMarketing(de, ate) {
+  const [d, setD] = useState(null); const [erro, setErro] = useState("");
+  const carregar = () => {
+    setD(null); setErro("");
+    fetchAut(`/api/funil?recurso=marketing&de=${de}&ate=${ate}`).then(async (r) => {
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.erro || "Não consegui ler o marketing.");
+      setD(j);
+    }).catch((e) => setErro(e.message));
+  };
+  useEffect(carregar, [de, ate]);
+  return [d, erro, carregar];
+}
+
+function PeriodoMkt({ comp, p, setP }) {
+  const ops = [["mes", rotuloMes(comp)], ["30", "30 dias"], ["60", "60 dias"], ["90", "90 dias"]];
+  return (
+    <div className="inline-flex rounded-lg p-0.5" style={{ background: C.bg, border: `1px solid ${C.line}` }}>
+      {ops.map(([k, r]) => (
+        <button key={k} onClick={() => setP(k)} className="rounded-md px-2.5 py-1 text-[12.5px] font-semibold"
+          style={{ background: p === k ? C.paper : "transparent", color: p === k ? C.roxo : C.mute, boxShadow: p === k ? "0 1px 2px rgba(0,0,0,.08)" : "none" }}>{r}</button>
+      ))}
+    </div>
+  );
+}
+const faixaMkt = (comp, p) => {
+  const hoje = hojeEmSP();
+  if (p === "mes") { const fim = new Date(Date.UTC(+comp.slice(0, 4), +comp.slice(5, 7), 0)).toISOString().slice(0, 10); return [comp, fim < hoje ? fim : hoje]; }
+  const de = new Date(Date.parse(hoje) - (Number(p) - 1) * 86400000).toISOString().slice(0, 10);
+  return [de, hoje];
+};
+
+function KpiMkt({ rot, v, sub, cor }) {
+  return (
+    <div className="rounded-xl px-3.5 py-2.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+      <div className="text-[10.5px] font-bold uppercase tracking-[0.06em]" style={{ color: C.mute }}>{rot}</div>
+      <div className="mt-0.5 text-[21px] font-extrabold" style={{ fontVariantNumeric: "tabular-nums", color: cor || C.ink }}>{v}</div>
+      {sub && <div className="text-[11.5px] leading-snug" style={{ color: C.mute }}>{sub}</div>}
+    </div>
+  );
+}
+
+/* O funil de um criativo numa barra: cada degrau é a parte do anterior que passou. */
+function DegrausMkt({ x }) {
+  const passos = [["conversas", x.conversas], ["agendados", x.agendados], ["na loja", x.compareceram], ["fecharam", x.fecharam]];
+  const max = Math.max(1, x.conversas);
+  return (
+    <div className="space-y-1">
+      {passos.map(([r, n], i) => (
+        <div key={r} className="flex items-center gap-2 text-[11.5px]">
+          <span className="w-[62px] shrink-0" style={{ color: C.mute }}>{r}</span>
+          <div className="h-[9px] flex-1 overflow-hidden rounded-full" style={{ background: C.bg }}>
+            <div className="h-full rounded-full" style={{ width: `${Math.max(n ? 3 : 0, Math.round((n / max) * 100))}%`, background: [C.roxo, "#8E6BD8", "#B49AE6", C.verde][i] }} />
+          </div>
+          <span className="w-[30px] shrink-0 text-right font-semibold" style={{ fontVariantNumeric: "tabular-nums" }}>{n}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CartaoCriativo({ x }) {
+  const retornoCor = x.retorno == null ? C.mute : x.retorno >= 3 ? C.verde : x.retorno >= 1 ? AMARELO.texto : C.laranja;
+  return (
+    <div className="flex flex-col overflow-hidden rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+      <div className="relative" style={{ background: "#EFEAF6", aspectRatio: "1.6" }}>
+        {x.miniatura
+          ? <img src={x.miniatura} alt="" className="h-full w-full object-cover" loading="lazy" />
+          : <div className="flex h-full items-center justify-center px-4 text-center text-[13px] font-semibold leading-snug" style={{ color: C.roxo }}>{x.titulo || "Anúncio sem título"}</div>}
+        {x.situacao && <span className="absolute left-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase" style={{ background: x.situacao === "ACTIVE" ? C.verde : "rgba(0,0,0,.55)", color: "#fff" }}>{x.situacao === "ACTIVE" ? "no ar" : "pausado"}</span>}
+        {x.retorno != null && <span className="absolute right-2 top-2 rounded-full px-2 py-0.5 text-[11px] font-extrabold" style={{ background: "#fff", color: retornoCor }}>{xTxt(x.retorno)}</span>}
+      </div>
+      <div className="flex flex-1 flex-col p-3">
+        <div className="text-[13.5px] font-bold leading-snug">{x.titulo || x.nome || "Anúncio"}</div>
+        <div className="mt-0.5 text-[11px] leading-snug" style={{ color: C.mute }}>
+          {[x.campanha, x.conjunto].filter(Boolean).join(" · ") || (x.id ? `anúncio ${x.id}` : "sem id do anúncio")}
+          {x.canais && x.canais.length ? ` · ${x.canais.map((c) => c.canal).join(", ")}` : ""}
+        </div>
+        {x.texto && <p className="mt-1 line-clamp-2 text-[11.5px] leading-snug" style={{ color: C.ink }}>{x.texto}</p>}
+        <div className="mt-2.5"><DegrausMkt x={x} /></div>
+        <div className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-1 text-[11.5px]" style={{ fontVariantNumeric: "tabular-nums" }}>
+          <span style={{ color: C.mute }}>Gasto</span><b className="text-right">{x.gasto != null ? rs0(x.gasto) : "—"}</b>
+          {x.cliques != null && <><span style={{ color: C.mute }}>Impressões · cliques</span><span className="text-right">{inteiro(x.impressoes)} · {inteiro(x.cliques)}</span></>}
+          {x.conversas_meta != null && <><span style={{ color: C.mute }}>Conversas (Meta · chegaram)</span><span className="text-right">{inteiro(x.conversas_meta)} · {x.conversas}</span></>}
+          <span style={{ color: C.mute }}>Custo por conversa</span><span className="text-right">{rs0(x.custo_conversa)}</span>
+          <span style={{ color: C.mute }}>Custo por visita</span><span className="text-right">{rs0(x.custo_visita)}</span>
+          <span style={{ color: C.mute }}>Carros · custo por carro</span><span className="text-right">{x.carros} · {rs0(x.custo_carro)}</span>
+          <span style={{ color: C.mute }}>Margem gerada</span><b className="text-right" style={{ color: x.margem > 0 ? C.verde : C.ink }}>{x.margem ? rs0(x.margem) : "—"}</b>
+        </div>
+        <div className="mt-auto flex items-center gap-3 pt-2.5 text-[11px]" style={{ color: C.mute }}>
+          <span>{x.primeira ? `${diaBR(x.primeira)} – ${diaBR(x.ultima)}` : "nenhuma conversa no período"}</span>
+          {x.url && <a href={x.url} target="_blank" rel="noopener noreferrer" className="ml-auto font-semibold" style={{ color: C.roxo }}>ver anúncio ↗</a>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GraficoDiasMkt({ dias, gastos }) {
+  if (!dias.length) return null;
+  const g = {}; (gastos || []).forEach((x) => { g[x.dia] = x.gasto; });
+  const max = Math.max(1, ...dias.map((x) => x.anuncio + x.organico));
+  const maxG = Math.max(1, ...Object.values(g));
+  return (
+    <div className="rounded-xl p-3" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+      <div className="text-[11px] font-bold uppercase tracking-[0.06em]" style={{ color: C.mute }}>Conversas novas por dia</div>
+      <div className="rolar mt-2 overflow-x-auto">
+        <div className="flex items-end gap-[3px]" style={{ height: 130, minWidth: dias.length * 14 }}>
+          {dias.map((x) => (
+            <div key={x.dia} className="relative flex flex-1 flex-col justify-end" style={{ minWidth: 10, height: "100%" }}
+              title={`${diaBR(x.dia)}: ${x.anuncio} de anúncio · ${x.organico} sem anúncio${g[x.dia] != null ? ` · gasto ${rs0(g[x.dia])}` : ""}`}>
+              {g[x.dia] != null && <div className="absolute left-0 right-0" style={{ bottom: `${(g[x.dia] / maxG) * 100}%`, borderTop: `2px solid ${AMARELO.texto}` }} />}
+              <div style={{ height: `${(x.organico / max) * 100}%`, background: "#C9BFD9" }} />
+              <div style={{ height: `${(x.anuncio / max) * 100}%`, background: C.roxo, borderRadius: "3px 3px 0 0" }} />
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="mt-1.5 flex flex-wrap gap-3 text-[11px]" style={{ color: C.mute }}>
+        <span><span style={{ color: C.roxo }}>■</span> de anúncio</span><span><span style={{ color: "#C9BFD9" }}>■</span> sem anúncio</span>
+        {!!(gastos || []).length && <span><span style={{ color: AMARELO.texto }}>━</span> gasto do dia na Meta</span>}
+        <span>{diaBR(dias[0].dia)} a {diaBR(dias[dias.length - 1].dia)}</span>
+      </div>
+    </div>
+  );
+}
+
+function TelaMarketing({ aba, comp, mes, perfil }) {
+  const [p, setP] = useState("mes");
+  const [de, ate] = faixaMkt(comp, p);
+  const [d, erro, carregar] = useMarketing(de, ate);
+  const [ordem, setOrdem] = useState("gasto");
+  const [q, setQ] = useState("");
+  const titulo = aba === "criativos" ? "Criativos" : aba === "conexao" ? "Contas de anúncio" : "Marketing";
+  const sub = aba === "criativos" ? "Cada anúncio, da conversa ao carro e à margem." : aba === "conexao" ? "De onde vem o gasto de cada anúncio." : "Quanto se investiu, quanto voltou.";
+  const cab = <Cabecalho titulo={titulo} sub={sub} acao={aba !== "conexao" ? <PeriodoMkt comp={comp} p={p} setP={setP} /> : null} mes={aba !== "conexao" && p === "mes" ? mes : null} />;
+  if (aba === "conexao") return <>{cab}<ConexaoMeta d={d} erro={erro} aoMudar={carregar} perfil={perfil} /></>;
+  if (erro) return <>{cab}<p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p></>;
+  if (!d) return <>{cab}<p className="text-[13px]" style={{ color: C.mute }}>Juntando conversas, agendamentos, carros e gasto…</p></>;
+  const inv = d.investimento;
+  const avisoColeta = de < d.coleta_desde && <p className="mb-2 text-[11.5px]" style={{ color: C.mute }}>As conversas começaram a ser registradas em {diaBR(d.coleta_desde)}: antes disso o período aparece vazio.</p>;
+  const avisoMeta = !d.meta.conectado
+    ? <div className="mb-3 rounded-xl px-3 py-2 text-[12.5px]" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>A conta de anúncios da Meta não está conectada: o gasto vem do que foi lançado no financeiro (contas 5), sem separar por anúncio. Conecte em Marketing → Contas de anúncio para ver o gasto, os cliques e a imagem de cada criativo.</div>
+    : d.meta.erro ? <div className="mb-3 rounded-xl px-3 py-2 text-[12.5px]" style={{ background: "#FBEAE8", color: "#B42318" }}>A Meta não respondeu: {d.meta.erro}. O resto da tela continua valendo.</div> : null;
+
+  if (aba === "criativos") {
+    const termos = semAcento(q).toLowerCase().split(/\s+/).filter(Boolean);
+    const ORD = { gasto: (x) => x.gasto || 0, conversas: (x) => x.conversas, loja: (x) => x.compareceram, carros: (x) => x.carros, margem: (x) => x.margem, retorno: (x) => (x.retorno == null ? -1 : x.retorno), barato: (x) => (x.custo_conversa == null ? -1e9 : -x.custo_conversa) };
+    const lista = d.criativos.filter((x) => !termos.length || termos.every((t) => semAcento(`${x.titulo || ""} ${x.nome || ""} ${x.campanha || ""} ${x.texto || ""}`).toLowerCase().indexOf(t) >= 0))
+      .slice().sort((a, b) => ORD[ordem](b) - ORD[ordem](a));
+    return (
+      <>
+        {cab}{avisoMeta}{avisoColeta}
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-[12.5px]">
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Procurar criativo, campanha, texto" className="min-w-[220px] flex-1 rounded-md border px-2.5 py-1 outline-none" style={inputSty} />
+          <span style={{ color: C.mute }}>ordenar por</span>
+          <select value={ordem} onChange={(e) => setOrdem(e.target.value)} className="rounded-md border px-2 py-1 outline-none" style={inputSty}>
+            <option value="gasto">maior gasto</option><option value="conversas">mais conversas</option><option value="loja">mais visitas na loja</option>
+            <option value="carros">mais carros</option><option value="margem">mais margem</option><option value="retorno">melhor retorno</option><option value="barato">conversa mais barata</option>
+          </select>
+          <span style={{ color: C.mute }}>{lista.length} criativo{lista.length === 1 ? "" : "s"}</span>
+        </div>
+        {!lista.length ? <p className="text-[13px]" style={{ color: C.mute }}>Nenhuma conversa de anúncio no período.</p> : (
+          <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}>
+            {lista.map((x) => <CartaoCriativo key={x.chave} x={x} />)}
+          </div>
+        )}
+        <p className="mt-3 text-[11px] leading-snug" style={{ color: C.mute }}>
+          "Conversas" são as que chegaram no WhatsApp marcadas com o anúncio (o clique para o WhatsApp manda o anúncio na primeira mensagem). Agendado, na loja e fechou seguem a mesma conta das métricas da pré-venda;
+          a margem é a dos carros revendidos que saíram desses atendimentos. Retorno = margem ÷ gasto do anúncio.
+        </p>
+      </>
+    );
+  }
+
+  const t = d.total, an = d.anuncio, org = d.organico;
+  const linhaFunil = (rot, x) => (
+    <tr key={rot} style={{ borderTop: `1px solid ${C.line}` }}>
+      <td className="px-2 py-1.5 font-semibold">{rot}</td>
+      {[x.conversas, x.agendados, x.compareceram, x.fecharam, x.carros].map((n, i) => <td key={i} className="px-2 py-1.5 text-right">{inteiro(n)}</td>)}
+      <td className="px-2 py-1.5 text-right">{pctTxt(x.conv_loja)}</td><td className="px-2 py-1.5 text-right">{pctTxt(x.conv_venda)}</td>
+      <td className="px-2 py-1.5 text-right font-semibold" style={{ color: x.margem > 0 ? C.verde : C.ink }}>{x.margem ? rs0(x.margem) : "—"}</td>
+    </tr>
+  );
+  const th = (h, dir) => <th key={h} className="px-2 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.05em]" style={{ color: C.mute, textAlign: dir ? "right" : "left" }}>{h}</th>;
+  return (
+    <>
+      {cab}{avisoMeta}{avisoColeta}
+      <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
+        <KpiMkt rot="Investimento" v={rs0(inv)} sub={d.investimento_fonte === "meta" ? `consumido na Meta · ${rs0(d.aplicado)} lançado no financeiro` : d.investimento_fonte === "financeiro" ? "lançado no financeiro (contas 5)" : "sem acesso ao financeiro"} />
+        <KpiMkt rot="Conversas de anúncio" v={inteiro(an.conversas)} sub={`${inteiro(org.conversas)} sem anúncio · ${inteiro(t.conversas)} no total`} />
+        <KpiMkt rot="Custo por conversa" v={inv && an.conversas ? rs0(inv / an.conversas) : "—"} sub="investimento ÷ conversas de anúncio" />
+        <KpiMkt rot="Agendados" v={inteiro(an.agendados)} sub={`${pctTxt(an.conv_agenda)} das conversas de anúncio`} />
+        <KpiMkt rot="Na loja" v={inteiro(an.compareceram)} sub={`${pctTxt(an.conv_loja)} · ${inv && an.compareceram ? rs0(inv / an.compareceram) + " por visita" : "—"}`} />
+        <KpiMkt rot="Carros fechados" v={inteiro(an.carros)} sub={`CAC ${inv && an.carros ? rs0(inv / an.carros) : "—"} (investimento ÷ carros)`} />
+        <KpiMkt rot="Margem dos carros" v={an.margem ? rs0(an.margem) : "—"} cor={an.margem > 0 ? C.verde : undefined} sub="dos revendidos que vieram de anúncio" />
+        <KpiMkt rot="Retorno" v={inv ? xTxt(an.margem / inv) : "—"} cor={inv && an.margem / inv >= 1 ? C.verde : inv ? C.laranja : undefined} sub="margem ÷ investimento" />
+      </div>
+      <div className="mt-3"><GraficoDiasMkt dias={d.por_dia} gastos={d.gasto_por_dia} /></div>
+      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        <div className="rolar overflow-x-auto rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+          <div className="px-3 pt-2.5 text-[11px] font-bold uppercase tracking-[0.06em]" style={{ color: C.mute }}>Anúncio contra o resto</div>
+          <table className="w-full text-[12.5px]" style={{ fontVariantNumeric: "tabular-nums", minWidth: 560 }}>
+            <thead><tr>{th("")}{["Conversas", "Agendados", "Na loja", "Fecharam", "Carros", "Conv. loja", "Conv. venda", "Margem"].map((h) => th(h, 1))}</tr></thead>
+            <tbody>{linhaFunil("De anúncio", an)}{linhaFunil("Sem anúncio", org)}{linhaFunil("Total", t)}</tbody>
+          </table>
+        </div>
+        <div className="rolar overflow-x-auto rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+          <div className="px-3 pt-2.5 text-[11px] font-bold uppercase tracking-[0.06em]" style={{ color: C.mute }}>Por número de WhatsApp</div>
+          <table className="w-full text-[12.5px]" style={{ fontVariantNumeric: "tabular-nums", minWidth: 520 }}>
+            <thead><tr>{th("Número")}{["Conversas", "de anúncio", "Na loja", "Carros", "Margem"].map((h) => th(h, 1))}</tr></thead>
+            <tbody>{d.por_canal.map((x) => (
+              <tr key={x.canal} style={{ borderTop: `1px solid ${C.line}` }}>
+                <td className="px-2 py-1.5">{x.canal}</td><td className="px-2 py-1.5 text-right">{inteiro(x.conversas)}</td><td className="px-2 py-1.5 text-right">{inteiro(x.anuncio)}</td>
+                <td className="px-2 py-1.5 text-right">{inteiro(x.compareceram)} <span style={{ color: C.mute }}>({pctTxt(x.conv_loja)})</span></td>
+                <td className="px-2 py-1.5 text-right">{inteiro(x.carros)}</td><td className="px-2 py-1.5 text-right">{x.margem ? rs0(x.margem) : "—"}</td>
+              </tr>))}</tbody>
+          </table>
+        </div>
+      </div>
+      {!!d.por_conta.length && (
+        <div className="mt-3 rounded-xl p-3" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+          <div className="text-[11px] font-bold uppercase tracking-[0.06em]" style={{ color: C.mute }}>Aplicado em marketing no financeiro ({rotuloMes(de.slice(0, 7) + "-01")}{de.slice(0, 7) !== ate.slice(0, 7) ? ` a ${rotuloMes(ate.slice(0, 7) + "-01")}` : ""})</div>
+          <div className="mt-1.5 space-y-1 text-[12.5px]" style={{ fontVariantNumeric: "tabular-nums" }}>
+            {d.por_conta.map((x) => (
+              <div key={x.conta} className="flex items-center gap-2">
+                <span className="w-[200px] shrink-0 truncate">{x.conta}</span>
+                <div className="h-[8px] flex-1 rounded-full" style={{ background: C.bg }}><div className="h-full rounded-full" style={{ width: `${Math.round(((x.pago + x.previsto) / Math.max(1, d.aplicado)) * 100)}%`, background: C.roxo }} /></div>
+                <span className="w-[110px] text-right font-semibold">{rs0(x.pago)}</span>
+                <span className="w-[120px] text-right text-[11.5px]" style={{ color: AMARELO.texto }}>{x.previsto ? `+ ${rs0(x.previsto)} previsto` : ""}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <p className="mt-3 text-[11px] leading-snug" style={{ color: C.mute }}>
+        Conversa de anúncio é a que chegou no WhatsApp com o anúncio na primeira mensagem. Agendado, na loja e fechou são a mesma conta da pré-venda; carros e margem vêm dos atendimentos dessas conversas.
+        O retorno usa a margem dos carros já revendidos — carro no pátio ainda não deu margem.
+      </p>
+    </>
+  );
+}
+
+function ConexaoMeta({ d, erro, aoMudar, perfil }) {
+  const [conta, setConta] = useState(""); const [token, setToken] = useState(""); const [msg, setMsg] = useState(""); const [indo, setIndo] = useState(false);
+  const gerente = perfil && perfil.papel === "gerente";
+  const enviar = async (corpo) => {
+    setMsg(""); setIndo(true);
+    try {
+      const r = await fetchAut("/api/funil?recurso=marketing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.erro || "Não deu certo.");
+      setToken(""); setMsg(j.desconectado ? "Desconectado." : `Conectado${j.nome ? ` à conta ${j.nome}` : ""}.`); aoMudar();
+    } catch (e) { setMsg(e.message); }
+    setIndo(false);
+  };
+  const m = d && d.meta;
+  return (
+    <div className="max-w-3xl space-y-3">
+      <div className="rounded-xl p-4" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        <div className="text-[15px] font-bold">Meta Ads (Facebook e Instagram)</div>
+        {erro && <p className="mt-1 text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
+        {!d && !erro && <p className="mt-1 text-[12.5px]" style={{ color: C.mute }}>Lendo…</p>}
+        {m && m.conectado && (
+          <div className="mt-1 text-[13px]">
+            Conectada à conta <b>{m.nome || `act_${m.conta}`}</b> desde {diaBR(m.conectado_em)}.
+            {m.erro && <div className="mt-1" style={{ color: "#B42318" }}>Última leitura falhou: {m.erro}</div>}
+            {gerente && <button disabled={indo} onClick={() => { if (window.confirm("Desconectar a conta de anúncios? O token guardado é apagado.")) enviar({ token: "" }); }} className="ml-3 text-[12.5px] font-semibold" style={{ color: C.laranja }}>desconectar</button>}
+          </div>
+        )}
+        {m && !m.conectado && <p className="mt-1 text-[13px]" style={{ color: C.mute }}>Não conectada. Sem ela, o gasto vem só do financeiro e não se separa por anúncio.</p>}
+        {gerente ? (
+          <div className="mt-3 grid gap-2 lg:grid-cols-[180px_1fr_auto]">
+            <label className="block"><Rotulo>Conta de anúncios</Rotulo><input value={conta} onChange={(e) => setConta(e.target.value)} placeholder="act_1234567890" className={inputCls} style={inputSty} /></label>
+            <label className="block"><Rotulo>Token de acesso</Rotulo><input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="cole o token aqui" autoComplete="off" className={inputCls} style={inputSty} /></label>
+            <div className="flex items-end"><BotaoPrimario disabled={indo || !conta || !token} onClick={() => enviar({ conta, token })}>{indo ? "Conferindo…" : m && m.conectado ? "Trocar" : "Conectar"}</BotaoPrimario></div>
+          </div>
+        ) : <p className="mt-2 text-[12px]" style={{ color: C.mute }}>Só o gerente conecta a conta.</p>}
+        {msg && <p className="mt-2 text-[12.5px]" style={{ color: /^Conectad|^Desconect/.test(msg) ? C.verde : C.laranja }}>{msg}</p>}
+        <div className="mt-3 text-[12px] leading-relaxed" style={{ color: C.mute }}>
+          <b style={{ color: C.ink }}>Como pegar o token:</b> no Gerenciador de Negócios da Meta, Configurações do negócio → Usuários do sistema → adicione um usuário do sistema,
+          dê a ele acesso à conta de anúncios (pode ser só "ver desempenho") e gere um token com a permissão <code>ads_read</code>, sem expiração.
+          O número da conta está no Gerenciador de Anúncios (act_…). O token é conferido com a Meta antes de ser guardado, fica no banco sem leitura para ninguém e só o servidor o usa — ele nunca volta para a tela.
+        </div>
+      </div>
+      <div className="rounded-xl p-4 text-[12.5px]" style={{ background: C.paper, border: `1px solid ${C.line}`, color: C.mute }}>
+        <div className="text-[15px] font-bold" style={{ color: C.ink }}>De qual anúncio veio cada conversa</div>
+        Isso não depende da conexão: a ponte do WhatsApp já guarda o anúncio de cada conversa que começou num "clique para o WhatsApp". A conexão acrescenta o que só a Meta sabe — o gasto, as impressões, os cliques e a imagem do criativo.
+      </div>
+    </div>
+  );
+}
 
 function Shell({ perfil, tela, setTela, children, cheia }) {
   const destinos = destinosPara(perfil);
@@ -31812,6 +32124,8 @@ function App() {
       )}
       {tela === "whatsapp" && perfil && perfil.papel === "gerente" && <TelaWhatsApp />}
       {tela === "treino_ia" && perfil && perfil.papel === "gerente" && <TelaTreinoIA />}
+      {(tela === "mkt" || tela === "mkt_criativos" || tela === "mkt_conexao") && (perfil && (perfil.financeiro || perfil.papel === "gerente")) &&
+        <TelaMarketing key={tela} aba={tela === "mkt_criativos" ? "criativos" : tela === "mkt_conexao" ? "conexao" : "geral"} comp={compOuAtual} mes={mes} perfil={perfil} />}
       {ABA_FIN[tela] && <TelaFinanceiro perfil={perfil} comp={compOuAtual} mes={mes} aba={ABA_FIN[tela]}
         aoMudarMes={setComp} aoIrPara={(aba) => setTela(DESTINO_FIN[aba])} />}
       {tela === "lojistas" && podeGestao && <TelaVendaLojistas perfil={perfil} />}

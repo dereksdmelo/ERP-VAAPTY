@@ -331,6 +331,230 @@ async function preVendas(req, res, tok, de, ate) {
   });
 }
 
+/* ===================== MARKETING, CRIATIVO POR CRIATIVO =====================
+ *
+ * `GET /api/funil?recurso=marketing&de=&ate=` (0135, 08/11/2026, o Derek: "mais uma aba principal
+ * para marketing… imitar a do Camisetas Já, mas um cenário mais completo, criativo por criativo").
+ *
+ * O anúncio de "clique para o WhatsApp" chega na primeira mensagem (`wa_conversa.anuncio`, o
+ * `referral` que a ponte guarda desde 26/09): o id do anúncio, o título e o link. Cada conversa segue
+ * a MESMA corrente da pré-venda — lead, agendado, na loja, fechou, o carro e a margem —, só que
+ * separada por anúncio em vez de por número. O gasto vem do financeiro (as contas 5.x) e, quando a
+ * conta de anúncios está conectada, da própria Meta, anúncio por anúncio (gasto, impressões, cliques,
+ * conversas iniciadas e a miniatura do criativo). O token da Meta fica no banco e só o servidor o lê.
+ */
+const GRAPH = "https://graph.facebook.com/v21.0";
+async function metaDoPeriodo(conta, token, de, ate) {
+  const act = String(conta).replace(/^act_/, "");
+  const tr = encodeURIComponent(JSON.stringify({ since: de, until: ate }));
+  const campos = "ad_id,ad_name,adset_name,campaign_name,spend,impressions,reach,clicks,inline_link_clicks,actions";
+  const linhas = [];
+  let url = `${GRAPH}/act_${act}/insights?level=ad&fields=${campos}&time_range=${tr}&limit=500&access_token=${encodeURIComponent(token)}`;
+  for (let i = 0; url && i < 10; i++) {
+    const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error((j.error && j.error.message) || `A Meta respondeu ${r.status}.`);
+    (j.data || []).forEach((x) => linhas.push(x));
+    url = j.paging && j.paging.next;
+  }
+  // O dia a dia do gasto, para o gráfico.
+  let porDia = [];
+  try {
+    const r = await fetch(`${GRAPH}/act_${act}/insights?fields=spend&time_increment=1&time_range=${tr}&limit=100&access_token=${encodeURIComponent(token)}`, { signal: AbortSignal.timeout(15000) });
+    const j = await r.json();
+    porDia = (j.data || []).map((x) => ({ dia: x.date_start, gasto: Number(x.spend) || 0 }));
+  } catch (e) { porDia = []; }
+  // As miniaturas e os textos de cada criativo, 50 por vez.
+  const ids = linhas.map((x) => x.ad_id).filter(Boolean);
+  const criativos = {};
+  for (let i = 0; i < ids.length; i += 50) {
+    try {
+      const r = await fetch(`${GRAPH}/?ids=${ids.slice(i, i + 50).join(",")}&fields=name,effective_status,creative{thumbnail_url,image_url,title,body}&access_token=${encodeURIComponent(token)}`, { signal: AbortSignal.timeout(15000) });
+      const j = await r.json();
+      Object.keys(j || {}).forEach((k) => { criativos[k] = j[k]; });
+    } catch (e) { /* sem miniatura não é erro */ }
+  }
+  const conversas = (acts) => {
+    const a = (acts || []).find((x) => /messaging_conversation_started/.test(x.action_type));
+    return a ? Number(a.value) || 0 : 0;
+  };
+  return {
+    porDia,
+    anuncios: linhas.map((x) => {
+      const c = criativos[x.ad_id] || {}; const cr = c.creative || {};
+      return { id: x.ad_id, nome: x.ad_name, conjunto: x.adset_name, campanha: x.campaign_name, situacao: c.effective_status || null,
+        gasto: Number(x.spend) || 0, impressoes: Number(x.impressions) || 0, alcance: Number(x.reach) || 0,
+        cliques: Number(x.inline_link_clicks || x.clicks) || 0, conversas_meta: conversas(x.actions),
+        miniatura: cr.thumbnail_url || cr.image_url || null, titulo: cr.title || null, texto: cr.body || null };
+    }),
+  };
+}
+
+async function marketing(req, res, tok, de, ate) {
+  const puxar = async (url, opt) => {
+    const r = await fetch(url, { ...(opt || {}), headers: { apikey: ANON, Authorization: tok, ...((opt && opt.headers) || {}) } });
+    if (!r.ok) { const e = new Error("Não consegui ler o marketing."); e.status = r.status === 401 ? 401 : 502; throw e; }
+    return JSON.parse((await r.text()) || "[]");
+  };
+  const rpc = (fn, corpo) => puxar(`${URL_BASE}/rest/v1/rpc/${fn}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo || {}) });
+
+  // Conectar/desconectar a conta de anúncios (só o gerente; quem confere é a função do banco).
+  if (req.method === "POST") {
+    let c = req.body;
+    if (c && typeof Buffer !== "undefined" && Buffer.isBuffer(c)) c = c.toString("utf8");
+    if (typeof c === "string") { try { c = JSON.parse(c); } catch (e) { c = {}; } }
+    c = c || {};
+    const conta = String(c.conta || "").replace(/[^0-9]/g, "");
+    const token = String(c.token || "").trim();
+    if (token && !conta) return res.status(400).json({ erro: "Digite o número da conta de anúncios (act_…)." });
+    if (token) {
+      // Confere antes de guardar: token errado guardado é a tela inteira em erro depois.
+      const r = await fetch(`${GRAPH}/act_${conta}?fields=name,currency,account_status&access_token=${encodeURIComponent(token)}`, { signal: AbortSignal.timeout(15000) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) return res.status(400).json({ erro: `A Meta recusou: ${(j.error && j.error.message) || r.status}` });
+      try { await rpc("mkt_conectar", { p_plataforma: "meta", p_conta: conta, p_token: token, p_nome: j.name || null }); }
+      catch (e) { return res.status(403).json({ erro: "Só o gerente conecta a conta de anúncios." }); }
+      return res.status(200).json({ ok: true, nome: j.name || null });
+    }
+    try { await rpc("mkt_conectar", { p_plataforma: "meta", p_conta: "", p_token: "", p_nome: null }); }
+    catch (e) { return res.status(403).json({ erro: "Só o gerente desconecta a conta de anúncios." }); }
+    return res.status(200).json({ ok: true, desconectado: true });
+  }
+
+  let estado = [];
+  try { estado = await rpc("mkt_estado"); }
+  catch (e) { return res.status(403).json({ erro: "O marketing é do gerente e do financeiro." }); }
+
+  const compDe = de.slice(0, 7) + "-01", compAte = ate.slice(0, 7) + "-01";
+  const [convs, leads, ats, gastos] = await Promise.all([
+    puxar(`${URL_BASE}/rest/v1/wa_conversa?select=telefone,lead_id,primeira_em,anuncio,wa_canal!inner(slug,nome,comercial)` +
+          `&wa_canal.comercial=is.true&grupo=is.false&primeira_em=gte.${de}&primeira_em=lte.${ate}T23:59:59&limit=${TETO * 3}`).catch(() => []),
+    puxar(`${URL_BASE}/rest/v1/lead?select=id,telefone,status,agendado_para,atendimento_id,criado_em&order=criado_em.desc&limit=${TETO * 2}`).catch(() => []),
+    puxar(`${URL_BASE}/rest/v1/atendimento?select=id,cliente_telefone,status,data&data=gte.${de}&limit=${TETO}`).catch(() => []),
+    // O que foi APLICADO em marketing, pelas contas 5.x do plano de contas.
+    puxar(`${URL_BASE}/rest/v1/fin_lancamento?select=debito,credito,situacao,competencia,fin_categoria!fin_lancamento_categoria_id_fkey!inner(codigo,nome)` +
+          `&fin_categoria.codigo=like.5.*&situacao=in.(efetivado,aberto)&competencia=gte.${compDe}&competencia=lte.${compAte}&limit=5000`).catch(() => null),
+  ]);
+
+  let porAtendimento = {};
+  const idsAt = ats.map((a) => a.id).filter(Boolean);
+  for (let i = 0; i < idsAt.length; i += 150) {
+    try {
+      const car = await puxar(`${URL_BASE}/rest/v1/estoque?select=atendimento_id,valor_compra,valor_venda,situacao,` +
+        `estoque_custo(tipo,previsto,realizado)&atendimento_id=in.(${idsAt.slice(i, i + 150).join(",")})&limit=${TETO}`);
+      car.forEach((e) => {
+        const x = porAtendimento[e.atendimento_id] || (porAtendimento[e.atendimento_id] = { carros: 0, margem: 0 });
+        x.carros += 1;
+        if (e.situacao === "vendido") x.margem += liquidaDe(e);
+      });
+    } catch (e) { /* a perna do carro é a mais frágil; sem ela a corrente vai até "na loja" */ }
+  }
+  const ORDEM = { perdido: 0, novo: 1, em_contato: 2, nao_compareceu: 3, agendado: 4, confirmado: 5, compareceu: 6 };
+  const porFone = {}, porId = {};
+  leads.forEach((l) => {
+    porId[l.id] = l;
+    const k = chaveFone(l.telefone); if (!k) return;
+    const at = porFone[k];
+    if (!at || (ORDEM[l.status] || 0) >= (ORDEM[at.status] || 0)) porFone[k] = l;
+  });
+  const naLoja = {}; ats.forEach((a) => { const k = chaveFone(a.cliente_telefone); if (k) naLoja[k] = a; });
+
+  const vazio = () => ({ conversas: 0, agendados: 0, compareceram: 0, fecharam: 0, carros: 0, margem: 0 });
+  const por = {}, dias = {};
+  const somar = (x, c) => {
+    x.conversas += 1;
+    const k = chaveFone(c.telefone);
+    const l = (c.lead_id && porId[c.lead_id]) || porFone[k];
+    const at = naLoja[k] || null;
+    const sentou = !!(at || (l && (l.status === "compareceu" || l.atendimento_id)));
+    if (sentou) x.compareceram += 1;
+    if ((l && l.agendado_para) || sentou) x.agendados += 1;
+    if (at && at.status === "fechado") x.fecharam += 1;
+    const atId = (at && at.id) || (l && l.atendimento_id) || null;
+    const carro = atId ? porAtendimento[atId] : null;
+    if (carro) { x.carros += carro.carros; x.margem += carro.margem; }
+  };
+  const total = vazio(), anuncioT = vazio(), organicoT = vazio();
+  const porCanal = {};
+  convs.forEach((c) => {
+    const a = c.anuncio && typeof c.anuncio === "object" ? c.anuncio : null;
+    const ca = Array.isArray(c.wa_canal) ? c.wa_canal[0] : c.wa_canal;
+    const dia = String(c.primeira_em || "").slice(0, 10);
+    const d = dias[dia] || (dias[dia] = { dia, anuncio: 0, organico: 0 });
+    somar(total, c);
+    const cn = (ca && ca.nome) || "sem número";
+    const xc = porCanal[cn] || (porCanal[cn] = { canal: cn, ...vazio(), anuncio: 0 });
+    somar(xc, c);
+    if (!a) { d.organico += 1; somar(organicoT, c); return; }
+    d.anuncio += 1; xc.anuncio += 1; somar(anuncioT, c);
+    const chave = a.source_id ? String(a.source_id) : `t:${String(a.headline || a.body || "sem título").slice(0, 80)}`;
+    const x = por[chave] || (por[chave] = { chave, id: a.source_id || null, titulo: a.headline || null, texto: a.body || null,
+      url: a.source_url || null, canais: {}, primeira: c.primeira_em, ultima: c.primeira_em, ...vazio() });
+    x.canais[cn] = (x.canais[cn] || 0) + 1;
+    if (c.primeira_em < x.primeira) x.primeira = c.primeira_em;
+    if (c.primeira_em > x.ultima) x.ultima = c.primeira_em;
+    if (!x.titulo && a.headline) x.titulo = a.headline;
+    somar(x, c);
+  });
+
+  // Meta, quando conectada.
+  let meta = null, metaErro = null;
+  const con = (estado || []).find((x) => x.plataforma === "meta");
+  if (con) {
+    try {
+      const t = (await rpc("mkt_token", { p_plataforma: "meta" }))[0];
+      if (t && t.token) meta = await metaDoPeriodo(t.conta, t.token, de, ate);
+    } catch (e) { metaErro = e.message || "Não consegui ler a Meta."; }
+  }
+  if (meta) {
+    meta.anuncios.forEach((m) => {
+      const x = por[m.id] || (por[m.id] = { chave: m.id, id: m.id, titulo: null, texto: null, url: null, canais: {}, primeira: null, ultima: null, ...vazio() });
+      Object.assign(x, { nome: m.nome, campanha: m.campanha, conjunto: m.conjunto, situacao: m.situacao, gasto: m.gasto,
+        impressoes: m.impressoes, alcance: m.alcance, cliques: m.cliques, conversas_meta: m.conversas_meta, miniatura: m.miniatura });
+      if (!x.titulo) x.titulo = m.titulo || m.nome; if (!x.texto) x.texto = m.texto;
+    });
+  }
+
+  const pct = (a, b) => (b ? Math.round((a / b) * 1000) / 10 : null);
+  const criativos = Object.values(por).map((x) => ({
+    ...x, canais: Object.keys(x.canais).map((k) => ({ canal: k, conversas: x.canais[k] })),
+    conv_agenda: pct(x.agendados, x.conversas), conv_loja: pct(x.compareceram, x.conversas), conv_venda: pct(x.fecharam, x.compareceram),
+    custo_conversa: x.gasto && x.conversas ? x.gasto / x.conversas : null,
+    custo_visita: x.gasto && x.compareceram ? x.gasto / x.compareceram : null,
+    custo_carro: x.gasto && x.carros ? x.gasto / x.carros : null,
+    retorno: x.gasto ? x.margem / x.gasto : null,
+  })).sort((a, b) => (b.gasto || 0) - (a.gasto || 0) || b.conversas - a.conversas);
+
+  // Aplicado no financeiro, por conta.
+  const porConta = {}; let aplicado = null;
+  if (Array.isArray(gastos)) {
+    aplicado = 0;
+    gastos.forEach((g) => {
+      const v = (Number(g.debito) || 0) - (Number(g.credito) || 0);
+      const cat = g.fin_categoria || {}; const k = `${cat.codigo || ""} ${cat.nome || ""}`.trim();
+      const p = porConta[k] || (porConta[k] = { conta: k, pago: 0, previsto: 0 });
+      if (g.situacao === "efetivado") p.pago += v; else p.previsto += v;
+      aplicado += v;
+    });
+  }
+  const gastoMeta = meta ? meta.anuncios.reduce((t, x) => t + x.gasto, 0) : null;
+  const investimento = gastoMeta != null ? gastoMeta : aplicado;
+  const kpi = (t) => ({ ...t,
+    conv_agenda: pct(t.agendados, t.conversas), conv_loja: pct(t.compareceram, t.conversas), conv_venda: pct(t.fecharam, t.compareceram) });
+  return res.status(200).json({
+    de, ate, coleta_desde: "2026-10-01",
+    investimento, investimento_fonte: gastoMeta != null ? "meta" : aplicado != null ? "financeiro" : null,
+    aplicado, gasto_meta: gastoMeta, por_conta: Object.values(porConta).sort((a, b) => b.pago + b.previsto - a.pago - a.previsto),
+    total: kpi(total), anuncio: kpi(anuncioT), organico: kpi(organicoT),
+    por_canal: Object.values(porCanal).sort((a, b) => b.conversas - a.conversas).map(kpi),
+    por_dia: Object.values(dias).sort((a, b) => (a.dia < b.dia ? -1 : 1)),
+    gasto_por_dia: meta ? meta.porDia : [],
+    criativos,
+    meta: con ? { conectado: true, conta: con.conta, nome: con.nome, conectado_em: con.conectado_em, erro: metaErro } : { conectado: false },
+    truncado: convs.length >= TETO * 3,
+  });
+}
+
 module.exports = async function handler(req, res) {
   if (!URL_BASE || !ANON) {
     return res.status(500).json({ erro: "SUPABASE_URL ou SUPABASE_ANON_KEY não configurados." });
@@ -342,6 +566,10 @@ module.exports = async function handler(req, res) {
   const de = dia(req.query.de) || `${hoje.slice(0, 8)}01`;
   const ate = dia(req.query.ate) || hoje;
 
+  if (String(req.query.recurso || "") === "marketing") {
+    try { return await marketing(req, res, tok, de, ate); }
+    catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Falhou." }); }
+  }
   if (String(req.query.recurso || "") === "prevendas") {
     try { return await preVendas(req, res, tok, de, ate); }
     catch (e) { return res.status(e.status || 502).json({ erro: e.message || "Falhou." }); }
