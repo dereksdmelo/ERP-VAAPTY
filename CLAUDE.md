@@ -6439,8 +6439,9 @@ depois de três descobertas que valem para quem mexer aqui:
   "error code: 520" — até sem certificado. A rota `/nfse` do `servidor.mjs` faz o POST em Node (`viaPonte`, em
   `api/financeiro.js`), com a chave e o certificado que o ERP manda na chamada, sem gravar. O binding
   `NFSE_MTLS` ficou como reserva. Mexeu na ponte: empacotar, publicar e reiniciar o número do adm.
-- **O servidor já roda o leiaute da reforma (SefinNacional 1.6)**: exige `finNFSe` (0, regular) logo depois do
-  `tpEmit`, e o XSD 1.01 que serviu de base não tinha. O "Complemento" da rejeição diz qual elemento falhou —
+- **Os dois servidores estão em leiautes diferentes**: a produção restrita (SefinNacional 1.6) EXIGE `finNFSe`
+  (0, regular) logo depois do `tpEmit`; a produção ainda o RECUSA (1ª nota de produção, 09/11/2026). Ele só vai
+  com tpAmb = 2 — quando a produção migrar, a recusa dela vai pedir o campo, e é tirar a condição. O "Complemento" da rejeição diz qual elemento falhou —
   é guardado na nota; **E1235 sozinho não diz nada**. `?recurso=nfse&acao=diagnostico` testa a conexão.
 - **`pTotTribSN` vai de 0 a 99,99**, e todo texto vai em Latin-1 (travessão e aspas curvas viram simples).
 - **O PDF (DANFSe) é nosso**: a API da Receita que gerava o PDF foi suspensa em 03/08/2026 (NT 008 v1.02).
