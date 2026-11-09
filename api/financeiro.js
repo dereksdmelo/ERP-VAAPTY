@@ -3818,6 +3818,28 @@ async function nfse(req, res, tok) {
   const acao = String(req.query.acao || "");
   const emp = async () => um(await supa(`${base("empresa")}?select=*&id=eq.1`, { headers: cab(tok) }));
   const certificado = () => !!(process.env.NFSE_KEY_PEM && process.env.NFSE_CERT_PEM && req.nfse);
+  /* TESTE DE CONEXÃO COM A RECEITA (09/11/2026, o primeiro envio voltou "error
+   * code: 520" — a conexão caiu sem resposta). Sem nota nenhuma: um POST vazio,
+   * sem e com o certificado, para separar bloqueio de rede de recusa do
+   * certificado. A Receita responde 400/403 com motivo quando a conexão fecha. */
+  if (req.method === "GET" && acao === "diagnostico") {
+    const N = require("../regras/nfse.js");
+    const teste = async (rot, f, url) => {
+      const t0 = Date.now();
+      try {
+        const r = await f(url, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: "{}", signal: AbortSignal.timeout(20000) });
+        const t = await r.text();
+        return { rot, url, status: r.status, ms: Date.now() - t0, corpo: t.slice(0, 300), cf: r.headers.get("cf-ray") || null, server: r.headers.get("server") || null };
+      } catch (e) { return { rot, url, erro: String((e && e.message) || e).slice(0, 300), ms: Date.now() - t0 }; }
+    };
+    const urls = [`${N.BASE.restrita}/nfse`, `${N.BASE.restrita.replace("/API/", "/")}/nfse`];
+    const out = [];
+    for (const u of urls) {
+      out.push(await teste("sem certificado", (a, b) => fetch(a, b), u));
+      if (req.nfse) out.push(await teste("com certificado", (a, b) => req.nfse.fetch(a, b), u));
+    }
+    return res.status(200).json({ certificado: certificado(), testes: out });
+  }
   if (req.method === "GET" && acao === "xml") {
     const id = idOuNulo(req.query.id);
     const n = id && um(await supa(`${base("nfse")}?select=dps_xml,nfse_xml&id=eq.${id}`, { headers: cab(tok) }));
