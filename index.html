@@ -4999,7 +4999,58 @@ function AnotacoesDoAtendimento({ atendimentoId, iniciais }) {
   );
 }
 
-function ResumoAtendimento({ f, cliente, statusAtual, voltaEm, fotos, irParaCampo, irPara, atendimentoId, anotacoesIniciais }) {
+/* O GESTOR DENTRO DO ATENDIMENTO (08/11/2026, o Derek: "tem como o gestor ter a opção de fazer a
+ * revisão direto por aqui? e também ouvir o áudio da conversa do computador dele? e conversar no chat
+ * daquela negociação com o negociador?"). Só para o gerente, no painel da esquerda, abaixo do cliente:
+ * o resumo por IA, o "ouvir a mesa" (o mesmo da 0052 — o som vai do celular direto para cá), o retorno
+ * da revisão (o mesmo da 0035) e o atalho para os recados (o chat que o negociador já vê no ✉). */
+function GestorNoAtendimento({ atendimentoId, abrirChat }) {
+  const [viva, setViva] = useState(null);
+  const [verTexto, setVerTexto] = useState(false);
+  const [rev, setRev] = useState(null); const [texto, setTexto] = useState(""); const [msg, setMsg] = useState(""); const [indo, setIndo] = useState(false);
+  useEffect(() => {
+    let vivo = true;
+    const ler = () => { if (document.visibilityState === "visible") lerNegociacaoViva(atendimentoId).then((d) => { if (vivo) setViva((d && d.viva) || false); }).catch(() => { if (vivo) setViva((x) => x || false); }); };
+    ler(); const t = setInterval(ler, 8000);
+    lerRevisaoDoAtendimento(atendimentoId).then((r) => { if (!vivo) return; setRev(r); if (r && r.feedback) setTexto(r.feedback); });
+    return () => { vivo = false; clearInterval(t); };
+  }, [atendimentoId]);
+  const enviar = async () => {
+    if (!texto.trim()) return;
+    setIndo(true); setMsg("");
+    try { const r = await salvarRevisao(atendimentoId, texto.trim()); setRev(r); setMsg("Retorno enviado ao negociador."); }
+    catch (e) { setMsg(e.message); }
+    setIndo(false);
+  };
+  const titulo = (t) => <div className="border-b pb-0.5 text-[10.5px] font-bold uppercase tracking-[0.1em]" style={{ color: C.roxo, borderColor: C.line }}>{t}</div>;
+  return (
+    <div className="mt-3 space-y-3 rounded-lg p-2" style={{ background: "#F7F3FB", border: `1px solid ${C.roxoFraco}` }}>
+      <div className="text-[10px] font-bold uppercase tracking-[0.12em]" style={{ color: C.roxo }}>Gestor</div>
+      <div>
+        {titulo("Resumo da negociação (IA)")}
+        {viva === null ? <p className="mt-1 text-[11px]" style={{ color: C.mute }}>Lendo…</p>
+          : !viva ? <p className="mt-1 text-[11px]" style={{ color: C.mute }}>Este atendimento ainda não mandou nada do aparelho do negociador.</p>
+          : <div className="mt-1 text-[12px]"><ConversaResumida viva={viva} verTexto={verTexto} setVerTexto={setVerTexto} /></div>}
+      </div>
+      {viva ? <div>{titulo("Ouvir a mesa")}<div className="mt-1"><OuvirAMesa viva={viva} /></div></div> : null}
+      <div>
+        {titulo("Revisão")}
+        <textarea value={texto} onChange={(e) => setTexto(e.target.value)} rows={4} placeholder="O retorno para o negociador sobre este atendimento"
+          className="mt-1 w-full rounded border px-1.5 py-1 text-[12px] leading-snug outline-none" style={inputSty} />
+        <div className="mt-1 flex items-center gap-2">
+          <button onClick={enviar} disabled={indo || !texto.trim()} className="rounded-md px-2.5 py-1 text-[11.5px] font-semibold text-white" style={{ background: texto.trim() ? C.roxo : C.mute }}>
+            {indo ? "Enviando…" : rev ? "Atualizar retorno" : "Enviar retorno"}</button>
+          {rev && <span className="text-[10.5px]" style={{ color: rev.lida_em ? C.verde : C.mute }}>{rev.lida_em ? "lido pelo negociador" : "ainda não lido"}</span>}
+        </div>
+        {msg && <p className="mt-1 text-[11px]" style={{ color: /enviado/.test(msg) ? C.verde : C.laranja }}>{msg}</p>}
+      </div>
+      <button onClick={abrirChat} className="w-full rounded-md border px-2 py-1.5 text-[12px] font-semibold" style={{ borderColor: C.roxo, color: C.roxo, background: C.paper }}>
+        ✉ Conversar com o negociador</button>
+    </div>
+  );
+}
+
+function ResumoAtendimento({ f, cliente, statusAtual, voltaEm, fotos, irParaCampo, irPara, atendimentoId, anotacoesIniciais, gestor, abrirChat }) {
   const v = (x) => (x === 0 || (x && String(x).trim()) ? x : null);
   const din = (x) => (v(x) != null && numeroBR(x) ? brl(numeroBR(x)) : null);
   const ult = (f.rodadas || []).length ? f.rodadas[f.rodadas.length - 1] : null;
@@ -5077,6 +5128,7 @@ function ResumoAtendimento({ f, cliente, statusAtual, voltaEm, fotos, irParaCamp
               );
             })}
           </dl>
+          {titulo === "Cliente" && gestor && atendimentoId && <GestorNoAtendimento atendimentoId={atendimentoId} abrirChat={abrirChat} />}
         </div>
       ))}
     </aside>
@@ -6340,7 +6392,8 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   return (
     <div id="vp-atendimento-corpo" className="min-h-screen w-full pb-16 lg:pl-[264px]" style={{ background: C.bg, fontFamily: F.body, color: C.ink }}>
       <ResumoAtendimento f={f} cliente={cliente} statusAtual={statusAtual} voltaEm={voltaEm} fotos={enviadas.length}
-        irParaCampo={irParaCampo} irPara={irPara} atendimentoId={atendimento && atendimento.id} anotacoesIniciais={atendimento && atendimento.observacoes} />
+        irParaCampo={irParaCampo} irPara={irPara} atendimentoId={atendimento && atendimento.id} anotacoesIniciais={atendimento && atendimento.observacoes}
+        gestor={!!(perfil && perfil.papel === "gerente")} abrirChat={() => { setChatAberto(true); setRecados(0); }} />
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Public+Sans:wght@400;500;600&family=Roboto+Mono:wght@500;700&display=swap');
         input:focus,textarea:focus,select:focus{border-color:${C.roxo}!important;box-shadow:0 0 0 3px ${C.roxoFraco}}
         .rolar::-webkit-scrollbar{height:0}
@@ -8116,7 +8169,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               onClick={() => setChatAberto(false)}>
               <div className="rounded-t-2xl p-4" style={{ background: C.paper }} onClick={(e) => e.stopPropagation()}>
                 <div className="mb-2 flex items-baseline justify-between">
-                  <span className="text-[13px] font-semibold">Recados do gestor</span>
+                  <span className="text-[13px] font-semibold">{perfil && perfil.papel === "gerente" ? "Conversa com o negociador" : "Recados do gestor"}</span>
                   <button onClick={() => setChatAberto(false)} className="text-[12px]" style={{ color: C.mute }}>fechar</button>
                 </div>
                 <ChatAtendimento atendimentoId={atendimento.id} compacto />
