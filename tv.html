@@ -297,6 +297,14 @@
       return "<div class='ag e-" + e + "' style='font-size:" + fonte + "vh'>" + (ROT[e] ? "<span class='tag'>" + ROT[e] + "</span>" : "") +
         "<b>" + esc(x.hora) + "</b>" + esc(x.carro || "carro a confirmar") + quem + "</div>";
     }).join("") : "<div style='color:var(--mudo)'>Nenhum agendamento.</div>";
+    // Encolhe até caber na caixa (e passa a três colunas se precisar): todos à vista, nenhum cortado.
+    var caixa = $("agendaCaixa"), itens = lista.querySelectorAll(".ag"), f = fonte, c = cols;
+    var aplica = function () { lista.style.gridTemplateColumns = "repeat(" + c + ", 1fr)"; for (var k = 0; k < itens.length; k++) itens[k].style.fontSize = f.toFixed(2) + "vh"; };
+    for (var volta = 0; volta < 40 && caixa.scrollHeight > caixa.clientHeight + 1; volta++) {
+      if (f > 1.15 || c >= 3) f -= 0.08; else { c = 3; f = Math.min(fonte, 1.6); }
+      if (f < 0.85) break;
+      aplica();
+    }
   }
   function lerAgenda() {
     if (cfg.agenda !== true) { $("agendaCaixa").style.display = "none"; $("direita").className = "direita so"; return; }
