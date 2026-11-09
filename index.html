@@ -2580,9 +2580,12 @@ const Bloco = ({ titulo, sub, children }) => (
     {/* O título deixou de ser roxo: roxo agora é só da ação principal.
         Antes ele competia com o botão que a pessoa tem que apertar.
         Mais enxuto desde 24/10/2026, com o cabeçalho das páginas. */}
-    <h3 className="text-[15px] leading-tight" style={{ color: C.ink, fontFamily: F.disp, fontWeight: 700 }}>{titulo}</h3>
-    {sub && <p className="mt-0.5 text-[12.5px] leading-snug" style={{ color: "#57515F" }}>{sub}</p>}
-    <div className="mt-2">{children}</div>
+    {/* O subtítulo na MESMA linha do título (08/11/2026, o Derek: "mais dentro do bloco, ocupando menos espaço"). */}
+    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+      <h3 className="text-[14.5px] leading-tight" style={{ color: C.ink, fontFamily: F.disp, fontWeight: 700 }}>{titulo}</h3>
+      {sub && <p className="min-w-0 text-[11.5px] leading-snug" style={{ color: "#6B6475" }}>{sub}</p>}
+    </div>
+    <div className="mt-1.5">{children}</div>
   </section>
 );
 const Pendente = ({ children }) => (
@@ -6537,8 +6540,8 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         {/* ---------- A ---------- */}
         {cabecaEtapa("A")}
         {(
-          <Bloco titulo="Chegada" sub="“Cliente não aguardou na loja” é a perda mais repetida no CRM — combine o tempo agora.">
-            <div className="grid items-end gap-2 sm:grid-cols-[1fr_170px] lg:grid-cols-[1fr_170px_1.3fr]">
+          <Bloco titulo="Chegada" sub="combine o tempo agora — “não aguardou” é a perda que mais se repete">
+            <div className="grid items-end gap-2 sm:grid-cols-[1fr_170px] lg:grid-cols-[1fr_170px_1.3fr_auto]">
               <Campo label="Negociador"><input className={inputCls} style={inputSty} value={f.negociador} onChange={(e) => set("negociador", e.target.value)}
                 onBlur={(e) => gravarNegociador(e.target.value)} placeholder="Seu nome" /></Campo>
               {negLista && f.negociador && !mesmoNome(negLista, f.negociador) && (
@@ -6563,17 +6566,9 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 </div>
               </Campo>
               <Toggle label="Combinei o tempo do processo" nota="“A avaliação leva uns 40 minutos, tudo bem?”" valor={f.tempoCombinado} onChange={(v) => set("tempoCombinado", v)} />
+              {/* A autorização da escuta é pedida aqui, no primeiro contato, e vale para o atendimento inteiro. */}
+              <EscutaControle escuta={escuta} f={f} setVarios={setVarios} compacto />
             </div>
-          </Bloco>
-        )}
-
-        {/* A autorização é pedida aqui, no primeiro contato, e vale
-            para o atendimento inteiro. Pedir no meio da negociação
-            seria pedir na pior hora possível. */}
-        {(
-          <Bloco titulo="Escutar a conversa"
-            sub="Peça agora, no começo. Ligada, ela segue o atendimento inteiro; os ganchos aparecem na Negociação.">
-            <EscutaControle escuta={escuta} f={f} setVarios={setVarios} />
           </Bloco>
         )}
 
@@ -8492,7 +8487,7 @@ const CONSENTIMENTO_ESCUTA =
 const CONSENTIMENTO_VERSAO = "2026-09-16";
 
 /** O aceite e o microfone. Fica na Abordagem: é onde se pede. */
-function EscutaControle({ escuta, f, setVarios }) {
+function EscutaControle({ escuta, f, setVarios, compacto }) {
   const { Rec, ouvindo, erro, ligar, desligar } = escuta;
   /* UM TOQUE SÓ: "Iniciar escuta (cliente autorizou)" (o Derek, em
    * 24/10/2026). A ordem da decisão 17 continua: o aceite é GRAVADO
@@ -8506,6 +8501,33 @@ function EscutaControle({ escuta, f, setVarios }) {
     ligar(true);
   };
   const retirar = () => { desligar(); setVarios({ escutaOk: false, escutaEm: null, escutaVersao: "" }); };
+  const [lendo, setLendo] = useState(false);
+  /* COMPACTO (08/11/2026, o Derek: "o botão escutar pode ficar ao lado dos itens acima… com o mínimo de
+     texto"). Um botão na linha da chegada. A ORDEM do parecer não muda: sem aceite, o toque abre o
+     texto para ser lido ao cliente, e só o "cliente autorizou" grava o aceite e liga o microfone. */
+  if (compacto) return (
+    <div className="relative">
+      {Rec ? (
+        <button onClick={ouvindo ? desligar : f.escutaOk ? aceitarELigar : () => setLendo((x) => !x)}
+          className="h-[38px] w-full whitespace-nowrap rounded-md px-3 text-[12.5px] font-semibold"
+          style={{ background: ouvindo ? C.laranja : C.roxo, color: "#fff" }}
+          title={f.escutaOk && f.escutaEm ? `autorizado em ${new Date(f.escutaEm).toLocaleString("pt-BR")}` : "Escutar a conversa (pede a autorização do cliente)"}>
+          {ouvindo ? "● Ouvindo · parar" : f.escutaOk ? "🎙 Retomar escuta" : "🎙 Escutar"}
+        </button>
+      ) : <span className="text-[11px]" style={{ color: C.laranja }}>sem reconhecimento de voz neste navegador</span>}
+      {f.escutaOk && !ouvindo && <button onClick={retirar} className="mt-0.5 block text-[10.5px] underline" style={{ color: C.mute }}>cliente retirou</button>}
+      {lendo && !f.escutaOk && (
+        <div className="absolute right-0 top-[42px] z-30 w-[340px] rounded-lg p-3 text-[12px] leading-snug shadow-lg" style={{ background: C.paper, border: `1px solid ${C.roxo}` }}>
+          <p style={{ color: C.ink }}>{CONSENTIMENTO_ESCUTA}</p>
+          <div className="mt-2 flex items-center gap-2">
+            <button onClick={() => { setLendo(false); aceitarELigar(); }} className="rounded-md px-3 py-1.5 text-[12px] font-semibold text-white" style={{ background: C.roxo }}>Cliente autorizou — iniciar</button>
+            <button onClick={() => setLendo(false)} className="text-[12px]" style={{ color: C.mute }}>cancelar</button>
+          </div>
+        </div>
+      )}
+      {erro && <p className="mt-1 text-[11px]" style={{ color: C.laranja }}>{erro}</p>}
+    </div>
+  );
   return (
     <div>
       <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
