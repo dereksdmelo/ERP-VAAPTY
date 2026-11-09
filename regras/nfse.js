@@ -23,8 +23,14 @@ const BASE = {
 
 const so = (v) => String(v == null ? "" : v).replace(/\D/g, "");
 // Escapa como a C14N escreve: &, < e > no texto; aspas também nos atributos.
-const esc = (v) => String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
-  .replace(/\r/g, "&#xD;").trim();
+/* SÓ LATIN-1 (09/11/2026): o TSString do XSD aceita do "!" ao "ÿ"; travessão, aspas curvas e emoji
+ * derrubavam a nota inteira (E1235). Vira o equivalente simples; o resto fora da faixa sai.
+ * E as aspas NÃO se escapam no texto: o texto já é a forma canônica (exc-C14N só escapa & < > e \r),
+ * e um &quot; aqui mudaria o digest da assinatura. */
+const latin1 = (t) => t.replace(/[\u2012-\u2015\u2212]/g, "-").replace(/[\u2018\u2019\u201A\u2032]/g, "'").replace(/[\u201C\u201D\u201E\u2033]/g, '"')
+  .replace(/\u2026/g, "...").replace(/[\u2022\u25CF]/g, "-").replace(/\u00A0/g, " ").replace(/[^\u0000-\u00FF]/g, "");
+const esc = (v) => latin1(String(v == null ? "" : v)).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  .replace(/\r/g, "&#xD;").replace(/[ \t]{2,}/g, " ").trim();
 const tag = (nome, valor) => (valor == null || valor === "" ? "" : `<${nome}>${esc(valor)}</${nome}>`);
 const dinheiro = (v) => (Math.round(Number(v) * 100) / 100).toFixed(2);
 
