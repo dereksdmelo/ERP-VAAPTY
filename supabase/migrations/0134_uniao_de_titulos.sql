@@ -30,4 +30,7 @@ create index if not exists fin_lancamento_uniao_idx on fin_lancamento (uniao_id)
 -- dinheiro sairia duas vezes (no carro e na categoria). A categoria de antes fica guardada para
 -- "tirar do carro" devolver.
 alter table fin_lancamento add column if not exists atribuido_ao_carro boolean not null default false;
-alter table fin_lancamento add column if not exists categoria_antes_id uuid references fin_categoria(id) on delete set null;
+-- SEM chave estrangeira, de propósito: uma segunda FK de fin_lancamento para fin_categoria deixa
+-- ambíguo todo `fin_categoria(...)` embutido do PostgREST, e o financeiro inteiro parou por uns
+-- minutos em 08/11/2026 até ela sair.
+alter table fin_lancamento add column if not exists categoria_antes_id uuid;
