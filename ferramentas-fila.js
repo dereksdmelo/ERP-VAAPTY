@@ -101,5 +101,24 @@ ok(F.horarioAberto(null, Date.parse("2026-11-07T17:00:00Z")) === false, "sábado
   ok(st2.forcado === null, "a correção acaba quando ele pega o cliente");
 }
 
+// 12. O TRANSBORDO (0144): só pega quando os outros estão todos atendendo.
+{
+  const pes3 = { A: { presente: true, atendendo: 0 }, B: { presente: true, atendendo: 0 }, T: { presente: true, atendendo: 0 } };
+  const e3 = { circulo: ["T", "A", "B"], pessoas: pes3, ponteiro: "T", creditos: {}, transbordo: ["T"], aberto: true, agora: 0 };
+  const v = F.escolher(e3);
+  ok(v.quem === "A" && !v.pulos.length, "o do transbordo é passado sem perder nem dever");
+  const v2 = F.escolher(F.aplicar(e3, v));
+  ok(v2.quem === "B", "com um livre fora do transbordo, ainda não é dele");
+  const v3 = F.escolher(F.aplicar(F.aplicar(e3, v), v2));
+  ok(v3.quem === "T", "todos os outros atendendo: é a vez do transbordo");
+  const cfg = { transbordo_auto: true, transbordo_abaixo: 0.15, transbordo_minimo: 10, transbordo_dia_de: 10, transbordo_dia_ate: 20 };
+  ok(F.noTransbordo(cfg, { fluxo_ate_ontem: 20, conversao_ate_ontem: 0.1 }, null, 11).em === true, "gatilho: conversão abaixo do corte entra");
+  ok(F.noTransbordo(cfg, { fluxo_ate_ontem: 20, conversao_ate_ontem: 0.2 }, null, 11).em === false, "acima do corte, não");
+  ok(F.noTransbordo(cfg, { fluxo_ate_ontem: 5, conversao_ate_ontem: 0 }, null, 11).em === false, "sem o mínimo de atendimentos, não");
+  ok(F.noTransbordo(cfg, { fluxo_ate_ontem: 20, conversao_ate_ontem: 0.1 }, null, 25).em === false, "fora dos dias, não");
+  ok(F.noTransbordo(cfg, { fluxo_ate_ontem: 20, conversao_ate_ontem: 0.1 }, { modo: "fora" }, 11).em === false, "o gerente tira à mão");
+  ok(F.noTransbordo(null, {}, { modo: "dentro" }, 1).em === true, "o gerente põe à mão, sem gatilho");
+}
+
 if (falhas) { console.log(`\n${falhas} falha(s).`); process.exit(1); }
 console.log("\ntodos os casos passaram.");

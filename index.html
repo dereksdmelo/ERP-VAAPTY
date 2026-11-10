@@ -29255,6 +29255,91 @@ function TelaRecuperacao({ perfil, aoAbrir, aoConversar }) {
   );
 }
 
+/* O TRANSBORDO (0144, o Derek, 10/11/2026): em certas épocas do mês, quem
+ * está com conversão abaixo do corte só atende quando todos os outros estão
+ * atendendo. Só o gerente põe e tira — à mão, na linha de cada um, ou pelo
+ * gatilho daqui. A conversão do gatilho é a do mês ATÉ ONTEM, para ninguém
+ * entrar e sair no meio do dia. */
+function TransbordoDaFila({ d, gerente, aoMudar, todos }) {
+  const cfg = d.transbordo_cfg || {};
+  const [aberto, setAberto] = useState(false);
+  const [f, setF] = useState(null);
+  const [indo, setIndo] = useState(false);
+  const [erro, setErro] = useState("");
+  const em = (todos || []).filter((p) => p.transbordo && p.transbordo.em);
+  const abrir = () => {
+    setF({ ligado: !!cfg.transbordo_auto, abaixo: String(Math.round((Number(cfg.transbordo_abaixo) || 0.15) * 1000) / 10).replace(".", ","),
+      minimo: String(cfg.transbordo_minimo == null ? 10 : cfg.transbordo_minimo), dia_de: cfg.transbordo_dia_de ? String(cfg.transbordo_dia_de) : "",
+      dia_ate: cfg.transbordo_dia_ate ? String(cfg.transbordo_dia_ate) : "" });
+    setErro(""); setAberto(true);
+  };
+  const salvar = async () => {
+    setIndo(true); setErro("");
+    try {
+      const pct = Number(String(f.abaixo).replace(",", "."));
+      await mexerNaVez("transbordo-config", { ligado: f.ligado, abaixo: pct / 100, minimo: f.minimo, dia_de: f.dia_de, dia_ate: f.dia_ate });
+      setAberto(false); aoMudar && aoMudar();
+    } catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+  if (!gerente && !em.length) return null;
+  const pctTxt = `${String(Math.round((Number(cfg.transbordo_abaixo) || 0) * 1000) / 10).replace(".", ",")}%`;
+  const dias = cfg.transbordo_dia_de || cfg.transbordo_dia_ate
+    ? ` · ${cfg.transbordo_dia_de ? `do dia ${cfg.transbordo_dia_de}` : ""}${cfg.transbordo_dia_ate ? ` até o dia ${cfg.transbordo_dia_ate}` : ""}` : "";
+  return (
+    <div className="mb-4 rounded-xl border px-4 py-3" style={{ borderColor: C.line, background: C.paper }}>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="text-[13.5px]">
+          <b style={{ color: C.laranja }}>Transbordo</b>
+          <span className="ml-2" style={{ color: C.mute }}>só pega cliente quando todos os outros estão atendendo</span>
+          <div className="mt-1">
+            {em.length ? <>Hoje: <b>{em.map((p) => p.nome).join(", ")}</b></> : <span style={{ color: C.mute }}>Ninguém no transbordo hoje.</span>}
+          </div>
+          <div className="text-[12px]" style={{ color: C.mute }}>
+            {cfg.transbordo_auto
+              ? `Automático: conversão do mês até ontem abaixo de ${pctTxt}, com pelo menos ${cfg.transbordo_minimo || 0} atendimentos${dias}.`
+              : "Automático desligado — só quem o gerente põe à mão."}
+          </div>
+        </div>
+        {gerente && !aberto && <button onClick={abrir} className="text-[13px] font-semibold underline" style={{ color: C.roxo }}>configurar</button>}
+      </div>
+      {aberto && f && (
+        <div className="mt-3 flex flex-wrap items-end gap-3 border-t pt-3 text-[13px]" style={{ borderColor: C.line }}>
+          <label className="flex items-center gap-2"><input type="checkbox" checked={f.ligado} onChange={(e) => setF({ ...f, ligado: e.target.checked })} /> entrar e sair sozinho</label>
+          <label>conversão abaixo de (%)<br /><input className="w-20 rounded border px-2 py-1" style={{ borderColor: C.line }} inputMode="decimal" value={f.abaixo} onChange={(e) => setF({ ...f, abaixo: e.target.value })} /></label>
+          <label>com pelo menos (atend.)<br /><input className="w-20 rounded border px-2 py-1" style={{ borderColor: C.line }} inputMode="numeric" value={f.minimo} onChange={(e) => setF({ ...f, minimo: e.target.value })} /></label>
+          <label>do dia<br /><input className="w-16 rounded border px-2 py-1" style={{ borderColor: C.line }} inputMode="numeric" placeholder="—" value={f.dia_de} onChange={(e) => setF({ ...f, dia_de: e.target.value })} /></label>
+          <label>até o dia<br /><input className="w-16 rounded border px-2 py-1" style={{ borderColor: C.line }} inputMode="numeric" placeholder="—" value={f.dia_ate} onChange={(e) => setF({ ...f, dia_ate: e.target.value })} /></label>
+          <BotaoPrimario onClick={salvar} disabled={indo}>{indo ? "Gravando…" : "Salvar"}</BotaoPrimario>
+          <button onClick={() => setAberto(false)} className="underline" style={{ color: C.mute }}>cancelar</button>
+          <p className="w-full text-[12px]" style={{ color: C.mute }}>
+            Dias em branco = o mês inteiro. O "pôr / tirar do transbordo" na linha de cada um vale por cima do automático, até você voltar ao automático.
+          </p>
+          {erro && <p className="w-full text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
+          <div className="w-full border-t pt-2" style={{ borderColor: C.line }}>
+            <div className="mb-1 text-[11px] uppercase tracking-wide" style={{ color: C.mute }}>à mão — vale também para quem ainda não chegou</div>
+            {(todos || []).slice().sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR")).map((p) => {
+              const t = p.transbordo || {};
+              const marcar = async (modo) => { setIndo(true); setErro(""); try { await mexerNaVez("transbordo", { perfil_id: p.perfil_id, modo }); aoMudar && aoMudar(); } catch (e) { setErro(e.message); } setIndo(false); };
+              return (
+                <div key={p.perfil_id} className="flex flex-wrap items-baseline gap-x-3 py-0.5">
+                  <b className="min-w-[160px]">{p.nome}</b>
+                  <span style={{ fontFamily: F.mono, color: C.mute }}>{Math.round((t.conversao_ate_ontem || 0) * 100)}% até ontem</span>
+                  <span style={{ color: t.em ? C.laranja : C.mute }}>{t.em ? `no transbordo${t.como === "auto" ? " (automático)" : " (à mão)"}` : t.marca === "fora" ? "fora (à mão)" : "na fila normal"}</span>
+                  {t.em
+                    ? <button disabled={indo} onClick={() => marcar("fora")} className="underline" style={{ color: C.laranja }}>tirar</button>
+                    : <button disabled={indo} onClick={() => marcar("dentro")} className="underline" style={{ color: C.laranja }}>pôr</button>}
+                  {t.marca && <button disabled={indo} onClick={() => marcar("auto")} className="underline" style={{ color: C.mute }}>{cfg.transbordo_auto ? "voltar ao automático" : "limpar"}</button>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TelaFilaDaVez({ perfil, aoAbrir }) {
   const [d, setD] = useState(null);
   const [erro, setErro] = useState("");
@@ -29337,6 +29422,8 @@ function TelaFilaDaVez({ perfil, aoAbrir }) {
         </div>
       </div>
 
+      <TransbordoDaFila d={d} gerente={gerente} aoMudar={carregar} todos={todos} />
+
       <div className="overflow-x-auto rounded-xl border" style={{ borderColor: C.line, background: C.paper }}>
         <div className="min-w-[720px]">
           <div className="grid grid-cols-[28px_1fr_60px_60px_80px_80px_80px] gap-2 border-b px-3 py-2 text-[11px] uppercase tracking-wide"
@@ -29356,6 +29443,8 @@ function TelaFilaDaVez({ perfil, aoAbrir }) {
                   {p.perfil_id === d.vez && <span className="ml-2 rounded px-1.5 py-0.5 text-[11px] font-semibold" style={{ background: C.roxo, color: "#fff" }}>a vez</span>}
                   {p.perfil_id === d.segundo && <span className="ml-2 rounded border px-1.5 py-0.5 text-[11px] font-semibold" style={{ borderColor: C.roxo, color: C.roxo }}>depois</span>}
                   {p.perfil_id === d.ponteiro && p.perfil_id !== d.vez && <span className="ml-2 text-[11px]" style={{ color: C.laranja }}>a roda está aqui</span>}
+                  {p.transbordo && p.transbordo.em && <span className="ml-2 rounded px-1.5 py-0.5 text-[11px] font-semibold" style={{ background: C.laranjaFraco || "#FCEBD9", color: C.laranja }}
+                    title="Só pega cliente quando todos os outros estão atendendo">transbordo{p.transbordo.como === "auto" ? " · automático" : ""}</span>}
                 </span>
                 <span className="text-right" style={{ fontFamily: F.mono }}>{p.fluxo}</span>
                 <span className="text-right" style={{ fontFamily: F.mono }}>{p.vendas}</span>
@@ -29385,6 +29474,11 @@ function TelaFilaDaVez({ perfil, aoAbrir }) {
                       className="font-semibold underline" style={{ color: C.laranja }}>tirar uma vez devida</button>}
                   </>
                 )}
+                {gerente && p.transbordo && (p.transbordo.em
+                  ? <button onClick={() => fazer(p.perfil_id, "transbordo", { perfil_id: p.perfil_id, modo: "fora" })} disabled={!!indo} className="underline" style={{ color: C.laranja }}>tirar do transbordo</button>
+                  : <button onClick={() => fazer(p.perfil_id, "transbordo", { perfil_id: p.perfil_id, modo: "dentro" })} disabled={!!indo} className="underline" style={{ color: C.laranja }}>pôr no transbordo</button>)}
+                {gerente && p.transbordo && p.transbordo.marca && (d.transbordo_cfg || {}).transbordo_auto &&
+                  <button onClick={() => fazer(p.perfil_id, "transbordo", { perfil_id: p.perfil_id, modo: "auto" })} disabled={!!indo} className="underline">voltar ao automático</button>}
                 {gerente && p.perfil_id !== d.eu && (p.presente
                   ? <button onClick={() => fazer(p.perfil_id, "saiu", { perfil_id: p.perfil_id })} disabled={!!indo} className="underline">marcar saída</button>
                   : <button onClick={() => fazer(p.perfil_id, "presente", { perfil_id: p.perfil_id })} disabled={!!indo} className="font-semibold" style={{ color: C.roxo }}>está na loja</button>)}

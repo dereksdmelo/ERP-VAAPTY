@@ -1300,7 +1300,7 @@ async function estadoDaFila(tok, ignorar) {
   const hoje = hojeAqui();
   const cab = { headers: cabecalhos(tok) };
   const mes = await contaDoMes(tok, hoje);
-  const [presencas, deHoje, sinais, eventos, diaLinha] = await Promise.all([
+  const [presencas, deHoje, sinais, eventos, diaLinha, transb, cfgTb] = await Promise.all([
     banco(`${REST("presenca")}?select=perfil_id,chegou_em,saiu_em,abriu_em,saida_manual&dia=eq.${hoje}`, cab),
     banco(`${REST("atendimento")}?select=id,negociador_id,negociador_nome,cliente_nome,carro_descricao,status,` +
           `chegada_em,criado_em,atendimento_fim_em&data=eq.${hoje}&limit=500`, cab),
@@ -1308,7 +1308,12 @@ async function estadoDaFila(tok, ignorar) {
       .catch(() => []),
     banco(`${REST("fila_evento")}?select=*&dia=eq.${hoje}&order=criado_em.asc&limit=1000`, cab).catch(() => []),
     banco(`${REST("fila_dia")}?select=*&dia=eq.${hoje}`, cab).catch(() => []),
+    banco(`${REST("fila_transbordo")}?select=*`, cab).catch(() => []),
+    // O gatilho do transbordo é lido sempre (a conta do mês fica 5 min guardada).
+    banco(`${REST("config_loja")}?id=eq.1&select=transbordo_auto,transbordo_abaixo,transbordo_minimo,transbordo_dia_de,transbordo_dia_ate`, cab).catch(() => []),
   ]);
+  const tbCfg = (cfgTb || [])[0] || null;
+  const diaDoMes = Number(hoje.slice(8, 10));
   const agora = Date.now();
   const aberto = F.horarioAberto(mes.cfg, agora);
   const ats = (deHoje || []).filter((a) => a.id !== ignorar);
@@ -1374,6 +1379,11 @@ async function estadoDaFila(tok, ignorar) {
       sem_meta: !meta,
       atendendo: naMesa,
       fim_ultimo: fimUltimo,
+      transbordo: (() => {
+        const marca = (transb || []).find((x) => x.perfil_id === p.id) || null;
+        const t = F.noTransbordo(tbCfg, { fluxo_ate_ontem: doDia.fluxo, conversao_ate_ontem: doDia.fluxo ? doDia.vendas / doDia.fluxo : 0 }, marca, diaDoMes);
+        return { ...t, marca: marca ? marca.modo : null, conversao_ate_ontem: doDia.fluxo ? doDia.vendas / doDia.fluxo : 0 };
+      })(),
     };
   });
 
@@ -1392,13 +1402,14 @@ async function estadoDaFila(tok, ignorar) {
   const st = F.estadoDosEventos(eventos || []);
   const porId = {};
   pessoas.forEach((p) => { porId[p.perfil_id] = { presente: p.presente, atendendo: p.atendendo.length, fim_ultimo: p.fim_ultimo }; });
-  const est = { circulo, pessoas: porId, ponteiro: st.ponteiro, creditos: st.creditos, forcado: st.forcado, aberto, agora };
+  const transbordo = pessoas.filter((p) => p.transbordo.em).map((p) => p.perfil_id);
+  const est = { circulo, pessoas: porId, ponteiro: st.ponteiro, creditos: st.creditos, forcado: st.forcado, transbordo, aberto, agora };
   const vez = F.escolher(est);
   const segundo = vez ? F.escolher(F.aplicar(est, vez)) : null;
   // De quem é a vez PELA RODA, presente ou não: é quem leva o alerta de
   // "você é o próximo e não está na fila".
   const ponteiro = circulo.indexOf(st.ponteiro) >= 0 ? st.ponteiro : circulo[0] || null;
-  return { F, hoje, mes, pessoas, circulo, congelada, est, vez, segundo, ponteiro, eventos: eventos || [], aberto, agora, ats };
+  return { F, hoje, mes, pessoas, circulo, congelada, est, vez, segundo, ponteiro, eventos: eventos || [], aberto, agora, ats, tbCfg };
 }
 
 /* Os eventos que a roda gera, gravados de uma vez. Pulado por estar
@@ -1631,6 +1642,39 @@ async function vez(req, res, tok) {
     return res.status(200).json({ ok: true, ...r, atendimento_id: ev.atendimento_id });
   }
 
+  /* O TRANSBORDO (0144) — só o gerente:
+   *   acao=transbordo        { perfil_id, modo: dentro | fora | auto }
+   *   acao=transbordo-config { ligado, abaixo (fração), minimo, dia_de, dia_ate } */
+  if (req.method === "POST" && (acao === "transbordo" || acao === "transbordo-config")) {
+    const perfil = await banco(`${URL_BASE}/rest/v1/perfil?select=papel&id=eq.${eu}`, { headers: cabecalhos(tok) });
+    if (!(perfil && perfil[0] && perfil[0].papel === "gerente")) return res.status(403).json({ erro: "Só o gerente mexe no transbordo." });
+    if (acao === "transbordo") {
+      const quem = String(c.perfil_id || "");
+      if (!RX_UUID.test(quem)) return res.status(400).json({ erro: "perfil_id inválido." });
+      const modo = String(c.modo || "");
+      if (modo === "auto") {
+        await banco(`${REST("fila_transbordo")}?perfil_id=eq.${quem}`, { method: "DELETE", headers: cabecalhos(tok) });
+      } else if (modo === "dentro" || modo === "fora") {
+        await banco(`${REST("fila_transbordo")}?on_conflict=perfil_id`, {
+          method: "POST", headers: json(tok, { Prefer: "resolution=merge-duplicates,return=minimal" }),
+          body: JSON.stringify({ perfil_id: quem, modo, motivo: texto(c.motivo) || null, por: eu, em: new Date().toISOString() }),
+        });
+      } else return res.status(400).json({ erro: "Modo desconhecido." });
+      return res.status(200).json({ ok: true });
+    }
+    const num = (v) => (v === "" || v == null ? null : Number(v));
+    const abaixo = num(c.abaixo), minimo = num(c.minimo), de = num(c.dia_de), ate = num(c.dia_ate);
+    if (abaixo == null || !(abaixo > 0 && abaixo < 1)) return res.status(400).json({ erro: "A conversão de corte vai de 1% a 99%." });
+    if (minimo != null && !(minimo >= 0 && minimo <= 500)) return res.status(400).json({ erro: "Mínimo de atendimentos inválido." });
+    for (const d of [de, ate]) if (d != null && !(Number.isInteger(d) && d >= 1 && d <= 31)) return res.status(400).json({ erro: "O dia do mês vai de 1 a 31." });
+    const r = await banco(`${REST("config_loja")}?id=eq.1`, {
+      method: "PATCH", headers: json(tok, { Prefer: "return=representation" }),
+      body: JSON.stringify({ transbordo_auto: !!c.ligado, transbordo_abaixo: abaixo, transbordo_minimo: minimo == null ? 0 : minimo, transbordo_dia_de: de, transbordo_dia_ate: ate }),
+    });
+    if (!Array.isArray(r) || !r.length) return res.status(403).json({ erro: "O banco não gravou a configuração." });
+    return res.status(200).json({ ok: true });
+  }
+
   /* A CORREÇÃO DO GERENTE (o Derek: "ele precisa poder corrigir"):
    *   vez      — a vez passa a ser de alguém (a roda anda daí);
    *   devolver — devolve uma vez a quem perdeu sem dever;
@@ -1695,6 +1739,7 @@ async function vez(req, res, tok) {
   return res.status(200).json({
     dia: s.hoje, competencia: s.mes.comp, aberto: s.aberto,
     congelada_em: s.congelada ? true : false,
+    transbordo_cfg: s.tbCfg,
     ordem,
     vez: s.vez ? s.vez.quem : null, vez_via: s.vez ? s.vez.via : null,
     segundo: s.segundo ? s.segundo.quem : null,

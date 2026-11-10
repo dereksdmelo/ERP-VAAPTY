@@ -3882,6 +3882,20 @@ manhã inteira; a última correção pôs a vez no André Bruno e pulou o
 Marcos. Agora `registrarNaFila` casa pelo nome do login e da meta, e o
 registro mostra quem fez cada correção.
 
+**O TRANSBORDO (0144, 10/11/2026, o Derek: *"certas épocas do mês… quem
+está com conversão abaixo de XX não vai pra fila da vez, apenas atende na
+vez dele se todos estiverem ocupados"*).** Quem está nele é passado pela
+roda enquanto houver alguém livre fora do transbordo — sem perder a vez e
+sem ficar devendo; com todos os outros atendendo, entra na roda normal. Só
+o gerente põe e tira: à mão (`fila_transbordo`, 'dentro' ou 'fora', vale
+até ele voltar ao automático) ou pelo gatilho em `config_loja` (ligado,
+conversão do mês ATÉ ONTEM abaixo do corte, mínimo de atendimentos, e os
+dias do mês, opcionais) — até ontem para ninguém entrar e sair no meio do
+dia. `noTransbordo` e a regra moram em `regras/fila.js`. Na mesma leva:
+**"pôr a vez aqui" ganha da vez devida** (o Dimas devia uma e furava a
+correção para o André Ricardo) e **"tirar uma vez devida"** desfaz um
+"devolver" a mais.
+
 **O que libera é "encerrar atendimento", não o status (0106).** O
 Derek: o negociador fechou o carro, mudou o status sozinho e ficou livre
 na fila com o cliente ainda assinando papel. `emLoja` deixou de olhar o

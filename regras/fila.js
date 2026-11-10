@@ -17,6 +17,10 @@
  *    segundo cliente, o próximo também, até alguém liberar.
  *  - Fora do horário da loja (depois das 18h) a roda só olha quem está
  *    lá, e ninguém "perde" a vez.
+ *  - TRANSBORDO (0144): quem está nele só entra na roda quando todos os
+ *    outros que estão na fila estão atendendo. Enquanto houver alguém
+ *    livre fora do transbordo, ele é passado sem perder a vez e sem
+ *    ficar devendo — não é falta dele, é a regra da época.
  *
  * O estado não é gravado: é a soma dos eventos do dia (`fila_evento`),
  * montada por `estadoDosEventos`. Quem lê isto: `api/atendimento.js`
@@ -89,14 +93,18 @@ function escolher(est, excluir) {
   const C = (est.circulo || []).filter((id) => est.pessoas[id]);
   if (!C.length) return null;
   const P = (id) => est.pessoas[id];
-  const pode = (id) => fora.indexOf(id) < 0;
+  const tb = est.transbordo || [];
+  // Alguém fora do transbordo está livre? Então o transbordo espera.
+  const livreNormal = C.some((id) => fora.indexOf(id) < 0 && tb.indexOf(id) < 0 && P(id).presente && !P(id).atendendo);
+  const segura = livreNormal ? tb : [];
+  const pode = (id) => fora.indexOf(id) < 0 && segura.indexOf(id) < 0;
   const presentes = C.filter((id) => pode(id) && P(id).presente);
   if (!presentes.length) return null;
   const livres = presentes.filter((id) => !P(id).atendendo);
   const ponteiro = C.indexOf(est.ponteiro) >= 0 ? est.ponteiro : C[0];
 
   // 0. A vez que o gerente pôs: é dela, enquanto ela estiver na fila.
-  if (est.forcado && C.indexOf(est.forcado) >= 0 && pode(est.forcado) && P(est.forcado).presente) {
+  if (est.forcado && C.indexOf(est.forcado) >= 0 && fora.indexOf(est.forcado) < 0 && P(est.forcado).presente) {
     const j = C.indexOf(est.forcado);
     return { quem: est.forcado, via: "correcao", pulos: [], prox: C[(j + 1) % C.length] };
   }
@@ -149,4 +157,30 @@ function horarioAberto(cfg, agoraMs) {
   return agora >= abre && agora <= fecha;
 }
 
-module.exports = { ESPERA_CREDITO_MS, PRAZO_CHAMADA_MS, estadoDosEventos, circuloDoDia, escolher, aplicar, horarioAberto };
+/**
+ * QUEM ESTÁ NO TRANSBORDO HOJE. À mão manda ('dentro' / 'fora'); sem
+ * marca, o gatilho: ligado, dentro dos dias do mês (se houver), com o
+ * mínimo de atendimentos, e a conversão do mês ATÉ ONTEM abaixo do corte
+ * — até ontem, para ninguém entrar e sair no meio do dia.
+ *   cfg: config_loja; p: { fluxo_ate_ontem, conversao_ate_ontem };
+ *   marca: linha de fila_transbordo ou null; dia: 1..31.
+ * Devolve { em, como: 'manual' | 'auto' | null }.
+ */
+function noTransbordo(cfg, p, marca, dia) {
+  if (marca && marca.modo === "dentro") return { em: true, como: "manual" };
+  if (marca && marca.modo === "fora") return { em: false, como: "manual" };
+  if (!cfg || !cfg.transbordo_auto) return { em: false, como: null };
+  const de = cfg.transbordo_dia_de, ate = cfg.transbordo_dia_ate;
+  if (de && ate) {
+    const dentro = de <= ate ? dia >= de && dia <= ate : dia >= de || dia <= ate;
+    if (!dentro) return { em: false, como: null };
+  } else if (de && dia < de) return { em: false, como: null };
+  else if (ate && dia > ate) return { em: false, como: null };
+  const minimo = Number(cfg.transbordo_minimo) || 0;
+  if ((p.fluxo_ate_ontem || 0) < Math.max(1, minimo)) return { em: false, como: null };
+  const corte = Number(cfg.transbordo_abaixo);
+  if (!(corte > 0)) return { em: false, como: null };
+  return (p.conversao_ate_ontem || 0) < corte ? { em: true, como: "auto" } : { em: false, como: null };
+}
+
+module.exports = { noTransbordo, ESPERA_CREDITO_MS, PRAZO_CHAMADA_MS, estadoDosEventos, circuloDoDia, escolher, aplicar, horarioAberto };
