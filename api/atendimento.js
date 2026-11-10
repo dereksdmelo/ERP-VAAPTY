@@ -3351,6 +3351,25 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ ok: true, registrada: !!msgId, conversa_id: conversaId, telefone: fone });
     }
 
+    /* A IA NESTA CONVERSA (0150, o Derek: "uma opção de ligar e desligar a
+     * IA naquela conversa, e mostrar se está ligada"). GET diz o estado
+     * (ligada, desligada, pausada porque uma pessoa respondeu, número sem
+     * IA); POST { modo: "ligada" | "desligada" | null } muda. Ligar zera a
+     * pausa: o que uma pessoa escreveu antes deixa de calar a Flávia. */
+    if (RX_UUID.test(id) && String(req.query.acao || "") === "ia") {
+      if (req.method === "POST") {
+        const c = await lerCorpo(req) || {};
+        const modo = c.modo === "ligada" || c.modo === "desligada" ? c.modo : null;
+        const r = await banco(`${REST_CV}?id=eq.${id}`, {
+          method: "PATCH", headers: json(tok, { Prefer: "return=representation" }),
+          body: JSON.stringify({ ia_modo: modo, ...(modo === "ligada" ? { ia_ligada_em: new Date().toISOString() } : {}) }),
+        });
+        if (!(Array.isArray(r) && r.length)) return res.status(403).json({ erro: "Não consegui mudar a IA desta conversa." });
+      }
+      const e = await banco(`${URL_BASE}/rest/v1/rpc/ia_estado_conversa`, { method: "POST", headers: json(tok), body: JSON.stringify({ p_conversa: id }) });
+      return res.status(200).json({ ia: e || null });
+    }
+
     /* LIDA / NÃO LIDA (0105, o Derek: "opção de marcar como LIDO / não
      * lido"). Lida tira de "Não respondidas" até o cliente escrever de
      * novo; não lida põe de volta até alguém responder ou marcar lida. */

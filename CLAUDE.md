@@ -3226,6 +3226,16 @@ entraram no período do alto (`?recurso=lead&acao=relatorio`, em páginas de
 1.000), CSV com ";". *Transbordo "até agora"* (0149, `transbordo_base`):
 o gatilho escolhe a conversão até ontem ou até agora.
 
+**A IA por conversa (0150, 10/11/2026, o Derek: *"ligar e desligar a IA
+naquela conversa, e mostrar se está ligada"*).** `wa_conversa.ia_modo`: nulo
+segue o número; 'desligada' tira a Flávia só desta conversa; 'ligada' faz ela
+voltar mesmo depois de uma pessoa ter respondido — o "assumiu a conversa"
+(decisão 64) só conta depois de `ia_ligada_em`. O número continua mandando:
+sem a IA no número, não há IA. A faixa no alto da conversa (`IaDaConversa`,
+`?recurso=conversas&id=&acao=ia`, estado por `ia_estado_conversa`) diz ligada,
+pausada até tal hora ou desligada. As 36 conversas duplicadas foram juntadas
+no mesmo dia, com o ok do Derek.
+
 ### 58. O caixa começa do saldo que o financeiro digita
 
 O financeiro pediu em 15/10/2026 para *"zerar o caixa e iniciar em
