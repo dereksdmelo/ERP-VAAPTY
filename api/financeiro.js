@@ -1186,7 +1186,7 @@ async function sincronizarTitulosDoCarro(tok, estoqueId, forcar) {
   const id = idOuNulo(estoqueId);
   if (!id) return { ok: false };
   const [e, existentes, catNeg] = await Promise.all([
-    supa(`${base("estoque")}?select=id,situacao,natureza,entrou_em,vendido_em,valor_compra,valor_venda,` +
+    supa(`${base("estoque")}?select=id,situacao,natureza,descricao_carro,entrou_em,vendido_em,valor_compra,valor_venda,` +
       `veiculo(placa,marca_modelo),comprador(nome),atendimento(cliente_nome),estoque_custo(id,tipo,descricao,previsto,realizado)&id=eq.${id}`,
       { headers: cab(tok) }).then(um),
     supa(`${base("fin_lancamento")}?select=id,situacao,item_contrato,debito,credito,vencimento,competencia,descricao` +
@@ -1213,7 +1213,7 @@ async function sincronizarTitulosDoCarro(tok, estoqueId, forcar) {
   const temVenda = existentes.some((x) => String(x.item_contrato).startsWith("venda:"));
   const doCorteCompra = forcar || temCompra || (entrou && entrou >= CORTE_TITULOS);
   const doCorteVenda = forcar || temVenda || (vendeu && vendeu >= CORTE_TITULOS);
-  const v = e.veiculo || {};
+  const v = e.veiculo || { marca_modelo: e.descricao_carro };
   const carro = [v.marca_modelo, v.placa].filter(Boolean).join(" ");
   const cliente = e.atendimento && e.atendimento.cliente_nome;
   const comp = (d) => competenciaDe(d) || competenciaDe(hojeAqui());
@@ -1222,7 +1222,7 @@ async function sincronizarTitulosDoCarro(tok, estoqueId, forcar) {
   // Baixado (0110) saiu do pátio sem venda — repetido, teste, coisa antiga:
   // não deve nada nem a recebe nada; os títulos em aberto dele saem.
   const baixado = e.situacao === "baixado";
-  if (!baixado && doCorteCompra && e.natureza !== "indicacao") {
+  if (!baixado && doCorteCompra && e.natureza !== "indicacao" && e.natureza !== "multa") {
     if (Number(e.valor_compra) > 0) quer.push({ item: "compra:cliente", debito: Number(e.valor_compra), tipo: "pagto_cliente",
       descricao: `Pagar ao cliente${cliente ? ` ${cliente}` : ""} · ${carro}`, favorecido: cliente || null, data: entrou });
     (e.estoque_custo || []).forEach((c) => {
@@ -1233,8 +1233,9 @@ async function sincronizarTitulosDoCarro(tok, estoqueId, forcar) {
   }
   if (doCorteVenda && e.situacao === "vendido" && Number(e.valor_venda) > 0) {
     quer.push({ item: "venda:lojista", credito: Number(e.valor_venda), tipo: "pagto_lojista",
-      descricao: `${e.natureza === "indicacao" ? "Comissão de indicação" : "Receber"} de ${(e.comprador && e.comprador.nome) || "lojista"} · ${carro}`,
-      favorecido: (e.comprador && e.comprador.nome) || null, data: vendeu || hojeAqui() });
+      descricao: e.natureza === "multa" ? `Multa contratual de ${cliente || "cliente"} · ${carro}`
+        : `${e.natureza === "indicacao" ? "Comissão de indicação" : "Receber"} de ${(e.comprador && e.comprador.nome) || "lojista"} · ${carro}`,
+      favorecido: e.natureza === "multa" ? cliente || null : (e.comprador && e.comprador.nome) || null, data: vendeu || hojeAqui() });
   }
   const feito = { criados: 0, atualizados: 0, cancelados: 0, achados_no_extrato: 0 };
   const querPor = {};
@@ -3030,7 +3031,7 @@ const NAO_E_PAGAMENTO = /^(saldo|rend(imentos)? pago|res aplic|aplic)/i;
 async function dadosRecebimento(tok, de, ate) {
   const cDe = somaDias(de, -JANELA_ANTES), cAte = somaDias(ate, JANELA_DEPOIS);
   const [vendas, creditos] = await Promise.all([
-    supa(`${base("estoque")}?select=id,natureza,entrou_em,vendido_em,valor_venda,negociador_nome,` +
+    supa(`${base("estoque")}?select=id,natureza,descricao_carro,entrou_em,vendido_em,valor_venda,negociador_nome,` +
       `comprador(id,nome),veiculo(placa,marca_modelo),` +
       `fin_recebimento(id,valor,modo,explicacao,lancamento_id,criado_em,fin_lancamento(data,descricao,credito))` +
       `&situacao=eq.vendido&or=(and(vendido_em.gte.${de},vendido_em.lte.${ate}),and(vendido_em.is.null,entrou_em.gte.${de},entrou_em.lte.${ate}))` +
@@ -3062,7 +3063,7 @@ async function dadosRecebimento(tok, de, ate) {
       id: e.id, natureza: e.natureza || "compra", base: e.vendido_em || e.entrou_em, valor,
       recebido: r2(recebido), explicado: r2(explicado), falta: r2(Math.max(0, valor - recebido - explicado)),
       comprador_id: comp.id || null, comprador: comp.nome || null, tokens: tokensDe(comp.nome),
-      placa: e.veiculo && e.veiculo.placa, carro: e.veiculo && e.veiculo.marca_modelo, negociador: e.negociador_nome,
+      placa: e.veiculo && e.veiculo.placa, carro: (e.veiculo && e.veiculo.marca_modelo) || e.descricao_carro, negociador: e.negociador_nome,
       recebimentos: recs.map((x) => ({ id: x.id, valor: Number(x.valor) || 0, modo: x.modo, explicacao: x.explicacao,
         em: x.criado_em, lancamento: x.lancamento_id ? { id: x.lancamento_id, ...(x.fin_lancamento || {}) } : null })),
     };

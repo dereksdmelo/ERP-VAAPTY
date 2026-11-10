@@ -819,7 +819,7 @@ async function transferencia(req, res, tok) {
   if (req.method === "GET") {
     const [carros, cfg] = await Promise.all([
       fetch(`${RE}?select=id,atendimento_id,vendido_em,entrou_em,semana_venda,transferido_em,transferido_obs,comunicado_em,comunicado_obs,natureza,prazo_transferencia_dias,` +
-        `veiculo(placa,marca_modelo),comprador(id,nome,telefone,adm_nome,adm_telefone)&situacao=eq.vendido&natureza=neq.indicacao&order=vendido_em.desc.nullslast,entrou_em.desc&limit=1000`,
+        `veiculo(placa,marca_modelo),comprador(id,nome,telefone,adm_nome,adm_telefone)&situacao=eq.vendido&natureza=eq.compra&order=vendido_em.desc.nullslast,entrou_em.desc&limit=1000`,
         { headers: cabecalhos(tok) }).then((r) => r.json()).catch(() => []),
       fetch(`${URL_BASE}/rest/v1/config_loja?select=lojista_lembretes,lojista_boas_vindas,lojista_crlv&id=eq.1`, { headers: cabecalhos(tok) })
         .then((r) => r.json()).then((x) => (Array.isArray(x) && x[0]) || {}).catch(() => ({})),
@@ -1214,7 +1214,7 @@ async function crlvPendente(req, tok, atendimentoId) {
   const car = ((await fetch(`${URL_BASE}/rest/v1/estoque?select=id,atendimento_id,vendido_em,prazo_transferencia_dias,natureza,` +
     `veiculo(placa,marca_modelo),comprador(nome,telefone,adm_nome,adm_telefone)&atendimento_id=eq.${atendimentoId}&situacao=eq.vendido&limit=1`,
     { headers: cabecalhos(tok) }).then((r) => r.json()).catch(() => [])) || [])[0];
-  if (!car || car.natureza === "indicacao") return null;
+  if (!car || car.natureza === "indicacao" || car.natureza === "multa") return null;
   const avisos = ((await fetch(`${URL_BASE}/rest/v1/aviso_lojista?select=tipo&estoque_id=eq.${car.id}&estado=eq.enviado`, { headers: cabecalhos(tok) })
     .then((r) => r.json()).catch(() => [])) || []).map((a) => a.tipo);
   if (avisos.indexOf("crlv") >= 0 || avisos.indexOf("boas_vindas") < 0) return null;

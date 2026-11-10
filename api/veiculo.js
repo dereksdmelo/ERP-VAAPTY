@@ -458,11 +458,12 @@ async function estoque(req, res, tok) {
     if (aid && RX_ID.test(aid)) {
       const veics = await supa(`${base("veiculo")}?select=id&atendimento_id=eq.${aid}`, { headers: cab });
       const ids = (veics || []).map((v) => v.id);
-      if (!ids.length) return res.status(200).json({ estoque: null });
+      // A indicação e a multa sem ficha do carro (0145) pendem só do atendimento.
+      const onde = ids.length ? `or=(veiculo_id.in.(${ids.join(",")}),atendimento_id.eq.${aid})` : `atendimento_id=eq.${aid}`;
       const linha = await supa(
-        `${base("estoque")}?select=${CAMPOS_ESTOQUE}&veiculo_id=in.(${ids.join(",")})&order=entrou_em.desc&limit=1`,
+        `${base("estoque")}?select=${CAMPOS_ESTOQUE}&${onde}&order=entrou_em.desc&limit=1`,
         { headers: cab });
-      return res.status(200).json({ estoque: (linha || [])[0] || null, veiculo_id: ids[0] });
+      return res.status(200).json({ estoque: (linha || [])[0] || null, veiculo_id: ids[0] || null });
     }
     // Os carros com compra provisória (0141): o alerta da gestão e do negociador.
     if (req.query.provisorias) {
@@ -480,16 +481,81 @@ async function estoque(req, res, tok) {
     return res.status(200).json({ estoque: lista || [] });
   }
 
+  /* CANCELAMENTO COM MULTA CONTRATUAL (0145, 10/11/2026, o Derek). O
+   * cliente aceitou a proposta e desistiu: a multa do termo de aceite (10%
+   * da proposta aceita, editável) vai para a RENTABILIDADE e para a meta de
+   * quem atendeu — como a comissão de indicação (0067), é uma linha do
+   * estoque já vendida, compra zero e venda igual à multa, com a natureza
+   * 'multa'. Se o carro já tinha entrado no pátio, a MESMA linha vira a
+   * multa: sai do pátio, os custos só previstos saem, os pagos ficam (são
+   * prejuízo de verdade e descontam a multa), e os títulos em aberto da
+   * compra são cancelados. O atendimento vai para "Rescisão". Só o gerente
+   * ou o financeiro. */
+  if (req.method === "POST" && String(req.query.acao || "") === "multa") {
+    const c = await corpoDe(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    const pode = await supa(`${URL_BASE}/rest/v1/rpc/e_financeiro`, { method: "POST", headers: cabecalhos(tok, { "Content-Type": "application/json" }), body: "{}" }).catch(() => false);
+    if (pode !== true) return res.status(403).json({ erro: "Só o gerente ou o financeiro cancela contrato com multa." });
+    const aid = String(c.atendimento_id || "");
+    if (!RX_ID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
+    const multa = decimal(c.valor);
+    if (!(multa > 0)) return res.status(400).json({ erro: "Informe o valor da multa." });
+    const at = ((await supa(`${base("atendimento")}?select=id,cliente_nome,carro_descricao,negociador_nome,origem,prospec&id=eq.${aid}`, { headers: cab })) || [])[0];
+    if (!at) return res.status(404).json({ erro: "Atendimento não encontrado." });
+    const veics = await supa(`${base("veiculo")}?select=id&atendimento_id=eq.${aid}`, { headers: cab });
+    const vids = (veics || []).map((v) => v.id);
+
+    const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+    const obs = `Multa contratual — ${at.cliente_nome || "cliente"} desistiu${texto(c.observacoes) ? `. ${texto(c.observacoes)}` : ""}`;
+    const ondeE = vids.length ? `or=(veiculo_id.in.(${vids.join(",")}),atendimento_id.eq.${aid})` : `atendimento_id=eq.${aid}`;
+    const ja = ((await supa(`${base("estoque")}?select=id,situacao,natureza&${ondeE}&limit=1`, { headers: cab })) || [])[0];
+    let estoqueId;
+    if (ja) {
+      if (ja.natureza === "multa") return res.status(409).json({ erro: "A multa deste atendimento já foi registrada." });
+      if (ja.natureza === "indicacao") return res.status(409).json({ erro: "Este atendimento já tem uma comissão de indicação registrada." });
+      if (ja.situacao === "vendido") return res.status(409).json({ erro: "O carro já foi vendido a um lojista — desfaça a venda antes de cancelar com multa." });
+      // Os custos só previstos saem (o negócio não aconteceu); os pagos ficam.
+      await supa(`${base("estoque_custo")}?estoque_id=eq.${ja.id}&realizado=is.null`, { method: "DELETE", headers: cab });
+      const r = await supa(`${base("estoque")}?id=eq.${ja.id}`, {
+        method: "PATCH", headers: cabecalhos(tok, { Prefer: "return=representation", "Content-Type": "application/json" }),
+        body: JSON.stringify({ natureza: "multa", situacao: "vendido", valor_compra: 0, compra_provisoria: false, valor_venda: multa,
+          vendido_em: hoje, comprador_id: null, observacoes: obs, transferido_em: hoje }),
+      });
+      if (!(Array.isArray(r) && r.length)) return res.status(403).json({ erro: "O banco recusou a mudança no estoque." });
+      estoqueId = ja.id;
+    } else {
+      const r = await supa(base("estoque"), {
+        method: "POST", headers: cabecalhos(tok, { Prefer: "return=representation", "Content-Type": "application/json" }),
+        body: JSON.stringify({ veiculo_id: vids[0] || null, descricao_carro: vids.length ? null : at.carro_descricao || null, atendimento_id: aid, natureza: "multa", situacao: "vendido", valor_compra: 0, valor_venda: multa,
+          entrou_em: hoje, vendido_em: hoje, observacoes: obs, transferido_em: hoje,
+          negociador_nome: at.negociador_nome || null, meio_alcance: at.origem || null, prospector: at.prospec || null }),
+      });
+      const novo = (Array.isArray(r) ? r[0] : r) || null;
+      if (!novo) return res.status(403).json({ erro: "O banco recusou a multa no estoque." });
+      estoqueId = novo.id;
+    }
+    await titulosDoCarro(tok, estoqueId);
+    await supa(`${base("atendimento")}?id=eq.${aid}`, { method: "PATCH", headers: cabecalhos(tok, { "Content-Type": "application/json" }), body: JSON.stringify({ status: "rescisao" }) }).catch(() => {});
+    return res.status(200).json({ ok: true, estoque_id: estoqueId });
+  }
+
   if (req.method === "POST") {
     const c = await corpoDe(req);
     if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
-    const veiculoId = String(c.veiculo_id || "");
-    if (!RX_ID.test(veiculoId)) return res.status(400).json({ erro: "veiculo_id inválido." });
+    let veiculoId = String(c.veiculo_id || "");
+    /* A INDICAÇÃO NÃO PRECISA DA FICHA DO CARRO (0145, o Derek: "ele tá pedindo
+     * todo o cadastro do carro… basta o cadastro do lojista, pois é uma simples
+     * indicação"). Sem veículo, ela pende do atendimento, e o carro vai em texto. */
+    if (!RX_ID.test(veiculoId) && c.natureza === "indicacao" && RX_ID.test(String(c.atendimento_id || ""))) {
+      const ja = await supa(`${base("estoque")}?select=id&atendimento_id=eq.${c.atendimento_id}&natureza=eq.indicacao&limit=1`, { headers: cab });
+      if ((ja || []).length) return res.status(409).json({ erro: "A indicação deste atendimento já foi registrada.", id: ja[0].id });
+      veiculoId = null;
+    } else if (!RX_ID.test(veiculoId)) return res.status(400).json({ erro: "veiculo_id inválido." });
 
     // Um carro entra uma vez. O índice único da 0019 garante isso no
     // banco; aqui a checagem existe para a mensagem sair legível em vez
     // de "duplicate key value violates unique constraint".
-    const jaTem = await supa(`${base("estoque")}?select=id&veiculo_id=eq.${veiculoId}`, { headers: cab });
+    const jaTem = veiculoId ? await supa(`${base("estoque")}?select=id&veiculo_id=eq.${veiculoId}`, { headers: cab }) : [];
     if ((jaTem || []).length) {
       return res.status(409).json({ erro: "Este carro já está no estoque.", id: jaTem[0].id });
     }
@@ -506,6 +572,7 @@ async function estoque(req, res, tok) {
 
     const linha = {
       veiculo_id: veiculoId,
+      ...(veiculoId ? {} : { descricao_carro: texto(c.descricao_carro) }),
       atendimento_id: RX_ID.test(String(c.atendimento_id || "")) ? c.atendimento_id : null,
       valor_compra: decimal(c.valor_compra),
       // 0141: sem o líquido do check list, a tela manda o valor fechado e diz que é provisório.
@@ -770,6 +837,13 @@ async function custo(req, res, tok) {
   return res.status(405).json({ erro: "Use GET, POST, PATCH ou DELETE." });
 }
 
+// Os do contrato do lojista (0108): endereço completo e o representante
+// legal; e o contato do ADM do lojista (0115), para onde vão os avisos de
+// documentação quando o lojista indica outro número.
+const CAMPOS_CADASTRO_COMPRADOR = ["rg_ie", "endereco", "bairro", "cep",
+  "rep_nome", "rep_cpf", "rep_rg", "rep_endereco", "rep_bairro", "rep_cidade", "rep_uf", "rep_cep",
+  "rep_contato", "rep_email", "rep_especie", "adm_nome", "adm_telefone"];
+
 /** O cadastro de compradores. */
 async function comprador(req, res, tok) {
   const cab = cabecalhos(tok);
@@ -784,9 +858,14 @@ async function comprador(req, res, tok) {
     // O `ilike` do PostgREST usa vírgula e parêntese como sintaxe —
     // mesmo cuidado do api/atendimento.js.
     const seguro = busca.replace(/[,()*]/g, " ").trim();
-    const filtro = seguro ? `&nome=ilike.*${encodeURIComponent(seguro)}*` : "";
+    const dig = seguro.replace(/\D/g, "");
+    const filtro = !seguro ? "" : dig.length >= 4
+      ? `&or=(nome.ilike.*${encodeURIComponent(seguro)}*,documento.ilike.*${dig.split("").join("*")}*,telefone.ilike.*${dig.split("").join("*")}*)`
+      : `&nome=ilike.*${encodeURIComponent(seguro)}*`;
+    // O cadastro de lojistas (0145) lê todos; o seletor, os 200 primeiros.
+    const lim = req.query.todos ? 2000 : 200;
     const lista = await supa(
-      `${base("comprador")}?select=*${filtro}&order=nome.asc&limit=200`, { headers: cab });
+      `${base("comprador")}?select=*${filtro}&order=nome.asc&limit=${lim}`, { headers: cab });
     return res.status(200).json({ compradores: lista || [] });
   }
 
@@ -803,6 +882,8 @@ async function comprador(req, res, tok) {
       cidade: texto(c.cidade), uf: texto(c.uf) ? String(c.uf).toUpperCase().slice(0, 2) : null,
       shinkai_id: texto(c.shinkai_id),
     };
+    // O cadastro completo (0145): endereço, representante e o ADM entram já na criação.
+    CAMPOS_CADASTRO_COMPRADOR.forEach((k) => { if (c[k] !== undefined && linha[k] === undefined) linha[k] = texto(c[k]); });
     let criado;
     try {
       criado = await supa(base("comprador"), {
@@ -831,12 +912,7 @@ async function comprador(req, res, tok) {
     const mud = {};
     // Os do contrato do lojista (0108): endereço completo e o
     // representante legal.
-    ["nome", "documento", "telefone", "email", "cidade", "rg_ie", "endereco", "bairro", "cep",
-     "rep_nome", "rep_cpf", "rep_rg", "rep_endereco", "rep_bairro", "rep_cidade", "rep_uf", "rep_cep",
-     "rep_contato", "rep_email", "rep_especie",
-     // O contato do ADM do lojista (0115): para onde vão os avisos de
-     // documentação, quando o lojista indica outro número.
-     "adm_nome", "adm_telefone"].forEach((k) => {
+    ["nome", "documento", "telefone", "email", "cidade"].concat(CAMPOS_CADASTRO_COMPRADOR).forEach((k) => {
       if (c[k] !== undefined) mud[k] = texto(c[k]);
     });
     if (c.uf !== undefined) mud.uf = texto(c.uf) ? String(c.uf).toUpperCase().slice(0, 2) : null;

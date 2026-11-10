@@ -586,7 +586,7 @@ async function shinkaiVenda(req, res, tok) {
     { headers: cabecalhos(tok) });
   const e = Array.isArray(achado) ? achado[0] : null;
   if (!e || !e.veiculo || !e.veiculo.placa) return res.status(404).json({ erro: "Carro não encontrado no estoque." });
-  if (e.natureza === "indicacao") return res.status(200).json({ ok: true, pulado: "indicacao" });
+  if (e.natureza === "indicacao" || e.natureza === "multa") return res.status(200).json({ ok: true, pulado: e.natureza });
 
   const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
   const cancelamento = { placa: e.veiculo.placa, status: "cancelado", motivo: String(c.motivo || "venda desfeita no ERP").slice(0, 200) };

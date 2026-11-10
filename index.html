@@ -916,7 +916,7 @@ async function boasVindasLojista(estoqueId) {
 }
 async function venderEMandar(e, dados) {
   await atualizarEstoque(e.id, dados);
-  if (e.natureza === "indicacao") return { recado: "" };
+  if (naoEhCarro(e)) return { recado: "" };
   const r0 = await venderNoShinkai(e);
   const bv = await boasVindasLojista(e.id);
   return bv ? { ...r0, recado: [r0.recado, bv].filter(Boolean).join(" ") } : r0;
@@ -4864,6 +4864,82 @@ function MandarAssinar({ doc, telefone, nome, estado, aoMudar, auto }) {
  * passam do POR (ou da FIPE). "Desde o atendimento" foi o pedido: é na
  * Negociação que se descobre que o carro não fecha.
  */
+// Linha do estoque que não é carro que passou pelo pátio: comissão de
+// indicação (0067) ou multa contratual (0145).
+const naoEhCarro = (e) => !!e && (e.natureza === "indicacao" || e.natureza === "multa");
+
+/* CANCELAMENTO COM MULTA CONTRATUAL (0145, o Derek, 10/11/2026). O cliente
+ * aceitou a proposta e desistiu: a multa do termo de aceite (cláusula
+ * quarta, 10% da proposta aceita — sugerido, editável) vai para a
+ * rentabilidade e para a meta de quem atendeu, como a comissão de
+ * indicação. Se o carro já estava no pátio, ele sai e no lugar fica a
+ * multa; o atendimento vai para "Rescisão". Só o gerente ou o financeiro. */
+function CancelarComMulta({ atendimento, f, perfil, aoCancelar }) {
+  const aid = atendimento && atendimento.id;
+  const pode = !!(perfil && (perfil.papel === "gerente" || perfil.financeiro));
+  const [aberto, setAberto] = useState(false);
+  const [valor, setValor] = useState(""); const [obs, setObs] = useState("");
+  const [ocupado, setOcupado] = useState(false); const [erro, setErro] = useState(""); const [feito, setFeito] = useState(false);
+  if (!aid || !pode) return null;
+  const rodadas = (f && f.rodadas) || [];
+  const ult = rodadas[rodadas.length - 1] || null;
+  const base = numeroBR(f && f.valorFechado) || numeroBR(ult && ult.contra) || numeroBR(ult && ult.impresso);
+  const sugerido = base > 0 ? Math.round(base * 0.1 * 100) / 100 : 0;
+  const abrir = () => { setValor(sugerido ? String(sugerido).replace(".", ",") : ""); setErro(""); setAberto(true); };
+  const confirmar = async () => {
+    const v = numeroBR(valor);
+    if (!(v > 0)) { setErro("Informe o valor da multa."); return; }
+    if (!confirm(`Cancelar o contrato com multa de ${brl(v)}? O carro sai do pátio (se estiver lá), a multa entra na rentabilidade e o atendimento vai para Rescisão.`)) return;
+    setOcupado(true); setErro("");
+    try {
+      const r = await fetchAut("/api/veiculo?recurso=estoque&acao=multa", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ atendimento_id: aid, valor: v, observacoes: obs.trim() || null }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.erro || "Não consegui registrar a multa.");
+      setFeito(true); setAberto(false); aoCancelar && aoCancelar();
+    } catch (e) { setErro(e.message); }
+    setOcupado(false);
+  };
+  if (feito) return (
+    <div className="rounded-lg p-3" style={{ background: "#FCEBD9", border: `1px solid ${C.line}` }}>
+      <div className="text-[12.5px] font-bold" style={{ color: C.laranja }}>Contrato cancelado com multa</div>
+      <div className="mt-0.5 text-[12px]">A multa está na rentabilidade e nos títulos a receber. O atendimento foi para Rescisão.</div>
+    </div>
+  );
+  if (!aberto) return (
+    <button onClick={abrir} className="text-[12px] font-semibold" style={{ color: C.laranja }}>
+      Cliente desistiu? Cancelar o contrato com multa →
+    </button>
+  );
+  return (
+    <Bloco titulo="Cancelar o contrato com multa"
+      sub="O cliente aceitou a proposta e desistiu (termo de aceite, cláusula quarta). A multa entra na rentabilidade e na meta de quem atendeu.">
+      <div className="space-y-2.5">
+        <div className="grid grid-cols-2 gap-2.5">
+          <Campo label="Multa" req>
+            <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)} />
+          </Campo>
+          <Campo label="Observação">
+            <input className={inputCls} style={inputSty} value={obs} onChange={(e) => setObs(e.target.value)} placeholder="acordo, prazo para pagar…" />
+          </Campo>
+        </div>
+        <p className="text-[11.5px]" style={{ color: C.mute }}>
+          {sugerido ? `Sugerido: 10% de ${brl(base)} (${f.valorFechado ? "valor fechado" : "última proposta"}) = ${brl(sugerido)}.` : "Sem valor fechado nem proposta para calcular os 10% — digite a multa."}
+          {" "}Se o carro já está no pátio, ele sai; o que já foi pago dele continua descontando.
+        </p>
+        {erro && <p className="text-[11.5px]" style={{ color: C.laranja }}>{erro}</p>}
+        <div className="flex gap-2">
+          <button disabled={ocupado} onClick={confirmar} className="flex-1 rounded-md py-2 text-[12.5px] font-semibold"
+            style={{ background: C.laranja, color: "#fff" }}>{ocupado ? "Gravando…" : "Cancelar com multa"}</button>
+          <button onClick={() => setAberto(false)} className="rounded-md border px-3 text-[12px]" style={{ borderColor: C.line, color: C.mute }}>voltar</button>
+        </div>
+      </div>
+    </Bloco>
+  );
+}
+
 function IndicacaoLojista({ atendimento, f, perfil }) {
   const aid = atendimento && atendimento.id;
   const [est, setEst] = useState(undefined); const [veiculoId, setVeiculoId] = useState(null);
@@ -4908,12 +4984,15 @@ function IndicacaoLojista({ atendimento, f, perfil }) {
   const quitDeb = numeroBR(f.quitacao) + numeroBR(f.debitos);
   const ref = numeroBR(f.por) || numeroBR(f.fipe);
   const acima = ref > 0 && quitDeb > ref;
-  const podeGravar = !!veiculoId && numeroBR(valor) > 0 && (compId || novoNome.trim());
+  // Basta o lojista e a comissão (0145): a ficha do carro é opcional — sem ela,
+  // o carro vai em texto, do que o atendimento já diz.
+  const podeGravar = numeroBR(valor) > 0 && (compId || novoNome.trim());
   const gravar = async () => {
     setOcupado(true); setErro("");
     try {
       await entrarNoEstoque({
-        veiculo_id: veiculoId, atendimento_id: aid, natureza: "indicacao",
+        veiculo_id: veiculoId || null, atendimento_id: aid, natureza: "indicacao",
+        descricao_carro: veiculoId ? null : ([f.modelo || atendimento.carro_descricao, f.ano].filter(Boolean).join(" ") || null),
         comprador_id: compId || null, comprador_nome: compId ? null : novoNome.trim(),
         valor_venda: valor,
         observacoes: `Indicação — ${solucao}${obs.trim() ? `. ${obs.trim()}` : ""}`,
@@ -4948,11 +5027,6 @@ function IndicacaoLojista({ atendimento, f, perfil }) {
     <Bloco titulo="Indicar a um lojista"
       sub="A Vaapty não compra; o lojista resolve e paga a comissão. Ela entra na rentabilidade e na meta de quem atendeu.">
       <div className="space-y-2.5">
-        {!veiculoId && (
-          <p className="text-[11.5px]" style={{ color: AMARELO.texto }}>
-            Salve a ficha do carro no banco primeiro (etapa Lançamento) — é ela que diz de que carro é a comissão.
-          </p>
-        )}
         <Campo label="Lojista que resolve" req>
           <select className={inputCls} style={inputSty} value={compId} onChange={(e) => setCompId(e.target.value)}>
             <option value="">{lojistas ? "— outro, digitar o nome —" : "carregando…"}</option>
@@ -7618,6 +7692,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 parecia uma pilha de blocos. */}
             <TrilhoFechamento f={f} preContratoFeito={preContratoFeito} contratoLiberado={contratoLiberado} />
             <IndicacaoLojista atendimento={atendimento} f={f} perfil={perfil} />
+            <CancelarComMulta atendimento={atendimento} f={f} perfil={perfil} aoCancelar={() => setStatusAtual("rescisao")} />
 
             {/* Primeiro de propósito, a pedido do Derek: é aqui que o
                 valor fecha. O pré-contrato e o contrato final saem com
@@ -14577,7 +14652,7 @@ function PrevisaoRentabilidade({ patio, realizadoMes, comp, aoMudar, aoAbrir }) 
               style={{ color: C.mute, textAlign: i >= 3 && i <= 6 ? "right" : "left", borderBottom: `1px solid ${C.line}` }}>{h}</th>))}</tr></thead>
           <tbody>
             {vis.map(({ e, prev, r, custo, dias }) => {
-              const v = e.veiculo || {};
+              const v = e.veiculo || { marca_modelo: e.descricao_carro };
               const conta = prev != null && !fora[e.id];
               return (
                 <tr key={e.id} style={{ borderBottom: `1px solid ${C.line}`, opacity: prev != null && fora[e.id] ? 0.5 : 1 }}>
@@ -14680,7 +14755,7 @@ function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar, aoMudar, aoPr
     if (fProsp && e.prospector !== fProsp) return false;
     if (fPrej && !(r.liquida < 0)) return false;
     if (termosR.length) {
-      const v = e.veiculo || {};
+      const v = e.veiculo || { marca_modelo: e.descricao_carro };
       const alvo = semAcento([v.placa, String(v.placa || "").replace(/[^A-Za-z0-9]/g, ""), v.marca_modelo, v.ano_modelo,
         e.comprador && e.comprador.nome, e.negociador_nome, e.meio_alcance, e.prospector].filter(Boolean).join(" ")).toLowerCase();
       if (!termosR.every((t) => alvo.indexOf(t) >= 0)) return false;
@@ -14689,7 +14764,7 @@ function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar, aoMudar, aoPr
   });
   const valorCol = {
     compra: ({ e }) => String(e.entrou_em || ""), venda_dia: ({ e }) => String(e.vendido_em || ""), dias: ({ dias }) => (dias == null ? -1 : dias),
-    carro: ({ e }) => String((e.veiculo && e.veiculo.marca_modelo) || ""), placa: ({ e }) => String((e.veiculo && e.veiculo.placa) || ""),
+    carro: ({ e }) => String((e.veiculo && e.veiculo.marca_modelo) || e.descricao_carro || ""), placa: ({ e }) => String((e.veiculo && e.veiculo.placa) || ""),
     comprador: ({ e }) => String((e.comprador && e.comprador.nome) || ""), venda: ({ r }) => r.venda, cliente: ({ r }) => r.compra,
     debitos: ({ r }) => r.debitos, quitacao: ({ r }) => r.quitacao, deducoes: ({ r }) => r.deducoes, bruta: ({ r }) => r.bruta,
     cautelar: ({ r }) => r.cautelar, comissao: ({ r }) => r.comissaoExterna, liquida: ({ r }) => r.liquida,
@@ -14846,7 +14921,7 @@ function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar, aoMudar, aoPr
             </thead>
             <tbody>
               {linhas.map(({ e, r, semana, dias }, i) => {
-                const v = e.veiculo || {};
+                const v = e.veiculo || { marca_modelo: e.descricao_carro };
                 const z = i % 2 ? PLAN.zebra : undefined;
                 return (
                   <tr key={e.id} onClick={aoAbrir ? () => aoAbrir(e.id) : undefined} title="Abrir a ficha do carro"
@@ -14867,6 +14942,8 @@ function Rentabilidade({ vendidos, comp, aoAbrir, mes, aoImportar, aoMudar, aoPr
                         e a compra é zero porque o carro nunca foi nosso. */}
                     {td(<>{e.comprador ? e.comprador.nome : "—"}{e.natureza === "indicacao" && (
                       <span className="ml-1.5 rounded px-1 text-[10px] font-semibold" style={{ background: "#F1ECF8", color: C.roxo }}>indicação</span>
+                    )}{e.natureza === "multa" && (
+                      <span className="ml-1.5 rounded px-1 text-[10px] font-semibold" style={{ background: "#FCEBD9", color: C.laranja }}>multa contratual</span>
                     )}</>, { dir: "left" })}
                     {td(rs(r.venda), { forte: true })}
                     {td(rs(r.compra))}
@@ -15053,7 +15130,7 @@ function PacoteLojistas({ carros, aoTirar }) {
   const pct = (preco, fipe) => (fipe ? (1 - preco / fipe) * 100 : null);
   const fmtPct = (p) => (p == null ? "—" : p >= 0 ? `${p.toFixed(1).replace(".", ",")}% abaixo` : `${(-p).toFixed(1).replace(".", ",")}% acima`);
   const linhas = carros.map((e) => {
-    const v = e.veiculo || {};
+    const v = e.veiculo || { marca_modelo: e.descricao_carro };
     return { e, v, fipe: Number(v.fipe_valor) || 0, preco: Number(e.preco_pedido) || 0, custo: contaDoEstoque(e).atual };
   });
   const somaFipe = linhas.reduce((t, l) => t + l.fipe, 0);
@@ -15249,7 +15326,7 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
   const [capas, setCapas] = useState({});
   const buscando = !!String(busca || "").trim();
   const idsCapa = (lista || []).filter((e) => e.veiculo_id && (buscando
-      ? (() => { const v = e.veiculo || {}; const q = semAcento(busca).toLowerCase(); return semAcento([v.placa, v.marca_modelo, e.comprador && e.comprador.nome].join(" ")).toLowerCase().indexOf(q.split(/\s+/)[0] || "") >= 0; })()
+      ? (() => { const v = e.veiculo || { marca_modelo: e.descricao_carro }; const q = semAcento(busca).toLowerCase(); return semAcento([v.placa, v.marca_modelo, e.comprador && e.comprador.nome].join(" ")).toLowerCase().indexOf(q.split(/\s+/)[0] || "") >= 0; })()
       : (filtro === "em_estoque" || filtro === "baixado") && e.situacao === filtro))
     .map((e) => e.veiculo_id).slice(0, 150).join(",");
   useEffect(() => {
@@ -15266,7 +15343,7 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
 
   const termos = semAcento(busca).toLowerCase().split(/\s+/).filter(Boolean);
   const casaBusca = (e) => {
-    const v = e.veiculo || {};
+    const v = e.veiculo || { marca_modelo: e.descricao_carro };
     const alvo = semAcento([v.placa, v.marca_modelo, v.ano_modelo, v.ano_fabricacao, v.cor,
       e.comprador && e.comprador.nome, e.negociador_nome].filter(Boolean).join(" ")).toLowerCase();
     const alvoPlaca = String(v.placa || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -15402,7 +15479,7 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
           aoPrever={() => setPrevendo((x) => !x)} prevendo={prevendo}
           previsao={prevendo ? (
             <PrevisaoRentabilidade comp={comp} aoAbrir={(id) => setAbrindo(id)}
-              patio={lista.filter((e) => e.situacao === "em_estoque" && e.natureza !== "indicacao")}
+              patio={lista.filter((e) => e.situacao === "em_estoque" && !naoEhCarro(e))}
               realizadoMes={lista.filter((e) => e.situacao === "vendido" && String(e.vendido_em || e.entrou_em || "").slice(0, 7) === String(comp).slice(0, 7))
                 .reduce((t, e) => t + rentabilidadeDe(e).liquida, 0)}
               aoMudar={async (id, dados) => {
@@ -15520,7 +15597,7 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
       <div className="rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
         {(buscando || filtro === "em_estoque" || filtro === "baixado") && visivel.map((e, i) => {
           const capaDe = capas[e.veiculo_id];
-          const v = e.veiculo || {};
+          const v = e.veiculo || { marca_modelo: e.descricao_carro };
           const c = contaDoEstoque(e);
           const dias = diasNoPatio(e);
           /* **Parado há muito tempo é a informação principal do
@@ -15713,7 +15790,7 @@ function TitulosDoCarro({ e }) {
   const rot = (it) => { const k = String(it || ""); return k.indexOf("compra:cliente") === 0 ? "Compra — pagar ao cliente" : k.indexOf("venda:lojista") === 0 ? "Venda — receber do lojista" : "Custo do carro"; };
   const val = (x) => (Number(x.debito) || 0) + (Number(x.credito) || 0);
   const faltas = [];
-  if (e.natureza !== "indicacao" && !(Number(e.valor_compra) > 0)) faltas.push("sem valor de compra — preencha o check list do negócio para nascer o título do cliente");
+  if (!naoEhCarro(e) && !(Number(e.valor_compra) > 0)) faltas.push("sem valor de compra — preencha o check list do negócio para nascer o título do cliente");
   if (e.situacao === "vendido" && !(Number(e.valor_venda) > 0)) faltas.push("vendido sem valor de venda");
   return (
     <div className="rounded-lg p-3.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
@@ -15776,7 +15853,7 @@ function FichaEstoque({ id, perfil, aoVoltar }) {
     try {
       await atualizarEstoque(e.id, { situacao: "em_estoque", comprador_id: null, valor_venda: null, vendido_em: null });
       let rec = { recado: "Venda desfeita aqui. O carro voltou para o pátio." };
-      if (e.natureza !== "indicacao" && e.shinkai_venda_acao && e.shinkai_venda_acao !== "fora_do_shinkai") {
+      if (!naoEhCarro(e) && e.shinkai_venda_acao && e.shinkai_venda_acao !== "fora_do_shinkai") {
         try { const r = await vendaNoShinkai(e.id, { acao: "cancelado", motivo: motivo || "venda desfeita no ERP" }); rec = { recado: `${rec.recado} ${recadoShinkai(r)}` }; }
         catch (ex) { rec = { recado: `${rec.recado} Mas o Shinkai não desfez: ${ex.message}`, alerta: true }; }
       }
@@ -15801,7 +15878,7 @@ function FichaEstoque({ id, perfil, aoVoltar }) {
     );
   }
 
-  const v = e.veiculo || {};
+  const v = e.veiculo || { marca_modelo: e.descricao_carro };
   const c = contaDoEstoque(e);
   const custos = (e.estoque_custo || []).slice().sort((a, b) => (a.do_fechamento === b.do_fechamento ? 0 : a.do_fechamento ? -1 : 1));
   const dias = diasNoPatio(e);
@@ -15976,7 +16053,7 @@ function FichaEstoque({ id, perfil, aoVoltar }) {
           {/* O que o Shinkai fez com a venda (0071), guardado no carro:
               sem isso o aviso de "comprador não encontrado" sumiria ao
               recarregar, e o carro ficaria lá ofertado sem ninguém ver. */}
-          {e.natureza !== "indicacao" && (
+          {!naoEhCarro(e) && (
             <div className="mt-2 rounded-md px-2.5 py-2 text-[12px]"
               style={{ background: !e.shinkai_venda_em ? AMARELO.fundo : (e.shinkai_venda_avisos || []).length ? AMARELO.fundo : "#E8F3EE",
                        color: !e.shinkai_venda_em || (e.shinkai_venda_avisos || []).length ? AMARELO.texto : C.verde }}>
@@ -15988,7 +16065,7 @@ function FichaEstoque({ id, perfil, aoVoltar }) {
           )}
           {recado && <p className="mt-2 text-[12px]" style={{ color: recado.alerta ? AMARELO.texto : C.verde }}>{recado.recado}</p>}
           <div className="mt-2 flex flex-wrap gap-3 text-[12.5px]">
-            {e.natureza !== "indicacao" && (
+            {!naoEhCarro(e) && (
               <button disabled={mandando} onClick={mandarDeNovo} style={{ color: C.roxo, fontWeight: 600 }}>
                 {mandando ? "mandando…" : e.shinkai_venda_em ? "mandar ao Shinkai de novo" : "mandar ao Shinkai"}
               </button>
@@ -15997,10 +16074,10 @@ function FichaEstoque({ id, perfil, aoVoltar }) {
           </div>
           {/* O CONTRATO DO LOJISTA (0108, a Schell: "lancei a venda… mas
               ele não gera nada para contrato"). */}
-          {e.natureza !== "indicacao" && (
+          {!naoEhCarro(e) && (
             <BotaoPrimario className="mt-3 w-full" onClick={() => setContratoLoj(true)}>Contrato do lojista</BotaoPrimario>
           )}
-          {e.natureza !== "indicacao" && <SituacaoContratoLojista e={e} recarga={contratoLoj} />}
+          {!naoEhCarro(e) && <SituacaoContratoLojista e={e} recarga={contratoLoj} />}
           {contratoLoj && <ContratoDoLojista e={e} valor={c.venda} aoFechar={() => setContratoLoj(false)} />}
         </div>
       ) : vendendo ? (
@@ -19167,7 +19244,7 @@ const SHINKAI_PAINEL = "https://www.shinkai.com.br/painel";
  * sendo avaliado e outro para o que está no pátio.
  */
 function fichaDoEstoque(e) {
-  const v = e.veiculo || {};
+  const v = e.veiculo || { marca_modelo: e.descricao_carro };
   const ano = v.ano_fabricacao && v.ano_modelo && v.ano_fabricacao !== v.ano_modelo
     ? `${v.ano_fabricacao}/${v.ano_modelo}` : String(v.ano_modelo || v.ano_fabricacao || "");
   const cap = (p) => (p ? p.charAt(0).toUpperCase() + p.slice(1) : "");
@@ -19299,7 +19376,7 @@ function TelaVendaLojistas({ perfil }) {
           formulário da venda não cabe. */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {carros.map((e) => {
-          const v = e.veiculo || {};
+          const v = e.veiculo || { marca_modelo: e.descricao_carro };
           const c = contaDoEstoque(e);
           const dias = diasNoPatio(e);
           const f = fichaDoEstoque(e);
@@ -20013,7 +20090,7 @@ function SeletorCarro({ valor, carros, aoMudar, aoVarios, largura, alerta }) {
                   <b style={{ fontFamily: F.mono }}>{c.placa || "sem placa"}</b> · {c.carro || "—"}{c.ano ? ` · ${c.ano}` : ""}
                   <span className="block text-[10px]" style={{ color: C.mute }}>
                     {c.situacao === "vendido" ? `vendido${c.comprador ? ` a ${c.comprador}` : ""}${c.vendido_em ? ` em ${diaBR(c.vendido_em)}` : ""}`
-                      : c.situacao === "em_estoque" ? "no pátio" : c.situacao}{c.natureza === "indicacao" ? " · comissão de indicação" : ""}
+                      : c.situacao === "em_estoque" ? "no pátio" : c.situacao}{c.natureza === "indicacao" ? " · comissão de indicação" : c.natureza === "multa" ? " · multa contratual" : ""}
                   </span>
                 </button>
               ))}
@@ -22550,7 +22627,7 @@ function FinNotas() {
                     <tr key={c.id} style={{ borderTop: `1px solid ${C.line}` }}>
                       <td className="px-2 py-1.5"><b>{c.carro || "—"}</b><span className="ml-1.5 text-[11px]" style={{ color: C.mute, fontFamily: F.mono }}>{c.placa}</span>
                         <span className="block text-[11px]" style={{ color: C.mute }}>
-                          {c.natureza === "indicacao" ? "comissão de indicação" : c.situacao === "vendido" ? `vendido ${c.vendido_em ? diaBR(c.vendido_em) : ""}` : `no pátio desde ${diaBR(c.entrou_em)}`}
+                          {c.natureza === "indicacao" ? "comissão de indicação" : c.natureza === "multa" ? "multa contratual" : c.situacao === "vendido" ? `vendido ${c.vendido_em ? diaBR(c.vendido_em) : ""}` : `no pátio desde ${diaBR(c.entrou_em)}`}
                         </span></td>
                       <td className="px-2 py-1.5">{botao("cliente", "Cliente")}</td>
                     </tr>
@@ -24167,6 +24244,9 @@ function FinRecebimentos({ comp }) {
                     <span className="text-[13px] font-semibold">{v.comprador || "sem comprador"}</span>
                     {v.natureza === "indicacao" && (
                       <span className="rounded px-1.5 text-[10.5px] font-semibold" style={{ background: "#F1ECF8", color: C.roxo }}>comissão de indicação</span>
+                    )}
+                    {v.natureza === "multa" && (
+                      <span className="rounded px-1.5 text-[10.5px] font-semibold" style={{ background: "#FCEBD9", color: C.laranja }}>multa contratual</span>
                     )}
                   </div>
                   <div className="truncate text-[11.5px]" style={{ color: C.mute }}>
@@ -26139,6 +26219,189 @@ const CAMPOS_REPRESENTANTE = [
   ["rep_bairro", "Bairro"], ["rep_cidade", "Cidade"], ["rep_uf", "Estado"], ["rep_cep", "CEP"],
   ["rep_contato", "Contato"], ["rep_email", "E-mail"],
 ];
+/* O CNPJ e o CEP preenchem o cadastro (0145, o Derek: "toda vez que vamos
+ * fazer um contrato pro lojista temos que ficar adicionando endereço").
+ * BrasilAPI (Receita) e ViaCEP: dado público do registro da empresa, só no
+ * clique. Devolve só o que veio — nunca apaga o que já está escrito. */
+async function buscarCnpj(doc) {
+  const d = String(doc || "").replace(/\D/g, "");
+  if (d.length !== 14) throw new Error("O CNPJ tem 14 dígitos.");
+  const r = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${d}`);
+  if (!r.ok) throw new Error(r.status === 404 ? "CNPJ não encontrado na Receita." : "A consulta do CNPJ não respondeu — tente de novo.");
+  const j = await r.json();
+  const end = [j.descricao_tipo_de_logradouro, j.logradouro].filter(Boolean).join(" ");
+  return {
+    nome: j.razao_social || "", endereco: [end, j.numero, j.complemento].filter(Boolean).join(", "),
+    bairro: j.bairro || "", cidade: j.municipio || "", uf: j.uf || "", cep: j.cep ? String(j.cep).replace(/^(\d{5})(\d{3})$/, "$1-$2") : "",
+    email: j.email || "", telefone: j.ddd_telefone_1 ? String(j.ddd_telefone_1).replace(/\D/g, "") : "",
+    rep_nome: ((j.qsa || [])[0] || {}).nome_socio || "",
+  };
+}
+async function buscarCep(cep) {
+  const d = String(cep || "").replace(/\D/g, "");
+  if (d.length !== 8) throw new Error("O CEP tem 8 dígitos.");
+  const r = await fetch(`https://viacep.com.br/ws/${d}/json/`);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.erro) throw new Error("CEP não encontrado.");
+  return { endereco: j.logradouro || "", bairro: j.bairro || "", cidade: j.localidade || "", uf: j.uf || "" };
+}
+// O que o contrato do lojista pede para não sair com linha em branco.
+const OBRIG_LOJISTA = [["documento", "CPF/CNPJ"], ["endereco", "endereço"], ["bairro", "bairro"], ["cidade", "cidade"], ["uf", "estado"], ["cep", "CEP"], ["telefone", "contato"]];
+const faltaNoLojista = (c) => OBRIG_LOJISTA.filter(([k]) => !String((c && c[k]) || "").trim()).map(([, r]) => r);
+// Preenche só o que está vazio.
+const completar = (atual, novo) => { const o = { ...atual }; Object.keys(novo || {}).forEach((k) => { if (novo[k] && !String(o[k] || "").trim()) o[k] = novo[k]; }); return o; };
+
+/* O CADASTRO DE LOJISTAS (0145). Um lugar para manter o lojista completo —
+ * documento, endereço, representante legal e o ADM —, para o contrato do
+ * lojista sair preenchido sem redigitar a cada carro. É o mesmo `comprador`
+ * que a venda, o contrato, o Shinkai e as transferências leem. */
+function TelaLojistas() {
+  const [lista, setLista] = useState(null);
+  const [busca, setBusca] = useState("");
+  const [filtro, setFiltro] = useState("todos");
+  const [aberto, setAberto] = useState(null);
+  const [erro, setErro] = useState("");
+  const carregar = async () => {
+    try {
+      const r = await fetchAut("/api/veiculo?recurso=comprador&todos=1");
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.erro || "Não consegui carregar os lojistas.");
+      setLista(d.compradores || []); setErro("");
+    } catch (e) { setErro(e.message); }
+  };
+  useEffect(() => { carregar(); }, []);
+  const q = busca.trim().toLowerCase(), qd = busca.replace(/\D/g, "");
+  const vis = (lista || []).filter((c) => {
+    if (filtro === "incompletos" && (c.ativo === false || !faltaNoLojista(c).length)) return false;
+    if (filtro === "completos" && faltaNoLojista(c).length) return false;
+    if (filtro === "inativos" ? c.ativo !== false : filtro !== "todos" && c.ativo === false) return false;
+    if (!q) return true;
+    return String(c.nome || "").toLowerCase().includes(q) || String(c.cidade || "").toLowerCase().includes(q) ||
+      (qd.length >= 3 && (String(c.documento || "").replace(/\D/g, "").includes(qd) || String(c.telefone || "").replace(/\D/g, "").includes(qd)));
+  });
+  const incompletos = (lista || []).filter((c) => c.ativo !== false && faltaNoLojista(c).length).length;
+  return (
+    <div>
+      <Cabecalho titulo="Cadastro de lojistas" sub={lista ? `${lista.length} lojistas · ${incompletos} sem o cadastro completo para o contrato` : "Carregando…"}
+        acao={<BotaoPrimario onClick={() => setAberto({ tipo: "lojista", ativo: true })}>+ Novo lojista</BotaoPrimario>} />
+      {erro && <p className="mb-3 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <input className={inputCls} style={{ ...inputSty, maxWidth: 320 }} placeholder="Procurar por nome, CNPJ, telefone ou cidade" value={busca} onChange={(e) => setBusca(e.target.value)} />
+        {[["todos", "Todos"], ["incompletos", "Faltando dados"], ["completos", "Completos"], ["inativos", "Inativos"]].map(([k, r]) => (
+          <button key={k} onClick={() => setFiltro(k)} className="rounded-full border px-3 py-1 text-[12.5px]"
+            style={{ borderColor: filtro === k ? C.roxo : C.line, background: filtro === k ? C.roxo : "#fff", color: filtro === k ? "#fff" : C.ink }}>{r}</button>
+        ))}
+      </div>
+      <div className="overflow-x-auto rounded-xl border" style={{ borderColor: C.line, background: C.paper }}>
+        <div className="min-w-[760px]">
+          <div className="grid grid-cols-[2fr_150px_1fr_130px_1.4fr] gap-2 border-b px-3 py-2 text-[11px] uppercase tracking-wide" style={{ borderColor: C.line, color: C.mute }}>
+            <span>lojista</span><span>CPF / CNPJ</span><span>cidade</span><span>contato</span><span>cadastro</span>
+          </div>
+          {!lista ? <div className="px-3 py-4 text-[13px]" style={{ color: C.mute }}>Carregando…</div> : !vis.length ? (
+            <div className="px-3 py-4 text-[13px]" style={{ color: C.mute }}>Nenhum lojista neste filtro.</div>
+          ) : vis.map((c) => {
+            const falta = faltaNoLojista(c);
+            return (
+              <button key={c.id} onClick={() => setAberto(c)} className="grid w-full grid-cols-[2fr_150px_1fr_130px_1.4fr] items-baseline gap-2 border-b px-3 py-2 text-left text-[13.5px] last:border-b-0 hover:bg-[#FAF8FC]"
+                style={{ borderColor: C.line, opacity: c.ativo === false ? 0.55 : 1 }}>
+                <span className="min-w-0 truncate"><b>{c.nome}</b>{c.rep_nome ? <span className="ml-2 text-[12px]" style={{ color: C.mute }}>{c.rep_nome}</span> : null}</span>
+                <span style={{ fontFamily: F.mono }}>{c.documento || "—"}</span>
+                <span className="truncate">{[c.cidade, c.uf].filter(Boolean).join("/") || "—"}</span>
+                <span style={{ fontFamily: F.mono }}>{c.telefone || "—"}</span>
+                <span className="truncate text-[12.5px]" style={{ color: falta.length ? C.laranja : C.verde }}>{falta.length ? `falta ${falta.join(", ")}` : "completo"}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      {aberto && <FichaLojista lojista={aberto} aoFechar={() => setAberto(null)} aoSalvar={() => { setAberto(null); carregar(); }} />}
+    </div>
+  );
+}
+
+function FichaLojista({ lojista, aoFechar, aoSalvar }) {
+  const [L, setL] = useState({ ...lojista });
+  const [indo, setIndo] = useState(""); const [erro, setErro] = useState(""); const [aviso, setAviso] = useState("");
+  const novo = !L.id;
+  const campo = (k, r, extra) => (
+    <label className="block text-[12px]" key={k}>
+      <span style={{ color: C.mute }}>{r}</span>
+      <input className={inputCls} style={inputSty} value={L[k] || ""} onChange={(ev) => setL({ ...L, [k]: ev.target.value })} {...(extra || {})} />
+    </label>
+  );
+  const porCnpj = async () => {
+    setIndo("cnpj"); setErro(""); setAviso("");
+    try { const v = await buscarCnpj(L.documento); setL(completar(L, v)); setAviso("Preenchido pela Receita — confira. O que já estava escrito não mudou."); }
+    catch (e) { setErro(e.message); }
+    setIndo("");
+  };
+  const porCep = async (rep) => {
+    setIndo("cep"); setErro("");
+    try {
+      const v = await buscarCep(rep ? L.rep_cep : L.cep);
+      setL(completar(L, rep ? { rep_endereco: v.endereco, rep_bairro: v.bairro, rep_cidade: v.cidade, rep_uf: v.uf } : v));
+    } catch (e) { setErro(e.message); }
+    setIndo("");
+  };
+  const salvar = async () => {
+    if (!String(L.nome || "").trim()) { setErro("Informe o nome do lojista."); return; }
+    setIndo("salvar"); setErro("");
+    try {
+      const corpo = {};
+      CAMPOS_LOJISTA.concat(CAMPOS_REPRESENTANTE).concat([["rep_especie"], ["adm_nome"], ["adm_telefone"]]).forEach(([k]) => { corpo[k] = L[k] || ""; });
+      corpo.tipo = L.tipo || "lojista"; corpo.ativo = L.ativo !== false;
+      if (novo) await criarComprador(corpo); else await atualizarComprador(L.id, corpo);
+      aoSalvar && aoSalvar();
+    } catch (e) { setErro(e.message); }
+    setIndo("");
+  };
+  const especie = L.rep_especie || "";
+  const falta = faltaNoLojista(L);
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center lg:items-center" style={{ background: "rgba(24,18,33,0.45)" }} onClick={aoFechar}>
+      <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-t-2xl p-4 lg:rounded-2xl" style={{ background: C.paper }} onClick={(ev) => ev.stopPropagation()}>
+        <div className="flex items-baseline justify-between">
+          <span className="text-[17px] font-bold">{novo ? "Novo lojista" : L.nome}</span>
+          <button onClick={aoFechar} className="text-[13px]" style={{ color: C.mute }}>fechar</button>
+        </div>
+        <p className="mt-0.5 text-[12.5px]" style={{ color: falta.length ? C.laranja : C.verde }}>
+          {falta.length ? `Para o contrato sair completo, falta: ${falta.join(", ")}.` : "Cadastro completo — o contrato do lojista sai preenchido."}
+        </p>
+        <div className="mt-3 text-[11px] font-bold uppercase tracking-[0.1em]" style={{ color: C.roxo }}>O lojista</div>
+        <div className="mt-1 grid grid-cols-2 gap-2 md:grid-cols-3">
+          {CAMPOS_LOJISTA.map(([k, r]) => campo(k, r))}
+        </div>
+        <div className="mt-1.5 flex flex-wrap gap-3 text-[12.5px]">
+          <button onClick={porCnpj} disabled={!!indo} className="font-semibold underline" style={{ color: C.roxo }}>{indo === "cnpj" ? "consultando…" : "Preencher pelo CNPJ (Receita)"}</button>
+          <button onClick={() => porCep(false)} disabled={!!indo} className="font-semibold underline" style={{ color: C.roxo }}>{indo === "cep" ? "consultando…" : "Preencher endereço pelo CEP"}</button>
+        </div>
+        <div className="mt-3 text-[11px] font-bold uppercase tracking-[0.1em]" style={{ color: C.roxo }}>Representante legal (se for empresa)</div>
+        <div className="mt-1 grid grid-cols-2 gap-2 md:grid-cols-3">{CAMPOS_REPRESENTANTE.map(([k, r]) => campo(k, r))}</div>
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          {["Administrador", "Procurador", "Curador", "Inventariante"].map((x) => (
+            <button key={x} onClick={() => setL({ ...L, rep_especie: especie === x ? "" : x })} className="rounded-full border px-2.5 py-1 text-[12px]"
+              style={{ borderColor: especie === x ? C.roxo : C.line, background: especie === x ? C.roxo : "#fff", color: especie === x ? "#fff" : C.ink }}>{x}</button>
+          ))}
+          <button onClick={() => porCep(true)} disabled={!!indo} className="ml-2 text-[12.5px] font-semibold underline" style={{ color: C.roxo }}>endereço pelo CEP</button>
+        </div>
+        <div className="mt-3 text-[11px] font-bold uppercase tracking-[0.1em]" style={{ color: C.roxo }}>ADM do lojista (para onde vão os avisos de documentação)</div>
+        <div className="mt-1 grid grid-cols-2 gap-2">{campo("adm_nome", "Nome")}{campo("adm_telefone", "WhatsApp com DDD")}</div>
+        {!novo && (
+          <label className="mt-3 flex items-center gap-2 text-[13px]">
+            <input type="checkbox" checked={L.ativo !== false} onChange={(e) => setL({ ...L, ativo: e.target.checked })} /> ativo (desmarque para tirar das listas sem apagar o histórico)
+          </label>
+        )}
+        {aviso && <p className="mt-2 text-[12.5px]" style={{ color: C.verde }}>{aviso}</p>}
+        {erro && <p className="mt-2 text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
+        <div className="mt-4 flex gap-2">
+          <BotaoPrimario onClick={salvar} disabled={!!indo}>{indo === "salvar" ? "Salvando…" : novo ? "Cadastrar" : "Salvar"}</BotaoPrimario>
+          <button onClick={aoFechar} className="rounded-lg border px-3 text-[13px]" style={{ borderColor: C.line, color: C.mute }}>cancelar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const TIPO_ESPECIE = { 1: "Automóvel / Passageiro", 2: "Motocicleta / Passageiro", 3: "Caminhão / Carga" };
 
 /* ONDE ESTÁ A ASSINATURA DO LOJISTA, na ficha do carro (04/11/2026, o
@@ -26183,7 +26446,7 @@ function SituacaoContratoLojista({ e, recarga }) {
 }
 
 function ContratoDoLojista({ e, valor, aoFechar }) {
-  const v = e.veiculo || {};
+  const v = e.veiculo || { marca_modelo: e.descricao_carro };
   const [L, setL] = useState(null);
   const [V, setV] = useState({
     renavam: v.renavam || "", proprietario_nome: "", proprietario_doc: "", placa: v.placa || e.placa || "",
@@ -26249,9 +26512,9 @@ function ContratoDoLojista({ e, valor, aoFechar }) {
     </label>
   );
 
-  const guardarCadastro = async () => {
-    if (!e.comprador || !e.comprador.id) { setErro("Esta venda não tem comprador cadastrado."); return; }
-    setIndo("cadastro"); setErro("");
+  const guardarCadastro = async (calado) => {
+    if (!e.comprador || !e.comprador.id) { if (!calado) setErro("Esta venda não tem comprador cadastrado."); return; }
+    if (!calado) { setIndo("cadastro"); setErro(""); }
     try {
       const corpo = {};
       CAMPOS_LOJISTA.concat(CAMPOS_REPRESENTANTE).concat([["rep_especie"]]).forEach(([k]) => { corpo[k] = L[k] || ""; });
@@ -26260,8 +26523,21 @@ function ContratoDoLojista({ e, valor, aoFechar }) {
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.erro || "Não consegui guardar.");
-      setL(d.comprador || L);
-    } catch (x) { setErro(x.message); }
+      if (!calado) setL(d.comprador || L);
+    } catch (x) { if (!calado) setErro(x.message); }
+    if (!calado) setIndo("");
+  };
+  // O que se digitou para o contrato vai para o cadastro sozinho (0145):
+  // "Guardar" era um clique que ninguém dava — 1 lojista de 279 tinha endereço.
+  const guardarSozinho = () => { guardarCadastro(true); };
+  const porCnpjL = async () => {
+    setIndo("cnpj"); setErro("");
+    try { setL(completar(L, await buscarCnpj(L.documento))); } catch (x) { setErro(x.message); }
+    setIndo("");
+  };
+  const porCepL = async () => {
+    setIndo("cep"); setErro("");
+    try { setL(completar(L, await buscarCep(L.cep))); } catch (x) { setErro(x.message); }
     setIndo("");
   };
 
@@ -26272,6 +26548,7 @@ function ContratoDoLojista({ e, valor, aoFechar }) {
     // A janela abre no clique, antes de qualquer espera (decisão 15).
     const r = abrirDocumento(html);
     if (!r.ok) { setErro(r.erro); return; }
+    guardarSozinho();
     setIndo("imprimir");
     try {
       const d = await registrarDocumento({ veiculo_id: e.veiculo_id, tipo: "contrato_lojista", rodada: null,
@@ -26289,6 +26566,7 @@ function ContratoDoLojista({ e, valor, aoFechar }) {
   const enviarZap = async () => {
     setErro(""); setIndo("zap");
     try { localStorage.setItem("vaapty:recebe-lojista", JSON.stringify({ ...B, forma })); } catch (x) {}
+    guardarSozinho();
     try {
       const html = montar();
       // O papel também entra no registro do carro, como o impresso.
@@ -26339,9 +26617,14 @@ function ContratoDoLojista({ e, valor, aoFechar }) {
             ))}
           </div>
         </details>
-        <button onClick={guardarCadastro} disabled={!!indo} className="mt-2 text-[12.5px] font-semibold underline" style={{ color: C.roxo }}>
-          {indo === "cadastro" ? "guardando…" : "Guardar no cadastro do lojista (para os próximos carros)"}
-        </button>
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12.5px]">
+          <button onClick={porCnpjL} disabled={!!indo} className="font-semibold underline" style={{ color: C.roxo }}>{indo === "cnpj" ? "consultando…" : "Preencher pelo CNPJ (Receita)"}</button>
+          <button onClick={porCepL} disabled={!!indo} className="font-semibold underline" style={{ color: C.roxo }}>{indo === "cep" ? "consultando…" : "Endereço pelo CEP"}</button>
+          <button onClick={() => guardarCadastro(false)} disabled={!!indo} className="font-semibold underline" style={{ color: C.roxo }}>
+            {indo === "cadastro" ? "guardando…" : "Guardar no cadastro do lojista"}
+          </button>
+          <span style={{ color: C.mute }}>— ao imprimir ou mandar ao ZapSign, guarda sozinho</span>
+        </div>
         {L.id && <div className="mt-2"><ContatoAdmLojista comprador={L} aoSalvar={(c) => setL({ ...L, ...c })} /></div>}
 
         {/* O PRAZO DE TRANSFERÊNCIA (0115): grava no carro na hora. Mudar
@@ -26648,13 +26931,13 @@ function VenderCarro({ e, aoVender, aoFechar }) {
           sem lojista e não conta para a loja certa. Corrigir aqui conserta
           todas as próximas vendas desse comprador. Nada é completado
           sozinho — o 47 num lojista de Curitiba seria pior que nada. */}
-      {escolhido && e.natureza !== "indicacao" && !telefoneCasaNoShinkai(escolhido.telefone) && (
+      {escolhido && !naoEhCarro(e) && !telefoneCasaNoShinkai(escolhido.telefone) && (
         <TelefoneParaShinkai comprador={escolhido} aoSalvar={(novo) => setEscolhido({ ...escolhido, ...novo })} />
       )}
 
       {/* O prazo de transferência e o contato do ADM (0115): a mensagem de
           boas-vindas sai ao confirmar, já com este prazo e para este número. */}
-      {escolhido && e.natureza !== "indicacao" && (
+      {escolhido && !naoEhCarro(e) && (
         <div className="mt-3 space-y-2">
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-[0.06em]" style={{ color: ROTULO_COR }}>Prazo para o lojista transferir</div>
@@ -29601,6 +29884,7 @@ function destinosPara(perfil) {
     // cliente na mesa.
     { id: "estoque", rot: "Estoque", curto: "Estoque", area: "gestao" },
     gestao ? { id: "lojistas", rot: "Venda para lojistas", curto: "Lojistas", area: "gestao" } : null,
+    gestao ? { id: "cad_lojistas", rot: "Cadastro de lojistas", curto: "Cadastro", area: "gestao" } : null,
     gerente ? { id: "gestao", rot: "Equipe", curto: "Equipe", area: "gestao" } : null,
     // O combinado pronto para mais de uma pessoa (0082). A RLS é do
     // financeiro e do gerente, como a ficha.
@@ -33616,6 +33900,7 @@ function App() {
       {ABA_FIN[tela] && <TelaFinanceiro perfil={perfil} comp={compOuAtual} mes={mes} aba={ABA_FIN[tela]}
         aoMudarMes={setComp} aoIrPara={(aba) => setTela(DESTINO_FIN[aba])} />}
       {tela === "lojistas" && podeGestao && <TelaVendaLojistas perfil={perfil} />}
+      {tela === "cad_lojistas" && podeGestao && <TelaLojistas />}
       </RedeDeErro>
     </Shell>
   );

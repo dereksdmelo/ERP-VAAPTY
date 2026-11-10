@@ -3171,6 +3171,28 @@ quando quitação mais débitos passam do POR. O importador da
 rentabilidade reconhece "ASSUMIU" — antes, "ADAM ASSUMIU" sozinho
 mandava para o PÁTIO um carro que a Vaapty nunca comprou.
 
+**Multa contratual, indicação sem ficha e o cadastro de lojistas (0145,
+10/11/2026, o Derek).** *Cancelar com multa*: o cliente aceitou e desistiu
+(termo de aceite, cláusula quarta) — no Fechamento, só gerente ou financeiro
+(`CancelarComMulta`, `?recurso=estoque&acao=multa`). A multa (10% do valor
+fechado ou da última proposta, editável) é uma linha do estoque com
+`natureza = 'multa'`, já vendida, compra zero: entra na rentabilidade e na
+meta de quem atendeu, como a indicação. Se o carro estava no pátio, a MESMA
+linha vira a multa — os custos só previstos saem, os pagos ficam (descontam),
+os títulos da compra em aberto são cancelados e nasce o "Multa contratual de
+<cliente>" a receber. O atendimento vai para Rescisão. `naoEhCarro()` na tela
+é o lugar único de "não é carro que passou pelo pátio"; no servidor, as
+checagens de `indicacao` ganharam `multa`, e Transferências lê só
+`natureza = 'compra'`. *A indicação não pede mais a ficha do carro*: basta o
+lojista e a comissão; sem veículo, a linha pende do atendimento
+(`estoque.veiculo_id` virou opcional só para indicação e multa) e o carro vai
+em `descricao_carro`. *Cadastro de lojistas* (Gestão): todos os
+compradores, com o que falta para o contrato sair completo, "preencher pelo
+CNPJ" (BrasilAPI, dado público da Receita, só no clique) e endereço pelo CEP
+(ViaCEP) — preenchem só o vazio. O contrato do lojista passou a guardar no
+cadastro sozinho ao imprimir ou mandar ao ZapSign: em 10/11/2026, 1 lojista
+de 279 tinha endereço, porque o "Guardar" era um clique que ninguém dava.
+
 ### 58. O caixa começa do saldo que o financeiro digita
 
 O financeiro pediu em 15/10/2026 para *"zerar o caixa e iniciar em
