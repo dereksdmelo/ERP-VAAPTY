@@ -733,14 +733,19 @@ async function anexos(req, res, tok) {
       const eidL = String(corpo.estoque_id || ""), aidL = String(corpo.atendimento_id || "");
       if (!RX_UUID.test(eidL) && !RX_UUID.test(aidL)) return res.status(400).json({ erro: "estoque_id ou atendimento_id inválido." });
       const filtro = RX_UUID.test(eidL) ? `id=eq.${eidL}` : `atendimento_id=eq.${aidL}&lojista_zapsign_token=not.is.null`;
-      const es = (await banco(`${REST("estoque")}?select=id,atendimento_id,lojista_zapsign_token,lojista_assinado_em&${filtro}&order=lojista_enviado_em.desc.nullslast&limit=1`,
+      const es = (await banco(`${REST("estoque")}?select=id,atendimento_id,lojista_zapsign_token,lojista_assinado_em,lojista_enviado_em&${filtro}&order=lojista_enviado_em.desc.nullslast&limit=1`,
         { headers: cabecalhos(tok) }) || [])[0];
       if (!es || !es.lojista_zapsign_token) return res.status(200).json({ ok: true, nada: true });
       if (!es.atendimento_id) return res.status(200).json({ ok: true, sem_atendimento: true });
-      const ROT = "doc:arq_contrato_lojista", NOME = "contrato-lojista-assinado.pdf";
-      const jaTemL = await banco(`${REST("anexo")}?select=id&atendimento_id=eq.${es.atendimento_id}&rotulo=eq.${encodeURIComponent(ROT)}&nome=eq.${NOME}&limit=1`,
+      // Uma via por documento (0147): o contrato reenviado guarda a nova. A via
+      // de antes (nome sem token) vale se é posterior ao último envio.
+      const ROT = "doc:arq_contrato_lojista", NOME = `contrato-lojista-assinado-${String(es.lojista_zapsign_token).slice(0, 8)}.pdf`;
+      const jaTemL = await banco(`${REST("anexo")}?select=id,nome,criado_em&atendimento_id=eq.${es.atendimento_id}&rotulo=eq.${encodeURIComponent(ROT)}`,
         { headers: cabecalhos(tok) });
-      if (Array.isArray(jaTemL) && jaTemL[0]) return res.status(200).json({ ok: true, ja_guardado: true });
+      const envL = es.lojista_enviado_em ? Date.parse(es.lojista_enviado_em) : 0;
+      if ((jaTemL || []).some((x) => x.nome === NOME || (x.nome === "contrato-lojista-assinado.pdf" && Date.parse(x.criado_em) >= envL))) {
+        return res.status(200).json({ ok: true, ja_guardado: true });
+      }
       if (!ZAP_TOKEN) return res.status(200).json({ ok: true, sem_chave: true });
 
       let docL;
@@ -1930,14 +1935,16 @@ module.exports.crlvParaLojista = crlvParaLojista;
  * que o envio gravou. A chave de serviço toca SÓ o Storage, como em todo
  * este arquivo (decisão 9). Falha em silêncio: o abrir do atendimento e do
  * check list continua guardando, como antes. */
-async function viaAssinadaDoWebhook(tokenDoc, doc) {
+// `lojista`: o contrato do lojista (0147) — as mesmas voltas, pelas funções dele.
+async function viaAssinadaDoWebhook(tokenDoc, doc, lojista) {
   if (!CHAVE || !doc) return null;
   const rpc = (fn, corpo) => banco(`${URL_BASE}/rest/v1/rpc/${fn}`, {
     method: "POST", headers: { apikey: ANON, "Content-Type": "application/json" }, body: JSON.stringify(corpo),
   });
-  const aid = await rpc("contrato_por_token", { tok: tokenDoc });
+  const fnAnexar = lojista ? "anexar_contrato_lojista_assinado" : "anexar_contrato_assinado";
+  const aid = await rpc(lojista ? "lojista_por_token" : "contrato_por_token", { tok: tokenDoc });
   if (!aid || !RX_UUID.test(String(aid))) return null;
-  const antes = await rpc("anexar_contrato_assinado", { tok: tokenDoc, p_caminho: null, p_bytes: 0 });
+  const antes = await rpc(fnAnexar, { tok: tokenDoc, p_caminho: null, p_bytes: 0 });
   if (!antes || antes.ja) return antes;
   const urlPdf = doc.signed_file || doc.original_file;
   if (!urlPdf) return null;
@@ -1949,7 +1956,7 @@ async function viaAssinadaDoWebhook(tokenDoc, doc) {
   await arquivos(`${STORAGE()}/object/${BUCKET_DOC}/${paraURL(caminho)}`, {
     method: "POST", headers: hArquivo({ "Content-Type": "application/pdf", "Cache-Control": "3600", "x-upsert": "false" }), body: pdf,
   });
-  const fim = await rpc("anexar_contrato_assinado", { tok: tokenDoc, p_caminho: caminho, p_bytes: pdf.length }).catch(() => null);
+  const fim = await rpc(fnAnexar, { tok: tokenDoc, p_caminho: caminho, p_bytes: pdf.length }).catch(() => null);
   // Outro caminho guardou no meio (o abrir do atendimento): o arquivo daqui sobra e sai.
   if (!fim || fim.ja || !fim.id) await apagarDoc(caminho).catch(() => {});
   return fim;

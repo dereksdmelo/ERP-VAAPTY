@@ -269,7 +269,8 @@ async function zapsign(req, res, tok) {
   if (zapToken && doLojista) {
     await banco(`${REST("estoque")}?id=eq.${eid}`, {
       method: "PATCH", headers: json(tok),
-      body: JSON.stringify({ lojista_zapsign_token: zapToken, lojista_enviado_em: new Date().toISOString(),
+      // Reenvio zera a assinatura do documento anterior (0147), como o do cliente.
+      body: JSON.stringify({ lojista_zapsign_token: zapToken, lojista_enviado_em: new Date().toISOString(), lojista_assinado_em: null,
         lojista_zapsign_link: links[0] ? links[0].link : null, lojista_zapsign_formato: comPdf ? "pdf" : "markdown" }),
     }).catch(() => {});
   } else if (zapToken) {
@@ -339,6 +340,8 @@ async function zapsignWebhook(req, res) {
       headers: { apikey: ANON, "Content-Type": "application/json" },
       body: JSON.stringify({ tok: tokenDoc }),
     }).catch(() => {});
+    // E a via do lojista vai para o item "Contrato Lojista" do check list na hora (0147).
+    await require("./foto.js").viaAssinadaDoWebhook(tokenDoc, doc, true).catch(() => {});
   } catch (e) { /* o ZapSign repete; não há o que devolver */ }
 
   return ok();

@@ -1443,7 +1443,9 @@ SÓ no Storage, e a linha entra por `anexar_contrato_assinado` — estreitas,
 pela chave anônima, só para o token gravado no envio. A via é uma POR
 DOCUMENTO (o nome leva o começo do token): o contrato reenviado nunca
 guardava a nova, porque a marca era "já tem um Contrato assinado". Reenviar
-zera `contrato_assinado_em`. Abrir o check list do adm também busca a via,
+zera `contrato_assinado_em`. O do LOJISTA faz o mesmo (0147, `lojista_por_token`,
+`anexar_contrato_lojista_assinado`): a via vai para o item "Contrato Lojista"
+do check list do atendimento do carro, na hora, uma por documento. Abrir o check list do adm também busca a via,
 para o que foi assinado antes e o webhook que falhar.
 
 **O link fica guardado, e reenviar pede confirmação (0102).** A Schell:
