@@ -1432,6 +1432,20 @@ teste a âncora ficou numa folha e o traço na outra. **Quem acrescentar
 signatário acrescenta a âncora `signerN` no molde, na ordem da lista.**
 Se o PDF falhar no aparelho, vai o Markdown e a tela avisa.
 
+**A via assinada entra NA HORA, pelo webhook (0146, 10/11/2026, o Derek:
+*"o contrato que o cliente assina no ZapSign não tá ficando salvo o PDF no
+sistema pra conferência do adm"*).** Ela só entrava quando alguém abria o
+atendimento (o Jackson assinou às 16:51, o PDF entrou às 17:56), e o adm
+conferia antes e anexava à mão. Agora o webhook, depois de confirmar
+"signed" no próprio ZapSign, chama `viaAssinadaDoWebhook` (`api/foto.js`):
+o atendimento sai do token por `contrato_por_token`, o PDF sobe com a chave
+SÓ no Storage, e a linha entra por `anexar_contrato_assinado` — estreitas,
+pela chave anônima, só para o token gravado no envio. A via é uma POR
+DOCUMENTO (o nome leva o começo do token): o contrato reenviado nunca
+guardava a nova, porque a marca era "já tem um Contrato assinado". Reenviar
+zera `contrato_assinado_em`. Abrir o check list do adm também busca a via,
+para o que foi assinado antes e o webhook que falhar.
+
 **O link fica guardado, e reenviar pede confirmação (0102).** A Schell:
 *"a cliente falou que não achou o link, o Marcos foi lá e reenviou… ele
 cria outro documento no ZapSign toda vez"*. O link só aparecia na

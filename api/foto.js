@@ -795,23 +795,28 @@ async function anexos(req, res, tok) {
     if (String(req.query.acao || "") === "contrato-assinado") {
       if (!ZAP_TOKEN) return res.status(503).json({ erro: "A chave do ZapSign não está configurada." });
 
-      // Idempotente: repetir o botão não empilha vias.
-      const jaTem = await banco(
-        `${REST("anexo")}?select=id&atendimento_id=eq.${aid}&rotulo=eq.${encodeURIComponent("Contrato assinado")}&limit=1`,
-        { headers: cabecalhos(tok) }
-      );
-      if (Array.isArray(jaTem) && jaTem[0]) {
-        return res.status(200).json({ ok: true, ja_guardado: true });
-      }
-
       // A leitura pelo token do usuário é o que confirma o acesso.
       const at = await banco(
-        `${REST("atendimento")}?select=contrato_zapsign_token,contrato_assinado_em&id=eq.${aid}&limit=1`,
+        `${REST("atendimento")}?select=contrato_zapsign_token,contrato_assinado_em,contrato_enviado_em&id=eq.${aid}&limit=1`,
         { headers: cabecalhos(tok) }
       );
       const linhaAt = Array.isArray(at) ? at[0] : null;
       const zapTok = linhaAt && linhaAt.contrato_zapsign_token;
       if (!zapTok) return res.status(404).json({ erro: "Este atendimento não tem contrato no ZapSign." });
+
+      /* Idempotente POR DOCUMENTO (0146): o nome leva o começo do token do
+       * ZapSign. Antes a marca era "já tem um Contrato assinado", e o
+       * contrato reenviado nunca guardava a via nova. A via de antes de
+       * 10/11/2026 (nome sem token) vale se é posterior ao último envio. */
+      const nomeVia = `contrato-assinado-${String(zapTok).slice(0, 8)}.pdf`;
+      const jaTem = await banco(
+        `${REST("anexo")}?select=id,nome,criado_em&atendimento_id=eq.${aid}&rotulo=eq.${encodeURIComponent("Contrato assinado")}`,
+        { headers: cabecalhos(tok) }
+      );
+      const enviado = linhaAt.contrato_enviado_em ? Date.parse(linhaAt.contrato_enviado_em) : 0;
+      if ((jaTem || []).some((x) => x.nome === nomeVia || (x.nome === "contrato-assinado.pdf" && Date.parse(x.criado_em) >= enviado))) {
+        return res.status(200).json({ ok: true, ja_guardado: true });
+      }
 
       let doc;
       try {
@@ -856,7 +861,7 @@ async function anexos(req, res, tok) {
           headers: json(tok, { Prefer: "return=representation" }),
           body: JSON.stringify({
             atendimento_id: aid, caminho: caminhoAss, tipo: "application/pdf",
-            bytes: pdf.length, nome: "contrato-assinado.pdf", rotulo: "Contrato assinado",
+            bytes: pdf.length, nome: nomeVia, rotulo: "Contrato assinado",
           }),
         });
         salvo = Array.isArray(r) ? r[0] : r;
@@ -1914,3 +1919,39 @@ async function crlvParaLojista(tok, atendimentoId) {
   return { url: url.charAt(0) === "/" ? `${STORAGE()}${url}` : url, nome: a.nome || "CRLV.pdf", tipo: a.tipo || "application/pdf" };
 }
 module.exports.crlvParaLojista = crlvParaLojista;
+
+/* A VIA ASSINADA ENTRA NA HORA, PELO WEBHOOK (0146, 10/11/2026, o Derek: "o
+ * contrato que o cliente assina no ZapSign não tá ficando salvo o PDF no
+ * sistema pra conferência do adm"). Ela só entrava quando alguém abria o
+ * atendimento. O webhook chega sem login: o documento já foi confirmado
+ * "signed" consultando o próprio ZapSign com a nossa chave (decisão 21), o
+ * atendimento sai do token por `contrato_por_token`, e a linha do anexo
+ * entra por `anexar_contrato_assinado` — as duas estreitas, só para o token
+ * que o envio gravou. A chave de serviço toca SÓ o Storage, como em todo
+ * este arquivo (decisão 9). Falha em silêncio: o abrir do atendimento e do
+ * check list continua guardando, como antes. */
+async function viaAssinadaDoWebhook(tokenDoc, doc) {
+  if (!CHAVE || !doc) return null;
+  const rpc = (fn, corpo) => banco(`${URL_BASE}/rest/v1/rpc/${fn}`, {
+    method: "POST", headers: { apikey: ANON, "Content-Type": "application/json" }, body: JSON.stringify(corpo),
+  });
+  const aid = await rpc("contrato_por_token", { tok: tokenDoc });
+  if (!aid || !RX_UUID.test(String(aid))) return null;
+  const antes = await rpc("anexar_contrato_assinado", { tok: tokenDoc, p_caminho: null, p_bytes: 0 });
+  if (!antes || antes.ja) return antes;
+  const urlPdf = doc.signed_file || doc.original_file;
+  if (!urlPdf) return null;
+  const r = await fetch(urlPdf);
+  if (!r.ok) return null;
+  const pdf = Buffer.from(await r.arrayBuffer());
+  if (!pdf.length || pdf.length > MAX_DOC) return null;
+  const caminho = `${aid}/${Date.now()}-${sufixo()}.pdf`;
+  await arquivos(`${STORAGE()}/object/${BUCKET_DOC}/${paraURL(caminho)}`, {
+    method: "POST", headers: hArquivo({ "Content-Type": "application/pdf", "Cache-Control": "3600", "x-upsert": "false" }), body: pdf,
+  });
+  const fim = await rpc("anexar_contrato_assinado", { tok: tokenDoc, p_caminho: caminho, p_bytes: pdf.length }).catch(() => null);
+  // Outro caminho guardou no meio (o abrir do atendimento): o arquivo daqui sobra e sai.
+  if (!fim || fim.ja || !fim.id) await apagarDoc(caminho).catch(() => {});
+  return fim;
+}
+module.exports.viaAssinadaDoWebhook = viaAssinadaDoWebhook;

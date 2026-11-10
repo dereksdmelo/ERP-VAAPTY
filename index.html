@@ -25760,6 +25760,13 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
     guardarContratoLojistaAssinado({ atendimento_id: atendimentoId })
       .then((d) => { if (d && d.guardado) carregarAnexos(); }).catch(() => {});
   }, [atendimentoId]);
+  // E o do cliente (0146): o webhook guarda na hora; isto cobre o que foi
+  // assinado antes e o webhook que falhou. Sem contrato assinado, o
+  // servidor recusa e nada acontece.
+  useEffect(() => {
+    guardarContratoAssinado(atendimentoId)
+      .then((d) => { if (d && !d.ja_guardado) carregarAnexos(); }).catch(() => {});
+  }, [atendimentoId]);
   // Os documentos gerados pendem do veículo, não do atendimento — são
   // duas voltas, e por isso ficam num efeito à parte: a lista do check
   // list não pode esperar por eles para aparecer.
