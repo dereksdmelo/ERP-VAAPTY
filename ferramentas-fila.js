@@ -117,6 +117,7 @@ ok(F.horarioAberto(null, Date.parse("2026-11-07T17:00:00Z")) === false, "sábado
   ok(F.noTransbordo(cfg, { fluxo_ate_ontem: 5, conversao_ate_ontem: 0 }, null, 11).em === false, "sem o mínimo de atendimentos, não");
   ok(F.noTransbordo(cfg, { fluxo_ate_ontem: 20, conversao_ate_ontem: 0.1 }, null, 25).em === false, "fora dos dias, não");
   ok(F.noTransbordo(cfg, { fluxo_ate_ontem: 20, conversao_ate_ontem: 0.1 }, { modo: "fora" }, 11).em === false, "o gerente tira à mão");
+  ok(F.noTransbordo({ ...cfg, transbordo_base: "agora" }, { fluxo_ate_ontem: 20, conversao_ate_ontem: 0.1, fluxo_ate_agora: 21, conversao_ate_agora: 0.2 }, null, 11).em === false, "até agora: o carro de hoje tira do transbordo");
   ok(F.noTransbordo(null, {}, { modo: "dentro" }, 1).em === true, "o gerente põe à mão, sem gatilho");
 }
 

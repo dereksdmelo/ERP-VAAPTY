@@ -176,11 +176,16 @@ function noTransbordo(cfg, p, marca, dia) {
     if (!dentro) return { em: false, como: null };
   } else if (de && dia < de) return { em: false, como: null };
   else if (ate && dia > ate) return { em: false, como: null };
+  // "até agora" (0149) conta também o dia de hoje: reage ao carro que fechou
+  // hoje, e por isso pode mudar no meio do expediente.
+  const agora = cfg.transbordo_base === "agora";
+  const fluxo = agora ? p.fluxo_ate_agora : p.fluxo_ate_ontem;
+  const conv = agora ? p.conversao_ate_agora : p.conversao_ate_ontem;
   const minimo = Number(cfg.transbordo_minimo) || 0;
-  if ((p.fluxo_ate_ontem || 0) < Math.max(1, minimo)) return { em: false, como: null };
+  if ((fluxo || 0) < Math.max(1, minimo)) return { em: false, como: null };
   const corte = Number(cfg.transbordo_abaixo);
   if (!(corte > 0)) return { em: false, como: null };
-  return (p.conversao_ate_ontem || 0) < corte ? { em: true, como: "auto" } : { em: false, como: null };
+  return (conv || 0) < corte ? { em: true, como: "auto" } : { em: false, como: null };
 }
 
 module.exports = { noTransbordo, ESPERA_CREDITO_MS, PRAZO_CHAMADA_MS, estadoDosEventos, circuloDoDia, escolher, aplicar, horarioAberto };

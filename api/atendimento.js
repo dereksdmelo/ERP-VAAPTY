@@ -1310,7 +1310,7 @@ async function estadoDaFila(tok, ignorar) {
     banco(`${REST("fila_dia")}?select=*&dia=eq.${hoje}`, cab).catch(() => []),
     banco(`${REST("fila_transbordo")}?select=*`, cab).catch(() => []),
     // O gatilho do transbordo é lido sempre (a conta do mês fica 5 min guardada).
-    banco(`${REST("config_loja")}?id=eq.1&select=transbordo_auto,transbordo_abaixo,transbordo_minimo,transbordo_dia_de,transbordo_dia_ate`, cab).catch(() => []),
+    banco(`${REST("config_loja")}?id=eq.1&select=transbordo_auto,transbordo_abaixo,transbordo_minimo,transbordo_dia_de,transbordo_dia_ate,transbordo_base`, cab).catch(() => []),
   ]);
   const tbCfg = (cfgTb || [])[0] || null;
   const diaDoMes = Number(hoje.slice(8, 10));
@@ -1381,8 +1381,13 @@ async function estadoDaFila(tok, ignorar) {
       fim_ultimo: fimUltimo,
       transbordo: (() => {
         const marca = (transb || []).find((x) => x.perfil_id === p.id) || null;
-        const t = F.noTransbordo(tbCfg, { fluxo_ate_ontem: doDia.fluxo, conversao_ate_ontem: doDia.fluxo ? doDia.vendas / doDia.fluxo : 0 }, marca, diaDoMes);
-        return { ...t, marca: marca ? marca.modo : null, conversao_ate_ontem: doDia.fluxo ? doDia.vendas / doDia.fluxo : 0 };
+        const cvOntem = doDia.fluxo ? doDia.vendas / doDia.fluxo : 0;
+        const cvAgora = doMesAtual.fluxo ? doMesAtual.vendas / doMesAtual.fluxo : 0;
+        const t = F.noTransbordo(tbCfg, { fluxo_ate_ontem: doDia.fluxo, conversao_ate_ontem: cvOntem,
+          fluxo_ate_agora: doMesAtual.fluxo, conversao_ate_agora: cvAgora }, marca, diaDoMes);
+        const base = tbCfg && tbCfg.transbordo_base === "agora";
+        return { ...t, marca: marca ? marca.modo : null, conversao_ate_ontem: cvOntem, conversao_ate_agora: cvAgora,
+          conversao_base: base ? cvAgora : cvOntem };
       })(),
     };
   });
@@ -1669,7 +1674,7 @@ async function vez(req, res, tok) {
     for (const d of [de, ate]) if (d != null && !(Number.isInteger(d) && d >= 1 && d <= 31)) return res.status(400).json({ erro: "O dia do mês vai de 1 a 31." });
     const r = await banco(`${REST("config_loja")}?id=eq.1`, {
       method: "PATCH", headers: json(tok, { Prefer: "return=representation" }),
-      body: JSON.stringify({ transbordo_auto: !!c.ligado, transbordo_abaixo: abaixo, transbordo_minimo: minimo == null ? 0 : minimo, transbordo_dia_de: de, transbordo_dia_ate: ate }),
+      body: JSON.stringify({ transbordo_base: c.base === "agora" ? "agora" : "ontem", transbordo_auto: !!c.ligado, transbordo_abaixo: abaixo, transbordo_minimo: minimo == null ? 0 : minimo, transbordo_dia_de: de, transbordo_dia_ate: ate }),
     });
     if (!Array.isArray(r) || !r.length) return res.status(403).json({ erro: "O banco não gravou a configuração." });
     return res.status(200).json({ ok: true });
@@ -1767,6 +1772,28 @@ async function vez(req, res, tok) {
 async function leads(req, res, tok) {
   const base = REST("lead");
   const cabJson = json(tok);
+
+  /* O RELATÓRIO DE LEADS DO PERÍODO (10/11/2026, o Derek: "como faz para
+   * puxar o relatório de leads de outubro… precisava em Excel"). Todos os
+   * leads que ENTRARAM entre `de` e `ate` (dia de Joinville), com o número
+   * de WhatsApp e o anúncio de onde vieram, o agendamento, se vieram e como
+   * o atendimento terminou. Em páginas de 1.000 — o teto do PostgREST. A
+   * tela monta a planilha. */
+  if (req.method === "GET" && String(req.query.acao || "") === "relatorio") {
+    const de = String(req.query.de || ""), ate = String(req.query.ate || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) return res.status(400).json({ erro: "Período inválido." });
+    const sel = "id,nome,telefone,carro,cidade,origem,status,criado_em,agendado_para,agendado_por_nome,negociador_nome,prospector_nome," +
+      "proximo_contato,ligacoes,fora_regiao,excluido_em,excluido_motivo,observacoes," +
+      "atendimento(data,status,negociador_nome,chegada_em),wa_conversa(anuncio,primeira_em,wa_canal(nome))";
+    const todos = [];
+    for (let pag = 0; pag < 20; pag++) {
+      const l = await banco(`${base}?select=${sel}&criado_em=gte.${de}T00:00:00-03:00&criado_em=lt.${ate}T23:59:59.999-03:00` +
+        `&order=criado_em.asc&offset=${pag * 1000}&limit=1000`, { headers: cabecalhos(tok) });
+      (l || []).forEach((x) => todos.push(x));
+      if (!l || l.length < 1000) break;
+    }
+    return res.status(200).json({ leads: todos });
+  }
 
   if (req.method === "GET") {
     const f = [];
@@ -2048,6 +2075,13 @@ async function leads(req, res, tok) {
     const c = await lerCorpo(req);
     if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
     const l = paraLead(c);
+    // Uma anotação que SE SOMA às observações (a conversa não carrega as
+    // observações do lead, e mandar só a nova apagaria as de antes).
+    const acresc = typeof c.anotar === "string" ? c.anotar.trim().slice(0, 2000) : "";
+    if (acresc) {
+      const ob = (await banco(`${base}?select=observacoes&id=eq.${id}`, { headers: cabecalhos(tok) }) || [])[0];
+      l.observacoes = [ob && ob.observacoes, acresc].filter(Boolean).join("\n");
+    }
 
     // Remarcar guarda a data antiga. Sem isso, "remarcou três vezes"
     // — que é o que diz se o cliente vem mesmo — some no primeiro
@@ -3593,7 +3627,7 @@ module.exports = async function handler(req, res) {
        * conversa do Kiko, ligada ao lead dele (VALMIR, compareceu), aparecia
        * "sem contato". Agora vêm os ligados às conversas desta página pelo
        * id, e os mais recentes para casar pelo telefone. */
-      const SEL = "id,nome,telefone,status,agendado_para,atendimento_id";
+      const SEL = "id,nome,telefone,status,agendado_para,proximo_contato,atendimento_id";
       const idsPag = [...new Set((linhas || []).map((x) => x.lead_id).filter((x) => RX_UUID.test(String(x || ""))))];
       const [doPag, recentes] = await Promise.all([
         idsPag.length ? banco(`${URL_BASE}/rest/v1/lead?select=${SEL}&id=in.(${idsPag.join(",")})`, { headers: cabecalhos(tok) }) : [],
@@ -3618,7 +3652,7 @@ module.exports = async function handler(req, res) {
         return {
           ...resto,
           canal: wa_canal || null,
-          lead: lead ? { id: lead.id, status: lead.status, agendado_para: lead.agendado_para, atendimento_id: lead.atendimento_id } : null,
+          lead: lead ? { id: lead.id, status: lead.status, agendado_para: lead.agendado_para, atendimento_id: lead.atendimento_id, proximo_contato: lead.proximo_contato || null } : null,
           // "Esperando resposta" é a pergunta de todo dia, e ela é
           // derivada aqui para a tela não repetir a regra.
           esperando: conversaEsperando(l),

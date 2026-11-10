@@ -11226,6 +11226,32 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe, aoMarcar, aoAbrir, 
     setVirando(false);
   };
 
+  /* CONTATO FUTURO NA PRÓPRIA CONVERSA (10/11/2026, o Derek). É o mesmo
+   * "ligar depois" do quadro (decisão 55): o lead em "em contato" com
+   * `proximo_contato`, que vai para a coluna Contato futuro e acende nas
+   * Ações no dia. Sem lead, ele nasce aqui, como no Agendar. */
+  const [voltandoConv, setVoltandoConv] = useState(null);
+  const abrirVolta = async () => {
+    setVirando(true);
+    try {
+      let id = conversa.lead && conversa.lead.id;
+      if (!id) { const d = await waVirarLead(conversa.id); id = d.lead_id; if (aoVirarLead) aoVirarLead(conversa.id, d.lead || { id }); }
+      setVoltandoConv({ id, proximo_contato: (conversa.lead && conversa.lead.proximo_contato) || "" });
+      setErro("");
+    } catch (e) { setErro(e.message); }
+    setVirando(false);
+  };
+  const salvarVolta = async (dia, obs) => {
+    try {
+      const nota = obs ? `${diaBR(dia)}: ${obs}` : "";
+      const mud = { status: "em_contato", proximo_contato: dia, agendado_para: null };
+      if (nota) mud.anotar = nota;
+      const l = await atualizarLead(voltandoConv.id, mud);
+      if (aoVirarLead) aoVirarLead(conversa.id, l);
+      setVoltandoConv(null); setErro("");
+    } catch (e) { setErro(e.message); setVoltandoConv(null); }
+  };
+
   const salvarAgenda = async (mud) => {
     try {
       const l = await atualizarLead(agendando.id, { ...mud, status: "agendado" });
@@ -11301,6 +11327,14 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe, aoMarcar, aoAbrir, 
               className="rounded-full px-3.5 py-1.5 text-[13px] font-semibold text-white"
               style={{ background: C.roxo, opacity: virando ? 0.5 : 1 }}>
               {virando ? "abrindo…" : conversa.lead && conversa.lead.agendado_para ? "Remarcar" : "Agendar"}
+            </button>
+          )}
+          {!operacao && !ehGrupo && (
+            <button onClick={abrirVolta} disabled={!!virando}
+              title="Ligar ou escrever de novo num dia combinado — vai para a coluna Contato futuro do quadro"
+              className="rounded-full px-3.5 py-1.5 text-[13px] font-semibold"
+              style={{ color: C.roxo, border: `1px solid ${C.roxo}`, background: "#fff", opacity: virando ? 0.5 : 1 }}>
+              {conversa.lead && conversa.lead.proximo_contato && !conversa.lead.agendado_para ? `Contato futuro · ${diaBR(conversa.lead.proximo_contato)}` : "Contato futuro"}
             </button>
           )}
           {/* Ligar sai do número em que a conversa chegou: é o que o
@@ -11393,6 +11427,11 @@ function Conversa({ conversa, aoVoltar, aoVirarLead, equipe, aoMarcar, aoAbrir, 
       {agendando && (
         <Agendador lead={agendando} equipe={equipe || []}
           aoFechar={() => setAgendando(null)} aoAgendar={salvarAgenda} />
+      )}
+      {voltandoConv && (
+        <QuandoVoltar titulo="Contato futuro — quando falar de novo com este cliente?"
+          valor={voltandoConv.proximo_contato || ""}
+          aoFechar={() => setVoltandoConv(null)} aoEscolher={salvarVolta} />
       )}
     </div>
   );
@@ -29653,14 +29692,14 @@ function TransbordoDaFila({ d, gerente, aoMudar, todos }) {
   const abrir = () => {
     setF({ ligado: !!cfg.transbordo_auto, abaixo: String(Math.round((Number(cfg.transbordo_abaixo) || 0.15) * 1000) / 10).replace(".", ","),
       minimo: String(cfg.transbordo_minimo == null ? 10 : cfg.transbordo_minimo), dia_de: cfg.transbordo_dia_de ? String(cfg.transbordo_dia_de) : "",
-      dia_ate: cfg.transbordo_dia_ate ? String(cfg.transbordo_dia_ate) : "" });
+      dia_ate: cfg.transbordo_dia_ate ? String(cfg.transbordo_dia_ate) : "", base: cfg.transbordo_base === "agora" ? "agora" : "ontem" });
     setErro(""); setAberto(true);
   };
   const salvar = async () => {
     setIndo(true); setErro("");
     try {
       const pct = Number(String(f.abaixo).replace(",", "."));
-      await mexerNaVez("transbordo-config", { ligado: f.ligado, abaixo: pct / 100, minimo: f.minimo, dia_de: f.dia_de, dia_ate: f.dia_ate });
+      await mexerNaVez("transbordo-config", { ligado: f.ligado, abaixo: pct / 100, minimo: f.minimo, dia_de: f.dia_de, dia_ate: f.dia_ate, base: f.base });
       setAberto(false); aoMudar && aoMudar();
     } catch (e) { setErro(e.message); }
     setIndo(false);
@@ -29680,7 +29719,7 @@ function TransbordoDaFila({ d, gerente, aoMudar, todos }) {
           </div>
           <div className="text-[12px]" style={{ color: C.mute }}>
             {cfg.transbordo_auto
-              ? `Automático: conversão do mês até ontem abaixo de ${pctTxt}, com pelo menos ${cfg.transbordo_minimo || 0} atendimentos${dias}.`
+              ? `Automático: conversão do mês ${cfg.transbordo_base === "agora" ? "até agora" : "até ontem"} abaixo de ${pctTxt}, com pelo menos ${cfg.transbordo_minimo || 0} atendimentos${dias}.`
               : "Automático desligado — só quem o gerente põe à mão."}
           </div>
         </div>
@@ -29689,6 +29728,11 @@ function TransbordoDaFila({ d, gerente, aoMudar, todos }) {
       {aberto && f && (
         <div className="mt-3 flex flex-wrap items-end gap-3 border-t pt-3 text-[13px]" style={{ borderColor: C.line }}>
           <label className="flex items-center gap-2"><input type="checkbox" checked={f.ligado} onChange={(e) => setF({ ...f, ligado: e.target.checked })} /> entrar e sair sozinho</label>
+          <label>contar a conversão<br />
+            <select className="rounded border px-2 py-1" style={{ borderColor: C.line }} value={f.base} onChange={(e) => setF({ ...f, base: e.target.value })}>
+              <option value="ontem">até ontem (não muda no dia)</option>
+              <option value="agora">até agora (conta o dia de hoje)</option>
+            </select></label>
           <label>conversão abaixo de (%)<br /><input className="w-20 rounded border px-2 py-1" style={{ borderColor: C.line }} inputMode="decimal" value={f.abaixo} onChange={(e) => setF({ ...f, abaixo: e.target.value })} /></label>
           <label>com pelo menos (atend.)<br /><input className="w-20 rounded border px-2 py-1" style={{ borderColor: C.line }} inputMode="numeric" value={f.minimo} onChange={(e) => setF({ ...f, minimo: e.target.value })} /></label>
           <label>do dia<br /><input className="w-16 rounded border px-2 py-1" style={{ borderColor: C.line }} inputMode="numeric" placeholder="—" value={f.dia_de} onChange={(e) => setF({ ...f, dia_de: e.target.value })} /></label>
@@ -29707,7 +29751,7 @@ function TransbordoDaFila({ d, gerente, aoMudar, todos }) {
               return (
                 <div key={p.perfil_id} className="flex flex-wrap items-baseline gap-x-3 py-0.5">
                   <b className="min-w-[160px]">{p.nome}</b>
-                  <span style={{ fontFamily: F.mono, color: C.mute }}>{Math.round((t.conversao_ate_ontem || 0) * 100)}% até ontem</span>
+                  <span style={{ fontFamily: F.mono, color: C.mute }}>{Math.round((t.conversao_ate_ontem || 0) * 100)}% até ontem · {Math.round((t.conversao_ate_agora || 0) * 100)}% até agora</span>
                   <span style={{ color: t.em ? C.laranja : C.mute }}>{t.em ? `no transbordo${t.como === "auto" ? " (automático)" : " (à mão)"}` : t.marca === "fora" ? "fora (à mão)" : "na fila normal"}</span>
                   {t.em
                     ? <button disabled={indo} onClick={() => marcar("fora")} className="underline" style={{ color: C.laranja }}>tirar</button>
@@ -30197,6 +30241,54 @@ function GraficoDiasMkt({ dias, gastos }) {
   );
 }
 
+/* O RELATÓRIO DE LEADS (10/11/2026, o Derek: "como faz para puxar o
+ * relatório de leads de outubro no sistema, no marketing? precisava em
+ * Excel"). Os leads que ENTRARAM no período escolhido no alto, um por linha,
+ * com o número e o anúncio de onde vieram, o agendamento, se vieram e como
+ * terminou. CSV com ";" — abre direto no Excel em português. */
+function BaixarLeads({ de, ate }) {
+  const [indo, setIndo] = useState(false); const [erro, setErro] = useState("");
+  const dataBR = (iso) => (iso ? new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "");
+  const diaBRx = (d) => (d ? `${String(d).slice(8, 10)}/${String(d).slice(5, 7)}/${String(d).slice(0, 4)}` : "");
+  const baixar = async () => {
+    setIndo(true); setErro("");
+    try {
+      const r = await fetchAut(`/api/atendimento?recurso=lead&acao=relatorio&de=${de}&ate=${ate}`);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.erro || "Não consegui puxar os leads.");
+      const STAT_AT = Object.fromEntries((STATUS_AT || []).map(([k, rot]) => [k, rot]));
+      const linhas = (d.leads || []).map((l) => {
+        const cv = (l.wa_conversa || [])[0] || {};
+        const an = cv.anuncio || {};
+        const at = l.atendimento || {};
+        return [
+          dataBR(l.criado_em), l.nome || "", l.telefone || "", l.carro || "", l.cidade || "",
+          l.origem || "", (cv.wa_canal && cv.wa_canal.nome) || "", an.titulo || an.title || an.headline || "", an.id || an.source_id || an.ad_id || "",
+          l.excluido_em ? "Excluído" : (LEAD_ROT[l.status] || l.status || ""),
+          l.agendado_para ? dataBR(String(l.agendado_para).replace(/(\+00:00|Z)$/, "-03:00")) : "", l.agendado_por_nome || "",
+          l.proximo_contato ? diaBRx(l.proximo_contato) : "", String(l.ligacoes || 0),
+          at.data ? "sim" : "", at.data ? diaBRx(at.data) : "", at.negociador_nome || l.negociador_nome || "",
+          at.status ? (STAT_AT[at.status] || at.status) : "", l.fora_regiao ? "sim" : "",
+          l.excluido_motivo || "", String(l.observacoes || "").replace(/\s+/g, " ").slice(0, 500),
+        ];
+      });
+      baixarCSV(`leads-${de}-a-${ate}.csv`,
+        ["Entrou em", "Nome", "Telefone", "Carro", "Cidade", "Origem", "Número de WhatsApp", "Anúncio", "Id do anúncio",
+         "Etapa", "Agendado para", "Quem agendou", "Contato futuro", "Ligações", "Veio à loja", "Dia da visita", "Negociador",
+         "Como terminou", "Fora da região", "Motivo da exclusão", "Observações"], linhas);
+    } catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+  return (
+    <span className="inline-flex items-center gap-2">
+      <button onClick={baixar} disabled={indo} className="rounded-lg border px-3 py-1.5 text-[12.5px] font-semibold" style={{ borderColor: C.line, color: C.roxo, background: C.paper }}>
+        {indo ? "Juntando…" : "Baixar leads (Excel)"}
+      </button>
+      {erro && <span className="text-[12px]" style={{ color: C.laranja }}>{erro}</span>}
+    </span>
+  );
+}
+
 function TelaMarketing({ aba, comp, mes, perfil }) {
   const [p, setP] = useState("mes");
   const [de, ate] = faixaMkt(comp, p);
@@ -30205,7 +30297,7 @@ function TelaMarketing({ aba, comp, mes, perfil }) {
   const [q, setQ] = useState("");
   const titulo = aba === "criativos" ? "Criativos" : aba === "conexao" ? "Contas de anúncio" : "Marketing";
   const sub = aba === "criativos" ? "Cada anúncio, da conversa ao carro e à margem." : aba === "conexao" ? "De onde vem o gasto de cada anúncio." : "Quanto se investiu, quanto voltou.";
-  const cab = <Cabecalho titulo={titulo} sub={sub} acao={aba !== "conexao" ? <PeriodoMkt comp={comp} p={p} setP={setP} /> : null} mes={aba !== "conexao" && p === "mes" ? mes : null} />;
+  const cab = <Cabecalho titulo={titulo} sub={sub} acao={aba !== "conexao" ? <span className="inline-flex flex-wrap items-center gap-2"><BaixarLeads de={de} ate={ate} /><PeriodoMkt comp={comp} p={p} setP={setP} /></span> : null} mes={aba !== "conexao" && p === "mes" ? mes : null} />;
   if (aba === "conexao") return <>{cab}<ConexaoMeta d={d} erro={erro} aoMudar={carregar} perfil={perfil} /></>;
   if (erro) return <>{cab}<p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p></>;
   if (!d) return <>{cab}<p className="text-[13px]" style={{ color: C.mute }}>Juntando conversas, agendamentos, carros e gasto…</p></>;

@@ -3209,6 +3209,23 @@ CNPJ" (BrasilAPI, dado público da Receita, só no clique) e endereço pelo CEP
 cadastro sozinho ao imprimir ou mandar ao ZapSign: em 10/11/2026, 1 lojista
 de 279 tinha endereço, porque o "Guardar" era um clique que ninguém dava.
 
+**10/11/2026, mais quatro pedidos do Derek.** *Contato futuro na própria
+conversa*: botão ao lado do Agendar, o mesmo `QuandoVoltar` do quadro (o lead
+nasce ali se não existir; a anotação se SOMA às observações pelo `anotar` do
+PATCH do lead — a conversa não carrega as observações). *A Flávia pergunta o
+período antes*: "manhã ou tarde?", depois exatamente dois horários daquele
+período, e se nenhum servir, um outro ou "qual fica melhor" — o roteiro de
+18/10 mandava oferecer horários direto, e oferecer muitos parecia agenda
+vazia. *Uma conversa por número* (0148): a "Nova conversa" gravava o telefone
+com o nono dígito e o WhatsApp respondia sem ele — dois números para o banco.
+`wa_receber` (a versão com segredo) põe a mensagem na conversa que já existe
+no mesmo número com DDD + oito últimos (`wa_chave_fone`). As 36 duplicadas de
+antes ficam para `wa_juntar_conversas`, que só roda com o ok do Derek. *O
+relatório de leads*: Marketing → "Baixar leads (Excel)", os leads que
+entraram no período do alto (`?recurso=lead&acao=relatorio`, em páginas de
+1.000), CSV com ";". *Transbordo "até agora"* (0149, `transbordo_base`):
+o gatilho escolhe a conversão até ontem ou até agora.
+
 ### 58. O caixa começa do saldo que o financeiro digita
 
 O financeiro pediu em 15/10/2026 para *"zerar o caixa e iniciar em
