@@ -28630,7 +28630,7 @@ const TIPO_EVENTO = {
   especifico: "atendeu a pedido (não conta)", fora_da_vez: "atendeu fora da vez",
   correcao: "o gerente pôs a vez", credito: "o gerente devolveu a vez",
 };
-const VIA_VEZ = { roda: "", credito: "a vez que devia", todos_ocupados: "todos ocupados", repasse: "repasse" };
+const VIA_VEZ = { roda: "", correcao: "posta pelo gerente", credito: "a vez que devia", todos_ocupados: "todos ocupados", repasse: "repasse" };
 const RESPOSTA = { aceitou: "aceitou", passou: "passou a vez", expirou: "não respondeu em 3 min" };
 
 /* AS APROVAÇÕES QUE ESPERAM (03/11/2026, o Derek: "deve aparecer
@@ -29318,7 +29318,8 @@ function TelaFilaDaVez({ perfil, aoAbrir }) {
               <div className="text-[12px] uppercase tracking-wide" style={{ opacity: 0.8 }}>o próximo cliente é de</div>
               <div className="text-[28px] leading-tight" style={{ fontFamily: F.disp, fontWeight: 800 }}>{daVez.nome}</div>
               <div className="mt-1 text-[13px]" style={{ opacity: 0.9 }}>
-                {d.vez_via === "credito" ? "É a vez que ele ficou devendo — estava atendendo quando chegou a dele."
+                {d.vez_via === "correcao" ? "O gerente pôs a vez aqui."
+                  : d.vez_via === "credito" ? "É a vez que ele ficou devendo — estava atendendo quando chegou a dele."
                   : d.vez_via === "todos_ocupados" ? `Estão todos atendendo — ${daVez.nome} pega mais um.` : "Pela roda."}
                 {d.segundo && ` Depois: ${nomeDe(d.segundo)}.`}
               </div>
@@ -29378,8 +29379,10 @@ function TelaFilaDaVez({ perfil, aoAbrir }) {
                   <>
                     <button onClick={() => { if (confirm(`Pôr a vez em ${p.nome}? A roda continua dele em diante — quem estiver antes dele na roda perde esta volta.`)) fazer(p.perfil_id, "corrigir", { tipo: "vez", perfil_id: p.perfil_id }); }} disabled={!!indo}
                       className="font-semibold underline" style={{ color: C.roxo }}>pôr a vez aqui</button>
-                    <button onClick={() => fazer(p.perfil_id, "corrigir", { tipo: "devolver", perfil_id: p.perfil_id })} disabled={!!indo}
+                    <button onClick={() => { if (confirm(`Devolver uma vez a ${p.nome}? Ele passa a dever ${p.deve_vez + 1 > 1 ? `${p.deve_vez + 1} vezes` : "uma vez"} e é chamado antes da roda quando estiver livre.`)) fazer(p.perfil_id, "corrigir", { tipo: "devolver", perfil_id: p.perfil_id }); }} disabled={!!indo}
                       className="font-semibold underline" style={{ color: C.roxo }}>devolver uma vez</button>
+                    {p.deve_vez > 0 && <button onClick={() => fazer(p.perfil_id, "corrigir", { tipo: "tirar", perfil_id: p.perfil_id })} disabled={!!indo}
+                      className="font-semibold underline" style={{ color: C.laranja }}>tirar uma vez devida</button>}
                   </>
                 )}
                 {gerente && p.perfil_id !== d.eu && (p.presente
@@ -29412,7 +29415,7 @@ function TelaFilaDaVez({ perfil, aoAbrir }) {
           <div key={e.id} className="flex flex-wrap items-baseline gap-x-2 border-b px-3 py-1.5 text-[13px] last:border-b-0" style={{ borderColor: C.line }}>
             <span style={{ fontFamily: F.mono, color: C.mute }}>{horaSP(e.criado_em)}</span>
             <b>{e.nome || "—"}</b>
-            <span>{TIPO_EVENTO[e.tipo] || e.tipo}{e.tipo === "vez" && VIA_VEZ[e.via] ? ` (${VIA_VEZ[e.via]})` : ""}</span>
+            <span>{e.tipo === "credito" && e.via === "tirar" ? "o gerente tirou uma vez devida" : (TIPO_EVENTO[e.tipo] || e.tipo)}{e.tipo === "vez" && VIA_VEZ[e.via] ? ` (${VIA_VEZ[e.via]})` : ""}</span>
             {e.resposta && <span style={{ color: e.resposta === "aceitou" ? C.verde : C.laranja }}>· {RESPOSTA[e.resposta]}</span>}
             {e.penalizado && <span style={{ color: e.estornado_em ? C.mute : C.laranja, textDecoration: e.estornado_em ? "line-through" : "none" }}>· perdeu atendimento</span>}
             {e.motivo && <span style={{ color: C.mute }}>· {e.motivo}</span>}

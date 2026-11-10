@@ -79,5 +79,27 @@ ok(F.horarioAberto(null, Date.parse("2026-11-03T13:00:00Z")) === true, "terça 1
 ok(F.horarioAberto(null, Date.parse("2026-11-03T21:30:00Z")) === false, "terça 18h30: fechada");
 ok(F.horarioAberto(null, Date.parse("2026-11-07T17:00:00Z")) === false, "sábado 14h: fechada");
 
+// 11. "Pôr a vez aqui" ganha da vez devida (10/11/2026: o Dimas devia uma
+// e passava na frente do André Ricardo mesmo depois da correção); e o
+// "devolver" a mais se desfaz.
+{
+  const ev = [
+    { criado_em: "2026-11-10T19:03:00Z", tipo: "pulou", perfil_id: "D" },
+    { criado_em: "2026-11-10T20:40:00Z", tipo: "correcao", perfil_id: "R", prox: "R" },
+    { criado_em: "2026-11-10T20:41:00Z", tipo: "credito", perfil_id: "R" },
+    { criado_em: "2026-11-10T20:42:00Z", tipo: "credito", perfil_id: "R" },
+    { criado_em: "2026-11-10T20:43:00Z", tipo: "credito", via: "tirar", perfil_id: "R" },
+  ];
+  const st = F.estadoDosEventos(ev);
+  ok(st.forcado === "R" && st.creditos.R.length === 1, "tirar desfaz um devolver");
+  const pes2 = { D: { presente: true, atendendo: 0, fim_ultimo: 0 }, R: { presente: true, atendendo: 0, fim_ultimo: 0 }, C: { presente: true, atendendo: 0 } };
+  const e2 = { circulo: ["C", "D", "R"], pessoas: pes2, ponteiro: st.ponteiro, creditos: st.creditos, forcado: st.forcado, aberto: true, agora: Date.parse("2026-11-10T21:00:00Z") };
+  const v = F.escolher(e2);
+  ok(v.quem === "R" && v.via === "correcao" && v.prox === "C", "a vez posta pelo gerente vem antes da devida");
+  ok(F.escolher(F.aplicar(e2, v)).quem === "D", "depois dele, a devida segue valendo");
+  const st2 = F.estadoDosEventos(ev.concat([{ criado_em: "2026-11-10T20:50:00Z", tipo: "vez", via: "correcao", perfil_id: "R", prox: "C" }]));
+  ok(st2.forcado === null, "a correção acaba quando ele pega o cliente");
+}
+
 if (falhas) { console.log(`\n${falhas} falha(s).`); process.exit(1); }
 console.log("\ntodos os casos passaram.");

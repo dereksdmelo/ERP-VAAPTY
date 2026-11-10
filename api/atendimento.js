@@ -1392,7 +1392,7 @@ async function estadoDaFila(tok, ignorar) {
   const st = F.estadoDosEventos(eventos || []);
   const porId = {};
   pessoas.forEach((p) => { porId[p.perfil_id] = { presente: p.presente, atendendo: p.atendendo.length, fim_ultimo: p.fim_ultimo }; });
-  const est = { circulo, pessoas: porId, ponteiro: st.ponteiro, creditos: st.creditos, aberto, agora };
+  const est = { circulo, pessoas: porId, ponteiro: st.ponteiro, creditos: st.creditos, forcado: st.forcado, aberto, agora };
   const vez = F.escolher(est);
   const segundo = vez ? F.escolher(F.aplicar(est, vez)) : null;
   // De quem é a vez PELA RODA, presente ou não: é quem leva o alerta de
@@ -1634,6 +1634,7 @@ async function vez(req, res, tok) {
   /* A CORREÇÃO DO GERENTE (o Derek: "ele precisa poder corrigir"):
    *   vez      — a vez passa a ser de alguém (a roda anda daí);
    *   devolver — devolve uma vez a quem perdeu sem dever;
+   *   tirar    — desfaz um "devolver" (tira a vez devida mais recente);
    *   estornar — desfaz o "perdeu atendimento" de uma chamada. */
   if (req.method === "POST" && acao === "corrigir") {
     const perfil = await banco(`${URL_BASE}/rest/v1/perfil?select=papel&id=eq.${eu}`, { headers: cabecalhos(tok) });
@@ -1654,6 +1655,10 @@ async function vez(req, res, tok) {
       await gravarEventos(tok, [{ dia: s.hoje, tipo: "correcao", perfil_id: quem, nome: p.nome, prox: quem, motivo: texto(c.motivo) || "o gerente pôs a vez aqui" }]);
     } else if (tipo === "devolver") {
       await gravarEventos(tok, [{ dia: s.hoje, tipo: "credito", perfil_id: quem, nome: p.nome, motivo: texto(c.motivo) || "o gerente devolveu a vez" }]);
+    } else if (tipo === "tirar") {
+      // Desfaz um "devolver" a mais: tira a vez devida mais recente.
+      if (!((s.est.creditos[quem] || []).length)) return res.status(409).json({ erro: `${p.nome} não deve nenhuma vez.` });
+      await gravarEventos(tok, [{ dia: s.hoje, tipo: "credito", via: "tirar", perfil_id: quem, nome: p.nome, motivo: texto(c.motivo) || "o gerente tirou uma vez devida" }]);
     } else return res.status(400).json({ erro: "Correção desconhecida." });
     return res.status(200).json({ ok: true });
   }

@@ -38,16 +38,26 @@ const PRAZO_CHAMADA_MS = 3 * 60000;
  */
 function estadoDosEventos(eventos) {
   let ponteiro = null;
+  // A vez posta pelo gerente ("pôr a vez aqui") vale ANTES da vez devida:
+  // é a correção dele, e só termina quando essa pessoa recebe um cliente
+  // (10/11/2026: o Dimas devia uma vez e passava na frente do André
+  // Ricardo mesmo depois da correção).
+  let forcado = null;
   const creditos = {};
   const dar = (id, t) => { (creditos[id] = creditos[id] || []).push(t); };
   const tirar = (id) => { if (creditos[id] && creditos[id].length) creditos[id].shift(); };
+  // O gerente tira uma vez devolvida por engano: sai a mais recente.
+  const desfazer = (id) => { if (creditos[id] && creditos[id].length) creditos[id].pop(); };
   (eventos || []).slice().sort((a, b) => String(a.criado_em).localeCompare(String(b.criado_em))).forEach((e) => {
     const t = Date.parse(e.criado_em) || 0;
-    if (e.tipo === "pulou" || e.tipo === "credito") dar(e.perfil_id, t);
+    if (e.tipo === "credito" && e.via === "tirar") desfazer(e.perfil_id);
+    else if (e.tipo === "pulou" || e.tipo === "credito") dar(e.perfil_id, t);
     if (e.tipo === "vez" && e.via === "credito") tirar(e.perfil_id);
+    if (e.tipo === "correcao") forcado = e.perfil_id;
+    if (e.tipo === "vez") forcado = null;
     if (e.prox) ponteiro = e.prox;
   });
-  return { ponteiro, creditos };
+  return { ponteiro, creditos, forcado };
 }
 
 /**
@@ -85,6 +95,12 @@ function escolher(est, excluir) {
   const livres = presentes.filter((id) => !P(id).atendendo);
   const ponteiro = C.indexOf(est.ponteiro) >= 0 ? est.ponteiro : C[0];
 
+  // 0. A vez que o gerente pôs: é dela, enquanto ela estiver na fila.
+  if (est.forcado && C.indexOf(est.forcado) >= 0 && pode(est.forcado) && P(est.forcado).presente) {
+    const j = C.indexOf(est.forcado);
+    return { quem: est.forcado, via: "correcao", pulos: [], prox: C[(j + 1) % C.length] };
+  }
+
   // 1. A vez devida: livre há pelo menos dez minutos, quem ficou devendo
   // primeiro. Não mexe na roda — a vez normal dele continua lá.
   const devidos = livres.filter((id) => (est.creditos[id] || []).length &&
@@ -115,7 +131,7 @@ function aplicar(est, e) {
   Object.keys(est.creditos || {}).forEach((k) => { creditos[k] = est.creditos[k].slice(); });
   if (e.via === "credito") (creditos[e.quem] || []).shift();
   e.pulos.filter((x) => x.motivo === "ocupado").forEach((x) => { (creditos[x.perfil_id] = creditos[x.perfil_id] || []).push(est.agora); });
-  return { ...est, pessoas, creditos, ponteiro: e.prox };
+  return { ...est, pessoas, creditos, ponteiro: e.prox, forcado: e.via === "correcao" ? null : est.forcado };
 }
 
 /** A loja está atendendo agora? `cfg` é a linha da config_loja. */
