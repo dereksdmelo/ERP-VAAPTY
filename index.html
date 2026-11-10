@@ -29058,6 +29058,44 @@ function PerguntaForaDaFila({ eu, d, aoFeito, aoAgoraNao, proximo }) {
   );
 }
 
+/* O ALARME DA VEZ: som, título da aba piscando e a notificação do
+ * computador. Devolve a função que para tudo. O som é sintetizado (sem
+ * arquivo); o navegador só toca depois de a pessoa ter clicado na página
+ * uma vez — por isso a notificação do sistema, que não depende disso. */
+function alarmeDaVez(titulo, corpo) {
+  let ctx = null, parado = false;
+  const bip = () => {
+    if (parado) return;
+    try {
+      ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+      [0, 0.22, 0.44].forEach((t, i) => {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = "sine"; o.frequency.value = i === 2 ? 1175 : 880;
+        g.gain.setValueAtTime(0.0001, ctx.currentTime + t);
+        g.gain.exponentialRampToValueAtTime(0.35, ctx.currentTime + t + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + t + 0.2);
+        o.connect(g); g.connect(ctx.destination); o.start(ctx.currentTime + t); o.stop(ctx.currentTime + t + 0.22);
+      });
+    } catch (e) {}
+  };
+  bip();
+  const tSom = setInterval(bip, 8000);
+  const original = document.title; let alt = false;
+  const tTit = setInterval(() => { alt = !alt; document.title = alt ? "🔔 É A SUA VEZ" : original; }, 900);
+  let n = null;
+  try {
+    if ("Notification" in window && Notification.permission === "granted") {
+      n = new Notification(titulo, { body: corpo, tag: "vaapty-vez", requireInteraction: true });
+      n.onclick = () => { window.focus(); n.close(); };
+    }
+  } catch (e) {}
+  return () => {
+    parado = true; clearInterval(tSom); clearInterval(tTit); document.title = original;
+    try { n && n.close(); } catch (e) {}
+    try { ctx && ctx.close(); } catch (e) {}
+  };
+}
+
 /* A CHAMADA DA VEZ (0106). O Derek: "a pessoa da vez deve aparecer
  * automaticamente quando a pré-vendas anota que um cliente chegou… e o
  * negociador da vez e o segundo da vez devem receber notificação na
@@ -29069,6 +29107,11 @@ function ChamadaDaVez({ ch, aoResponder, aoAbrir }) {
   const [indo, setIndo] = useState("");
   const [erro, setErro] = useState("");
   useEffect(() => { const t = setInterval(() => setAgora(Date.now()), 1000); return () => clearInterval(t); }, []);
+  // NÃO DÁ PARA NÃO VER (10/11/2026, o Derek: "pra que eles não percam a
+  // vez por não ter visto o aviso"): som a cada 8 s, o título da aba
+  // piscando e a notificação do computador — que aparece mesmo com o
+  // negociador em outra aba ou outro programa.
+  useEffect(() => { const pare = alarmeDaVez(`Cliente na loja: ${ch.cliente || "é a sua vez"}`, ch.carro || "Responda em 3 minutos"); return pare; }, [ch.id]);
   const resta = Math.max(0, Date.parse(ch.vence_em) - agora);
   const mm = Math.floor(resta / 60000), ss = Math.floor((resta % 60000) / 1000);
   const responder = async (acao) => {
@@ -29081,23 +29124,30 @@ function ChamadaDaVez({ ch, aoResponder, aoAbrir }) {
     setIndo("");
   };
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center p-3" style={{ background: "rgba(24,20,32,0.6)" }}>
-      <div className="w-full max-w-[440px] overflow-hidden rounded-2xl" style={{ background: C.paper, boxShadow: "0 20px 60px rgba(24,20,32,0.4)" }}>
-        <div className="px-5 py-4" style={{ background: C.roxo, color: "#fff" }}>
-          <div className="text-[12px] uppercase tracking-wide" style={{ opacity: 0.85 }}>cliente na loja · é a sua vez</div>
-          <div className="mt-0.5 text-[24px] leading-tight" style={{ fontFamily: F.disp, fontWeight: 800 }}>{ch.cliente || "Cliente"}</div>
-          {ch.carro && <div className="text-[15px]" style={{ opacity: 0.95 }}>{ch.carro}</div>}
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-3" style={{ background: "rgba(24,20,32,0.78)" }}>
+      <div className="vez-anim w-full max-w-[640px] overflow-hidden rounded-3xl" style={{ background: C.paper, boxShadow: "0 30px 90px rgba(24,20,32,0.55)", animation: "vezPulsa 1.6s ease-in-out infinite" }}>
+        <style>{`@keyframes vezPulsa { 0%,100% { box-shadow: 0 0 0 0 rgba(109,40,217,0.55), 0 30px 90px rgba(24,20,32,0.55); } 50% { box-shadow: 0 0 0 22px rgba(109,40,217,0), 0 30px 90px rgba(24,20,32,0.55); } }
+          @media (prefers-reduced-motion: reduce) { .vez-anim { animation: none !important; } }`}</style>
+        <div className="px-7 py-6 text-center" style={{ background: C.roxo, color: "#fff" }}>
+          <div className="text-[15px] font-bold uppercase tracking-[0.14em]" style={{ opacity: 0.9 }}>é a sua vez · cliente na loja</div>
+          <div className="mt-2 text-[40px] leading-tight sm:text-[48px]" style={{ fontFamily: F.disp, fontWeight: 800 }}>{ch.cliente || "Cliente"}</div>
+          {ch.carro && <div className="mt-1 text-[20px]" style={{ opacity: 0.95 }}>{ch.carro}</div>}
         </div>
-        <div className="p-4">
-          <div className="text-center text-[13px]" style={{ color: resta < 60000 ? C.laranja : C.mute }}>
-            {resta ? `Responda em ${mm}:${String(ss).padStart(2, "0")} — depois disso a vez passa para o próximo e conta como "perdeu atendimento".`
-              : "O tempo acabou: a vez está passando para o próximo."}
+        <div className="p-6">
+          <div className="text-center" style={{ color: resta < 60000 ? C.laranja : C.ink }}>
+            {resta ? (
+              <>
+                <div className="text-[56px] font-extrabold leading-none" style={{ fontFamily: F.mono, fontVariantNumeric: "tabular-nums" }}>{mm}:{String(ss).padStart(2, "0")}</div>
+                <div className="mt-2 text-[14px]" style={{ color: C.mute }}>para responder — depois a vez passa para o próximo e conta como "perdeu atendimento".</div>
+              </>
+            ) : <div className="text-[18px] font-bold">O tempo acabou: a vez está passando para o próximo.</div>}
           </div>
-          <BotaoPrimario className="mt-3 w-full" disabled={!!indo || !resta} onClick={() => responder("aceitar")}>
+          <button disabled={!!indo || !resta} onClick={() => responder("aceitar")}
+            className="mt-5 w-full rounded-2xl py-5 text-[24px] font-extrabold" style={{ background: !!indo || !resta ? "#C9C2D6" : C.verde, color: "#fff" }}>
             {indo === "aceitar" ? "Abrindo…" : "Vou atender"}
-          </BotaoPrimario>
+          </button>
           <button disabled={!!indo || !resta} onClick={() => { if (confirm("Passar a vez? O cliente vai para o próximo, e conta um \"perdeu atendimento\" para você.")) responder("passar"); }}
-            className="mt-2 w-full rounded-lg border py-2.5 text-[14px] font-semibold" style={{ borderColor: C.line, color: C.laranja }}>
+            className="mt-3 w-full rounded-xl border py-3 text-[15px] font-semibold" style={{ borderColor: C.line, color: C.laranja }}>
             {indo === "passar" ? "Passando…" : "Passar a vez"}
           </button>
           {erro && <p className="mt-2 text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
@@ -29117,6 +29167,7 @@ function AvisosDaFila({ perfil, aoAbrir, aoIrParaFila }) {
   const [d, setD] = useState(null);
   const [respondidas, setRespondidas] = useState({});
   const [calarAte, setCalarAte] = useState(0);
+  const [vistoVez, setVistoVez] = useState("");
   // Re-renderiza de 30 em 30 s: é o que faz o "agora não" vencer sozinho.
   const [tique, setTique] = useState(0);
   const ler = () => lerVez().then(setD).catch(() => {});
@@ -29124,7 +29175,10 @@ function AvisosDaFila({ perfil, aoAbrir, aoIrParaFila }) {
     // A primeira leitura espera o `SinalAbriu` chegar ao servidor —
     // antes disso, todo mundo pareceria fora da fila.
     const t0 = setTimeout(ler, 3000);
-    const t = setInterval(() => { if (!document.hidden) ler(); }, 20000);
+    // Também com a aba escondida (10/11/2026): é justamente quando o
+    // negociador está em outra aba que ele precisa ser chamado. O
+    // navegador espaça o relógio de aba escondida, mas não para.
+    const t = setInterval(ler, 20000);
     const vis = () => { if (!document.hidden) ler(); };
     document.addEventListener("visibilitychange", vis);
     const tq = setInterval(() => setTique((n) => n + 1), 30000);
@@ -29154,17 +29208,56 @@ function AvisosDaFila({ perfil, aoAbrir, aoIrParaFila }) {
       aoAgoraNao={() => setCalarAte(Date.now() + (pertoDaVez ? 60000 : 180000))} />;
   }
 
-  // O segundo da vez, e o da vez, sabem — uma faixa, não uma janela.
+  // O da vez e o segundo sabem — GRANDE e no meio (10/11/2026, o Derek:
+  // "no meio da tela e grande, e não pequeno e no cantinho"). "Entendi"
+  // vira uma faixa larga no alto, que continua à vista; volta a abrir
+  // quando muda de "próximo" para "a vez".
   const souVez = d.vez === d.eu, souSegundo = d.segundo === d.eu;
   const chamandoOutro = (d.chamadas || []).find((c) => c.perfil_id !== d.eu);
-  if (!eu.presente || !(souVez || souSegundo)) return null;
-  return (
-    <button onClick={aoIrParaFila} className="fixed bottom-20 right-3 z-40 rounded-xl px-4 py-2.5 text-left shadow-lg lg:bottom-4"
-      style={{ background: souVez ? C.roxo : C.paper, color: souVez ? "#fff" : C.ink, border: souVez ? "none" : `2px solid ${C.roxo}` }}>
-      <div className="text-[14px] font-bold">{souVez ? "Você é a vez" : "Você é o próximo depois da vez"}</div>
-      <div className="text-[12px]" style={{ opacity: 0.85 }}>
-        {chamandoOutro && souSegundo ? `${chamandoOutro.nome} está sendo chamado — se passar, é você.` : "Fique perto: o próximo cliente é seu."}
+  const pedirNotif = "Notification" in window && Notification.permission === "default";
+  const botaoNotif = pedirNotif && (
+    <button onClick={() => { try { Notification.requestPermission().then(() => setTique((n) => n + 1)); } catch (e) {} }}
+      className="mt-3 w-full rounded-xl border-2 py-2.5 text-[14px] font-bold" style={{ borderColor: "#fff", color: "#fff", background: "transparent" }}>
+      Ativar o aviso do computador (aparece mesmo em outra aba)
+    </button>
+  );
+  if (!eu.presente || !(souVez || souSegundo)) {
+    // Quem está na fila e ainda não liberou a notificação é convidado, discreto.
+    if (eu.presente && pedirNotif) return (
+      <button onClick={() => { try { Notification.requestPermission().then(() => setTique((n) => n + 1)); } catch (e) {} }}
+        className="fixed bottom-20 right-3 z-40 rounded-xl px-4 py-2.5 text-left text-[13px] font-semibold shadow-lg lg:bottom-4" style={{ background: C.paper, color: C.roxo, border: `2px solid ${C.roxo}` }}>
+        🔔 Ativar o aviso da vez no computador
+      </button>
+    );
+    return null;
+  }
+  const chave = `${souVez ? "vez" : "seg"}:${d.vez}:${d.segundo}`;
+  if (vistoVez !== chave) {
+    return (
+      <div className="fixed inset-0 z-[65] flex items-center justify-center p-3" style={{ background: "rgba(24,20,32,0.6)" }} onClick={() => setVistoVez(chave)}>
+        <div className="w-full max-w-[560px] rounded-3xl px-7 py-8 text-center" onClick={(ev) => ev.stopPropagation()}
+          style={{ background: souVez ? C.roxo : C.paper, color: souVez ? "#fff" : C.ink, border: souVez ? "none" : `3px solid ${C.roxo}`, boxShadow: "0 30px 90px rgba(24,20,32,0.5)" }}>
+          <div className="text-[44px] leading-tight sm:text-[52px]" style={{ fontFamily: F.disp, fontWeight: 800 }}>
+            {souVez ? "Você é a vez" : "Você é o próximo"}
+          </div>
+          <div className="mt-3 text-[18px]" style={{ opacity: 0.92 }}>
+            {chamandoOutro && souSegundo ? `${chamandoOutro.nome} está sendo chamado — se ele passar, é você.`
+              : souVez ? "O próximo cliente que chegar é seu. Fique perto." : "Depois da vez, o cliente é seu. Fique perto."}
+          </div>
+          <button onClick={() => setVistoVez(chave)} className="mt-6 w-full rounded-2xl py-4 text-[20px] font-extrabold"
+            style={{ background: souVez ? "#fff" : C.roxo, color: souVez ? C.roxo : "#fff" }}>Entendi, estou pronto</button>
+          {souVez && botaoNotif}
+        </div>
       </div>
+    );
+  }
+  return (
+    <button onClick={aoIrParaFila} className="fixed inset-x-0 top-0 z-40 px-4 py-3 text-center shadow-lg"
+      style={{ background: souVez ? C.roxo : C.paper, color: souVez ? "#fff" : C.ink, borderBottom: souVez ? "none" : `3px solid ${C.roxo}` }}>
+      <span className="text-[19px] font-extrabold">{souVez ? "Você é a vez" : "Você é o próximo depois da vez"}</span>
+      <span className="ml-3 text-[15px]" style={{ opacity: 0.9 }}>
+        {chamandoOutro && souSegundo ? `${chamandoOutro.nome} está sendo chamado — se passar, é você.` : "Fique perto: o próximo cliente é seu."}
+      </span>
     </button>
   );
 }
