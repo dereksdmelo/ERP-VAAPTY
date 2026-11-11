@@ -3370,8 +3370,11 @@ module.exports = async function handler(req, res) {
         const e = await banco(`${URL_BASE}/rest/v1/rpc/ia_estado_conversa`, { method: "POST", headers: json(tok), body: JSON.stringify({ p_conversa: id }) });
         return res.status(200).json({ ia: e || null });
       } catch (x) {
+        const msg = String((x && x.message) || "");
+        // Login vencido volta 401, para a tela renovar e repetir.
+        if (/JWT/i.test(msg)) return res.status(401).json({ erro: "Sessão expirada." });
         // Sem o estado, a faixa some — não derruba a conversa.
-        return res.status(200).json({ ia: null, erro: limpar(String((x && x.message) || "")).slice(0, 200) });
+        return res.status(200).json({ ia: null, erro: limpar(msg).slice(0, 200) });
       }
     }
 
