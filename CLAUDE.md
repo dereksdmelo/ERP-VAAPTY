@@ -3236,6 +3236,21 @@ sem a IA no número, não há IA. A faixa no alto da conversa (`IaDaConversa`,
 pausada até tal hora ou desligada. As 36 conversas duplicadas foram juntadas
 no mesmo dia, com o ok do Derek.
 
+**O estoque acompanha o check list, e o carro no pátio vira indicação
+(0151, 11/11/2026, o Derek).** *IWG8C85*: entrou com R$ 30.000 ao cliente, o
+desconto foi no check list (29.869,84) e o estoque e o título continuavam em
+30.000 — `puxarDoChecklist` só preenchia compra vazia. Agora, enquanto o título
+da compra não passou no banco e a compra não foi digitada no estoque
+(`compra_manual`), ela segue o líquido do check list; as linhas de custo que
+vieram dele (`do_fechamento`) também — o previsto muda, a nova entra, a que saiu
+sai, só as ainda não pagas. *MGQ2G66*: fechado, entrou no pátio como compra, e
+a indicação só existia para carro fora dele — agora o carro de compra no pátio,
+sem pagamento ao cliente, VIRA a indicação (a mesma linha; os custos previstos
+saem e os títulos da compra se cancelam). Indicação conta como fechado: o
+`entrarAoFechar` não cria compra para atendimento que já tem indicação ou multa.
+A ficha do carro no Estoque mostra a negociação (`NegociacaoDoCarro`): o
+negociador em destaque, o cliente, a origem e o botão para o atendimento.
+
 ### 58. O caixa começa do saldo que o financeiro digita
 
 O financeiro pediu em 15/10/2026 para *"zerar o caixa e iniciar em

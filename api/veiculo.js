@@ -558,9 +558,21 @@ async function estoque(req, res, tok) {
     // Um carro entra uma vez. O índice único da 0019 garante isso no
     // banco; aqui a checagem existe para a mensagem sair legível em vez
     // de "duplicate key value violates unique constraint".
-    const jaTem = veiculoId ? await supa(`${base("estoque")}?select=id&veiculo_id=eq.${veiculoId}`, { headers: cab }) : [];
+    const jaTem = veiculoId ? await supa(`${base("estoque")}?select=id,situacao,natureza&veiculo_id=eq.${veiculoId}`, { headers: cab }) : [];
+    /* O CARRO QUE ENTROU AO FECHAR E VIROU INDICAÇÃO (0151, 11/11/2026, o
+     * Derek: MGQ2G66 "passamos pra um lojista assumir o financiamento, pra
+     * receber comissão, mas não tá aparecendo opção"). Fechar põe no pátio
+     * sozinho (decisão 23), e a indicação só existia para carro fora dele.
+     * Se a linha é de compra, ainda no pátio e o cliente não foi pago, ela
+     * VIRA a indicação: os custos só previstos saem, os títulos da compra em
+     * aberto são cancelados pela sincronização. */
+    let converter = null;
     if ((jaTem || []).length) {
-      return res.status(409).json({ erro: "Este carro já está no estoque.", id: jaTem[0].id });
+      const j = jaTem[0];
+      const pagoC = ((await supa(`${base("fin_lancamento")}?select=id&estoque_id=eq.${j.id}&item_contrato=like.compra:*&situacao=eq.efetivado&limit=1`, { headers: cab }).catch(() => [])) || []).length > 0;
+      if (c.natureza === "indicacao" && j.natureza === "compra" && j.situacao === "em_estoque" && !pagoC) converter = j.id;
+      else if (c.natureza === "indicacao" && pagoC) return res.status(409).json({ erro: "Este carro já foi pago ao cliente — não dá para virar indicação.", id: j.id });
+      else return res.status(409).json({ erro: "Este carro já está no estoque.", id: j.id });
     }
     // A MESMA PLACA JÁ NO PÁTIO, por outro atendimento (04/11/2026: o
     // MHW1824 tinha quatro atendimentos e entrou quatro vezes).
@@ -619,6 +631,18 @@ async function estoque(req, res, tok) {
       });
     }
 
+    if (converter) {
+      await supa(`${base("estoque_custo")}?estoque_id=eq.${converter}&realizado=is.null`, { method: "DELETE", headers: cab }).catch(() => {});
+      const { veiculo_id: _v, ...semVeic } = linha;
+      const r = await supa(`${base("estoque")}?id=eq.${converter}`, {
+        method: "PATCH", headers: cabecalhos(tok, { Prefer: "return=representation" }),
+        body: JSON.stringify({ ...semVeic, compra_provisoria: false, compra_manual: false, transferido_em: null }),
+      });
+      const conv = (Array.isArray(r) ? r[0] : r) || null;
+      if (!conv) return res.status(403).json({ erro: "O banco recusou a mudança no estoque." });
+      await titulosDoCarro(tok, conv.id);
+      return res.status(200).json({ ok: true, estoque: conv, convertido: true });
+    }
     const criado = await supa(base("estoque"), {
       method: "POST", headers: cabecalhos(tok, { Prefer: "return=representation" }),
       body: JSON.stringify(linha),
@@ -681,7 +705,8 @@ async function estoque(req, res, tok) {
       mud.situacao = c.situacao;
       mud.baixado_em = c.situacao === "baixado" ? new Date().toISOString() : null;
     }
-    if (c.valor_compra !== undefined) mud.valor_compra = decimal(c.valor_compra);
+    // Digitada no estoque, a compra passa a valer por cima do check list (0151).
+    if (c.valor_compra !== undefined) { mud.valor_compra = decimal(c.valor_compra); mud.compra_manual = true; }
     // Quem digita a compra à mão a está confirmando: sai o "provisório" (0141), a não ser que diga o contrário.
     if (c.compra_provisoria !== undefined) mud.compra_provisoria = !!c.compra_provisoria;
     else if (c.valor_compra !== undefined) mud.compra_provisoria = false;
@@ -1097,13 +1122,26 @@ function checklistTemConta(cl) {
 }
 async function puxarDoChecklist(tok, atendimentoId) {
   const cab = { headers: cabecalhos(tok) };
-  const e = ((await supa(`${base("estoque")}?select=id,valor_compra,compra_provisoria,situacao,estoque_custo(id,do_fechamento)` +
+  const e = ((await supa(`${base("estoque")}?select=id,valor_compra,compra_provisoria,compra_manual,situacao,natureza,` +
+    `estoque_custo(id,tipo,descricao,previsto,realizado,do_fechamento)` +
     `&atendimento_id=eq.${atendimentoId}&order=entrou_em.desc&limit=1`, cab)) || [])[0];
   if (!e) return { ok: true, nada: true };
+  if (e.natureza && e.natureza !== "compra") return { ok: true, nao_e_carro: true };
   const cl = ((await supa(`${base("checklist")}?select=*&atendimento_id=eq.${atendimentoId}&limit=1`, cab)) || [])[0];
   if (!cl) return { ok: true, sem_checklist: true };
   const feito = {};
-  if (!(Number(e.valor_compra) > 0) && decimal(cl.valor_cliente)) {
+  /* O CHECK LIST CORRIGIDO DEPOIS também chega (0151, 11/11/2026, o Derek:
+   * o IWG8C85 entrou com R$ 30.000 ao cliente, o desconto foi dado no check
+   * list — 29.869,84 —, e o financeiro e o estoque continuavam com 30.000).
+   * Enquanto o cliente não foi pago (o título da compra não passou no banco)
+   * e ninguém digitou a compra no estoque, ela acompanha o check list. */
+  const pago = ((await supa(`${base("fin_lancamento")}?select=id&estoque_id=eq.${e.id}&item_contrato=like.compra:*&situacao=eq.efetivado&limit=1`, cab).catch(() => [])) || []).length > 0;
+  const vCl = decimal(cl.valor_cliente);
+  if (!e.compra_manual && !e.compra_provisoria && !pago && Number(e.valor_compra) > 0 && (vCl || checklistTemConta(cl)) &&
+      Math.abs((vCl || 0) - Number(e.valor_compra)) >= 0.005) {
+    await supa(`${base("estoque")}?id=eq.${e.id}`, { method: "PATCH", headers: cabecalhos(tok), body: JSON.stringify({ valor_compra: vCl || 0 }) });
+    feito.valor_compra = vCl || 0;
+  } else if (!(Number(e.valor_compra) > 0) && vCl) {
     await supa(`${base("estoque")}?id=eq.${e.id}`, { method: "PATCH", headers: cabecalhos(tok), body: JSON.stringify({ valor_compra: decimal(cl.valor_cliente), compra_provisoria: false }) });
     feito.valor_compra = decimal(cl.valor_cliente);
   } else if (e.compra_provisoria && (decimal(cl.valor_cliente) || checklistTemConta(cl))) {
@@ -1113,9 +1151,35 @@ async function puxarDoChecklist(tok, atendimentoId) {
     await supa(`${base("estoque")}?id=eq.${e.id}`, { method: "PATCH", headers: cabecalhos(tok), body: JSON.stringify({ valor_compra: v, compra_provisoria: false }) });
     feito.valor_compra = v;
   }
-  if (!(e.estoque_custo || []).some((x) => x.do_fechamento)) {
-    const linhas = previstoDoChecklist(cl, e.id);
+  const linhas = previstoDoChecklist(cl, e.id);
+  const doFech = (e.estoque_custo || []).filter((x) => x.do_fechamento);
+  if (!doFech.length) {
     if (linhas.length) { await supa(base("estoque_custo"), { method: "POST", headers: cabecalhos(tok), body: JSON.stringify(linhas) }); feito.custos = linhas.length; }
+  } else {
+    /* As linhas que vieram do check list o acompanham (0151): o previsto
+     * muda, a que surgiu entra, a que saiu sai — só as que ainda não foram
+     * pagas (`realizado` nulo). A paga e a digitada à mão não se tocam. */
+    const chave = (x) => `${x.tipo}|${String(x.descricao || "").trim().toLowerCase()}`;
+    const usadas = new Set();
+    for (const l of linhas) {
+      const ja = doFech.find((x) => !usadas.has(x.id) && chave(x) === chave(l)) || doFech.find((x) => !usadas.has(x.id) && x.tipo === l.tipo && x.realizado == null);
+      if (ja) {
+        usadas.add(ja.id);
+        if (ja.realizado == null && Math.abs((Number(ja.previsto) || 0) - l.previsto) >= 0.005) {
+          await supa(`${base("estoque_custo")}?id=eq.${ja.id}`, { method: "PATCH", headers: cabecalhos(tok), body: JSON.stringify({ previsto: l.previsto, descricao: l.descricao }) });
+          feito.custos_mudados = (feito.custos_mudados || 0) + 1;
+        }
+      } else {
+        await supa(base("estoque_custo"), { method: "POST", headers: cabecalhos(tok), body: JSON.stringify(l) });
+        feito.custos_novos = (feito.custos_novos || 0) + 1;
+      }
+    }
+    for (const x of doFech) {
+      if (!usadas.has(x.id) && x.realizado == null) {
+        await supa(`${base("estoque_custo")}?id=eq.${x.id}`, { method: "DELETE", headers: cabecalhos(tok) }).catch(() => {});
+        feito.custos_tirados = (feito.custos_tirados || 0) + 1;
+      }
+    }
   }
   await titulosDoCarro(tok, e.id);
   return { ok: true, ...feito };
@@ -1127,6 +1191,10 @@ async function entrarAoFechar(tok, atendimentoId) {
   const at = ((await supa(`${base("atendimento")}?select=id,valor_fechado,negociador_nome,origem,prospec,` +
     `veiculo(id,placa),checklist(*)&id=eq.${atendimentoId}`, cab)) || [])[0];
   if (!at) return { ok: false, motivo: "atendimento não encontrado" };
+  // Indicação ou multa do atendimento (0145) já é o "fechado" dele: não entra compra (11/11/2026, o Derek:
+  // "quando fazemos indicação também consideramos fechado").
+  const doAt = await supa(`${base("estoque")}?select=id&atendimento_id=eq.${atendimentoId}&limit=1`, cab).catch(() => []);
+  if ((doAt || []).length) return { ok: true, ja: true, id: doAt[0].id };
   const v = Array.isArray(at.veiculo) ? at.veiculo[0] : at.veiculo;
   if (!v || !v.id) return { ok: false, motivo: "sem ficha do carro" };
   const ja = await supa(`${base("estoque")}?select=id&veiculo_id=eq.${v.id}`, cab);

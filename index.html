@@ -4964,9 +4964,12 @@ function IndicacaoLojista({ atendimento, f, perfil }) {
 
   // Carregando, ou o carro foi comprado de verdade: nada a oferecer.
   if (!aid || est === undefined) return null;
-  if (est && est.natureza !== "indicacao") return null;
+  // Carro de compra ainda no pátio pode VIRAR indicação (0151): fechar põe
+  // no estoque sozinho, e é depois que se descobre que um lojista resolve.
+  const noPatio = !!(est && (est.natureza || "compra") === "compra" && est.situacao === "em_estoque");
+  if (est && est.natureza !== "indicacao" && !noPatio) return null;
 
-  if (est) {
+  if (est && !noPatio) {
     return (
       <div className="rounded-lg p-3" style={{ background: "#F1ECF8", border: `1px solid ${C.line}` }}>
         <div className="text-[12.5px] font-bold" style={{ color: C.roxo }}>Indicação registrada</div>
@@ -5004,6 +5007,13 @@ function IndicacaoLojista({ atendimento, f, perfil }) {
     setOcupado(false);
   };
 
+  if (!aberto && noPatio) {
+    return (
+      <button onClick={() => setAberto(true)} className="text-[12px] font-semibold" style={{ color: C.roxo }}>
+        O carro foi para um lojista (assumir financiamento)? Virar indicação com comissão →
+      </button>
+    );
+  }
   if (!aberto) {
     return acima ? (
       <div className="rounded-lg p-3" style={{ background: AMARELO.fundo, border: `1px solid ${AMARELO.borda}` }}>
@@ -5027,6 +5037,11 @@ function IndicacaoLojista({ atendimento, f, perfil }) {
     <Bloco titulo="Indicar a um lojista"
       sub="A Vaapty não compra; o lojista resolve e paga a comissão. Ela entra na rentabilidade e na meta de quem atendeu.">
       <div className="space-y-2.5">
+        {noPatio && (
+          <p className="rounded-md p-2 text-[12px]" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
+            Este carro está no estoque como compra. Registrar a indicação tira ele do pátio, apaga os custos só previstos e cancela o pagamento ao cliente em aberto no financeiro.
+          </p>
+        )}
         <Campo label="Lojista que resolve" req>
           <select className={inputCls} style={inputSty} value={compId} onChange={(e) => setCompId(e.target.value)}>
             <option value="">{lojistas ? "— outro, digitar o nome —" : "carregando…"}</option>
