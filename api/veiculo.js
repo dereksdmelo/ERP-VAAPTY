@@ -257,7 +257,10 @@ const CAMPOS_ESTOQUE =
   // A foto pende do VEÍCULO, não do estoque: embutida solta aqui o
   // PostgREST responde "could not find a relationship".
   "pontos_positivos,ressalvas_lojista,foto(id))," +
-  "comprador(id,nome,tipo,telefone),estoque_custo(id,tipo,descricao,previsto,realizado,pago_em,anexo_id,do_fechamento)";
+  "comprador(id,nome,tipo,telefone),estoque_custo(id,tipo,descricao,previsto,realizado,pago_em,anexo_id,do_fechamento)," +
+  // A negociação que pôs o carro aqui (11/11/2026, o Derek: "aparecesse os
+  // dados da negociação, principalmente qual negociador negociou o carro").
+  "atendimento(id,data,cliente_nome,cliente_telefone,negociador_nome,prospec,origem,status,chegada_em,pretensao,contrato_assinado_em)";
 
 /**
  * Importa a planilha CONTROLE DE VEÍCULOS / CLIENTES colada.

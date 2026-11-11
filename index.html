@@ -15291,7 +15291,7 @@ function PacoteLojistas({ carros, aoTirar }) {
   );
 }
 
-function TelaEstoque({ perfil, comp, mes, modo }) {
+function TelaEstoque({ perfil, comp, mes, modo, aoAbrir }) {
   const [lista, setLista] = useState(null);
   const [fila, setFila] = useState([]);
   // "rentabilidade" é a mesma tela aberta direto na planilha do mês —
@@ -15419,7 +15419,7 @@ function TelaEstoque({ perfil, comp, mes, modo }) {
   }, [idsCapa, abrindo]);
 
   if (abrindo) {
-    return <FichaEstoque id={abrindo} perfil={perfil}
+    return <FichaEstoque id={abrindo} perfil={perfil} aoAbrir={aoAbrir}
       aoVoltar={() => { setAbrindo(null); carregar(); }} />;
   }
 
@@ -15909,7 +15909,44 @@ function TitulosDoCarro({ e }) {
   );
 }
 
-function FichaEstoque({ id, perfil, aoVoltar }) {
+/* A NEGOCIAÇÃO QUE PÔS O CARRO NO PÁTIO (11/11/2026, o Derek: "seria bom
+ * se aparecesse os dados da negociação, principalmente qual negociador
+ * negociou o carro, na tela do estoque"). O negociador vem em destaque; o
+ * resto é o atendimento de origem — cliente, quem trouxe, quando, e o
+ * botão para abri-lo. Carro importado da planilha não tem atendimento: aí
+ * só o que o estoque guarda em texto. */
+function NegociacaoDoCarro({ e, aoAbrir }) {
+  const a = e.atendimento || null;
+  const neg = (a && a.negociador_nome) || e.negociador_nome || "";
+  const origem = a && a.origem ? ((ORIGENS.find((o) => o[0] === a.origem) || [])[1] || a.origem) : e.meio_alcance || "";
+  const status = a && a.status ? ((STATUS_AT.find((x) => x[0] === a.status) || [])[1] || a.status) : "";
+  const linha = (rot, val) => val ? (
+    <div className="flex gap-2 text-[13px]"><span className="w-[120px] shrink-0" style={{ color: C.mute }}>{rot}</span><span className="min-w-0">{val}</span></div>
+  ) : null;
+  return (
+    <div className="rounded-lg p-3.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>A negociação</div>
+        {a && aoAbrir && <button onClick={() => aoAbrir(a.id)} className="text-[12.5px] font-semibold" style={{ color: C.roxo }}>Abrir o atendimento →</button>}
+      </div>
+      <div className="mt-1 text-[12px]" style={{ color: C.mute }}>Negociado por</div>
+      <div className="text-[22px] leading-tight" style={{ fontFamily: F.disp, fontWeight: 800, color: neg ? C.roxo : C.mute }}>{neg || "sem negociador registrado"}</div>
+      <div className="mt-2.5 space-y-1">
+        {linha("Cliente", a && [a.cliente_nome, a.cliente_telefone].filter(Boolean).join(" · "))}
+        {linha("Atendido em", a && a.data ? diaBR(a.data) : "")}
+        {linha("Como chegou", origem)}
+        {linha("Prospecção", (a && a.prospec) || e.prospector || "")}
+        {linha("Cliente pedia", a && a.pretensao ? brl(a.pretensao) : "")}
+        {linha("Fechou por", Number(e.valor_compra) > 0 ? `${brl(e.valor_compra)}${e.compra_provisoria ? " (provisório)" : ""}` : "")}
+        {linha("Contrato", a && a.contrato_assinado_em ? `assinado em ${diaBR(String(a.contrato_assinado_em).slice(0, 10))}` : a ? "não assinado pelo ZapSign" : "")}
+        {linha("Atendimento", status)}
+        {!a && <p className="text-[12px]" style={{ color: C.mute }}>Carro sem atendimento ligado (veio da planilha): só o que o estoque guarda.</p>}
+      </div>
+    </div>
+  );
+}
+
+function FichaEstoque({ id, perfil, aoVoltar, aoAbrir }) {
   const [e, setE] = useState(null);
   const [erro, setErro] = useState("");
   const [novo, setNovo] = useState(null);
@@ -16009,6 +16046,8 @@ function FichaEstoque({ id, perfil, aoVoltar }) {
       {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
 
       <FotosDoCarro veiculoId={e.veiculo_id} />
+
+      <NegociacaoDoCarro e={e} aoAbrir={aoAbrir} />
 
       <div className="rounded-lg p-3.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
         <div className="text-[15px] font-semibold">{v.marca_modelo || "—"}{v.ano_modelo ? ` ${v.ano_modelo}` : ""}</div>
@@ -34110,10 +34149,10 @@ function App() {
       {tela === "atendimentos" && <CRM perfil={perfil} aoAbrir={abrir} mes={{ ...mes, todos: true }} />}
       {tela === "vez" && <TelaFilaDaVez perfil={perfil} aoAbrir={abrir} />}
       {tela === "recuperacao" && <TelaRecuperacao perfil={perfil} aoAbrir={abrir} aoConversar={conversarNeg} />}
-      {tela === "estoque" && <TelaEstoque perfil={perfil} comp={compOuAtual} mes={mes} />}
+      {tela === "estoque" && <TelaEstoque perfil={perfil} comp={compOuAtual} mes={mes} aoAbrir={abrir} />}
       {/* A rota confere de novo: esconder o item do menu é conveniência,
           não controle. Quem chegar aqui por outro caminho não passa. */}
-      {tela === "rentabilidade" && podeGestao && <TelaEstoque perfil={perfil} comp={compOuAtual} mes={mes} modo="rentabilidade" />}
+      {tela === "rentabilidade" && podeGestao && <TelaEstoque perfil={perfil} comp={compOuAtual} mes={mes} modo="rentabilidade" aoAbrir={abrir} />}
       {tela === "painel" && <Funil perfil={perfil} comp={compOuAtual} mes={mes} />}
       {tela === "leads" && <LeadsIndicacao />}
       {tela === "extrato" && <TelaExtratoAvulso perfil={perfil} />}
