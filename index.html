@@ -4874,6 +4874,51 @@ const naoEhCarro = (e) => !!e && (e.natureza === "indicacao" || e.natureza === "
  * rentabilidade e para a meta de quem atendeu, como a comissão de
  * indicação. Se o carro já estava no pátio, ele sai e no lugar fica a
  * multa; o atendimento vai para "Rescisão". Só o gerente ou o financeiro. */
+/* O CONTRATO ASSINADO FORA DO ZAPSIGN (0152). Papel, ou outro meio: o
+ * negócio e o estoque seguem do mesmo jeito — o carro fechado entra no
+ * pátio. A via assinada se anexa como "Contrato assinado", logo acima. */
+function AssinadoForaDoZap({ atendimento }) {
+  const [a, setA] = useState(atendimento || {});
+  const [indo, setIndo] = useState(false); const [msg, setMsg] = useState("");
+  useEffect(() => { setA(atendimento || {}); }, [atendimento && atendimento.id, atendimento && atendimento.contrato_assinado_em]);
+  if (!a || !a.id) return null;
+  const mandar = async (corpo) => {
+    setIndo(true); setMsg("");
+    try {
+      const r = await fetchAut("/api/atendimento?recurso=contrato-fora", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ atendimento_id: a.id, ...corpo }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.erro || "Não consegui registrar.");
+      setA(d.atendimento || a);
+      const est = d.estoque;
+      setMsg(corpo.desfazer ? "Assinatura desfeita." : est && est.ok ? "Registrado — o carro está no estoque." :
+        est && est.motivo === "não está fechado" ? "Registrado. O carro entra no estoque quando o atendimento for marcado como Fechado." :
+        est && est.motivo ? `Registrado, mas o carro não entrou no estoque: ${est.motivo}.` : "Registrado.");
+    } catch (e) { setMsg(e.message); }
+    setIndo(false);
+  };
+  if (a.contrato_assinado_fora) return (
+    <div className="rounded-md p-3" style={{ background: "#F0F8F4", border: `1px solid ${C.verde}` }}>
+      <p className="text-[12px] font-semibold" style={{ color: C.verde }}>
+        Contrato assinado {a.contrato_assinado_fora === "papel" ? "no papel" : "fora do ZapSign"}{a.contrato_assinado_em ? ` · registrado em ${new Date(a.contrato_assinado_em).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : ""}.
+      </p>
+      <p className="mt-0.5 text-[11.5px]" style={{ color: C.mute }}>Anexe a foto ou o PDF da via assinada como "Contrato assinado", para o adm conferir.</p>
+      <button disabled={indo} onClick={() => { if (confirm("Desfazer o registro da assinatura fora do ZapSign?")) mandar({ desfazer: true }); }}
+        className="mt-1 text-[11.5px] underline" style={{ color: C.mute }}>desfazer</button>
+      {msg && <p className="mt-1 text-[11.5px]" style={{ color: C.mute }}>{msg}</p>}
+    </div>
+  );
+  if (a.contrato_assinado_em) return null;
+  return (
+    <div>
+      <button disabled={indo} onClick={() => { if (confirm("O cliente assinou o contrato final no papel (ou por outro meio)? O carro fechado entra no estoque.")) mandar({ forma: "papel" }); }}
+        className="w-full rounded-md border py-2 text-[12.5px] font-semibold" style={{ borderColor: C.verde, color: C.verde }}>
+        {indo ? "Registrando…" : "O cliente assinou fora do ZapSign (papel)"}
+      </button>
+      {msg && <p className="mt-1 text-[11.5px]" style={{ color: C.laranja }}>{msg}</p>}
+    </div>
+  );
+}
+
 function CancelarComMulta({ atendimento, f, perfil, aoCancelar }) {
   const aid = atendimento && atendimento.id;
   const pode = !!(perfil && (perfil.papel === "gerente" || perfil.financeiro));
@@ -8233,7 +8278,8 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                             {envioZap}
                           </p>
                         )}
-                        {atendimento && atendimento.contrato_assinado_em && (
+                        <AssinadoForaDoZap atendimento={atendimento} />
+                        {atendimento && atendimento.contrato_assinado_em && !atendimento.contrato_assinado_fora && (
                           <div className="rounded-md p-3" style={{ background: "#F0F8F4", border: `1px solid ${C.verde}` }}>
                             <p className="text-[12px] font-semibold" style={{ color: C.verde }}>
                               Contrato assinado em {new Date(atendimento.contrato_assinado_em).toLocaleString("pt-BR")}.

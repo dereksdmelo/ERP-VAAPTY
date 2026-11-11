@@ -283,7 +283,7 @@ async function zapsign(req, res, tok) {
       // diz que não achou — reenviar criava outro documento no ZapSign.
       // A assinatura do documento anterior não vale para este (0146): sem
       // zerar, o reenvio aparecia "assinado" antes de o cliente assinar.
-      body: JSON.stringify({ contrato_zapsign_token: zapToken, contrato_enviado_em: new Date().toISOString(), contrato_assinado_em: null,
+      body: JSON.stringify({ contrato_zapsign_token: zapToken, contrato_enviado_em: new Date().toISOString(), contrato_assinado_em: null, contrato_assinado_fora: null,
         contrato_zapsign_link: links[0] ? links[0].link : null, contrato_zapsign_formato: comPdf ? "pdf" : "markdown" }),
     }).catch(() => {});
   }

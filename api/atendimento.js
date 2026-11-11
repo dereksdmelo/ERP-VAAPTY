@@ -3987,6 +3987,30 @@ module.exports = async function handler(req, res) {
     catch (e) { return res.status(e.status || 502).json({ erro: limpar(e.message) }); }
   }
 
+  /* O CONTRATO ASSINADO FORA DO ZAPSIGN (0152, 11/11/2026, o Derek: "se o
+   * contrato for assinado por outro meio preciso registrar a venda e o
+   * estoque do mesmo jeito"). Marca a assinatura — com a forma — e põe o
+   * carro fechado no estoque, como a assinatura do ZapSign. A via em papel
+   * se anexa no Fechamento ("Contrato assinado"). `desfazer` volta atrás. */
+  if (String(req.query.recurso || "") === "contrato-fora" && req.method === "POST") {
+    try {
+      const c = await lerCorpo(req) || {};
+      const aid = String(c.atendimento_id || "");
+      if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
+      const desfazer = !!c.desfazer;
+      const forma = ["papel", "outro"].indexOf(String(c.forma || "")) >= 0 ? String(c.forma) : "papel";
+      const r = await banco(`${REST("atendimento")}?id=eq.${aid}${desfazer ? "&contrato_assinado_fora=not.is.null" : ""}`, {
+        method: "PATCH", headers: json(tok, { Prefer: "return=representation" }),
+        body: JSON.stringify(desfazer ? { contrato_assinado_em: null, contrato_assinado_fora: null }
+          : { contrato_assinado_em: new Date().toISOString(), contrato_assinado_fora: forma }),
+      });
+      const linha = (Array.isArray(r) ? r[0] : r) || null;
+      if (!linha) return res.status(403).json({ erro: desfazer ? "Não havia assinatura fora do ZapSign para desfazer." : "Só quem atende (ou o gerente) registra a assinatura." });
+      const estoque = !desfazer && linha.status === "fechado" ? await entrarNoEstoqueAoFechar(tok, aid) : undefined;
+      return res.status(200).json({ ok: true, atendimento: comEmLoja(linha), estoque });
+    } catch (e) { return res.status(e.status || 502).json({ erro: limpar(e.message) }); }
+  }
+
   if (String(req.query.recurso || "") === "vez") {
     try { return await vez(req, res, tok); }
     catch (e) { return res.status(e.status || 502).json({ erro: limpar(e.message) }); }

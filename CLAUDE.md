@@ -4240,7 +4240,10 @@ termo"*). `entrarAoFechar` pede o status Fechado E o contrato assinado no
 ZapSign (`contrato_assinado_em`) ou a via assinada anexada (rótulo "Contrato
 assinado" ou o item "Contrato" do check list). Quem chama de novo quando a
 assinatura chega: o guardar da via assinada (abrir o atendimento ou o check
-list do adm, `api/foto.js`) e o anexo à mão. O webhook não põe no estoque:
+list do adm, `api/foto.js`) e o anexo à mão. Assinado no papel ou por outro meio, o botão "O cliente assinou fora do
+ZapSign" do Fechamento (`?recurso=contrato-fora`, 0152) grava
+`contrato_assinado_em` com `contrato_assinado_fora` e põe o carro no estoque do
+mesmo jeito; a via em papel se anexa como "Contrato assinado". O webhook não põe no estoque:
 chega sem login, e a linha do estoque é escrita com o token de alguém — a
 próxima abertura do atendimento ou do check list faz isso. Indicação e multa
 não passam por aqui (são "fechado" sem carro no pátio).
