@@ -14055,17 +14055,36 @@ function CRM({ perfil, aoAbrir, mes }) {
   const [lista, setLista] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
-  const [status, setStatus] = useState("");
-  const [busca, setBusca] = useState("");
+  /* OS FILTROS FICAM (11/11/2026, o Derek: "quando o negociador filtra o
+   * negociador e o status e entra numa negociação e depois volta, os
+   * filtros saem"). Abrir um atendimento desmonta esta tela; o que estava
+   * escolhido — e onde a lista estava rolada — fica guardado na sessão da
+   * aba e volta. Aba nova começa limpa. */
+  const lerS = (k, padrao) => { try { const v = sessionStorage.getItem(`vaapty:crm:${k}`); return v == null ? padrao : JSON.parse(v); } catch (e) { return padrao; } };
+  const [status, setStatus] = useState(() => lerS("status", ""));
+  const [busca, setBusca] = useState(() => lerS("busca", ""));
   const [novo, setNovo] = useState(false);
-  const [neg, setNeg] = useState("");
+  const [neg, setNeg] = useState(() => lerS("neg", ""));
+  const guardaS = (k, v) => { try { sessionStorage.setItem(`vaapty:crm:${k}`, JSON.stringify(v)); } catch (e) {} };
+  useEffect(() => { guardaS("status", status); }, [status]);
+  useEffect(() => { guardaS("busca", busca); }, [busca]);
+  useEffect(() => { guardaS("neg", neg); }, [neg]);
   const [equipe, setEquipe] = useState([]);
   useEffect(() => { listarNegociadores().then(setEquipe).catch(() => {}); }, []);
+  // A rolagem: guardada ao sair, devolvida quando a lista chega.
+  const rolagem = useRef(lerS("rolagem", 0));
+  useEffect(() => () => { guardaS("rolagem", window.scrollY || document.documentElement.scrollTop || 0); }, []);
+  useEffect(() => {
+    if (carregando || !rolagem.current || !(lista || []).length) return;
+    const y = rolagem.current; rolagem.current = 0;
+    requestAnimationFrame(() => window.scrollTo(0, y));
+  }, [carregando, lista]);
   // O período (05/11/2026): hoje, ontem, as semanas da casa, ou de/até.
   // Fica no aparelho — é como cada um gosta de abrir a tela.
   const [periodo, setPeriodoE] = useState(() => { try { return localStorage.getItem("vaapty:crm-periodo") || "mes"; } catch (e) { return "mes"; } });
   const escolherPeriodo = (v) => { setPeriodoE(v); try { localStorage.setItem("vaapty:crm-periodo", v); } catch (e) {} };
-  const [livre, setLivre] = useState({ de: "", ate: "" });
+  const [livre, setLivre] = useState(() => lerS("livre", { de: "", ate: "" }));
+  useEffect(() => { guardaS("livre", livre); }, [livre]);
   const faixa = faixaDoPeriodo(periodo, comp, livre);
   const [conv, setConv] = useState(null);
   useEffect(() => {
