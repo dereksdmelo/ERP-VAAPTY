@@ -1188,9 +1188,19 @@ module.exports.puxarDoChecklist = puxarDoChecklist;
 
 async function entrarAoFechar(tok, atendimentoId) {
   const cab = { headers: cabecalhos(tok) };
-  const at = ((await supa(`${base("atendimento")}?select=id,valor_fechado,negociador_nome,origem,prospec,` +
+  const at = ((await supa(`${base("atendimento")}?select=id,status,valor_fechado,negociador_nome,origem,prospec,contrato_assinado_em,` +
     `veiculo(id,placa),checklist(*)&id=eq.${atendimentoId}`, cab)) || [])[0];
   if (!at) return { ok: false, motivo: "atendimento não encontrado" };
+  if (at.status !== "fechado") return { ok: false, motivo: "não está fechado" };
+  /* SÓ COM O CONTRATO FINAL ASSINADO (11/11/2026, o Derek: "só manda pro
+   * estoque quando tiver o contrato final assinado, não somente com o
+   * termo"). Assinado no ZapSign, ou a via assinada anexada à mão. Quem
+   * chama de novo quando a assinatura chega: o guardar da via assinada
+   * (`api/foto.js`) e o anexo "Contrato assinado". */
+  if (!at.contrato_assinado_em) {
+    const via = await supa(`${base("anexo")}?select=id&atendimento_id=eq.${atendimentoId}&rotulo=in.(${encodeURIComponent('"Contrato assinado","doc:contrato"')})&limit=1`, cab).catch(() => []);
+    if (!(via || []).length) return { ok: false, espera_contrato: true, motivo: "o contrato final ainda não foi assinado" };
+  }
   // Indicação ou multa do atendimento (0145) já é o "fechado" dele: não entra compra (11/11/2026, o Derek:
   // "quando fazemos indicação também consideramos fechado").
   const doAt = await supa(`${base("estoque")}?select=id&atendimento_id=eq.${atendimentoId}&limit=1`, cab).catch(() => []);

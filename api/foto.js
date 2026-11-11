@@ -820,6 +820,7 @@ async function anexos(req, res, tok) {
       );
       const enviado = linhaAt.contrato_enviado_em ? Date.parse(linhaAt.contrato_enviado_em) : 0;
       if ((jaTem || []).some((x) => x.nome === nomeVia || (x.nome === "contrato-assinado.pdf" && Date.parse(x.criado_em) >= enviado))) {
+        await entrarSeAssinado(tok, aid);
         return res.status(200).json({ ok: true, ja_guardado: true });
       }
 
@@ -875,6 +876,7 @@ async function anexos(req, res, tok) {
         throw e;
       }
 
+      await entrarSeAssinado(tok, aid);
       const urls = await assinarDoc([caminhoAss]);
       return res.status(201).json({ ok: true, anexo: { ...salvo, url: urls[caminhoAss] || null } });
     }
@@ -934,6 +936,8 @@ async function anexos(req, res, tok) {
     if (/crlv/i.test(String((linha && linha.rotulo) || ""))) {
       try { crlv = await require("./checklist.js").crlvPendente(req, tok, aid); } catch (e) {}
     }
+    // O contrato final assinado anexado à mão põe o carro fechado no estoque (11/11/2026).
+    if (/^(Contrato assinado|doc:contrato)$/.test(String((linha && linha.rotulo) || ""))) await entrarSeAssinado(tok, aid);
     const urls = await assinarDoc([caminho]);
     return res.status(201).json({ ok: true, anexo: { ...linha, url: urls[caminho] || null }, crlv });
   }
@@ -1962,3 +1966,8 @@ async function viaAssinadaDoWebhook(tokenDoc, doc, lojista) {
   return fim;
 }
 module.exports.viaAssinadaDoWebhook = viaAssinadaDoWebhook;
+
+// O contrato final assinado é o que põe o carro FECHADO no estoque (11/11/2026). Idempotente; nunca derruba quem chamou.
+async function entrarSeAssinado(tok, aid) {
+  try { await require("./veiculo.js").entrarAoFechar(tok, aid); } catch (e) {}
+}

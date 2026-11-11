@@ -4234,6 +4234,17 @@ dela aparecia como "fora do estoque". **O gerente tira do estoque** o que
 entrou repetido ou por engano (só carro no pátio; as linhas de custo
 saem junto).
 
+**E desde 11/11/2026 só com o CONTRATO FINAL ASSINADO** (o Derek: *"só
+manda pro estoque quando tiver o contrato final assinado, não somente com o
+termo"*). `entrarAoFechar` pede o status Fechado E o contrato assinado no
+ZapSign (`contrato_assinado_em`) ou a via assinada anexada (rótulo "Contrato
+assinado" ou o item "Contrato" do check list). Quem chama de novo quando a
+assinatura chega: o guardar da via assinada (abrir o atendimento ou o check
+list do adm, `api/foto.js`) e o anexo à mão. O webhook não põe no estoque:
+chega sem login, e a linha do estoque é escrita com o token de alguém — a
+próxima abertura do atendimento ou do check list faz isso. Indicação e multa
+não passam por aqui (são "fechado" sem carro no pátio).
+
 **As fotos do carro aparecem no Estoque** (05/11/2026, o Derek): a
 ficha do carro tem a galeria (`FotosDoCarro`) com "+ Adicionar fotos",
 capa e apagar — as MESMAS fotos do atendimento, que pendem do veículo
