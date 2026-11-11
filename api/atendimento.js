@@ -3366,8 +3366,13 @@ module.exports = async function handler(req, res) {
         });
         if (!(Array.isArray(r) && r.length)) return res.status(403).json({ erro: "Não consegui mudar a IA desta conversa." });
       }
-      const e = await banco(`${URL_BASE}/rest/v1/rpc/ia_estado_conversa`, { method: "POST", headers: json(tok), body: JSON.stringify({ p_conversa: id }) });
-      return res.status(200).json({ ia: e || null });
+      try {
+        const e = await banco(`${URL_BASE}/rest/v1/rpc/ia_estado_conversa`, { method: "POST", headers: json(tok), body: JSON.stringify({ p_conversa: id }) });
+        return res.status(200).json({ ia: e || null });
+      } catch (x) {
+        // Sem o estado, a faixa some — não derruba a conversa.
+        return res.status(200).json({ ia: null, erro: limpar(String((x && x.message) || "")).slice(0, 200) });
+      }
     }
 
     /* LIDA / NÃO LIDA (0105, o Derek: "opção de marcar como LIDO / não
