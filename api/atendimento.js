@@ -471,7 +471,15 @@ async function leadQueVeio(tok, at) {
       method: "PATCH", headers: json(tok, { Prefer: "return=representation" }),
       body: JSON.stringify({ status: "compareceu", atendimento_id: at.id }),
     });
-    return ((Array.isArray(r) ? r[0] : r) || {}).id || null;
+    const ligado = (Array.isArray(r) ? r[0] : r) || null;
+    // Aberto como fluxo, mas era agendado (12/11/2026): a origem passa a ser a do lead.
+    if (ligado && (at.origem === "fluxo_loja" || !at.origem)) {
+      const l = (await banco(`${REST("lead")}?select=origem,agendado_por_nome,prospector_nome&id=eq.${ligado.id}`, { headers: cabecalhos(tok) }) || [])[0] || {};
+      const mud = { origem: l.origem && l.origem !== "fluxo_loja" ? l.origem : "outro", como_conheceu: null };
+      if (l.agendado_por_nome || l.prospector_nome) mud.prospec = caixaAlta(l.agendado_por_nome || l.prospector_nome);
+      await banco(`${REST("atendimento")}?id=eq.${at.id}`, { method: "PATCH", headers: json(tok), body: JSON.stringify(mud) }).catch(() => {});
+    }
+    return (ligado || {}).id || null;
   } catch (e) { return null; }
 }
 
@@ -1906,6 +1914,65 @@ async function leads(req, res, tok) {
     const linha = (Array.isArray(r) ? r[0] : r) || null;
     if (!linha) return res.status(403).json({ erro: "Não consegui registrar a ligação." });
     return res.status(200).json({ lead: linha });
+  }
+
+  /* O FLUXO QUE ERA UM AGENDAMENTO (12/11/2026, o Derek: o cliente que a
+   * IA agendou chegou, a loja não viu e abriu como fluxo — ficou duplicado,
+   * o lead não ficou como "veio" e a IA seguiu acompanhando). Ligar o lead
+   * ao atendimento: o lead vira "compareceu" com o atendimento dele (sai da
+   * agenda e das filas da IA), e o atendimento deixa de ser fluxo — ganha a
+   * origem do lead e, no PROSPEC, quem agendou (decisão 51). "Nunca vai ser
+   * fluxo se eu unifiquei com o lead."
+   *   GET  acao=candidatos&atendimento_id=&q=  os leads que podem ser
+   *   POST acao=ligar { lead_id, atendimento_id } */
+  if (req.method === "GET" && String(req.query.acao || "") === "candidatos") {
+    const aid = String(req.query.atendimento_id || "");
+    if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
+    const at = (await banco(`${REST("atendimento")}?select=id,data,cliente_nome,cliente_telefone&id=eq.${aid}`, { headers: cabecalhos(tok) }) || [])[0];
+    if (!at) return res.status(404).json({ erro: "Atendimento não encontrado." });
+    const q = String(req.query.q || "").trim().replace(/[,()*]/g, " ");
+    const sel = "id,nome,telefone,carro,status,origem,agendado_para,agendado_por_nome,criado_em,atendimento_id";
+    let ls;
+    if (q.length >= 2) {
+      const dig = q.replace(/\D/g, "");
+      const f = dig.length >= 4 ? `telefone.like.*${dig.slice(-8).split("").join("*")}*` : `nome.ilike.*${encodeURIComponent(q)}*`;
+      ls = await banco(`${base}?select=${sel}&excluido_em=is.null&or=(${f})&order=criado_em.desc&limit=30`, { headers: cabecalhos(tok) });
+    } else {
+      // Sem busca: os de hora marcada perto do dia do atendimento, mais o do mesmo telefone.
+      const d0 = new Date(Date.parse(at.data || hojeAqui()) - 7 * 86400000).toISOString().slice(0, 10);
+      const d1 = new Date(Date.parse(at.data || hojeAqui()) + 2 * 86400000).toISOString().slice(0, 10);
+      ls = await banco(`${base}?select=${sel}&excluido_em=is.null&atendimento_id=is.null&status=in.(agendado,confirmado,nao_compareceu)` +
+        `&agendado_para=gte.${d0}&agendado_para=lt.${d1}&order=agendado_para.asc&limit=80`, { headers: cabecalhos(tok) });
+      const k = chaveFone(at.cliente_telefone);
+      if (k) {
+        const pf = await banco(`${base}?select=${sel}&excluido_em=is.null&telefone=like.${encodeURIComponent("*" + k.slice(-8).split("").join("*") + "*")}&limit=10`, { headers: cabecalhos(tok) }).catch(() => []);
+        (pf || []).filter((l) => chaveFone(l.telefone) === k).forEach((l) => { if (!(ls || []).some((x) => x.id === l.id)) (ls = ls || []).unshift({ ...l, mesmo_telefone: true }); });
+      }
+    }
+    return res.status(200).json({ leads: (ls || []).filter((l) => !l.atendimento_id || l.atendimento_id === aid) });
+  }
+  if (req.method === "POST" && String(req.query.acao || "") === "ligar") {
+    const c2 = await lerCorpo(req) || {};
+    const lid = String(c2.lead_id || ""), aid = String(c2.atendimento_id || "");
+    if (!RX_UUID.test(lid) || !RX_UUID.test(aid)) return res.status(400).json({ erro: "lead_id ou atendimento_id inválido." });
+    const l = (await banco(`${base}?select=id,origem,status,atendimento_id,agendado_por_nome,prospector_nome,agendado_para&id=eq.${lid}`, { headers: cabecalhos(tok) }) || [])[0];
+    if (!l) return res.status(404).json({ erro: "Agendamento não encontrado." });
+    if (l.atendimento_id && l.atendimento_id !== aid) {
+      return res.status(409).json({ erro: "Este agendamento já tem outro atendimento (o do \"Chegou\"). Junte os dois atendimentos pelo ⋯ em Atendimentos." });
+    }
+    const r = await banco(`${base}?id=eq.${lid}`, {
+      method: "PATCH", headers: json(tok, { Prefer: "return=representation" }),
+      body: JSON.stringify({ status: "compareceu", atendimento_id: aid, proximo_contato: null }),
+    });
+    if (!(Array.isArray(r) && r.length)) return res.status(403).json({ erro: "Não consegui marcar o agendamento como compareceu." });
+    const mud = { origem: l.origem && l.origem !== "fluxo_loja" ? l.origem : "outro", como_conheceu: null };
+    const prosp = l.agendado_por_nome || l.prospector_nome;
+    if (prosp) mud.prospec = caixaAlta(prosp);
+    const ra = await banco(`${REST("atendimento")}?id=eq.${aid}`, {
+      method: "PATCH", headers: json(tok, { Prefer: "return=representation" }), body: JSON.stringify(mud),
+    }).catch(() => null);
+    return res.status(200).json({ ok: true, lead: r[0], atendimento: ra && ra[0] ? comEmLoja(ra[0]) : null,
+      aviso: ra && ra[0] ? null : "O agendamento ficou como compareceu, mas a origem do atendimento não mudou (só o dono ou o gerente muda)." });
   }
 
   if (req.method === "POST" && String(req.query.acao || "") === "excluir") {

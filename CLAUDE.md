@@ -2666,6 +2666,17 @@ cita a hora marcada: 320 achados, 19 ficam "não registrado" — palpite
 seria pior. No "Chegou", quem agendou vira o PROSPEC do atendimento
 quando ninguém digitou o prospector.
 
+**O fluxo que era um agendamento** (12/11/2026, o Derek: o cliente que a IA
+agendou chegou, a loja não viu e abriu como fluxo — duplicado, o lead não ficou
+"veio" e a IA seguiu acompanhando). "Era um agendamento — ligar ao lead", no ⋯
+de Atendimentos e no cartão de fluxo da agenda (`LigarAoAgendamento`,
+`?recurso=lead&acao=candidatos|ligar`): o lead vira compareceu com aquele
+atendimento, e o atendimento perde o fluxo — origem do lead, PROSPEC de quem
+agendou, sem "como conheceu". "Nunca vai ser fluxo se eu unifiquei com o lead."
+O ligar automático por telefone (`leadQueVeio`) faz o mesmo com a origem. Na
+agenda, o agendamento se exclui ("excluir agendamento", com motivo, esconde
+como a 0060) e o fluxo também (gerente, apaga o atendimento).
+
 **"Recuperação" muda a origem** (a Schell, 03/11/2026): é o cliente que a
 equipe foi buscar de volta, então o atendimento nasce `recuperacao`, com
 PROSPEC "RECUPERAÇÃO", e não `fluxo_loja`.
