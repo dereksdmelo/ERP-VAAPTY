@@ -1804,7 +1804,7 @@ async function leads(req, res, tok) {
       const d0 = new Date(Date.parse(at.data || hojeAqui()) - 7 * 86400000).toISOString().slice(0, 10);
       const d1 = new Date(Date.parse(at.data || hojeAqui()) + 2 * 86400000).toISOString().slice(0, 10);
       ls = await banco(`${base}?select=${sel}&excluido_em=is.null&atendimento_id=is.null&status=in.(agendado,confirmado,nao_compareceu)` +
-        `&agendado_para=gte.${d0}&agendado_para=lt.${d1}&order=agendado_para.asc&limit=80`, { headers: cabecalhos(tok) });
+        `&agendado_para=gte.${d0}&agendado_para=lt.${d1}&order=agendado_para.desc&limit=80`, { headers: cabecalhos(tok) });
       const k = chaveFone(at.cliente_telefone);
       if (k) {
         const pf = await banco(`${base}?select=${sel}&excluido_em=is.null&telefone=like.${encodeURIComponent("*" + k.slice(-8).split("").join("*") + "*")}&limit=10`, { headers: cabecalhos(tok) }).catch(() => []);
