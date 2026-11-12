@@ -5359,6 +5359,12 @@ consertadas junto, porque a revisão depende dela.
   anexado — "arquivado" sem o comprovante na pasta é o que esta etapa
   existe para impedir.
 
+**Com o carro no estoque, o que sai é o do estoque** (12/11/2026, a Schell:
+corrigia o custo no estoque e Pagamentos a realizar seguia com a quitação e os
+débitos do check list). A esteira lê `valor_compra` e as linhas de custo
+(realizado, ou o previsto ainda não pago) e manda `desembolso`; sem carro no
+estoque, vale o check list.
+
 **O que ficou de fora:** pagamento parcial (o cliente hoje e a quitação
 amanhã) — a observação do "pago" é onde se anota, por enquanto; e o
 lançamento no financeiro, que continua vindo do extrato.

@@ -206,10 +206,25 @@ async function esteira(req, res, tok) {
       `valor_quitacao,valor_debitos,valor_cautelar,banco_favorecido,banco_documento,banco_nome,banco_agencia,banco_conta,banco_tipo,banco_pix)` +
       `&status=eq.fechado&data=gte.${de}${ate}&order=data.desc&limit=300`, { headers: cabecalhos(tok) }) || [];
     const ids = ats.map((a) => a.id);
-    const [aprov, gente] = await Promise.all([
+    const [aprov, gente, ests] = await Promise.all([
       ids.length ? banco(`${RA}?select=atendimento_id,perfil_id,decisao,motivo,criado_em&atendimento_id=in.(${ids.join(",")})`, { headers: cabecalhos(tok) }) : [],
       banco(`${URL_BASE}/rest/v1/perfil?select=id,nome`, { headers: cabecalhos(tok) }),
+      ids.length ? banco(`${URL_BASE}/rest/v1/estoque?select=atendimento_id,natureza,valor_compra,estoque_custo(tipo,previsto,realizado)&atendimento_id=in.(${ids.join(",")})`, { headers: cabecalhos(tok) }).catch(() => []) : [],
     ]);
+    /* O QUE SAI É O DO ESTOQUE, quando o carro já está lá (12/11/2026, a
+     * Schell: "eu arrumo o custo no estoque, mas ele não atualiza o valor
+     * na parte de pagamento a realizar — a quitação ali não é esse valor,
+     * nem débitos"). A tela somava o check list; o estoque é onde o custo
+     * se corrige (o realizado, ou o previsto ainda não pago). Sem carro no
+     * estoque, vale o check list, como antes. */
+    const desembolso = {};
+    (ests || []).forEach((e) => {
+      if (!e.atendimento_id || (e.natureza && e.natureza !== "compra")) return;
+      const v = (x) => (x.realizado != null ? Number(x.realizado) || 0 : Number(x.previsto) || 0);
+      const soma = (tipo) => (e.estoque_custo || []).filter((x) => x.tipo === tipo).reduce((t, x) => t + v(x), 0);
+      const cliente = Number(e.valor_compra) || 0, quitacao = soma("quitacao"), debitos = soma("debitos");
+      desembolso[e.atendimento_id] = { cliente, quitacao, debitos, total: cliente + quitacao + debitos, do_estoque: true };
+    });
     const nomes = {}; (gente || []).forEach((p) => { nomes[p.id] = p.nome; });
     const porAt = {};
     (aprov || []).forEach((a) => { (porAt[a.atendimento_id] = porAt[a.atendimento_id] || []).push({ ...a, nome: nomes[a.perfil_id] || "" }); });
@@ -220,6 +235,7 @@ async function esteira(req, res, tok) {
       const devolvido = ap.filter((x) => x.decisao === "devolvido").sort((x, y) => String(y.criado_em).localeCompare(String(x.criado_em)))[0];
       return {
         ...a, checklist: cl, veiculo: umaLinha(a.veiculo),
+        desembolso: desembolso[a.id] || null,
         etapa: etapaDe(cl, ap),
         aprovacoes: valem.filter((x) => x.decisao === "aprovado"),
         // A devolução mais recente, enquanto ninguém revisou de novo.

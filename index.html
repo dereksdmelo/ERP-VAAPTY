@@ -27855,7 +27855,9 @@ async function moverEsteira(acao, corpo) {
   if (!r.ok) { const e = new Error(d.erro || "Não consegui gravar."); e.faltam = d.faltam; throw e; }
   return d;
 }
-const desembolsoDe = (cl) => {
+// `a` é o negócio da esteira: com o carro no estoque, vale o que o estoque diz (12/11/2026).
+const desembolsoDe = (cl, a) => {
+  if (a && a.desembolso) return a.desembolso;
   const c = cl || {};
   const cliente = numeroBR(c.valor_cliente) || 0, quitacao = numeroBR(c.valor_quitacao) || 0, debitos = numeroBR(c.valor_debitos) || 0;
   return { cliente, quitacao, debitos, total: cliente + quitacao + debitos };
@@ -28215,14 +28217,14 @@ function TelaADM({ perfil, comp, mes, modo = "revisar" }) {
   // Revisar mostra o mês inteiro, com o que falta fazer em cima.
   const ORDEM = { revisar: 0, aprovar: 1, pagar: 2, pago: 3, arquivar: 3, arquivado: 4 };
   const lista = daFila.slice().sort((a, b) => (ORDEM[a.etapa] - ORDEM[b.etapa]) || String(b.data || "").localeCompare(String(a.data || "")));
-  const soma = (xs) => xs.reduce((t, a) => t + desembolsoDe(a.checklist).total, 0);
+  const soma = (xs) => xs.reduce((t, a) => t + desembolsoDe(a.checklist, a).total, 0);
 
   const TITULO = { revisar: "Negócios fechados", aprovar: "Aprovações", pagar: "Pagamentos a realizar", arquivar: "Arquivamento" };
 
   if (foco) {
     const e = ETAPA_NEG[foco.etapa] || ETAPA_NEG.revisar;
     const v = umaDe(foco.veiculo) || {};
-    const dz = desembolsoDe(foco.checklist);
+    const dz = desembolsoDe(foco.checklist, foco);
     return (
       <div>
         <button onClick={() => { setFoco(null); setCl(null); setAba("negocio"); }} className="text-[14px]" style={{ color: C.roxo, fontWeight: 600 }}>‹ {TITULO[modo]}</button>
@@ -28454,7 +28456,7 @@ function TelaADM({ perfil, comp, mes, modo = "revisar" }) {
     : modo === "aprovar" ? `${lista.length} esperando aprovação · cada um precisa de ${minimo} revisores diferentes`
     : modo === "arquivar" ? `${todos.filter((a) => a.etapa === "arquivar").length} em arquivamento · ${todos.filter((a) => a.etapa === "arquivado").length} arquivados`
     : `${todos.filter((a) => a.etapa === "pagar").length} a pagar · ${brl(soma(todos.filter((a) => a.etapa === "pagar")))}` +
-      (lista.some((a) => !desembolsoDe(a.checklist).total) ? ` · ${lista.filter((a) => !desembolsoDe(a.checklist).total).length} sem valores no check list` : "");
+      (lista.some((a) => !desembolsoDe(a.checklist, a).total) ? ` · ${lista.filter((a) => !desembolsoDe(a.checklist, a).total).length} sem valores no check list` : "");
 
   return (
     <div>
@@ -28495,7 +28497,7 @@ function TelaADM({ perfil, comp, mes, modo = "revisar" }) {
         {lista.map((a) => {
           const e = ETAPA_NEG[a.etapa] || ETAPA_NEG.revisar;
           const v = umaDe(a.veiculo) || {};
-          const dz = desembolsoDe(a.checklist);
+          const dz = desembolsoDe(a.checklist, a);
           return (
             <button key={a.id} onClick={() => abrir(a)}
               className="w-full rounded-lg p-3 text-left"
