@@ -2673,7 +2673,11 @@ de Atendimentos e no cartão de fluxo da agenda (`LigarAoAgendamento`,
 `?recurso=lead&acao=candidatos|ligar`): o lead vira compareceu com aquele
 atendimento, e o atendimento perde o fluxo — origem do lead, PROSPEC de quem
 agendou, sem "como conheceu". "Nunca vai ser fluxo se eu unifiquei com o lead."
-O ligar automático por telefone (`leadQueVeio`) faz o mesmo com a origem. Na
+O ligar automático por telefone (`leadQueVeio`) faz o mesmo com a origem.
+E o telefone avisa antes (`AvisoLeadDoTelefone`, `?recurso=lead&acao=do-telefone`):
+no "+ Cliente de fluxo" e no "Novo atendimento", digitado o número de um lead,
+aparece de quem é e em que pé está; no fluxo, "É ele" troca o fluxo pela
+chegada do agendamento (o mesmo `compareceu` do "Chegou"). Na
 agenda, o agendamento se exclui ("excluir agendamento", com motivo, esconde
 como a 0060) e o fluxo também (gerente, apaga o atendimento).
 

@@ -1787,6 +1787,17 @@ async function leads(req, res, tok) {
    * de WhatsApp e o anúncio de onde vieram, o agendamento, se vieram e como
    * o atendimento terminou. Em páginas de 1.000 — o teto do PostgREST. A
    * tela monta a planilha. */
+  /* DE QUEM É ESTE TELEFONE (12/11/2026, o Derek: "quando for o mesmo
+   * telefone que um lead ele avisar — esse telefone é de um lead tal,
+   * agendado ou não"). DDD + oito últimos, a chave do funil. */
+  if (req.method === "GET" && String(req.query.acao || "") === "do-telefone") {
+    const k = chaveFone(String(req.query.telefone || ""));
+    if (!k) return res.status(200).json({ leads: [] });
+    const pad = "*" + k.slice(-8).split("").join("*") + "*";
+    const ls = await banco(`${base}?select=id,nome,telefone,carro,status,origem,agendado_para,agendado_por_nome,atendimento_id,criado_em` +
+      `&excluido_em=is.null&telefone=like.${encodeURIComponent(pad)}&order=criado_em.desc&limit=10`, { headers: cabecalhos(tok) }) || [];
+    return res.status(200).json({ leads: ls.filter((l) => chaveFone(l.telefone) === k) });
+  }
   if (req.method === "GET" && String(req.query.acao || "") === "candidatos") {
     const aid = String(req.query.atendimento_id || "");
     if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });

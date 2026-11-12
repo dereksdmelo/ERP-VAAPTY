@@ -9964,6 +9964,7 @@ function NovoAtendimento({ perfil, aoCriar, aoCancelar }) {
         <div className="grid grid-cols-2 gap-2.5">
           <Campo label="Cliente"><input className={inputCls} style={inputSty} value={d.cliente_nome} onChange={(e) => set("cliente_nome", e.target.value)} /></Campo>
           <Campo label="Telefone"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="tel" value={d.cliente_telefone} onChange={(e) => set("cliente_telefone", e.target.value)} /></Campo>
+          <AvisoLeadDoTelefone telefone={d.cliente_telefone} />
         </div>
         <Campo label="Carro" ><input className={inputCls} style={inputSty} placeholder="Como o cliente chamou: Onix, Ford Ka…" value={d.carro_descricao} onChange={(e) => set("carro_descricao", e.target.value)} /></Campo>
         <div className="grid grid-cols-2 gap-2.5">
@@ -16848,6 +16849,49 @@ function ComoConheceu({ valor, aoMudar }) {
   );
 }
 
+/* O TELEFONE JÁ É DE UM LEAD (12/11/2026, o Derek: "quando for o mesmo
+ * telefone que um lead ele avisar… esse telefone é de um lead tal, agendado
+ * ou não"). Aparece enquanto se digita, no "+ Cliente de fluxo" e no "Novo
+ * atendimento". `aoUsar(lead)` aparece só para quem tem hora marcada e
+ * ainda não chegou: é o "registrar como a chegada do agendamento". */
+function AvisoLeadDoTelefone({ telefone, aoUsar, usado }) {
+  const [ls, setLs] = useState([]);
+  const dig = String(telefone || "").replace(/\D/g, "");
+  useEffect(() => {
+    if (dig.length < 10) { setLs([]); return; }
+    const t = setTimeout(() => {
+      fetchAut(`/api/atendimento?recurso=lead&acao=do-telefone&telefone=${dig}`).then((r) => r.json()).then((d) => setLs(d.leads || [])).catch(() => setLs([]));
+    }, 500);
+    return () => clearTimeout(t);
+  }, [dig]);
+  if (!ls.length) return null;
+  const dataHora = (iso) => iso ? `${diaBR(String(iso).slice(0, 10)).slice(0, 5)} às ${horaBR(iso)}` : "";
+  return (
+    <div className="space-y-1.5 rounded-lg p-2.5 text-[12.5px]" style={{ background: AMARELO.fundo, color: AMARELO.texto, border: `1px solid ${AMARELO.borda}` }}>
+      {ls.map((l) => {
+        const marcado = ["agendado", "confirmado", "nao_compareceu"].indexOf(l.status) >= 0 && !l.atendimento_id;
+        const desc = l.status === "agendado" || l.status === "confirmado"
+          ? `agendado para ${dataHora(l.agendado_para)}${l.status === "confirmado" ? " (confirmou)" : ""}`
+          : l.status === "nao_compareceu" ? "tinha horário e não veio"
+          : l.status === "compareceu" ? "já veio à loja antes"
+          : l.status === "perdido" ? "marcado como perdido" : "lead sem horário marcado";
+        return (
+          <div key={l.id}>
+            Este telefone é do lead <b>{l.nome || "sem nome"}</b> — {desc}
+            {l.agendado_por_nome && (l.status === "agendado" || l.status === "confirmado") ? `, por ${l.agendado_por_nome}` : ""}
+            {l.carro ? ` · ${l.carro}` : ""}.
+            {marcado && aoUsar && (usado && usado.id === l.id
+              ? <span className="ml-1 font-bold" style={{ color: C.verde }}>✓ vai entrar como a chegada deste agendamento</span>
+              : <button onClick={() => aoUsar(l)} className="ml-1 font-bold underline">É ele — registrar como a chegada do agendamento</button>)}
+            {marcado && !aoUsar && <span> Ao salvar, o atendimento fica ligado a esse agendamento.</span>}
+          </div>
+        );
+      })}
+      {usado && <button onClick={() => aoUsar(null)} className="text-[11.5px] underline">não é ele — seguir como fluxo</button>}
+    </div>
+  );
+}
+
 function JanelaChegou({ lead, equipe, aoFechar, aoPronto, fluxo }) {
   lead = lead || {};
   const agora = () => new Date().toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
@@ -16876,16 +16920,18 @@ function JanelaChegou({ lead, equipe, aoFechar, aoPronto, fluxo }) {
   const [semAviso, setSemAviso] = useState(null);
   const [como, setComo] = useState("");
   const [origem, setOrigem] = useState(lead.origem || "");
+  // O fluxo que é um agendamento (12/11/2026): escolhido no aviso do telefone, a chegada vai para o lead.
+  const [usarLead, setUsarLead] = useState(null);
   const n = negs.filter((x) => x.id === neg)[0];
   const futuro = dia > hojeEmSP() || (dia === hojeEmSP() && hora > agora());
-  const comoOk = !fluxo || (como && como !== "Outro");
+  const comoOk = !fluxo || !!usarLead || (como && como !== "Outro");
   const pronto = n && nome.trim() && dia && hora && !futuro && comoOk;
 
   const confirmar = async () => {
     setIndo(true); setErro("");
     try {
       let d;
-      if (fluxo) {
+      if (fluxo && !usarLead) {
         const r = await fetchAut("/api/atendimento", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -16901,10 +16947,10 @@ function JanelaChegou({ lead, equipe, aoFechar, aoPronto, fluxo }) {
         if (!r.ok || !x.atendimento) throw new Error(x.erro || "Não consegui abrir o atendimento.");
         d = { atendimento_id: x.atendimento.id, atendimento: x.atendimento, aviso: x.aviso };
       } else {
-        d = await leadCompareceu(lead.id, {
+        d = await leadCompareceu((usarLead || lead).id, {
           negociador_id: n.id, negociador_nome: n.nome,
           cliente_nome: nome.trim(), carro: carro.trim(), chegada: `${dia}T${hora}`,
-          origem: origem || undefined,
+          origem: usarLead ? undefined : origem || undefined,
           fila: vez && vez.vez && n.id !== vez.vez && especifico ? "especifico" : undefined,
         });
       }
@@ -16955,10 +17001,12 @@ function JanelaChegou({ lead, equipe, aoFechar, aoPronto, fluxo }) {
                 <input className={inputCls} style={inputSty} value={telefone} inputMode="tel" placeholder="(47) 9…" onChange={(e) => setTelefone(e.target.value)} />
               </Campo>
             )}
+            {fluxo && <AvisoLeadDoTelefone telefone={telefone} usado={usarLead}
+              aoUsar={(l) => { setUsarLead(l); if (l && !carro.trim() && l.carro) setCarro(l.carro); }} />}
             <Campo label="Carro">
               <input className={inputCls} style={inputSty} value={carro} placeholder="ex.: Kwid" onChange={(e) => setCarro(e.target.value)} />
             </Campo>
-            {fluxo ? <ComoConheceu valor={como} aoMudar={setComo} /> : (
+            {fluxo && usarLead ? null : fluxo ? <ComoConheceu valor={como} aoMudar={setComo} /> : (
               <Campo label="De onde o cliente veio"
                 nota={`${quemAgendou(lead) ? `Agendado por ${quemAgendou(lead)}. ` : ""}A origem veio do número de WhatsApp; confirme com ele.`}>
                 <select className={inputCls} style={inputSty} value={origem} onChange={(e) => setOrigem(e.target.value)}>
