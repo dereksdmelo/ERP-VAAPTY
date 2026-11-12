@@ -7042,121 +7042,11 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               <Desvalorizometro chave={f.fipeDesval} modelo={f.modelo} />
             </Bloco>
 
-            {blocoCliente}
-
-            <Bloco titulo="O cliente" sub="Descobrir que falta o decisor depois de 40 minutos de avaliação é perda certa.">
-              <div className="space-y-2">
-                <div className="grid gap-2 lg:grid-cols-[220px_1fr]">
-                <Campo label="Motivo da venda">
-                  <select className={inputCls} style={inputSty} value={f.motivo} onChange={(e) => set("motivo", e.target.value)}>
-                    {MOTIVOS.map((m) => <option key={m}>{m}</option>)}
-                  </select>
-                </Campo>
-                <Campo label="Detalhe do motivo — opcional">
-                  <input className={inputCls} style={inputSty} value={f.motivoDetalhe}
-                    onChange={(e) => set("motivoDetalhe", e.target.value)}
-                    placeholder="A história por trás — é o que dá argumento na hora do extrato." />
-                </Campo>
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <Campo label="Pretensão"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.pretensao} onChange={(e) => set("pretensao", e.target.value)} /></Campo>
-                  <Campo label="Quitação"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.quitacao} onChange={(e) => set("quitacao", e.target.value)} /></Campo>
-                  <Campo label="Débitos"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.debitos} onChange={(e) => set("debitos", e.target.value)} /></Campo>
-                </div>
-                <p className="text-[10px] leading-relaxed" style={{ color: C.mute }}>
-                  Quitação é o saldo do financiamento. Débitos é IPVA, multa e licenciamento em aberto — os dois saem do valor que o cliente recebe.
-                </p>
-                <div className="grid gap-2 lg:grid-cols-3">
-                <Toggle label="O decisor está na loja" nota="Se não estiver, resolva antes de rodar o carro." valor={f.decisorPresente} onChange={(v) => set("decisorPresente", v)} />
-                <Toggle label="Cliente entrega o carro hoje"
-                  nota="Fechando negócio, o carro já fica na loja."
-                  valor={f.entregaHoje} onChange={(v) => set("entregaHoje", v)} />
-                <Toggle label="Já recebeu proposta de outro lugar" valor={f.temPropostaFora} onChange={(v) => set("temPropostaFora", v)} />
-                </div>
-                {f.temPropostaFora && (
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <Campo label="Quanto"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.propostaForaValor} onChange={(e) => set("propostaForaValor", e.target.value)} /></Campo>
-                    <Campo label="Onde"><input className={inputCls} style={inputSty} value={f.propostaForaOnde} onChange={(e) => set("propostaForaOnde", e.target.value)} /></Campo>
-                  </div>
-                )}
-              </div>
-            </Bloco>
-
-            <Bloco titulo="Documentos do carro e do cliente"
-              sub="O CRLV e a CNH em foto ou PDF. É de onde saem os dados — anexando, você para de perguntar.">
-              {/* A CNH DE QUEM ASSINA E A DE QUEM É DONO (03/11/2026, a
-                  Schell): o contratante nem sempre é o proprietário do
-                  carro. Sendo a mesma pessoa, uma CNH só, que vale pelos
-                  dois itens do check list de documentações. */}
-              <label className="mb-2 flex items-center gap-2 text-[13px]">
-                <input type="checkbox" checked={!!f.proprietarioMesmo} onChange={(e) => set("proprietarioMesmo", e.target.checked)} />
-                O proprietário do carro é o próprio cliente (uma CNH só)
-              </label>
-              <Anexos atendimentoId={atendimento ? atendimento.id : null} key={f.proprietarioMesmo ? "mesmo" : "dois"}
-                rotulos={f.proprietarioMesmo
-                  ? ["CRLV", "CNH (contratante e proprietário)", "Identidade", "Dossiê do Detran"]
-                  : ["CRLV", "CNH do contratante", "CNH do proprietário", "Identidade", "Dossiê do Detran"]}
-                legados={["CNH", "CNH do contratante", "CNH do proprietário", "CNH (contratante e proprietário)"]} />
-            </Bloco>
-          </>
-        )}
-
-        {/* ---------- O ---------- */}
-        {cabecaEtapa("O")}
-        {(
-          <>
-            <Bloco titulo="Mostre como funciona" sub="O cliente aceita um número menor quando entende de onde ele veio.">
-              <div className="space-y-2.5">
-                {/* CHEGAR À ÚLTIMA PÁGINA É O QUE MARCA (o Derek, em
-                    24/10/2026: "uma coisa a menos pro negociador ticar").
-                    Antes marcava ao ABRIR — e com as etapas numa página
-                    só, abrir o atendimento já daria o processo por
-                    mostrado sem ninguém virar uma folha. */}
-                <Apresentacao aoFim={() => { if (!f.mostrouProcesso) set("mostrouProcesso", true); }} />
-                <p className="text-[11px] leading-relaxed" style={{ color: f.mostrouProcesso ? C.verde : C.mute }}>
-                  {f.mostrouProcesso
-                    ? "✓ Processo mostrado — chegou à última página."
-                    : "Vire as páginas na frente do cliente (arraste ou use os botões). Chegando à última, conta como mostrado."}
-                </p>
-                <a href="/apresentacao.pdf" target="_blank" rel="noopener noreferrer"
-                  className="block text-[11px] underline" style={{ color: C.mute }}>
-                  Baixar o PDF — para mandar por WhatsApp
-                </a>
-              </div>
-            </Bloco>
-
-            <Bloco titulo="Prova social" sub="Depoimento de quem vendeu pelo mesmo motivo que esse cliente.">
-              <div className="space-y-2.5">
-                <Campo label="Necessidade principal do cliente">
-                  <input className={inputCls} style={inputSty} value={f.necessidadeCliente}
-                    onChange={(e) => setVarios({ necessidadeCliente: e.target.value, mostrouTestemunhal: true })}
-                    placeholder="Ex.: precisa quitar dívida rápido" />
-                </Campo>
-                {/* Sem tique: procurar pela necessidade ou mexer nas
-                    avaliações já é tê-las mostrado (24/10/2026). */}
-                <Testemunhais necessidade={f.necessidadeCliente} negociador={f.negociador}
-                  aoMostrar={() => { if (!f.mostrouTestemunhal) set("mostrouTestemunhal", true); }} />
-                <p className="text-[11px]" style={{ color: f.mostrouTestemunhal ? C.verde : C.mute }}>
-                  {f.mostrouTestemunhal ? "✓ Avaliações mostradas." : "Escolha um tema ou procure pela necessidade — conta como mostrado."}
-                </p>
-              </div>
-            </Bloco>
-          </>
-        )}
-
-        {/* ---------- PUB ---------- */}
-        {cabecaEtapa("PUB")}
-        {(
-          <>
-            <div className="rounded-lg p-3" style={{ background: liberado ? "#E7F4EE" : "#FDEDE6", border: `1px solid ${liberado ? C.verde : C.laranja}` }}>
-              <div className="text-[12px] font-semibold" style={{ color: liberado ? C.verde : C.laranja }}>
-                {liberado ? "Ficha completa — descritivo liberado" : `Faltam ${faltas.length} campos`}
-              </div>
-              {!liberado && <div className="mt-1 text-[11px]" style={{ color: C.mute }}>{faltas.map((x) => x[1]).join(" · ")}</div>}
-            </div>
-
-            {!!f.placa && !f.fipeConferida && <AvisoFipe />}
-
+            {/* AS FOTOS E A FICHA LOGO ABAIXO DO CARRO (12/11/2026, a loja: "a partir do
+                momento que a gente coloca a placa e o modelo, já colocar o preenchimento
+                logo abaixo, porque ele tá muito lá embaixo"). Moram aqui, na Pesquisa, e
+                o Lançamento continua dizendo o que falta. */}
+            <div id="fotos-e-ficha" />
             <Bloco titulo="Fotos" sub={`Primeira é a capa. Até ${MAX_FOTOS}. Cada foto sobe para o servidor na hora; o aparelho não guarda nada depois que sobe.`}>
               <input ref={camRef} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={receberFotos} />
               <input ref={galRef} type="file" accept="image/*" multiple className="hidden" onChange={receberFotos} />
@@ -7339,6 +7229,126 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 </Campo>
               </div>
             </Bloco>
+
+
+            {blocoCliente}
+
+            <Bloco titulo="O cliente" sub="Descobrir que falta o decisor depois de 40 minutos de avaliação é perda certa.">
+              <div className="space-y-2">
+                <div className="grid gap-2 lg:grid-cols-[220px_1fr]">
+                <Campo label="Motivo da venda">
+                  <select className={inputCls} style={inputSty} value={f.motivo} onChange={(e) => set("motivo", e.target.value)}>
+                    {MOTIVOS.map((m) => <option key={m}>{m}</option>)}
+                  </select>
+                </Campo>
+                <Campo label="Detalhe do motivo — opcional">
+                  <input className={inputCls} style={inputSty} value={f.motivoDetalhe}
+                    onChange={(e) => set("motivoDetalhe", e.target.value)}
+                    placeholder="A história por trás — é o que dá argumento na hora do extrato." />
+                </Campo>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <Campo label="Pretensão"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.pretensao} onChange={(e) => set("pretensao", e.target.value)} /></Campo>
+                  <Campo label="Quitação"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.quitacao} onChange={(e) => set("quitacao", e.target.value)} /></Campo>
+                  <Campo label="Débitos"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.debitos} onChange={(e) => set("debitos", e.target.value)} /></Campo>
+                </div>
+                <p className="text-[10px] leading-relaxed" style={{ color: C.mute }}>
+                  Quitação é o saldo do financiamento. Débitos é IPVA, multa e licenciamento em aberto — os dois saem do valor que o cliente recebe.
+                </p>
+                <div className="grid gap-2 lg:grid-cols-3">
+                <Toggle label="O decisor está na loja" nota="Se não estiver, resolva antes de rodar o carro." valor={f.decisorPresente} onChange={(v) => set("decisorPresente", v)} />
+                <Toggle label="Cliente entrega o carro hoje"
+                  nota="Fechando negócio, o carro já fica na loja."
+                  valor={f.entregaHoje} onChange={(v) => set("entregaHoje", v)} />
+                <Toggle label="Já recebeu proposta de outro lugar" valor={f.temPropostaFora} onChange={(v) => set("temPropostaFora", v)} />
+                </div>
+                {f.temPropostaFora && (
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <Campo label="Quanto"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={f.propostaForaValor} onChange={(e) => set("propostaForaValor", e.target.value)} /></Campo>
+                    <Campo label="Onde"><input className={inputCls} style={inputSty} value={f.propostaForaOnde} onChange={(e) => set("propostaForaOnde", e.target.value)} /></Campo>
+                  </div>
+                )}
+              </div>
+            </Bloco>
+
+            <Bloco titulo="Documentos do carro e do cliente"
+              sub="O CRLV e a CNH em foto ou PDF. É de onde saem os dados — anexando, você para de perguntar.">
+              {/* A CNH DE QUEM ASSINA E A DE QUEM É DONO (03/11/2026, a
+                  Schell): o contratante nem sempre é o proprietário do
+                  carro. Sendo a mesma pessoa, uma CNH só, que vale pelos
+                  dois itens do check list de documentações. */}
+              <label className="mb-2 flex items-center gap-2 text-[13px]">
+                <input type="checkbox" checked={!!f.proprietarioMesmo} onChange={(e) => set("proprietarioMesmo", e.target.checked)} />
+                O proprietário do carro é o próprio cliente (uma CNH só)
+              </label>
+              <Anexos atendimentoId={atendimento ? atendimento.id : null} key={f.proprietarioMesmo ? "mesmo" : "dois"}
+                rotulos={f.proprietarioMesmo
+                  ? ["CRLV", "CNH (contratante e proprietário)", "Identidade", "Dossiê do Detran"]
+                  : ["CRLV", "CNH do contratante", "CNH do proprietário", "Identidade", "Dossiê do Detran"]}
+                legados={["CNH", "CNH do contratante", "CNH do proprietário", "CNH (contratante e proprietário)"]} />
+            </Bloco>
+          </>
+        )}
+
+        {/* ---------- O ---------- */}
+        {cabecaEtapa("O")}
+        {(
+          <>
+            <Bloco titulo="Mostre como funciona" sub="O cliente aceita um número menor quando entende de onde ele veio.">
+              <div className="space-y-2.5">
+                {/* CHEGAR À ÚLTIMA PÁGINA É O QUE MARCA (o Derek, em
+                    24/10/2026: "uma coisa a menos pro negociador ticar").
+                    Antes marcava ao ABRIR — e com as etapas numa página
+                    só, abrir o atendimento já daria o processo por
+                    mostrado sem ninguém virar uma folha. */}
+                <Apresentacao aoFim={() => { if (!f.mostrouProcesso) set("mostrouProcesso", true); }} />
+                <p className="text-[11px] leading-relaxed" style={{ color: f.mostrouProcesso ? C.verde : C.mute }}>
+                  {f.mostrouProcesso
+                    ? "✓ Processo mostrado — chegou à última página."
+                    : "Vire as páginas na frente do cliente (arraste ou use os botões). Chegando à última, conta como mostrado."}
+                </p>
+                <a href="/apresentacao.pdf" target="_blank" rel="noopener noreferrer"
+                  className="block text-[11px] underline" style={{ color: C.mute }}>
+                  Baixar o PDF — para mandar por WhatsApp
+                </a>
+              </div>
+            </Bloco>
+
+            <Bloco titulo="Prova social" sub="Depoimento de quem vendeu pelo mesmo motivo que esse cliente.">
+              <div className="space-y-2.5">
+                <Campo label="Necessidade principal do cliente">
+                  <input className={inputCls} style={inputSty} value={f.necessidadeCliente}
+                    onChange={(e) => setVarios({ necessidadeCliente: e.target.value, mostrouTestemunhal: true })}
+                    placeholder="Ex.: precisa quitar dívida rápido" />
+                </Campo>
+                {/* Sem tique: procurar pela necessidade ou mexer nas
+                    avaliações já é tê-las mostrado (24/10/2026). */}
+                <Testemunhais necessidade={f.necessidadeCliente} negociador={f.negociador}
+                  aoMostrar={() => { if (!f.mostrouTestemunhal) set("mostrouTestemunhal", true); }} />
+                <p className="text-[11px]" style={{ color: f.mostrouTestemunhal ? C.verde : C.mute }}>
+                  {f.mostrouTestemunhal ? "✓ Avaliações mostradas." : "Escolha um tema ou procure pela necessidade — conta como mostrado."}
+                </p>
+              </div>
+            </Bloco>
+          </>
+        )}
+
+        {/* ---------- PUB ---------- */}
+        {cabecaEtapa("PUB")}
+        {(
+          <>
+            <div className="rounded-lg p-3" style={{ background: liberado ? "#E7F4EE" : "#FDEDE6", border: `1px solid ${liberado ? C.verde : C.laranja}` }}>
+              <div className="text-[12px] font-semibold" style={{ color: liberado ? C.verde : C.laranja }}>
+                {liberado ? "Ficha completa — descritivo liberado" : `Faltam ${faltas.length} campos`}
+              </div>
+              {!liberado && <div className="mt-1 text-[11px]" style={{ color: C.mute }}>{faltas.map((x) => x[1]).join(" · ")}</div>}
+              {!liberado && (
+                <button onClick={() => { const el = document.getElementById("fotos-e-ficha"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }}
+                  className="mt-1.5 text-[12px] font-semibold underline" style={{ color: C.laranja }}>completar as fotos e a ficha ↑ (logo abaixo do carro, na Pesquisa)</button>
+              )}
+            </div>
+
+            {!!f.placa && !f.fipeConferida && <AvisoFipe />}
 
             {/* ===== o carro vai à rede, e só então sai o descritivo =====
 
