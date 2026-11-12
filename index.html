@@ -7234,7 +7234,8 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                       {TIPOS_FIPE.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
                     </select>
                   </Campo>
-                  <Campo label="Ano / modelo" req><input className={inputCls} style={inputSty} value={f.ano} onChange={(e) => set("ano", e.target.value)} /></Campo>
+                  <Campo label="Ano / modelo" req><input className={inputCls} style={inputSty} value={f.ano} placeholder="2014/2015" onChange={(e) => set("ano", e.target.value)}
+                    onBlur={(e) => { const d = String(e.target.value || "").replace(/\D/g, ""); if (d.length === 8 && d !== String(e.target.value)) set("ano", `${d.slice(0, 4)}/${d.slice(4)}`); }} /></Campo>
                   <Campo label="Câmbio" req>
                     <select className={inputCls} style={inputSty} value={f.cambio} onChange={(e) => set("cambio", e.target.value)}>
                       {CAMBIO.map((c) => <option key={c}>{c}</option>)}

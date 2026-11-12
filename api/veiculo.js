@@ -87,7 +87,12 @@ const normalizarPlaca = (v) => String(v || "").replace(/[^A-Za-z0-9]/g, "").toUp
  * ano_modelo. Um valor sozinho vale para os dois.
  */
 function anos(ano) {
-  const p = String(ano || "").split("/").map((x) => inteiro(x));
+  // "2014/2015", "2014-2015", "2014 2015" ou "20142015" (12/11/2026: o Fusion
+  // digitado sem a barra virou o ano 20142015, e o Shinkai recusou o carro).
+  let t = String(ano || "").trim();
+  const d = t.replace(/\D/g, "");
+  if (d.length === 8 && /^(19|20)\d{2}(19|20)\d{2}$/.test(d)) t = `${d.slice(0, 4)}/${d.slice(4)}`;
+  const p = t.split(/[\/\-\s.]+/).filter(Boolean).map((x) => inteiro(x));
   if (p.length < 2) return { ano_fabricacao: p[0] || null, ano_modelo: p[0] || null };
   return { ano_fabricacao: p[0] || null, ano_modelo: p[1] || p[0] || null };
 }
