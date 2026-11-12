@@ -19230,12 +19230,16 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento, aoVerConversa }) {
    * que estava marcado. O fluxo conta à parte: ele não foi agendado, e
    * somá-lo inflaria o comparecimento da pré-venda com visita que ela
    * não trouxe. */
+  const chegouEm = (l) => { const a = l.atendimento || {}; return a.chegada_em || null; };
+  const diaDaVinda = (l) => { const c = chegouEm(l); if (c) return diaSP(c); const a = l.atendimento || {}; return a.data || String(l.agendado_para || "").slice(0, 10); };
+  const horaDaVinda = (l) => { const c = chegouEm(l); return c ? horaSP(c) : horaBR(l.agendado_para) || ""; };
   const itensDoDia = (d) => {
     const doDia = (grupos[d] || []).slice().sort((x, y) => String(x.agendado_para).localeCompare(String(y.agendado_para)));
     return [
       ...doDia.map((l) => ({ k: "l", h: horaBR(l.agendado_para) || "", l })),
-      ...semanaFeita.vieram.filter((l) => String(l.agendado_para || "").slice(0, 10) === d)
-        .map((l) => ({ k: "v", h: horaBR(l.agendado_para), l })),
+      // No dia e na hora em que CHEGOU (12/11/2026); sem a chegada, no horário marcado.
+      ...semanaFeita.vieram.filter((l) => diaDaVinda(l) === d)
+        .map((l) => ({ k: "v", h: horaDaVinda(l), l })),
       ...semanaFeita.faltaram.flatMap((l) => (l.remarcacoes || [])
         .filter((r) => r && r.nao_veio && String(r.de || "").slice(0, 10) === d)
         .map((r) => ({ k: "n", h: horaBR(r.de), l, r }))),
@@ -19371,7 +19375,10 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento, aoVerConversa }) {
                               <div className="truncate text-[12px]" style={{ color: novaData ? C.mute : C.ink }}>{l.nome}</div>
                               <div className="truncate text-[11px]" style={{ color: C.mute }}>
                                 {novaData ? `para ${diaBR(String(l.agendado_para).slice(0, 10)).slice(0, 5)} às ${horaBR(l.agendado_para)}`
-                                  : it.k === "n" ? "toque para remarcar" : (l.carro || "sem carro")}
+                                  : it.k === "n" ? "toque para remarcar"
+                                  : it.k === "v" && l.agendado_para && String(l.agendado_para).slice(0, 10) !== d
+                                    ? `${l.carro ? `${l.carro} · ` : ""}estava agendado para ${diaBR(String(l.agendado_para).slice(0, 10)).slice(0, 5)} às ${horaBR(l.agendado_para)}`
+                                  : (l.carro || "sem carro")}
                               </div>
                               <div className="truncate text-[10.5px]" style={{ color: C.mute }}>{linhaAgendou(l)}</div>
                             </button>

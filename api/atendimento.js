@@ -1989,15 +1989,22 @@ async function leads(req, res, tok) {
     if (fila === "semana") {
       const de = data(req.query.de), ate = data(req.query.ate);
       if (!de || !ate) return res.status(400).json({ erro: "Informe de e ate." });
-      const [vieram, faltaram] = await Promise.all([
-        banco(`${base}?select=${CAMPOS_LEAD},atendimento:atendimento_id(status)&status=eq.compareceu&excluido_em=is.null` +
+      /* QUEM VEIO aparece no dia em que VEIO (12/11/2026: o Diego, agendado
+       * para sexta às 15h, chegou na quinta e a agenda o mostrava "veio" na
+       * sexta). Entram os com horário nesta semana e os que chegaram nesta
+       * semana; a tela desenha pela chegada. */
+      const [vieramH, faltaram, vieramC] = await Promise.all([
+        banco(`${base}?select=${CAMPOS_LEAD},atendimento:atendimento_id(status,data,chegada_em,criado_em)&status=eq.compareceu&excluido_em=is.null` +
               `&agendado_para=gte.${de}T00:00:00&agendado_para=lte.${ate}T23:59:59&limit=300`, { headers: cabecalhos(tok) }),
         banco(`${base}?select=${CAMPOS_LEAD}&excluido_em=is.null&remarcacoes=cs.${encodeURIComponent('[{"nao_veio":true}]')}` +
               `&order=atualizado_em.desc&limit=500`, { headers: cabecalhos(tok) }),
+        banco(`${base}?select=${CAMPOS_LEAD},atendimento:atendimento_id!inner(status,data,chegada_em,criado_em)&status=eq.compareceu&excluido_em=is.null` +
+              `&atendimento.data=gte.${de}&atendimento.data=lte.${ate}&limit=300`, { headers: cabecalhos(tok) }).catch(() => []),
       ]);
       const naSemana = (t) => { const d = String(t || "").slice(0, 10); return d >= de && d <= ate; };
+      const vieram = (vieramH || []).concat((vieramC || []).filter((l) => !(vieramH || []).some((x) => x.id === l.id)));
       return res.status(200).json({
-        vieram: vieram || [],
+        vieram,
         faltaram: (faltaram || []).filter((l) => (l.remarcacoes || []).some((r) => r && r.nao_veio && naSemana(r.de))),
       });
     }
