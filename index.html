@@ -656,7 +656,18 @@ async function procurarHoje(nome, telefone) {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nome, telefone }),
   });
   const d = await r.json().catch(() => ({}));
-  return r.ok ? d.achados || [] : [];
+  const l = r.ok ? d.achados || [] : [];
+  // E os atendimentos dos últimos 60 dias do mesmo telefone: o RETORNO (0154).
+  l.antes = r.ok ? d.antes || [] : [];
+  return l;
+}
+// O cliente voltou à loja (0154): reabre o atendimento que ele já tem.
+async function clienteVoltou(atendimentoId, neg) {
+  const r = await fetchAut("/api/atendimento?recurso=voltou", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ atendimento_id: atendimentoId, ...(neg ? { negociador_nome: neg.nome, negociador_id: neg.id } : {}) }) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui reabrir.");
+  return d.atendimento;
 }
 async function juntarAtendimentos(fica, sai) {
   const r = await fetchAut("/api/atendimento?recurso=duplicados&acao=juntar", {
@@ -9979,7 +9990,7 @@ function NovoAtendimento({ perfil, aoCriar, aoCancelar }) {
     setErro(""); setIndo(true);
     if (mesmoAssim !== true) {
       const achados = await procurarHoje(d.cliente_nome, d.cliente_telefone);
-      if (achados.length) { setJaExiste(achados); setIndo(false); return; }
+      if (achados.length || (achados.antes || []).length) { setJaExiste(achados); setIndo(false); return; }
     }
     try {
       // O id é o do negociador ESCOLHIDO no campo, não o de quem está
@@ -10053,7 +10064,32 @@ function NovoAtendimento({ perfil, aoCriar, aoCancelar }) {
         <Campo label="Pretensão do cliente"><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="numeric" value={d.pretensao} onChange={(e) => set("pretensao", e.target.value)} /></Campo>
         {jaExiste && (
           <div className="rounded-lg p-3" style={{ background: AMARELO.fundo, border: `1px solid ${AMARELO.texto}` }}>
-            <div className="text-[13.5px] font-bold" style={{ color: AMARELO.texto }}>Este cliente já tem atendimento hoje</div>
+            {/* O RETORNO (0154, 12/11/2026): o cliente atendido antes voltou. Reabrir o atendimento dele em
+                vez de abrir outro — e a fila passa a ver o negociador ocupado. */}
+            {!jaExiste.length && !!(jaExiste.antes || []).length && (
+              <>
+                <div className="text-[13.5px] font-bold" style={{ color: AMARELO.texto }}>Este cliente já foi atendido — é um retorno?</div>
+                {jaExiste.antes.map((a) => (
+                  <div key={a.id} className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[13px]">
+                    <span>
+                      <b>{a.cliente_nome || "Sem nome"}</b> · atendido em {diaBR(a.data)}
+                      {a.negociador_nome ? ` por ${a.negociador_nome}` : ""}{a.carro ? ` · ${a.carro}` : ""}
+                    </span>
+                    <button disabled={indo} onClick={async () => {
+                        setIndo(true); setErro("");
+                        try {
+                          const neg = d.negociador_nome ? { nome: d.negociador_nome, id: String(d.negociador_nome || "").trim().toUpperCase() === String((perfil && perfil.nome) || "").trim().toUpperCase() ? perfil.id : null } : null;
+                          const at = await clienteVoltou(a.id, neg);
+                          aoCriar(at || a);
+                        } catch (e) { setErro(e.message); setIndo(false); }
+                      }}
+                      className="rounded-md px-3 py-1.5 text-[13px] font-semibold text-white" style={{ background: C.roxo }}>Ele voltou — reabrir esse atendimento</button>
+                  </div>
+                ))}
+                <p className="mt-1.5 text-[12px]" style={{ color: AMARELO.texto }}>Reabrir põe o cliente na loja de novo, com o negociador escolhido acima, e a fila o vê ocupado. Não conta como atendimento novo.</p>
+              </>
+            )}
+            {!!jaExiste.length && <div className="text-[13.5px] font-bold" style={{ color: AMARELO.texto }}>Este cliente já tem atendimento hoje</div>}
             {jaExiste.map((a) => (
               <div key={a.id} className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[13px]">
                 <span>
@@ -10065,7 +10101,7 @@ function NovoAtendimento({ perfil, aoCriar, aoCancelar }) {
               </div>
             ))}
             <button onClick={() => { setJaExiste(null); criar(true); }} className="mt-2 text-[12.5px] underline" style={{ color: C.mute }}>
-              É outro cliente — abrir um novo
+              {jaExiste.length ? "É outro cliente — abrir um novo" : "Não é retorno — abrir um atendimento novo"}
             </button>
           </div>
         )}
@@ -14013,6 +14049,17 @@ function AcoesAtendimento({ a, lista, gerente, aoFechar, aoJuntar, aoExcluido })
               Juntar com outro atendimento do mesmo cliente
               <span className="block text-[12px] font-normal" style={{ color: C.mute }}>Quando a pré-venda e o negociador abriram dois para a mesma pessoa.</span>
             </button>
+            {a.data !== hojeEmSP() && (
+              <button disabled={indo} onClick={async () => {
+                  if (!window.confirm(`${a.cliente_nome || "O cliente"} voltou à loja hoje? O atendimento é reaberto como "Cliente na loja" e a fila vê ${a.negociador_nome || "o negociador"} ocupado.`)) return;
+                  setIndo(true); setErro("");
+                  try { await clienteVoltou(a.id); aoExcluido(); } catch (e) { setErro(e.message); setIndo(false); }
+                }}
+                className="rounded-lg border px-3 py-2.5 text-left text-[14px] font-semibold" style={{ borderColor: C.verde, color: C.verde }}>
+                O cliente voltou à loja hoje
+                <span className="block text-[12px] font-normal" style={{ color: C.mute }}>Reabre este atendimento em vez de abrir outro; não conta como atendimento novo.</span>
+              </button>
+            )}
             {!doLead && (
               <button onClick={() => setModo("agendamento")} className="rounded-lg border px-3 py-2.5 text-left text-[14px] font-semibold" style={{ borderColor: C.line }}>
                 Era um agendamento — ligar ao lead

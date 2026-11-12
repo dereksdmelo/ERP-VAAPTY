@@ -4006,6 +4006,17 @@ dia. `noTransbordo` e a regra moram em `regras/fila.js`. Na mesma leva:
 correção para o André Ricardo) e **"tirar uma vez devida"** desfaz um
 "devolver" a mais.
 
+**O cliente que volta (0154, 12/11/2026):** o cliente já atendido no mês
+voltou, o Carlos o atendia no atendimento antigo e a fila o dava como livre
+("em loja" só olhava atendimento com a data de hoje). "O cliente voltou à loja
+hoje" (no ⋯ de Atendimentos, e no "Novo atendimento" quando o telefone já teve
+atendimento nos últimos 60 dias — "Ele voltou — reabrir esse atendimento")
+reabre o atendimento de antes: Cliente na loja, sem fim, `voltou_em` agora e
+uma linha nas observações. `emLoja` conta `voltou_em` de hoje, da hora da
+volta; a fila lê os atendimentos de hoje e os que voltaram hoje. Não conta como
+atendimento novo nem mexe na roda. Pôr o status de um atendimento de outro dia
+de volta em "Cliente na loja" faz o mesmo.
+
 **O que libera é "encerrar atendimento", não o status (0106).** O
 Derek: o negociador fechou o carro, mudou o status sozinho e ficou livre
 na fila com o cliente ainda assinando papel. `emLoja` deixou de olhar o

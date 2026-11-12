@@ -1180,7 +1180,16 @@ async function duplicados(req, res, tok) {
     if (!alvo.cliente_nome && !alvo.cliente_telefone) return res.status(200).json({ achados: [] });
     const hoje = hojeAqui();
     const lista = await banco(`${REST("atendimento")}?select=${CAMPOS_DUP}&data=eq.${hoje}&limit=200`, { headers: cabecalhos(tok) }) || [];
-    return res.status(200).json({ achados: lista.filter((a) => mesmoCliente(a, alvo)).map(resumoDup) });
+    // O RETORNO (0154): o mesmo cliente atendido nos últimos 60 dias — só pelo telefone, que nome se repete.
+    let antes = [];
+    const k = chaveFone(alvo.cliente_telefone);
+    if (k) {
+      const desde = new Date(Date.now() - 60 * 86400000).toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+      const pad = "*" + k.slice(-8).split("").join("*") + "*";
+      const l2 = await banco(`${REST("atendimento")}?select=${CAMPOS_DUP}&data=gte.${desde}&data=lt.${hoje}&cliente_telefone=like.${encodeURIComponent(pad)}&order=data.desc&limit=10`, { headers: cabecalhos(tok) }).catch(() => []) || [];
+      antes = l2.filter((a) => chaveFone(a.cliente_telefone) === k).map(resumoDup);
+    }
+    return res.status(200).json({ achados: lista.filter((a) => mesmoCliente(a, alvo)).map(resumoDup), antes });
   }
   if (req.method !== "GET") return res.status(405).json({ erro: "Método não permitido." });
   const desde = new Date(Date.now() - 14 * 86400000).toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
@@ -1236,9 +1245,17 @@ const TIPOS_FORA = ["almoco", "pausa"];
  * … atualizou sozinho o status e encerrou o atendimento dele, mas ele não
  * pode finalizar enquanto não finalizar o contrato e tudo mais e ficar
  * livre pra atender". Só o "encerrar atendimento" libera. */
+/* O CLIENTE QUE VOLTOU (0154, 12/11/2026: um cliente já atendido no mês
+ * voltou, o Carlos o atendia no atendimento antigo e a fila o dava como
+ * livre — "em loja" só olhava atendimento com a data de hoje). `voltou_em`
+ * de hoje também é cliente na mesa, contado da hora da volta. */
 function emLoja(a, agora) {
-  return !!(a && String(a.data) === hojeAqui() && !a.atendimento_fim_em &&
-    (agora || Date.now()) - Date.parse(a.chegada_em || a.criado_em) < TETO_OCUPADO_MS);
+  if (!a || a.atendimento_fim_em) return false;
+  const hoje = hojeAqui();
+  const volta = a.voltou_em && new Date(a.voltou_em).toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }) === hoje;
+  if (!volta && String(a.data) !== hoje) return false;
+  const desde = volta ? a.voltou_em : (a.chegada_em || a.criado_em);
+  return (agora || Date.now()) - Date.parse(desde) < TETO_OCUPADO_MS;
 }
 const comEmLoja = (a) => (a ? { ...a, em_loja: emLoja(a) } : a);
 
@@ -1311,7 +1328,7 @@ async function estadoDaFila(tok, ignorar) {
   const [presencas, deHoje, sinais, eventos, diaLinha, transb, cfgTb] = await Promise.all([
     banco(`${REST("presenca")}?select=perfil_id,chegou_em,saiu_em,abriu_em,saida_manual&dia=eq.${hoje}`, cab),
     banco(`${REST("atendimento")}?select=id,negociador_id,negociador_nome,cliente_nome,carro_descricao,status,` +
-          `chegada_em,criado_em,atendimento_fim_em&data=eq.${hoje}&limit=500`, cab),
+          `chegada_em,criado_em,atendimento_fim_em,voltou_em,data&or=(data.eq.${hoje},voltou_em.gte.${hoje}T00:00:00-03:00)&limit=500`, cab),
     banco(`${URL_BASE}/rest/v1/rpc/agenda_ultimo_sinal`, { method: "POST", headers: json(tok), body: JSON.stringify({ p_dia: hoje }) })
       .catch(() => []),
     banco(`${REST("fila_evento")}?select=*&dia=eq.${hoje}&order=criado_em.asc&limit=1000`, cab).catch(() => []),
@@ -4204,6 +4221,33 @@ module.exports = async function handler(req, res) {
    * estoque do mesmo jeito"). Marca a assinatura — com a forma — e põe o
    * carro fechado no estoque, como a assinatura do ZapSign. A via em papel
    * se anexa no Fechamento ("Contrato assinado"). `desfazer` volta atrás. */
+  /* "O CLIENTE VOLTOU À LOJA" (0154): reabre o atendimento que ele já tem
+   * em vez de abrir outro — status Cliente na loja, sem fim, e `voltou_em`
+   * agora, que é o que a fila lê para ver o negociador ocupado. Não mexe na
+   * roda: o cliente é dele. `negociador_*` muda se outro for atender. */
+  if (String(req.query.recurso || "") === "voltou" && req.method === "POST") {
+    try {
+      const c = await lerCorpo(req) || {};
+      const aid = String(c.atendimento_id || "");
+      if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
+      const mud = { status: "cliente_na_loja", atendimento_fim_em: null, voltou_em: new Date().toISOString() };
+      if (c.negociador_nome) {
+        mud.negociador_nome = texto(c.negociador_nome);
+        mud.negociador_id = RX_UUID.test(String(c.negociador_id || "")) ? c.negociador_id : null;
+      }
+      const r = await banco(`${REST("atendimento")}?id=eq.${aid}`, {
+        method: "PATCH", headers: json(tok, { Prefer: "return=representation" }), body: JSON.stringify(mud),
+      });
+      const linha = (Array.isArray(r) ? r[0] : r) || null;
+      if (!linha) return res.status(403).json({ erro: "Só quem atende (ou o gerente) reabre este atendimento." });
+      // O histórico do atendimento diz quando ele voltou.
+      const nota = `${new Date().toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })} ${new Date().toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" })}: o cliente voltou à loja${mud.negociador_nome ? ` — atendido por ${mud.negociador_nome}` : ""}.`;
+      await banco(`${REST("atendimento")}?id=eq.${aid}`, { method: "PATCH", headers: json(tok),
+        body: JSON.stringify({ observacoes: [linha.observacoes, nota].filter(Boolean).join("\n") }) }).catch(() => {});
+      return res.status(200).json({ ok: true, atendimento: comEmLoja(linha) });
+    } catch (e) { return res.status(e.status || 502).json({ erro: limpar(e.message) }); }
+  }
+
   if (String(req.query.recurso || "") === "contrato-fora" && req.method === "POST") {
     try {
       const c = await lerCorpo(req) || {};
@@ -4327,7 +4371,12 @@ module.exports = async function handler(req, res) {
       }
       // Pôr de volta em "Cliente na loja" é o cliente que voltou à mesa:
       // o "finalizar" de antes deixa de valer (decisão 67).
-      if (linha.status === "cliente_na_loja") linha.atendimento_fim_em = null;
+      if (linha.status === "cliente_na_loja") {
+        linha.atendimento_fim_em = null;
+        // Atendimento de outro dia voltando para a loja é o cliente que voltou (0154): a fila precisa ver.
+        const antes = (await banco(`${REST("atendimento")}?select=data,status&id=eq.${id}`, { headers: cabecalhos(tok) }).catch(() => []) || [])[0];
+        if (antes && String(antes.data) !== hojeAqui() && antes.status !== "cliente_na_loja") linha.voltou_em = new Date().toISOString();
+      }
       if (!Object.keys(linha).length) return res.status(400).json({ erro: "Nada para atualizar." });
 
       const r = await banco(`${REST("atendimento")}?id=eq.${id}`, {
