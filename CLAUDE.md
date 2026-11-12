@@ -6285,6 +6285,25 @@ hora, ligada ao atendimento; um toque diz como foi (não atendeu, volta em
 tal dia — status vai voltar e `volta_em` —, vendeu fora) e completa a
 linha. O gerente escolhe de quem ver.
 
+**Recuperar leads (0153, 12/11/2026, o Derek: *"uma ferramenta para os
+negociadores fazerem recuperação de leads antigos que não foram trazidos à loja
+… o gestor designe tais leads de tal período em tal fase para tal negociador…
+dividir igualmente ou mais pra um do que pra outros"*).** Negociação → Recuperar
+leads (`TelaRecuperarLeads`). O lead ganha um responsável (`recuperador_id`,
+`recuperacao_em`, `recuperacao_lote`) — uma marca, não uma cópia: agendar ali
+põe na agenda da pré-venda (com "agendado por" o negociador), a tentativa conta
+no contador de ligações e a anotação vai às observações. O gerente distribui
+(`DistribuirLeads`, `?recurso=lead&acao=recup-previa|recup-distribuir`): período
+em que o lead ENTROU, fases do quadro (novo, agendar, contato futuro, não veio,
+perdido), origens, só os sem dono, um teto; os pesos dividem (roda com pesos,
+os novos e os velhos misturados entre todos). Ficam de fora quem já tem hora
+marcada ou veio, quem não tem telefone e quem é de fora da região. O negociador
+trabalha na ordem: retornar hoje, nunca procurados, já procurados (o mais
+antigo primeiro), retornos futuros; Ligar abre o discador do celular
+(`tel:`), WhatsApp o wa.me — os dois contam a tentativa e deixam uma linha nas
+anotações. O placar por pessoa: designados, a fazer, procurados, agendados,
+vieram; "recolher" tira os que ainda não agendaram.
+
 **A tela da sala — gestão à vista (0121, 08/11/2026, o Derek: "uma tela
 dinâmica pra pendurar na sala… efeitos visuais quando alguém fecha um
 carro, comemoração, pódio… configurável; as configurações no painel do

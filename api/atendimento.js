@@ -1787,6 +1787,133 @@ async function leads(req, res, tok) {
    * de WhatsApp e o anúncio de onde vieram, o agendamento, se vieram e como
    * o atendimento terminou. Em páginas de 1.000 — o teto do PostgREST. A
    * tela monta a planilha. */
+  /* A RECUPERAÇÃO DE LEADS ANTIGOS (0153, 12/11/2026, o Derek: "listas de
+   * ações para os negociadores ligarem dos celulares deles… o gestor designe
+   * tais leads de tal período em tal fase para tal negociador… dividir
+   * igualmente ou mais pra um do que pra outros").
+   *   GET  acao=recup-previa   ?de&ate&fases=a,b&origens=x,y&livres=1  quantos o filtro pega (gerente)
+   *   POST acao=recup-distribuir { de, ate, fases, origens, livres, limite, pesos: [{perfil_id, nome, peso}] }
+   *   POST acao=recup-devolver   { perfil_id } ou { ids } — tira a designação (gerente)
+   *   GET  acao=recup-lista      ?perfil=<id>|* — os leads de quem recupera, e o placar
+   * As FASES são as colunas do quadro (decisão 51): novo, agendar (em contato
+   * sem retorno), futuro (com retorno marcado), nao_veio, perdido. Quem já tem
+   * hora marcada ou veio fica de fora: não é recuperação. */
+  const acaoRec = String(req.query.acao || "");
+  if (acaoRec.indexOf("recup-") === 0) {
+    const eu = donoDoToken(tok);
+    const pf = (await banco(`${REST("perfil")}?select=id,nome,papel&id=eq.${eu}`, { headers: cabecalhos(tok) }) || [])[0] || {};
+    const gerente = pf.papel === "gerente";
+    const filtroRec = (q) => {
+      const f = ["excluido_em=is.null", "status=not.in.(agendado,confirmado,compareceu)"];
+      if (/^\d{4}-\d{2}-\d{2}$/.test(String(q.de || ""))) f.push(`criado_em=gte.${q.de}T00:00:00-03:00`);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(String(q.ate || ""))) f.push(`criado_em=lte.${q.ate}T23:59:59-03:00`);
+      const fases = String(q.fases || "").split(",").filter(Boolean);
+      const ors = [];
+      fases.forEach((x) => {
+        if (x === "novo") ors.push("and(status.eq.novo,proximo_contato.is.null)");
+        if (x === "agendar") ors.push("and(status.eq.em_contato,proximo_contato.is.null)");
+        if (x === "futuro") ors.push("and(status.in.(novo,em_contato),proximo_contato.not.is.null)");
+        if (x === "nao_veio") ors.push("status.eq.nao_compareceu");
+        if (x === "perdido") ors.push("status.eq.perdido");
+      });
+      // Os dois "ou" (a fase e a região) vão num "e" só: o PostgREST não soma dois or= na mesma consulta.
+      const grupos = [];
+      if (ors.length) grupos.push(`or(${ors.join(",")})`);
+      if (String(q.foraRegiao || "") !== "1") grupos.push("or(fora_regiao.is.null,fora_regiao.is.false)");
+      if (grupos.length) f.push(`and=(${grupos.join(",")})`);
+      const origens = String(q.origens || "").split(",").filter((x) => /^[a-z_]+$/.test(x));
+      if (origens.length) f.push(`origem=in.(${origens.join(",")})`);
+      if (String(q.livres || "") === "1" || q.livres === true) f.push("recuperador_id=is.null");
+      return f.join("&");
+    };
+    const lerTodos = async (sel, f, teto) => {
+      const out = [];
+      for (let pg = 0; pg < Math.ceil((teto || 5000) / 1000); pg++) {
+        const l = await banco(`${base}?select=${sel}&${f}&order=criado_em.desc&offset=${pg * 1000}&limit=1000`, { headers: cabecalhos(tok) });
+        (l || []).forEach((x) => out.push(x));
+        if (!l || l.length < 1000) break;
+      }
+      return out;
+    };
+
+    if (req.method === "GET" && acaoRec === "recup-previa") {
+      if (!gerente) return res.status(403).json({ erro: "Só o gerente distribui leads." });
+      const ls = await lerTodos("id,status,recuperador_id,telefone", filtroRec(req.query), 10000);
+      const comFone = ls.filter((l) => String(l.telefone || "").replace(/\D/g, "").length >= 10);
+      return res.status(200).json({ total: comFone.length, sem_telefone: ls.length - comFone.length,
+        ja_designados: comFone.filter((l) => l.recuperador_id).length });
+    }
+
+    if (req.method === "POST" && acaoRec === "recup-distribuir") {
+      if (!gerente) return res.status(403).json({ erro: "Só o gerente distribui leads." });
+      const c = await lerCorpo(req) || {};
+      const pesos = (Array.isArray(c.pesos) ? c.pesos : []).filter((p) => RX_UUID.test(String(p.perfil_id || "")) && Number(p.peso) > 0)
+        .map((p) => ({ perfil_id: p.perfil_id, nome: texto(p.nome) || "", peso: Number(p.peso) }));
+      if (!pesos.length) return res.status(400).json({ erro: "Escolha ao menos um negociador." });
+      const q = { de: c.de, ate: c.ate, fases: (c.fases || []).join(","), origens: (c.origens || []).join(","), livres: c.livres ? "1" : "", foraRegiao: c.foraRegiao ? "1" : "" };
+      let ls = (await lerTodos("id,telefone,criado_em", filtroRec(q), 10000)).filter((l) => String(l.telefone || "").replace(/\D/g, "").length >= 10);
+      const limite = Number(c.limite) > 0 ? Math.floor(Number(c.limite)) : 0;
+      if (limite) ls = ls.slice(0, limite);
+      if (!ls.length) return res.status(409).json({ erro: "Nenhum lead com telefone neste filtro." });
+      // Roda com pesos (a "suave"): cada um recebe na proporção do peso, e os
+      // leads mais novos e os mais velhos se misturam entre todos.
+      const tot = pesos.reduce((t, p) => t + p.peso, 0);
+      const atual = pesos.map(() => 0); const de = pesos.map(() => []);
+      ls.forEach((l) => {
+        pesos.forEach((p, i) => { atual[i] += p.peso; });
+        let m = 0; atual.forEach((v, i) => { if (v > atual[m]) m = i; });
+        atual[m] -= tot; de[m].push(l.id);
+      });
+      const lote = ((await banco(REST("recuperacao_lote"), { method: "POST", headers: json(tok, { Prefer: "return=representation" }),
+        body: JSON.stringify({ descricao: texto(c.descricao) || null, filtro: q, divisao: pesos.map((p, i) => ({ ...p, qtd: de[i].length })), total: ls.length }) })) || [])[0];
+      const agora = new Date().toISOString();
+      for (let i = 0; i < pesos.length; i++) {
+        for (let k = 0; k < de[i].length; k += 120) {
+          const ids = de[i].slice(k, k + 120);
+          await banco(`${base}?id=in.(${ids.join(",")})`, { method: "PATCH", headers: json(tok),
+            body: JSON.stringify({ recuperador_id: pesos[i].perfil_id, recuperador_nome: pesos[i].nome, recuperacao_em: agora, recuperacao_lote: lote ? lote.id : null }) });
+        }
+      }
+      return res.status(200).json({ ok: true, total: ls.length, divisao: pesos.map((p, i) => ({ nome: p.nome, qtd: de[i].length })) });
+    }
+
+    if (req.method === "POST" && acaoRec === "recup-devolver") {
+      if (!gerente) return res.status(403).json({ erro: "Só o gerente tira leads de alguém." });
+      const c = await lerCorpo(req) || {};
+      const limpa = JSON.stringify({ recuperador_id: null, recuperador_nome: null, recuperacao_em: null, recuperacao_lote: null });
+      if (RX_UUID.test(String(c.perfil_id || ""))) {
+        // Só os que ainda estão por recuperar: quem já agendou ou veio fica com o crédito de quem trouxe.
+        await banco(`${base}?recuperador_id=eq.${c.perfil_id}&status=not.in.(agendado,confirmado,compareceu)`, { method: "PATCH", headers: json(tok), body: limpa });
+      } else if (Array.isArray(c.ids) && c.ids.every((x) => RX_UUID.test(String(x)))) {
+        await banco(`${base}?id=in.(${c.ids.join(",")})`, { method: "PATCH", headers: json(tok), body: limpa });
+      } else return res.status(400).json({ erro: "Diga de quem ou quais." });
+      return res.status(200).json({ ok: true });
+    }
+
+    if (req.method === "GET" && acaoRec === "recup-lista") {
+      const quem = String(req.query.perfil || eu);
+      if (quem !== eu && !gerente) return res.status(403).json({ erro: "Cada um vê a própria lista." });
+      const sel = "id,nome,telefone,carro,cidade,origem,status,criado_em,agendado_para,proximo_contato,observacoes,ligacoes,ultima_ligacao_em," +
+        "recuperador_id,recuperador_nome,recuperacao_em,agendado_por_nome,atendimento_id";
+      const f = quem === "*" ? "recuperador_id=not.is.null&excluido_em=is.null" : `recuperador_id=eq.${quem}&excluido_em=is.null`;
+      const ls = await lerTodos(sel, f, 6000);
+      // O placar, por pessoa: designados, procurados, agendados, vieram.
+      const placar = {};
+      ls.forEach((l) => {
+        const k = l.recuperador_id;
+        const p = placar[k] || (placar[k] = { perfil_id: k, nome: l.recuperador_nome || "", designados: 0, procurados: 0, agendados: 0, vieram: 0, a_fazer: 0 });
+        p.designados += 1;
+        const desde = l.recuperacao_em || "";
+        if (l.ultima_ligacao_em && l.ultima_ligacao_em >= desde) p.procurados += 1;
+        if (l.status === "agendado" || l.status === "confirmado") p.agendados += 1;
+        else if (l.status === "compareceu") p.vieram += 1;
+        else p.a_fazer += 1;
+      });
+      return res.status(200).json({ leads: quem === "*" ? [] : ls, placar: Object.values(placar), gerente });
+    }
+    return res.status(405).json({ erro: "Ação desconhecida." });
+  }
+
   /* DE QUEM É ESTE TELEFONE (12/11/2026, o Derek: "quando for o mesmo
    * telefone que um lead ele avisar — esse telefone é de um lead tal,
    * agendado ou não"). DDD + oito últimos, a chave do funil. */

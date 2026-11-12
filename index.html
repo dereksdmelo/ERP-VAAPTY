@@ -29751,6 +29751,304 @@ function NotaDaVez({ vez, escolhido, especifico, setEspecifico }) {
 const hojeSP = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
 const agoraSP = () => new Date().toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
 const diaSP = (iso) => (iso ? new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }) : "");
+/* RECUPERAR LEADS (0153, 12/11/2026, o Derek: "uma ferramenta para os
+ * negociadores fazerem recuperação de leads antigos que não foram trazidos à
+ * loja… listas de ações para eles ligarem dos celulares deles, fazer
+ * anotações e tentarem agendar… o gestor designe tais leads de tal período em
+ * tal fase para tal negociador… dividir igualmente ou mais pra um do que pra
+ * outros"). O negociador vê a lista DELE, na ordem em que se trabalha; o
+ * gerente vê também a distribuição e o placar de cada um. Tudo é o lead de
+ * sempre: agendar aqui põe na agenda da pré-venda, a ligação conta, a
+ * anotação fica nas observações. */
+const FASES_RECUP = [
+  ["novo", "Novo (ninguém falou)"], ["agendar", "Agendar (já falou, sem horário)"],
+  ["futuro", "Contato futuro"], ["nao_veio", "Não veio"], ["perdido", "Perdido"],
+];
+function TelaRecuperarLeads({ perfil }) {
+  const gerente = !!(perfil && perfil.papel === "gerente");
+  const [equipe, setEquipe] = useState(null);
+  useEffect(() => { listarNegociadores().then(setEquipe).catch(() => setEquipe([])); }, []);
+  const negs = quemAtende(equipe || []);
+  const [quem, setQuem] = useState(perfil && perfil.id);
+  const [d, setD] = useState(null); const [placar, setPlacar] = useState([]); const [erro, setErro] = useState("");
+  const [q, setQ] = useState(""); const [verFeitos, setVerFeitos] = useState(false);
+  const [abrirDist, setAbrirDist] = useState(false);
+  const [agendando, setAgendando] = useState(null); const [voltando, setVoltando] = useState(null); const [perdendo, setPerdendo] = useState(null);
+  const [nota, setNota] = useState({}); const [aberto, setAberto] = useState({}); const [aviso, setAviso] = useState({});
+  const carregar = () => {
+    if (!quem) return;
+    fetchAut(`/api/atendimento?recurso=lead&acao=recup-lista&perfil=${encodeURIComponent(quem)}`)
+      .then((r) => r.json().then((x) => { if (!r.ok) throw new Error(x.erro || "Não consegui carregar."); setD(x.leads || []); if (!gerente) setPlacar(x.placar || []); setErro(""); }))
+      .catch((e) => setErro(e.message));
+    if (gerente) fetchAut(`/api/atendimento?recurso=lead&acao=recup-lista&perfil=*`).then((r) => r.json()).then((x) => setPlacar(x.placar || [])).catch(() => {});
+  };
+  useEffect(() => { setD(null); carregar(); }, [quem]);
+  const hoje = hojeEmSP();
+  const lista = (d || []).filter((l) => {
+    if (!q.trim()) return true;
+    const t = semAcento(`${l.nome} ${l.telefone} ${l.carro || ""} ${l.cidade || ""}`).toLowerCase();
+    return t.indexOf(semAcento(q.trim()).toLowerCase()) >= 0 || String(l.telefone || "").replace(/\D/g, "").indexOf(q.replace(/\D/g, "") || "#") >= 0;
+  });
+  const resolvido = (l) => ["agendado", "confirmado", "compareceu"].indexOf(l.status) >= 0;
+  const procurado = (l) => l.ultima_ligacao_em && (!l.recuperacao_em || l.ultima_ligacao_em >= l.recuperacao_em);
+  const retornoHoje = lista.filter((l) => !resolvido(l) && l.proximo_contato && l.proximo_contato <= hoje)
+    .sort((a, b) => String(a.proximo_contato).localeCompare(String(b.proximo_contato)));
+  const idsR = new Set(retornoHoje.map((l) => l.id));
+  const nunca = lista.filter((l) => !resolvido(l) && !idsR.has(l.id) && !procurado(l) && !(l.proximo_contato && l.proximo_contato > hoje) && l.status !== "perdido");
+  const idsN = new Set(nunca.map((l) => l.id));
+  const ja = lista.filter((l) => !resolvido(l) && !idsR.has(l.id) && !idsN.has(l.id) && !(l.proximo_contato && l.proximo_contato > hoje) && l.status !== "perdido")
+    .sort((a, b) => String(a.ultima_ligacao_em || "").localeCompare(String(b.ultima_ligacao_em || "")));
+  const depois = lista.filter((l) => !resolvido(l) && l.proximo_contato && l.proximo_contato > hoje)
+    .sort((a, b) => String(a.proximo_contato).localeCompare(String(b.proximo_contato)));
+  const perdidos = lista.filter((l) => !resolvido(l) && l.status === "perdido" && !idsR.has(l.id));
+  const feitos = lista.filter(resolvido);
+  const mexerL = async (l, mud, msg) => {
+    try {
+      await atualizarLead(l.id, mud);
+      setAviso((a) => ({ ...a, [l.id]: msg || "Gravado." }));
+      carregar();
+    } catch (e) { setErro(e.message); }
+  };
+  const contato = async (l, como) => {
+    try { await registrarLigacao(l.id); } catch (e) {}
+    try { await atualizarLead(l.id, { anotar: `${diaBR(hoje)} ${new Date().toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" })}: ${como} (${(perfil && perfil.nome) || "negociador"})` }); } catch (e) {}
+    setTimeout(carregar, 1500);
+  };
+  const ORIG = Object.fromEntries(ORIGENS);
+  const cartao = (l) => {
+    const tel = String(l.telefone || "").replace(/\D/g, "");
+    const obs = String(l.observacoes || "").split("\n").filter(Boolean);
+    const ver = !!aberto[l.id];
+    const fase = l.status === "nao_compareceu" ? "não veio" : l.status === "perdido" ? "perdido" : l.proximo_contato ? `retornar ${diaBR(l.proximo_contato).slice(0, 5)}` : LEAD_ROT[l.status] || l.status;
+    return (
+      <div key={l.id} className="rounded-xl p-3" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+          <div className="min-w-0">
+            <b className="text-[15px]">{l.nome || "Sem nome"}</b>
+            <span className="ml-2 text-[12.5px]" style={{ fontFamily: F.mono, color: C.mute }}>{l.telefone}</span>
+          </div>
+          <span className="text-[12px]" style={{ color: C.mute }}>
+            {l.ligacoes ? `${l.ligacoes}ª tentativa` : "nunca procurado"} · {fase}
+          </span>
+        </div>
+        <div className="mt-0.5 text-[12.5px]" style={{ color: C.mute }}>
+          {[l.carro, l.cidade, ORIG[l.origem] || l.origem, `entrou ${diaBR(String(l.criado_em).slice(0, 10))}`].filter(Boolean).join(" · ")}
+        </div>
+        {!!obs.length && (
+          <div className="mt-1.5 rounded-md px-2 py-1.5 text-[12px]" style={{ background: "#FAF8FC" }}>
+            {(ver ? obs : obs.slice(-2)).map((o, i) => <div key={i}>{o}</div>)}
+            {obs.length > 2 && <button onClick={() => setAberto((a) => ({ ...a, [l.id]: !ver }))} className="text-[11.5px] underline" style={{ color: C.roxo }}>{ver ? "menos" : `ver as ${obs.length} anotações`}</button>}
+          </div>
+        )}
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {tel && <a href={`tel:+${tel.length <= 11 ? "55" + tel : tel}`} onClick={() => contato(l, "ligou")} className="rounded-lg px-3 py-1.5 text-[13px] font-bold text-white" style={{ background: C.verde }}>Ligar</a>}
+          {tel && <a href={zap(l.telefone, `Oi ${String(l.nome || "").split(" ")[0]}, tudo bem? Aqui é ${(perfil && String(perfil.nome || "").split(" ")[0]) || ""} da Vaapty Joinville.`)} target="_blank" rel="noreferrer" onClick={() => contato(l, "mandou WhatsApp")}
+            className="rounded-lg border px-3 py-1.5 text-[13px] font-semibold" style={{ borderColor: C.verde, color: C.verde }}>WhatsApp</a>}
+          <button onClick={() => setAgendando(l)} className="rounded-lg px-3 py-1.5 text-[13px] font-bold text-white" style={{ background: C.roxo }}>Agendar</button>
+          <button onClick={() => setVoltando(l)} className="rounded-lg border px-3 py-1.5 text-[13px] font-semibold" style={{ borderColor: C.roxo, color: C.roxo }}>Retornar depois</button>
+          <button onClick={() => setPerdendo(l)} className="rounded-lg border px-3 py-1.5 text-[13px]" style={{ borderColor: C.line, color: C.mute }}>Sem chance</button>
+        </div>
+        <div className="mt-2 flex gap-1.5">
+          <input className={inputCls} style={inputSty} placeholder="anotar (o que ele disse, o que ficou combinado)…" value={nota[l.id] || ""}
+            onChange={(e) => setNota((n) => ({ ...n, [l.id]: e.target.value }))}
+            onKeyDown={(e) => { if (e.key === "Enter" && (nota[l.id] || "").trim()) { mexerL(l, { anotar: `${diaBR(hoje)}: ${nota[l.id].trim()}` }, "Anotado."); setNota((n) => ({ ...n, [l.id]: "" })); } }} />
+          <button disabled={!(nota[l.id] || "").trim()} onClick={() => { mexerL(l, { anotar: `${diaBR(hoje)}: ${nota[l.id].trim()}` }, "Anotado."); setNota((n) => ({ ...n, [l.id]: "" })); }}
+            className="rounded-lg border px-3 text-[13px] font-semibold" style={{ borderColor: C.line, color: C.roxo }}>Anotar</button>
+        </div>
+        {aviso[l.id] && <p className="mt-1 text-[12px]" style={{ color: C.verde }}>{aviso[l.id]}</p>}
+      </div>
+    );
+  };
+  const secao = (titulo, sub, xs, cor) => !xs.length ? null : (
+    <section>
+      <div className="text-[12px] font-bold uppercase tracking-[0.08em]" style={{ color: cor || C.ink }}>{titulo} ({xs.length})</div>
+      {sub && <div className="mb-1.5 text-[12px]" style={{ color: C.mute }}>{sub}</div>}
+      <div className="space-y-2">{xs.slice(0, 60).map(cartao)}</div>
+      {xs.length > 60 && <p className="mt-1 text-[12px]" style={{ color: C.mute }}>…e mais {xs.length - 60}. Trabalhe estes e a lista anda.</p>}
+    </section>
+  );
+  const meu = placar.find((p) => p.perfil_id === quem);
+  return (
+    <div className="space-y-4">
+      <Cabecalho titulo="Recuperar leads" sub="Leads antigos que não vieram à loja, designados para você. Ligue, anote, agende."
+        acao={gerente ? <button onClick={() => setAbrirDist(!abrirDist)} className="rounded-lg px-3 py-2 text-[13px] font-bold text-white" style={{ background: C.roxo }}>{abrirDist ? "Fechar a distribuição" : "Distribuir leads"}</button> : null} />
+      {gerente && abrirDist && <DistribuirLeads negs={negs} aoFeito={() => { setAbrirDist(false); carregar(); }} />}
+      {gerente && !!placar.length && (
+        <div className="overflow-x-auto rounded-xl border" style={{ borderColor: C.line, background: C.paper }}>
+          <div className="min-w-[620px]">
+            <div className="grid grid-cols-[1.6fr_repeat(5,1fr)_90px] gap-2 border-b px-3 py-2 text-[11px] uppercase tracking-wide" style={{ borderColor: C.line, color: C.mute }}>
+              <span>negociador</span><span className="text-right">designados</span><span className="text-right">a fazer</span><span className="text-right">procurados</span><span className="text-right">agendados</span><span className="text-right">vieram</span><span />
+            </div>
+            {placar.sort((a, b) => b.designados - a.designados).map((p) => (
+              <div key={p.perfil_id} className="grid grid-cols-[1.6fr_repeat(5,1fr)_90px] items-center gap-2 border-b px-3 py-2 text-[13.5px] last:border-b-0" style={{ borderColor: C.line, background: quem === p.perfil_id ? C.roxoFraco : "transparent" }}>
+                <button onClick={() => setQuem(p.perfil_id)} className="text-left font-semibold" style={{ color: C.roxo }}>{p.nome || "—"}</button>
+                {[p.designados, p.a_fazer, p.procurados, p.agendados, p.vieram].map((v, i) => <span key={i} className="text-right" style={{ fontFamily: F.mono }}>{v}</span>)}
+                <button onClick={async () => {
+                    if (!window.confirm(`Tirar de ${p.nome} os leads que ele ainda não agendou? Os agendados e os que vieram continuam com ele.`)) return;
+                    try { await fetchAut("/api/atendimento?recurso=lead&acao=recup-devolver", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ perfil_id: p.perfil_id }) }); carregar(); } catch (e) { setErro(e.message); }
+                  }} className="text-right text-[12px] underline" style={{ color: C.laranja }}>recolher</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {gerente && (
+        <div className="flex flex-wrap items-center gap-2 text-[13px]">
+          <span style={{ color: C.mute }}>Ver a lista de</span>
+          <select className="rounded-md border px-2 py-1" style={{ borderColor: C.line }} value={quem} onChange={(e) => setQuem(e.target.value)}>
+            {[{ id: perfil.id, nome: `${perfil.nome} (eu)` }].concat(negs.filter((n) => n.id !== perfil.id)).map((n) => <option key={n.id} value={n.id}>{n.nome}</option>)}
+          </select>
+        </div>
+      )}
+      {!gerente && meu && (
+        <div className="flex flex-wrap gap-4 text-[13px]">
+          <span><b style={{ fontFamily: F.mono }}>{meu.a_fazer}</b> a fazer</span>
+          <span><b style={{ fontFamily: F.mono }}>{meu.procurados}</b> procurados</span>
+          <span style={{ color: C.roxo }}><b style={{ fontFamily: F.mono }}>{meu.agendados}</b> agendados</span>
+          <span style={{ color: C.verde }}><b style={{ fontFamily: F.mono }}>{meu.vieram}</b> vieram</span>
+        </div>
+      )}
+      {erro && <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+      <input className={inputCls} style={{ ...inputSty, maxWidth: 360 }} placeholder="Procurar por nome, telefone, carro ou cidade" value={q} onChange={(e) => setQ(e.target.value)} />
+      {!d ? <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p> : !d.length ? (
+        <p className="rounded-xl px-4 py-6 text-center text-[14px]" style={{ background: C.paper, border: `1px dashed ${C.line}`, color: C.mute }}>
+          Nenhum lead designado {quem === (perfil && perfil.id) ? "para você" : "para esta pessoa"}. {gerente ? "Use \"Distribuir leads\" no alto." : "O gestor distribui."}
+        </p>
+      ) : (
+        <>
+          {secao("Retornar hoje", "o dia que você combinou chegou (ou passou)", retornoHoje, C.laranja)}
+          {secao("Nunca procurados", "comece por aqui", nunca, C.roxo)}
+          {secao("Já procurados", "quem você tentou há mais tempo vem primeiro", ja)}
+          {secao("Retorno marcado para depois", "", depois, C.mute)}
+          {secao("Marcados como sem chance", "", perdidos, C.mute)}
+          {!!feitos.length && (
+            <section>
+              <button onClick={() => setVerFeitos(!verFeitos)} className="text-[12px] font-bold uppercase tracking-[0.08em]" style={{ color: C.verde }}>
+                {verFeitos ? "▾" : "▸"} Agendados e que vieram ({feitos.length})
+              </button>
+              {verFeitos && <div className="mt-2 space-y-1.5">{feitos.map((l) => (
+                <div key={l.id} className="rounded-lg px-3 py-2 text-[13px]" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+                  <b>{l.nome}</b> · {l.status === "compareceu" ? "veio à loja" : `agendado ${l.agendado_para ? `${diaBR(String(l.agendado_para).slice(0, 10)).slice(0, 5)} às ${horaBR(l.agendado_para)}` : ""}`}
+                </div>
+              ))}</div>}
+            </section>
+          )}
+        </>
+      )}
+      {agendando && (
+        <Agendador lead={agendando} equipe={equipe || []} aoFechar={() => setAgendando(null)}
+          aoAgendar={async (mud) => { const l = agendando; setAgendando(null); await mexerL(l, { ...mud, status: "agendado", proximo_contato: null }, "Agendado — está na agenda da loja."); }} />
+      )}
+      {voltando && (
+        <QuandoVoltar titulo="Quando falar de novo com este cliente?" valor={voltando.proximo_contato || ""}
+          aoFechar={() => setVoltando(null)}
+          aoEscolher={async (dia, obs) => { const l = voltando; setVoltando(null); await mexerL(l, { status: "em_contato", proximo_contato: dia, ...(obs ? { anotar: `${diaBR(hoje)}: ${obs}` } : {}) }, `Retorno marcado para ${diaBR(dia)}.`); }} />
+      )}
+      {perdendo && (
+        <PorQuePerdeu aoFechar={() => setPerdendo(null)}
+          aoEscolher={async (motivo) => { const l = perdendo; setPerdendo(null); await mexerL(l, { status: "perdido", proximo_contato: null, anotar: `${diaBR(hoje)}: sem chance — ${motivo}` }, "Marcado como sem chance."); }} />
+      )}
+    </div>
+  );
+}
+
+/* A DISTRIBUIÇÃO (só o gerente): o período em que o lead entrou, as fases,
+ * as origens; quem recebe e quanto (peso 1 para todos = igual; 2 para um =
+ * o dobro dele). A prévia diz quantos o filtro pega antes de gravar. */
+function DistribuirLeads({ negs, aoFeito }) {
+  const h = hojeEmSP();
+  const [de, setDe] = useState(new Date(Date.parse(h) - 90 * 86400000).toISOString().slice(0, 10));
+  const [ate, setAte] = useState(new Date(Date.parse(h) - 7 * 86400000).toISOString().slice(0, 10));
+  const [fases, setFases] = useState(["novo", "agendar", "nao_veio"]);
+  const [origens, setOrigens] = useState([]);
+  const [livres, setLivres] = useState(true);
+  const [limite, setLimite] = useState("");
+  const [pesos, setPesos] = useState({});
+  const [previa, setPrevia] = useState(null);
+  const [indo, setIndo] = useState(false); const [erro, setErro] = useState(""); const [feito, setFeito] = useState(null);
+  const marca = (arr, set, v) => set(arr.indexOf(v) >= 0 ? arr.filter((x) => x !== v) : arr.concat([v]));
+  const q = `de=${de}&ate=${ate}&fases=${fases.join(",")}&origens=${origens.join(",")}&livres=${livres ? "1" : ""}`;
+  useEffect(() => {
+    setPrevia(null);
+    const t = setTimeout(() => {
+      fetchAut(`/api/atendimento?recurso=lead&acao=recup-previa&${q}`).then((r) => r.json()).then(setPrevia).catch(() => {});
+    }, 500);
+    return () => clearTimeout(t);
+  }, [q]);
+  const escolhidos = negs.filter((n) => Number(pesos[n.id]) > 0);
+  const total = previa ? Math.min(previa.total, Number(limite) > 0 ? Number(limite) : previa.total) : 0;
+  const somaP = escolhidos.reduce((t, n) => t + Number(pesos[n.id]), 0);
+  const distribuir = async () => {
+    if (!escolhidos.length || !total) return;
+    if (!window.confirm(`Distribuir ${total} leads entre ${escolhidos.map((n) => n.nome).join(", ")}?`)) return;
+    setIndo(true); setErro("");
+    try {
+      const r = await fetchAut("/api/atendimento?recurso=lead&acao=recup-distribuir", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ de, ate, fases, origens, livres, limite: Number(limite) || 0,
+          pesos: escolhidos.map((n) => ({ perfil_id: n.id, nome: n.nome, peso: Number(pesos[n.id]) })) }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.erro || "Não consegui distribuir.");
+      setFeito(d);
+    } catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+  if (feito) return (
+    <div className="rounded-xl p-4" style={{ background: "#F0F8F4", border: `1px solid ${C.verde}` }}>
+      <b style={{ color: C.verde }}>{feito.total} leads distribuídos</b>
+      <div className="mt-1 text-[13px]">{(feito.divisao || []).map((x) => `${x.nome}: ${x.qtd}`).join(" · ")}</div>
+      <button onClick={aoFeito} className="mt-2 text-[13px] font-semibold underline" style={{ color: C.roxo }}>ok</button>
+    </div>
+  );
+  const chip = (on, rot, fn) => (
+    <button key={rot} onClick={fn} className="rounded-full border px-3 py-1 text-[12.5px]" style={{ borderColor: on ? C.roxo : C.line, background: on ? C.roxo : "#fff", color: on ? "#fff" : C.ink }}>{rot}</button>
+  );
+  return (
+    <div className="space-y-3 rounded-xl p-4" style={{ background: C.paper, border: `1px solid ${C.roxo}` }}>
+      <div className="text-[15px] font-bold">Distribuir leads para recuperação</div>
+      <div className="flex flex-wrap items-end gap-3 text-[13px]">
+        <label>Entraram de<br /><input type="date" className="rounded border px-2 py-1" style={{ borderColor: C.line }} value={de} onChange={(e) => setDe(e.target.value)} /></label>
+        <label>até<br /><input type="date" className="rounded border px-2 py-1" style={{ borderColor: C.line }} value={ate} onChange={(e) => setAte(e.target.value)} /></label>
+        <label className="flex items-center gap-1.5"><input type="checkbox" checked={livres} onChange={(e) => setLivres(e.target.checked)} /> só os que ainda não são de ninguém</label>
+        <label>no máximo<br /><input className="w-20 rounded border px-2 py-1" style={{ borderColor: C.line }} inputMode="numeric" placeholder="todos" value={limite} onChange={(e) => setLimite(e.target.value)} /></label>
+      </div>
+      <div>
+        <div className="mb-1 text-[12px]" style={{ color: C.mute }}>Fase em que o lead está</div>
+        <div className="flex flex-wrap gap-1.5">{FASES_RECUP.map(([k, r]) => chip(fases.indexOf(k) >= 0, r, () => marca(fases, setFases, k)))}</div>
+      </div>
+      <div>
+        <div className="mb-1 text-[12px]" style={{ color: C.mute }}>Origem (nenhuma marcada = todas)</div>
+        <div className="flex flex-wrap gap-1.5">{ORIGENS.map(([k, r]) => chip(origens.indexOf(k) >= 0, r, () => marca(origens, setOrigens, k)))}</div>
+      </div>
+      <p className="text-[13.5px]">
+        {!previa ? "Contando…" : <><b>{previa.total}</b> leads com telefone neste filtro{previa.sem_telefone ? ` (${previa.sem_telefone} sem telefone ficam de fora)` : ""}{!livres && previa.ja_designados ? ` · ${previa.ja_designados} já são de alguém e vão mudar de dono` : ""}.</>}
+      </p>
+      <div>
+        <div className="mb-1 text-[12px]" style={{ color: C.mute }}>Quem recebe — o peso decide a parte de cada um (1 para todos = igual; 2 = o dobro)</div>
+        <div className="grid gap-1.5 sm:grid-cols-2">
+          {negs.map((n) => {
+            const p = Number(pesos[n.id]) || 0;
+            return (
+              <div key={n.id} className="flex items-center gap-2 rounded-lg border px-2.5 py-1.5" style={{ borderColor: p ? C.roxo : C.line }}>
+                <input type="checkbox" checked={p > 0} onChange={(e) => setPesos((x) => ({ ...x, [n.id]: e.target.checked ? 1 : 0 }))} />
+                <span className="flex-1 text-[13.5px]">{n.nome}</span>
+                {p > 0 && <>
+                  <span className="text-[12px]" style={{ color: C.mute }}>peso</span>
+                  <input className="w-12 rounded border px-1.5 py-0.5 text-center" style={{ borderColor: C.line }} inputMode="numeric" value={pesos[n.id]}
+                    onChange={(e) => setPesos((x) => ({ ...x, [n.id]: e.target.value.replace(/[^\d]/g, "") }))} />
+                  <span className="w-16 text-right text-[12.5px]" style={{ fontFamily: F.mono, color: C.roxo }}>≈ {somaP ? Math.round(total * p / somaP) : 0}</span>
+                </>}
+              </div>
+            );
+          })}
+        </div>
+        <button onClick={() => setPesos(Object.fromEntries(negs.map((n) => [n.id, 1])))} className="mt-1 text-[12px] underline" style={{ color: C.roxo }}>todos, igual</button>
+      </div>
+      {erro && <p className="text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
+      <BotaoPrimario onClick={distribuir} disabled={indo || !escolhidos.length || !total}>{indo ? "Distribuindo…" : `Distribuir ${total || ""} leads`}</BotaoPrimario>
+    </div>
+  );
+}
+
 function TelaRecuperacao({ perfil, aoAbrir, aoConversar }) {
   const eGerente = !!(perfil && perfil.papel === "gerente");
   const [quem, setQuem] = useState(eGerente ? "*" : "");
@@ -30386,6 +30684,8 @@ function destinosPara(perfil) {
     // As ações do dia do negociador (08/11/2026): a recuperação, com o
     // registro automático no Meu dia.
     { id: "recuperacao", rot: "Recuperação", curto: "Recup.", area: "negociacao", icone: "meudia" },
+    // Os leads antigos que não vieram, designados pelo gestor (0153).
+    { id: "recup_leads", rot: "Recuperar leads", curto: "Leads", area: "negociacao", icone: "meudia" },
     // O WhatsApp dos negociadores (0122): só os números de uso "negociação".
     { id: "whats_neg", rot: "WhatsApp", curto: "WhatsApp", area: "negociacao", icone: "meudia" },
     // Ferramenta, não destino de todo dia. Todo mundo vê — é uma
@@ -34447,6 +34747,7 @@ function App() {
       {tela === "atendimentos" && <CRM perfil={perfil} aoAbrir={abrir} mes={{ ...mes, todos: true }} />}
       {tela === "vez" && <TelaFilaDaVez perfil={perfil} aoAbrir={abrir} />}
       {tela === "recuperacao" && <TelaRecuperacao perfil={perfil} aoAbrir={abrir} aoConversar={conversarNeg} />}
+      {tela === "recup_leads" && <TelaRecuperarLeads perfil={perfil} />}
       {tela === "estoque" && <TelaEstoque perfil={perfil} comp={compOuAtual} mes={mes} aoAbrir={abrir} />}
       {/* A rota confere de novo: esconder o item do menu é conveniência,
           não controle. Quem chegar aqui por outro caminho não passa. */}
