@@ -497,8 +497,8 @@ async function consultarPerfil() {
 }
 
 /* ===================== API ===================== */
-async function consultarPlaca(placa) {
-  const r = await fetch(`/api/placa?placa=${encodeURIComponent(placa)}`);
+async function consultarPlaca(placa, nova) {
+  const r = await fetch(`/api/placa?placa=${encodeURIComponent(placa)}${nova ? "&nova=1" : ""}`);
   const d = await r.json().catch(() => ({}));
   if (!r.ok) {
     const e = new Error(d.erro || "Falha na consulta.");
@@ -5622,11 +5622,16 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   const mudarFoto = (chave, mud) =>
     aplicar((prev) => prev.map((p) => (p.chave === chave ? { ...p, ...mud } : p)));
 
-  const buscar = async () => {
-    setErroBusca(""); setAchado(null); setBuscando(true); setCambioBusca(f.cambio || "");
-    try { setAchado(await consultarPlaca(placaBusca)); setCota(await consultarCota()); }
-    catch (e) { setErroBusca(e.message); setPlacaSemAssinatura(e.assinatura ? "assinatura" : e.limite ? "limite" : false); }
-    setBuscando(false);
+  // Só a ÚLTIMA consulta vale (12/11/2026): duas buscas seguidas, e a primeira que voltasse por último
+  // poria na tela o carro da placa anterior.
+  const buscaVez = useRef(0);
+  const [naoEraNenhum, setNaoEraNenhum] = useState(false);
+  const buscar = async (nova) => {
+    const minha = ++buscaVez.current;
+    setErroBusca(""); setAchado(null); setBuscando(true); setCambioBusca(f.cambio || ""); setNaoEraNenhum(false);
+    try { const d = await consultarPlaca(placaBusca, nova === true); if (minha !== buscaVez.current) return; setAchado(d); setCota(await consultarCota()); }
+    catch (e) { if (minha !== buscaVez.current) return; setErroBusca(e.message); setPlacaSemAssinatura(e.assinatura ? "assinatura" : e.limite ? "limite" : false); }
+    if (minha === buscaVez.current) setBuscando(false);
   };
   const escolherVersao = (v) => {
     setVarios({
@@ -6877,6 +6882,10 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 const aviso = alertaDispersao(lista);
                 return (
                   <div className="mt-3 rounded-md p-3" style={{ background: C.roxoFraco }}>
+                    <div className="text-[10.5px] uppercase tracking-[0.12em]" style={{ color: C.mute }}>
+                      A Placa Fipe devolveu para a placa <b style={{ fontFamily: F.mono, color: C.ink }}>{achado.placa}</b>{achado.guardado ? " (consulta guardada do mês)" : ""}
+                      {achado.guardado && <button onClick={() => { setPlacaBusca(achado.placa); setTimeout(() => buscar(true), 0); }} className="ml-2 normal-case tracking-normal underline" style={{ color: C.roxo }}>consultar de novo (gasta 1 consulta)</button>}
+                    </div>
                     <div className="text-[13px] font-semibold">{achado.marca} {achado.modeloAbreviado}</div>
                     <div className="mt-0.5 text-[11px]" style={{ color: C.mute }}>
                       {achado.anoFabricacao}/{achado.anoModelo} · {achado.cor} · {achado.municipio} {achado.uf}
@@ -6912,9 +6921,22 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                       ))}
                     </div>
                     {aviso && <p className="mt-2 rounded px-2 py-1.5 text-[11px]" style={{ background: "#FDEDE6", color: C.laranja }}>{aviso}</p>}
+                    {/* NÃO É NENHUM DESTES (12/11/2026, a loja: "aparece um carro nada a ver…
+                        uma opção de selecionar 'não é nenhum desses carros' e colocar o carro manual,
+                        para não travar o processo"). A placa fica; o carro se escolhe na tabela FIPE
+                        oficial logo abaixo, ou se digita em "Completar a ficha". */}
+                    <button onClick={() => { setVarios({ placa: achado.placa }); setAchado(null); setPlacaBusca(""); setNaoEraNenhum(true); }}
+                      className="mt-2 w-full rounded-md border px-3 py-2 text-[12.5px] font-semibold" style={{ borderColor: C.laranja, color: C.laranja, background: "#fff" }}>
+                      Não é nenhum destes carros — escolher o carro à mão
+                    </button>
                   </div>
                 );
               })()}
+              {naoEraNenhum && (
+                <p className="mt-2 rounded px-2 py-1.5 text-[12px]" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>
+                  A placa ficou na ficha. Escolha o carro na <b>tabela FIPE oficial</b> logo abaixo (marca → ano → modelo), ou digite o modelo e o ano em <b>Completar a ficha</b>.
+                </p>
+              )}
 
               {!!f.placa && <ConferirFipe f={f} set={setVarios} />}
 

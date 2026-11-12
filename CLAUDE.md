@@ -243,6 +243,13 @@ de volta na ficha ([index.html:328](index.html:328)).
 versões restantes variam mais de R$ 2.000 entre si: sinal de que o
 câmbio não bastou e alguém precisa abrir o documento.
 
+**Quando a Placa Fipe devolve um carro que não é o da placa** (12/11/2026): o
+resultado diz para qual placa ela respondeu (e se veio da consulta guardada do
+mês, com "consultar de novo"), e "Não é nenhum destes carros" põe só a placa na
+ficha e manda escolher o carro na tabela FIPE oficial ou digitar em "Completar
+a ficha" — o atendimento não trava. Só a última consulta vale (`buscaVez`): a
+resposta atrasada de uma busca anterior não cai por cima.
+
 ### 4. Cache mensal da consulta de placa
 
 O plano atual da Placa Fipe dá **20 consultas por dia**. O valor FIPE
