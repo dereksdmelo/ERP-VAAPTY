@@ -9985,8 +9985,9 @@ function NovoAtendimento({ perfil, aoCriar, aoCancelar }) {
   // com o cliente na frente, abria outro. Antes de criar, procura o
   // mesmo cliente no dia; achando, oferece abrir o que já existe.
   const [jaExiste, setJaExiste] = useState(null);
-  const criar = async (mesmoAssim) => {
-    if (falta) { setErro("Pergunte ao cliente como ele conheceu a Vaapty."); return; }
+  // `extra`: o que muda no atendimento novo — o retorno de outro mês nasce como Recuperação (0154).
+  const criar = async (mesmoAssim, extra) => {
+    if (falta && !extra) { setErro("Pergunte ao cliente como ele conheceu a Vaapty."); return; }
     setErro(""); setIndo(true);
     if (mesmoAssim !== true) {
       const achados = await procurarHoje(d.cliente_nome, d.cliente_telefone);
@@ -10021,6 +10022,7 @@ function NovoAtendimento({ perfil, aoCriar, aoCancelar }) {
         negociador_nome: d.negociador_nome || (perfil ? perfil.nome : null),
         data: hojeEmSP(),
         fila: vez && vez.vez && escolhidoId && escolhidoId !== vez.vez && especifico ? "especifico" : undefined,
+        ...(extra || {}),
       });
       await aoCriar(novo);
     } catch (e) { setErro(e.message); setIndo(false); }
@@ -10069,7 +10071,18 @@ function NovoAtendimento({ perfil, aoCriar, aoCancelar }) {
             {!jaExiste.length && !!(jaExiste.antes || []).length && (
               <>
                 <div className="text-[13.5px] font-bold" style={{ color: AMARELO.texto }}>Este cliente já foi atendido — é um retorno?</div>
-                {jaExiste.antes.map((a) => (
+                {jaExiste.antes.map((a) => String(a.data).slice(0, 7) !== hojeEmSP().slice(0, 7) ? (
+                  /* DE OUTRO MÊS (o Derek, 12/11/2026): atendimento NOVO, com origem Recuperação — é ele
+                     que conta na conversão do mês em que o cliente voltou e fechou. */
+                  <div key={a.id} className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[13px]">
+                    <span>
+                      <b>{a.cliente_nome || "Sem nome"}</b> · atendido em {diaBR(a.data)}
+                      {a.negociador_nome ? ` por ${a.negociador_nome}` : ""}{a.carro ? ` · ${a.carro}` : ""} · <i>outro mês</i>
+                    </span>
+                    <button disabled={indo} onClick={() => { setJaExiste(null); criar(true, { origem: "recuperacao", prospec: "RECUPERAÇÃO", como_conheceu: null }); }}
+                      className="rounded-md px-3 py-1.5 text-[13px] font-semibold text-white" style={{ background: C.roxo }}>Voltou — abrir como Recuperação</button>
+                  </div>
+                ) : (
                   <div key={a.id} className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[13px]">
                     <span>
                       <b>{a.cliente_nome || "Sem nome"}</b> · atendido em {diaBR(a.data)}
@@ -10086,7 +10099,10 @@ function NovoAtendimento({ perfil, aoCriar, aoCancelar }) {
                       className="rounded-md px-3 py-1.5 text-[13px] font-semibold text-white" style={{ background: C.roxo }}>Ele voltou — reabrir esse atendimento</button>
                   </div>
                 ))}
-                <p className="mt-1.5 text-[12px]" style={{ color: AMARELO.texto }}>Reabrir põe o cliente na loja de novo, com o negociador escolhido acima, e a fila o vê ocupado. Não conta como atendimento novo.</p>
+                <p className="mt-1.5 text-[12px]" style={{ color: AMARELO.texto }}>
+                  Do mesmo mês: reabrir põe o cliente na loja de novo, com o negociador escolhido acima, e a fila o vê ocupado — não conta como atendimento novo.
+                  De outro mês: abre um atendimento novo, com origem Recuperação, que conta na conversão deste mês.
+                </p>
               </>
             )}
             {!!jaExiste.length && <div className="text-[13.5px] font-bold" style={{ color: AMARELO.texto }}>Este cliente já tem atendimento hoje</div>}
@@ -14049,7 +14065,7 @@ function AcoesAtendimento({ a, lista, gerente, aoFechar, aoJuntar, aoExcluido })
               Juntar com outro atendimento do mesmo cliente
               <span className="block text-[12px] font-normal" style={{ color: C.mute }}>Quando a pré-venda e o negociador abriram dois para a mesma pessoa.</span>
             </button>
-            {a.data !== hojeEmSP() && (
+            {a.data !== hojeEmSP() && String(a.data).slice(0, 7) === hojeEmSP().slice(0, 7) && (
               <button disabled={indo} onClick={async () => {
                   if (!window.confirm(`${a.cliente_nome || "O cliente"} voltou à loja hoje? O atendimento é reaberto como "Cliente na loja" e a fila vê ${a.negociador_nome || "o negociador"} ocupado.`)) return;
                   setIndo(true); setErro("");

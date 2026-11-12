@@ -4015,7 +4015,11 @@ reabre o atendimento de antes: Cliente na loja, sem fim, `voltou_em` agora e
 uma linha nas observações. `emLoja` conta `voltou_em` de hoje, da hora da
 volta; a fila lê os atendimentos de hoje e os que voltaram hoje. Não conta como
 atendimento novo nem mexe na roda. Pôr o status de um atendimento de outro dia
-de volta em "Cliente na loja" faz o mesmo.
+de volta em "Cliente na loja" faz o mesmo. **Só dentro do mesmo mês** (o Derek:
+*"de um mês pro outro, principalmente se o cliente fechar, precisamos considerar
+a conversão de fechamentos do mês… a origem como RECUPERAÇÃO"*): de outro mês, o
+"Novo atendimento" oferece "Voltou — abrir como Recuperação" (atendimento novo,
+origem `recuperacao`, PROSPEC "RECUPERAÇÃO"), e o reabrir recusa.
 
 **O que libera é "encerrar atendimento", não o status (0106).** O
 Derek: o negociador fechou o carro, mudou o status sozinho e ficou livre

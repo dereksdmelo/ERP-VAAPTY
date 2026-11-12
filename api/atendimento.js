@@ -4230,6 +4230,11 @@ module.exports = async function handler(req, res) {
       const c = await lerCorpo(req) || {};
       const aid = String(c.atendimento_id || "");
       if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
+      // Só no MESMO mês (o Derek): de um mês para o outro, o retorno é atendimento novo, origem Recuperação.
+      const orig = (await banco(`${REST("atendimento")}?select=data&id=eq.${aid}`, { headers: cabecalhos(tok) }) || [])[0];
+      if (orig && String(orig.data).slice(0, 7) !== hojeAqui().slice(0, 7)) {
+        return res.status(409).json({ erro: "Este atendimento é de outro mês: abra um atendimento novo, com origem Recuperação (o Novo atendimento oferece isso pelo telefone)." });
+      }
       const mud = { status: "cliente_na_loja", atendimento_fim_em: null, voltou_em: new Date().toISOString() };
       if (c.negociador_nome) {
         mud.negociador_nome = texto(c.negociador_nome);
@@ -4375,7 +4380,7 @@ module.exports = async function handler(req, res) {
         linha.atendimento_fim_em = null;
         // Atendimento de outro dia voltando para a loja é o cliente que voltou (0154): a fila precisa ver.
         const antes = (await banco(`${REST("atendimento")}?select=data,status&id=eq.${id}`, { headers: cabecalhos(tok) }).catch(() => []) || [])[0];
-        if (antes && String(antes.data) !== hojeAqui() && antes.status !== "cliente_na_loja") linha.voltou_em = new Date().toISOString();
+        if (antes && String(antes.data) !== hojeAqui() && String(antes.data).slice(0, 7) === hojeAqui().slice(0, 7) && antes.status !== "cliente_na_loja") linha.voltou_em = new Date().toISOString();
       }
       if (!Object.keys(linha).length) return res.status(400).json({ erro: "Nada para atualizar." });
 
