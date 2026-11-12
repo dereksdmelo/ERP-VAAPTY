@@ -9645,6 +9645,24 @@ function ChecklistDigital({ atendimentoId, ficha, perfil, aoCarregar }) {
     document.addEventListener("visibilitychange", vis);
     return () => document.removeEventListener("visibilitychange", vis);
   }, [atendimentoId]);
+  /* O CHECK LIST SALVA SOZINHO (12/11/2026, o Derek: "tem acontecido de não
+   * salvar os dados, em várias etapas, diversas vezes" — os dados bancários
+   * do Grand Siena digitados e perdidos). Era o único bloco do atendimento
+   * que dependia de apertar "Salvar": quem saía da tela, recarregava ou ia
+   * ao outro aparelho perdia o que tinha digitado. Agora grava 1,5 s depois
+   * de parar de digitar, como os dados do cliente (decisão 44). */
+  const gravarRef = useRef(null);
+  useEffect(() => {
+    if (!cl || JSON.stringify(cl) === salvoRef.current) return;
+    const t = setTimeout(() => { if (gravarRef.current) gravarRef.current(true); }, 1500);
+    return () => clearTimeout(t);
+  }, [cl]);
+  // Saindo da página com algo por gravar, avisa o navegador.
+  useEffect(() => {
+    const antes = (e) => { if (cl && JSON.stringify(cl) !== salvoRef.current) { e.preventDefault(); e.returnValue = ""; } };
+    window.addEventListener("beforeunload", antes);
+    return () => window.removeEventListener("beforeunload", antes);
+  }, [cl]);
 
   if (!atendimentoId) {
     return (
@@ -9693,16 +9711,23 @@ function ChecklistDigital({ atendimentoId, ficha, perfil, aoCarregar }) {
     setCl({ ...cl, [chave]: lista.concat([semente]) });
   };
 
-  const gravar = async () => {
+  const gravar = async (auto) => {
+    const auto_ = auto === true;
+    const enviado = JSON.stringify(cl);
     setErro(""); setIndo(true);
     try {
       const d = await salvarChecklist(atendimentoId, { ...cl, valor_cliente: liquido });
-      salvoRef.current = JSON.stringify(d);
-      setCl(d); setSalvoEm(new Date());
+      // Digitou enquanto gravava: fica o que está na tela, e a próxima volta grava o resto.
+      setCl((atual) => {
+        if (JSON.stringify(atual) === enviado) { salvoRef.current = JSON.stringify(d); return d; }
+        salvoRef.current = enviado; return atual;
+      });
+      setSalvoEm(new Date());
       if (aoCarregar) aoCarregar(d);
-    } catch (e) { setErro(e.message); }
+    } catch (e) { setErro(auto_ ? `Não salvou sozinho: ${e.message} — aperte "Salvar check list".` : e.message); }
     setIndo(false);
   };
+  gravarRef.current = gravar;
 
   return (
     <div className="space-y-3">
@@ -9893,9 +9918,9 @@ function ChecklistDigital({ atendimentoId, ficha, perfil, aoCarregar }) {
         {indo ? "Salvando…" : "Salvar check list"}
       </button>
       {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
-      {salvoEm && !erro && (
-        <p className="text-[12px]" style={{ color: C.verde }}>
-          Salvo às {salvoEm.toTimeString().slice(0, 5)}.
+      {!erro && (
+        <p className="text-[12px]" style={{ color: JSON.stringify(cl) !== salvoRef.current ? C.mute : C.verde }}>
+          {JSON.stringify(cl) !== salvoRef.current ? "salvando sozinho…" : salvoEm ? `Salvo às ${salvoEm.toTimeString().slice(0, 5)} — salva sozinho enquanto você digita.` : "Salva sozinho enquanto você digita."}
         </p>
       )}
     </div>

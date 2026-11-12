@@ -585,6 +585,14 @@ só recebia o check list ao abrir e ao salvar, e o valor do contrato era o
 relê o banco ao voltar a ficar à vista, e o valor bruto é o do check list
 quando há os dois — a tela avisa quando eles não batem.
 
+**O check list salva sozinho** (12/11/2026, o Derek: *"tem acontecido de não
+salvar os dados, em várias etapas, diversas vezes"* — os dados bancários do
+Grand Siena digitados e perdidos). Era o único bloco do atendimento que
+dependia do botão. Agora grava 1,5 s depois de parar de digitar
+(`ChecklistDigital`, `gravarRef`); o que foi digitado durante a gravação fica na
+tela e vai na volta seguinte; sair da página com algo por gravar faz o
+navegador perguntar. O botão continua, para quem quer ter certeza.
+
 **Cada geração é uma linha.** Segunda via é evento novo, com protocolo
 novo: é assim que se sabe quantas vias existem circulando. Por isso a
 0003 não tem índice único.
