@@ -1787,6 +1787,32 @@ async function leads(req, res, tok) {
    * de WhatsApp e o anúncio de onde vieram, o agendamento, se vieram e como
    * o atendimento terminou. Em páginas de 1.000 — o teto do PostgREST. A
    * tela monta a planilha. */
+  if (req.method === "GET" && String(req.query.acao || "") === "candidatos") {
+    const aid = String(req.query.atendimento_id || "");
+    if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
+    const at = (await banco(`${REST("atendimento")}?select=id,data,cliente_nome,cliente_telefone&id=eq.${aid}`, { headers: cabecalhos(tok) }) || [])[0];
+    if (!at) return res.status(404).json({ erro: "Atendimento não encontrado." });
+    const q = String(req.query.q || "").trim().replace(/[,()*]/g, " ");
+    const sel = "id,nome,telefone,carro,status,origem,agendado_para,agendado_por_nome,criado_em,atendimento_id";
+    let ls;
+    if (q.length >= 2) {
+      const dig = q.replace(/\D/g, "");
+      const f = dig.length >= 4 ? `telefone.like.*${dig.slice(-8).split("").join("*")}*` : `nome.ilike.*${encodeURIComponent(q)}*`;
+      ls = await banco(`${base}?select=${sel}&excluido_em=is.null&or=(${f})&order=criado_em.desc&limit=30`, { headers: cabecalhos(tok) });
+    } else {
+      // Sem busca: os de hora marcada perto do dia do atendimento, mais o do mesmo telefone.
+      const d0 = new Date(Date.parse(at.data || hojeAqui()) - 7 * 86400000).toISOString().slice(0, 10);
+      const d1 = new Date(Date.parse(at.data || hojeAqui()) + 2 * 86400000).toISOString().slice(0, 10);
+      ls = await banco(`${base}?select=${sel}&excluido_em=is.null&atendimento_id=is.null&status=in.(agendado,confirmado,nao_compareceu)` +
+        `&agendado_para=gte.${d0}&agendado_para=lt.${d1}&order=agendado_para.asc&limit=80`, { headers: cabecalhos(tok) });
+      const k = chaveFone(at.cliente_telefone);
+      if (k) {
+        const pf = await banco(`${base}?select=${sel}&excluido_em=is.null&telefone=like.${encodeURIComponent("*" + k.slice(-8).split("").join("*") + "*")}&limit=10`, { headers: cabecalhos(tok) }).catch(() => []);
+        (pf || []).filter((l) => chaveFone(l.telefone) === k).forEach((l) => { if (!(ls || []).some((x) => x.id === l.id)) (ls = ls || []).unshift({ ...l, mesmo_telefone: true }); });
+      }
+    }
+    return res.status(200).json({ leads: (ls || []).filter((l) => !l.atendimento_id || l.atendimento_id === aid) });
+  }
   if (req.method === "GET" && String(req.query.acao || "") === "relatorio") {
     const de = String(req.query.de || ""), ate = String(req.query.ate || "");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) return res.status(400).json({ erro: "Período inválido." });
@@ -1925,32 +1951,6 @@ async function leads(req, res, tok) {
    * fluxo se eu unifiquei com o lead."
    *   GET  acao=candidatos&atendimento_id=&q=  os leads que podem ser
    *   POST acao=ligar { lead_id, atendimento_id } */
-  if (req.method === "GET" && String(req.query.acao || "") === "candidatos") {
-    const aid = String(req.query.atendimento_id || "");
-    if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
-    const at = (await banco(`${REST("atendimento")}?select=id,data,cliente_nome,cliente_telefone&id=eq.${aid}`, { headers: cabecalhos(tok) }) || [])[0];
-    if (!at) return res.status(404).json({ erro: "Atendimento não encontrado." });
-    const q = String(req.query.q || "").trim().replace(/[,()*]/g, " ");
-    const sel = "id,nome,telefone,carro,status,origem,agendado_para,agendado_por_nome,criado_em,atendimento_id";
-    let ls;
-    if (q.length >= 2) {
-      const dig = q.replace(/\D/g, "");
-      const f = dig.length >= 4 ? `telefone.like.*${dig.slice(-8).split("").join("*")}*` : `nome.ilike.*${encodeURIComponent(q)}*`;
-      ls = await banco(`${base}?select=${sel}&excluido_em=is.null&or=(${f})&order=criado_em.desc&limit=30`, { headers: cabecalhos(tok) });
-    } else {
-      // Sem busca: os de hora marcada perto do dia do atendimento, mais o do mesmo telefone.
-      const d0 = new Date(Date.parse(at.data || hojeAqui()) - 7 * 86400000).toISOString().slice(0, 10);
-      const d1 = new Date(Date.parse(at.data || hojeAqui()) + 2 * 86400000).toISOString().slice(0, 10);
-      ls = await banco(`${base}?select=${sel}&excluido_em=is.null&atendimento_id=is.null&status=in.(agendado,confirmado,nao_compareceu)` +
-        `&agendado_para=gte.${d0}&agendado_para=lt.${d1}&order=agendado_para.asc&limit=80`, { headers: cabecalhos(tok) });
-      const k = chaveFone(at.cliente_telefone);
-      if (k) {
-        const pf = await banco(`${base}?select=${sel}&excluido_em=is.null&telefone=like.${encodeURIComponent("*" + k.slice(-8).split("").join("*") + "*")}&limit=10`, { headers: cabecalhos(tok) }).catch(() => []);
-        (pf || []).filter((l) => chaveFone(l.telefone) === k).forEach((l) => { if (!(ls || []).some((x) => x.id === l.id)) (ls = ls || []).unshift({ ...l, mesmo_telefone: true }); });
-      }
-    }
-    return res.status(200).json({ leads: (ls || []).filter((l) => !l.atendimento_id || l.atendimento_id === aid) });
-  }
   if (req.method === "POST" && String(req.query.acao || "") === "ligar") {
     const c2 = await lerCorpo(req) || {};
     const lid = String(c2.lead_id || ""), aid = String(c2.atendimento_id || "");
