@@ -29656,7 +29656,11 @@ function AvisosDaFila({ perfil, aoAbrir, aoIrParaFila }) {
   const [d, setD] = useState(null);
   const [respondidas, setRespondidas] = useState({});
   const [calarAte, setCalarAte] = useState(0);
-  const [vistoVez, setVistoVez] = useState("");
+  // O "Entendi" fica guardado no aparelho (13/11/2026, o Derek: "fica abrindo direto, mesmo que o negociador
+  // já tenha visto e fechado… a faixa lá em cima já é o suficiente"). A janela abre UMA vez por volta da
+  // roda — de novo só depois que ele receber um cliente.
+  const [vistoVez, setVistoVez] = useState(() => { try { return localStorage.getItem("vaapty:vez-visto") || ""; } catch (e) { return ""; } });
+  useEffect(() => { try { if (vistoVez) localStorage.setItem("vaapty:vez-visto", vistoVez); } catch (e) {} }, [vistoVez]);
   // Re-renderiza de 30 em 30 s: é o que faz o "agora não" vencer sozinho.
   const [tique, setTique] = useState(0);
   const ler = () => lerVez().then(setD).catch(() => {});
@@ -29720,7 +29724,10 @@ function AvisosDaFila({ perfil, aoAbrir, aoIrParaFila }) {
     );
     return null;
   }
-  const chave = `${souVez ? "vez" : "seg"}:${d.vez}:${d.segundo}`;
+  // A volta da roda dele: o dia e quantos clientes ele já recebeu hoje. Ser o próximo e depois a vez na mesma
+  // volta abre só uma vez — a faixa no alto continua.
+  const recebidos = (d.eventos || []).filter((e) => e.tipo === "vez" && e.perfil_id === d.eu).length;
+  const chave = `${d.dia || ""}:${recebidos}`;
   if (vistoVez !== chave) {
     return (
       <div className="fixed inset-0 z-[65] flex items-center justify-center p-3" style={{ background: "rgba(24,20,32,0.6)" }} onClick={() => setVistoVez(chave)}>
