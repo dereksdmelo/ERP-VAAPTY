@@ -27797,7 +27797,7 @@ function CartaoDut({ p, aoMudar }) {
       )}
       {erro && <p className="mt-2 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
       {aviso && (aviso.enviado
-        ? <p className="mt-2 text-[12.5px]" style={{ color: C.verde }}>Lojista avisado pelo {aviso.canal || "WhatsApp do adm"}.</p>
+        ? <p className="mt-2 text-[12.5px]" style={{ color: C.verde }}>{aviso.tipo === "dut_assinado" ? `DUT assinado enviado ao lojista pelo ${aviso.canal || "WhatsApp do adm"} — pedido entregue.` : `Lojista avisado pelo ${aviso.canal || "WhatsApp do adm"}.`}</p>
         : <p className="mt-2 text-[12.5px]" style={{ color: C.laranja }}>O lojista não foi avisado ({aviso.erro}). Mande pelo botão WhatsApp.</p>)}
 
       {aberto && (
@@ -27819,9 +27819,9 @@ function CartaoDut({ p, aoMudar }) {
 
           <div>
             <div className="text-[10px] uppercase tracking-[0.08em]" style={{ color: C.mute }}>Anexos do lojista</div>
-            {anexos.length ? (
+            {anexos.filter((a) => !/assinado/i.test(a.rotulo || "")).length ? (
               <div className="mt-1 flex flex-wrap gap-2">
-                {anexos.map((a) => (
+                {anexos.filter((a) => !/assinado/i.test(a.rotulo || "")).map((a) => (
                   <button key={a.id} onClick={() => abrirAnexoDut(a.id, setErro)}
                     className="rounded-lg border px-2.5 py-1 text-[12.5px] font-semibold"
                     style={{ background: C.paper, borderColor: C.roxo, color: C.roxo }}>
@@ -27836,6 +27836,49 @@ function CartaoDut({ p, aoMudar }) {
                 Nenhum arquivo chegou com o pedido.
               </p>
             )}
+          </div>
+
+          {/* O DUT ASSINADO DIGITAL (13/11/2026, o Derek): anexado aqui, o "pronto" manda o
+              ARQUIVO no WhatsApp do lojista em vez do aviso de retirada, e fecha como entregue. */}
+          <div className="rounded-lg p-2.5" style={{ background: "#F0F8F4", border: `1px solid ${C.verde}` }}>
+            <div className="text-[10px] uppercase tracking-[0.08em]" style={{ color: C.verde }}>DUT assinado digitalmente</div>
+            {(() => {
+              const ass = anexos.filter((a) => /assinado/i.test(a.rotulo || ""));
+              const anexar = async (arq) => {
+                if (!arq) return;
+                setOcupado(true); setErro("");
+                try {
+                  const dados = await new Promise((ok, falha) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = falha; fr.readAsDataURL(arq); });
+                  const r = await fetchAut(`/api/foto?recurso=dut-assinado&id=${p.id}`, { method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ tipo: arq.type, nome: arq.name, dados }) });
+                  const d = await r.json().catch(() => ({}));
+                  if (!r.ok) throw new Error(d.erro || "Não consegui anexar.");
+                  setAviso(await aoMudar(p.id, {}) || null);
+                } catch (e) { setErro(e.message); }
+                setOcupado(false);
+              };
+              return (
+                <>
+                  {ass.length ? (
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      {ass.map((a) => (
+                        <button key={a.id} onClick={() => abrirAnexoDut(a.id, setErro)} className="rounded-lg border px-2.5 py-1 text-[12.5px] font-semibold"
+                          style={{ background: C.paper, borderColor: C.verde, color: C.verde }}>{a.nome || "DUT assinado"} ↗</button>
+                      ))}
+                      {p.situacao !== "entregue" && (
+                        <button disabled={ocupado} onClick={() => agir({ enviar_assinado: true })} className="rounded-lg px-3 py-1.5 text-[12.5px] font-bold text-white" style={{ background: C.verde }}>
+                          Mandar ao lojista pelo WhatsApp
+                        </button>
+                      )}
+                    </div>
+                  ) : <p className="mt-1 text-[12px]" style={{ color: C.mute }}>Assinado no digital? Anexe aqui: no "pronto" ele vai direto no WhatsApp do lojista, sem o aviso de retirada.</p>}
+                  <label className="mt-1.5 inline-block cursor-pointer text-[12.5px] font-semibold underline" style={{ color: C.verde }}>
+                    {ocupado ? "enviando…" : ass.length ? "anexar outra versão" : "Anexar o DUT assinado (PDF ou foto)"}
+                    <input type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => { anexar(e.target.files && e.target.files[0]); e.target.value = ""; }} />
+                  </label>
+                </>
+              );
+            })()}
           </div>
 
           <div>

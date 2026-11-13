@@ -1590,6 +1590,44 @@ module.exports = async function handler(req, res) {
   const tok = tokenDe(req);
   if (!tok) return res.status(401).json(SEM_LOGIN);
 
+  /* O DUT ASSINADO DIGITALMENTE, anexado pela loja (13/11/2026, o Derek:
+   * "quando fazemos a assinatura digital e anexamos o DUT assinado, em vez de
+   * avisar que está pronto para retirada, devemos enviar no WhatsApp dele o
+   * DUT assinado"). A linha entra com o token de quem anexa (a RLS da 0057
+   * deixa o adm); a chave só toca o Storage (decisão 9). */
+  if (String(req.query.recurso || "") === "dut-assinado" && req.method === "POST") {
+    try {
+      const pid = String(req.query.id || "");
+      if (!RX_UUID.test(pid)) return res.status(400).json({ erro: "pedido inválido" });
+      let corpo = req.body;
+      if (corpo && typeof Buffer !== "undefined" && Buffer.isBuffer(corpo)) corpo = corpo.toString("utf8");
+      if (typeof corpo === "string") { try { corpo = JSON.parse(corpo); } catch (e) { corpo = null; } }
+      const tipo = String((corpo && corpo.tipo) || "").split(";")[0].trim();
+      const ext = TIPOS_DOC[tipo];
+      if (!ext) return res.status(415).json({ erro: "Aceito PDF, JPG, PNG ou WebP." });
+      let cru = String((corpo && corpo.dados) || "").trim();
+      if (cru.slice(0, 5) === "data:") { const v = cru.indexOf(","); cru = v < 0 ? "" : cru.slice(v + 1); }
+      const buf = Buffer.from(cru.replace(/\s/g, ""), "base64");
+      if (!buf.length) return res.status(400).json({ erro: "Arquivo vazio." });
+      if (buf.length > MAX_DOC) return res.status(413).json({ erro: "O arquivo passa de 10 MB." });
+      // O pedido existe para quem pede?
+      const pr = await banco(`${REST("dut_pedido")}?select=id&id=eq.${pid}`, { headers: cabecalhos(tok) });
+      if (!(Array.isArray(pr) && pr[0])) return res.status(404).json({ erro: "Pedido não encontrado." });
+      const caminho = `dut/${pid}/${Date.now()}-${sufixo()}.${ext}`;
+      await arquivos(`${STORAGE()}/object/${BUCKET_DOC}/${paraURL(caminho)}`, {
+        method: "POST", headers: hArquivo({ "Content-Type": tipo, "Cache-Control": "3600", "x-upsert": "false" }), body: buf,
+      });
+      let linha;
+      try {
+        const r = await banco(REST("dut_anexo"), { method: "POST", headers: json(tok, { Prefer: "return=representation" }),
+          body: JSON.stringify({ pedido_id: pid, caminho, nome: String((corpo && corpo.nome) || `DUT-assinado.${ext}`).slice(0, 120), tipo, bytes: buf.length, rotulo: "DUT assinado (digital)" }) });
+        linha = Array.isArray(r) ? r[0] : r;
+      } catch (e) { await apagarDoc(caminho).catch(() => {}); throw e; }
+      if (!linha) { await apagarDoc(caminho).catch(() => {}); return res.status(403).json({ erro: "Só o administrativo anexa no DUT." }); }
+      return res.status(201).json({ ok: true, anexo: linha });
+    } catch (e) { return res.status(502).json({ erro: limpar(e.message) || "Não consegui guardar o arquivo." }); }
+  }
+
   if (String(req.query.recurso || "") === "wa-envio") {
     try { return await waEnvio(req, res, tok); }
     catch (e) { return res.status(502).json({ erro: limpar(e.message) || "Não consegui mandar o arquivo." }); }
@@ -1966,6 +2004,20 @@ async function viaAssinadaDoWebhook(tokenDoc, doc, lojista) {
   return fim;
 }
 module.exports.viaAssinadaDoWebhook = viaAssinadaDoWebhook;
+
+// O DUT assinado digital do pedido, para ir ao lojista: lido com o token (a RLS da 0057), e só então assinado.
+async function dutAssinadoParaEnvio(tok, pedidoId) {
+  if (!RX_UUID.test(String(pedidoId || ""))) return null;
+  const ls = await banco(`${REST("dut_anexo")}?select=id,caminho,nome,tipo&pedido_id=eq.${pedidoId}&rotulo=ilike.*assinado*&order=criado_em.desc&limit=1`, { headers: cabecalhos(tok) }).catch(() => []);
+  const a = Array.isArray(ls) ? ls[0] : null;
+  if (!a || !a.caminho || String(a.caminho).slice(0, 4) !== "dut/") return null;
+  const r = await arquivos(`${STORAGE()}/object/sign/${BUCKET_DOC}`, { method: "POST", headers: jsonArquivo(), body: JSON.stringify({ expiresIn: VALIDADE, paths: [a.caminho] }) });
+  const x = Array.isArray(r) ? r[0] : null;
+  const url = x && (x.signedURL || x.signedUrl);
+  if (!url) return null;
+  return { url: url.charAt(0) === "/" ? `${STORAGE()}${url}` : url, nome: a.nome || "DUT-assinado.pdf", tipo: a.tipo || "application/pdf" };
+}
+module.exports.dutAssinadoParaEnvio = dutAssinadoParaEnvio;
 
 // O contrato final assinado é o que põe o carro FECHADO no estoque (11/11/2026). Idempotente; nunca derruba quem chamou.
 async function entrarSeAssinado(tok, aid) {

@@ -739,7 +739,35 @@ function textoAoLojista(p, tipo, site) {
     : `${ola} Sobre ${qual}, está faltando:\n\n${String(p.pendencia || "").trim()}\n\nAssim que estiver resolvido, a gente segue com o pedido.`;
   return site ? `${corpo}\n\nVocê acompanha pelo protocolo em ${site}/dut.html` : corpo;
 }
+/* O DUT ASSINADO DIGITAL VAI NO WHATSAPP DO LOJISTA (13/11/2026, o Derek:
+ * "quando fazemos a assinatura de forma digital e anexamos o DUT assinado
+ * digital, em vez de avisar o lojista que está pronto para retirada no
+ * endereço da loja, devemos enviar no WhatsApp dele o DUT assinado"). Com o
+ * arquivo anexado, o "pronto" manda o arquivo, e o pedido fecha como
+ * entregue pelo WhatsApp. Sem o arquivo, segue o aviso de sempre. */
+async function enviarDutAssinado(req, tok, p) {
+  let arq = null;
+  try { arq = await require("./foto.js").dutAssinadoParaEnvio(tok, p.id); } catch (e) {}
+  if (!arq) return null;
+  const ola = p.lojista_nome ? `Olá, ${String(p.lojista_nome).trim()}!` : "Olá!";
+  const leg = `${ola} Segue o DUT da placa ${p.placa} (protocolo ${p.protocolo}), assinado digitalmente.`;
+  const ext = /pdf/.test(arq.tipo) ? "pdf" : (String(arq.tipo).split("/")[1] || "pdf");
+  const conteudo = /^image\//.test(arq.tipo)
+    ? { type: "image", image: { link: arq.url, caption: leg } }
+    : { type: "document", document: { link: arq.url, filename: `DUT ${p.placa}.${ext}`, mime_type: arq.tipo, caption: leg } };
+  const r = await mandarPeloAdm(req, tok, p.lojista_whats, conteudo, leg);
+  if (r.enviado) {
+    await fetch(`${REST_DUT}?id=eq.${p.id}`, { method: "PATCH", headers: json(tok),
+      body: JSON.stringify({ situacao: "entregue", entrega: "whatsapp", entregue_em: new Date().toISOString(), entregue_por: donoDoToken(tok) }) }).catch(() => {});
+  }
+  return { ...r, tipo: "dut_assinado" };
+}
+
 async function avisarLojista(req, tok, p, tipo) {
+  if (tipo === "pronto") {
+    const d = await enviarDutAssinado(req, tok, p).catch(() => null);
+    if (d) return d;
+  }
   try {
     let fone = String(p.lojista_whats || "").replace(/\D/g, "");
     if (fone.length < 10) return { enviado: false, erro: "o pedido não tem o WhatsApp do lojista" };
@@ -1087,7 +1115,9 @@ async function dutFila(req, res, tok) {
     if (!linha) return res.status(403).json({ erro: "Só o administrativo mexe na fila do DUT." });
     const pronto = linha.situacao === "reconhecido" && antes.situacao !== "reconhecido";
     const falta = linha.situacao === "pendente" && !!linha.pendencia && (antes.situacao !== "pendente" || antes.pendencia !== linha.pendencia);
-    const aviso = pronto || falta ? await avisarLojista(req, tok, linha, pronto ? "pronto" : "falta") : null;
+    let aviso = pronto || falta ? await avisarLojista(req, tok, linha, pronto ? "pronto" : "falta") : null;
+    // Anexou o DUT assinado depois do "pronto": manda agora, por pedido da tela.
+    if (!aviso && c.enviar_assinado) aviso = await enviarDutAssinado(req, tok, linha) || { enviado: false, erro: "não há DUT assinado anexado" };
     return res.status(200).json({ pedido: linha, aviso });
   }
 

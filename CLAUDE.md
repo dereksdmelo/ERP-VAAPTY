@@ -2364,6 +2364,16 @@ e o link da consulta do protocolo. **Só na mudança**: salvar o mesmo
 pedido de novo não manda de novo. **Nunca derruba a etapa**: se falhar,
 o cartão diz por quê e o botão WhatsApp continua ali.
 
+**O DUT assinado digitalmente vai no WhatsApp do lojista** (13/11/2026, o
+Derek: *"em vez de avisar o lojista que está pronto para retirada no endereço
+da loja, devemos enviar no WhatsApp dele o DUT assinado digital"*). No cartão do
+pedido, "Anexar o DUT assinado" (`?recurso=dut-assinado` no `api/foto.js`: a
+linha com o token do adm, a chave só no Storage) grava o anexo "DUT assinado
+(digital)". Com ele, o "pronto para entrega" manda o ARQUIVO pelo número do adm
+(`enviarDutAssinado`) em vez do aviso de retirada, e o pedido fecha como
+entregue pelo WhatsApp; anexado depois do pronto, "Mandar ao lojista pelo
+WhatsApp" faz o mesmo. Sem o arquivo, segue o aviso de sempre.
+
 **Por onde o DUT sai, e a observação que o lojista não vê (0100, a
 Schell, 03/11/2026).** Correio, WhatsApp e retirada se misturavam em
 "Entregues". A entrega ganhou o terceiro valor (`whatsapp`; `envio`
