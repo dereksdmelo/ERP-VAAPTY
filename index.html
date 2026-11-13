@@ -19608,13 +19608,14 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento, aoVerConversa }) {
                                   )}
                                   <button onClick={() => setAgendando(l)} className="col-span-2 rounded border px-1 py-1 text-[11px] font-semibold"
                                     style={{ borderColor: C.line, color: C.roxo }}>remarcar</button>
-                                  {/* Excluir o agendamento feito por engano (12/11/2026). Esconde, não apaga (0060). */}
-                                  <button onClick={async () => {
+                                  {/* Excluir o agendamento feito por engano (12/11/2026). Esconde, não apaga (0060).
+                                      Só a gestão (13/11/2026, o Derek) — o servidor confere de novo. */}
+                                  {perfil && perfil.papel === "gerente" && <button onClick={async () => {
                                       const motivo = window.prompt(`Excluir o agendamento de ${l.nome || "este cliente"}? Escreva o motivo (ex.: agendado por engano, repetido):`, "");
                                       if (!motivo || motivo.trim().length < 3) return;
                                       try { await excluirLead(l.id, motivo.trim()); setCartao(null); carregar(); } catch (e) { setErro(e.message); }
                                     }}
-                                    className="col-span-2 rounded px-1 py-0.5 text-[10.5px]" style={{ color: C.mute }}>excluir agendamento</button>
+                                    className="col-span-2 rounded px-1 py-0.5 text-[10.5px]" style={{ color: C.mute }}>excluir agendamento</button>}
                                 </div>
                               </div>
                             )}

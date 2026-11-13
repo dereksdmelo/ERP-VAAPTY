@@ -2144,6 +2144,13 @@ async function leads(req, res, tok) {
     const c2 = (req.body && typeof req.body === "object") ? req.body : {};
     const motivo = String(c2.motivo || "").trim();
     if (motivo.length < 3) return res.status(400).json({ erro: "Escreva por que está excluindo." });
+    // AGENDAMENTO SÓ O GERENTE EXCLUI (13/11/2026, o Derek): lead com hora marcada é visita que a loja
+    // espera — sumir com ele é decisão de gestão.
+    const alvo = (await banco(`${base}?select=status,agendado_para&id=eq.${id}`, { headers: cabecalhos(tok) }) || [])[0];
+    if (alvo && (alvo.status === "agendado" || alvo.status === "confirmado")) {
+      const pf = (await banco(`${REST("perfil")}?select=papel&id=eq.${donoDoToken(tok)}`, { headers: cabecalhos(tok) }) || [])[0];
+      if (!pf || pf.papel !== "gerente") return res.status(403).json({ erro: "Só a gestão exclui agendamento. Se o cliente desmarcou, use \"não veio\" ou remarque." });
+    }
     const r = await banco(`${base}?id=eq.${id}`, {
       method: "PATCH", headers: json(tok, { Prefer: "return=representation" }),
       body: JSON.stringify({

@@ -2694,7 +2694,9 @@ no "+ Cliente de fluxo" e no "Novo atendimento", digitado o número de um lead,
 aparece de quem é e em que pé está; no fluxo, "É ele" troca o fluxo pela
 chegada do agendamento (o mesmo `compareceu` do "Chegou"). Na
 agenda, o agendamento se exclui ("excluir agendamento", com motivo, esconde
-como a 0060) e o fluxo também (gerente, apaga o atendimento).
+como a 0060) e o fluxo também (gerente, apaga o atendimento). **Agendamento só a
+gestão exclui** (13/11/2026, o Derek): lead agendado ou confirmado, o servidor
+recusa quem não é gerente — quem desmarcou é "não veio" ou remarcar.
 
 **"Recuperação" muda a origem** (a Schell, 03/11/2026): é o cliente que a
 equipe foi buscar de volta, então o atendimento nasce `recuperacao`, com
