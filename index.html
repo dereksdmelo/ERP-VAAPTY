@@ -16748,7 +16748,82 @@ function horariosDoDia(cfg, iso) {
   for (let m = de; m <= ate; m += passo) {
     h.push(`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
   }
-  return h;
+  // Dia bloqueado (0155): o dia inteiro some; com das/até, só o trecho.
+  const bl = bloqueiosDoDia(c, iso);
+  if (bl.some((b) => !b.das)) return [];
+  return h.filter((x) => !bl.some((b) => x >= String(b.das).slice(0, 5) && x < String(b.ate).slice(0, 5)));
+}
+/** Os bloqueios de um dia (0155, feriado e afins). */
+function bloqueiosDoDia(cfg, iso) {
+  return ((cfg && Array.isArray(cfg.bloqueios)) ? cfg.bloqueios : []).filter((b) => b && b.dia === String(iso).slice(0, 10));
+}
+/* OS DIAS BLOQUEADOS (0155, 13/11/2026, o Derek: "bloquear a agenda em dia x,
+ * ou dia x… porque às vezes tem feriado"). O dia inteiro ou só um trecho; o
+ * agendador da equipe e a Flávia deixam de oferecer horário ali. Só o gerente
+ * grava. Os agendamentos que já estavam marcados num dia bloqueado aparecem
+ * para alguém remarcar. */
+function DiasBloqueados({ aoMudar }) {
+  const [lista, setLista] = useState(null);
+  const [novo, setNovo] = useState({ dia: "", motivo: "Feriado", das: "", ate: "" });
+  const [indo, setIndo] = useState(false); const [erro, setErro] = useState(""); const [ok, setOk] = useState("");
+  const [marcados, setMarcados] = useState({});
+  useEffect(() => { lerConfigLoja().then((d) => setLista(((d.config || {}).bloqueios) || [])).catch((e) => setErro(e.message)); }, []);
+  const hoje = hojeEmSP();
+  useEffect(() => {
+    if (!lista) return;
+    const dias = lista.map((b) => b.dia).filter((d) => d >= hoje);
+    if (!dias.length) { setMarcados({}); return; }
+    fetchAut(`/api/atendimento?recurso=lead&fila=agenda`).then((r) => r.json()).then((d) => {
+      const m = {};
+      (d.leads || []).forEach((l) => { const dia = String(l.agendado_para || "").slice(0, 10); if (dias.indexOf(dia) >= 0) (m[dia] = m[dia] || []).push(l); });
+      setMarcados(m);
+    }).catch(() => {});
+  }, [lista]);
+  const gravar = async (nova) => {
+    setIndo(true); setErro(""); setOk("");
+    try {
+      const r = await fetchAut("/api/perfil?recurso=config-loja", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bloqueios: nova }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.erro || "Não consegui gravar.");
+      setLista((d.config || {}).bloqueios || []);
+      configLojaAtual = { ...CONFIG_LOJA_PADRAO, ...(d.config || {}) }; configLojaPromessa = Promise.resolve(configLojaAtual);
+      setOk("Gravado — o agendador e a Flávia já não oferecem horário nesse dia.");
+      if (aoMudar) aoMudar(configLojaAtual);
+    } catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+  if (!lista) return <p className="text-[12.5px]" style={{ color: erro ? C.laranja : C.mute }}>{erro || "Carregando…"}</p>;
+  const futuros = lista.filter((b) => b.dia >= hoje);
+  const dataLonga = (iso) => `${diaDaSemana(iso)}, ${diaBR(iso)}`;
+  return (
+    <div className="space-y-2.5">
+      {futuros.length ? futuros.map((b, i) => (
+        <div key={`${b.dia}-${i}`} className="flex flex-wrap items-baseline justify-between gap-2 rounded-lg px-2.5 py-2 text-[13px]" style={{ background: "#FDEDE6" }}>
+          <span>
+            <b>{dataLonga(b.dia)}</b> · {b.motivo}{b.das ? ` · das ${b.das} às ${b.ate}` : " · o dia inteiro"}
+            {(marcados[b.dia] || []).length > 0 && (
+              <span className="block text-[12px]" style={{ color: C.laranja }}>
+                {marcados[b.dia].length} agendamento{marcados[b.dia].length > 1 ? "s" : ""} já marcado{marcados[b.dia].length > 1 ? "s" : ""} neste dia — remarque: {marcados[b.dia].map((l) => `${l.nome} ${horaBR(l.agendado_para)}`).join(", ")}
+              </span>
+            )}
+          </span>
+          <button disabled={indo} onClick={() => gravar(lista.filter((x) => x !== b))} className="text-[12px] underline" style={{ color: C.mute }}>desbloquear</button>
+        </div>
+      )) : <p className="text-[12.5px]" style={{ color: C.mute }}>Nenhum dia bloqueado daqui para frente.</p>}
+      <div className="flex flex-wrap items-end gap-2 rounded-lg p-2.5" style={{ background: C.bg }}>
+        <label className="text-[12px]">Dia<br /><input type="date" min={hoje} className="rounded border px-2 py-1" style={{ borderColor: C.line }} value={novo.dia} onChange={(e) => setNovo({ ...novo, dia: e.target.value })} /></label>
+        <label className="text-[12px]">Motivo<br /><input className="w-36 rounded border px-2 py-1" style={{ borderColor: C.line }} value={novo.motivo} onChange={(e) => setNovo({ ...novo, motivo: e.target.value })} /></label>
+        <label className="text-[12px]">das<br /><input type="time" className="rounded border px-2 py-1" style={{ borderColor: C.line }} value={novo.das} onChange={(e) => setNovo({ ...novo, das: e.target.value })} /></label>
+        <label className="text-[12px]">até<br /><input type="time" className="rounded border px-2 py-1" style={{ borderColor: C.line }} value={novo.ate} onChange={(e) => setNovo({ ...novo, ate: e.target.value })} /></label>
+        <BotaoPrimario disabled={indo || !novo.dia} onClick={() => { gravar(lista.concat([{ dia: novo.dia, motivo: novo.motivo || "Feriado", ...(novo.das || novo.ate ? { das: novo.das, ate: novo.ate } : {}) }])); setNovo({ dia: "", motivo: "Feriado", das: "", ate: "" }); }}>
+          {indo ? "Gravando…" : "Bloquear"}
+        </BotaoPrimario>
+        <p className="w-full text-[11.5px]" style={{ color: C.mute }}>Sem "das" e "até", bloqueia o dia inteiro.</p>
+      </div>
+      {erro && <p className="text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
+      {ok && <p className="text-[12.5px]" style={{ color: C.verde }}>{ok}</p>}
+    </div>
+  );
 }
 
 const soDigitos = (t) => String(t || "").replace(/\D/g, "");
@@ -17239,10 +17314,11 @@ function Agendador({ lead, equipe, aoFechar, aoAgendar }) {
         <div className="rolar mt-1 flex gap-1.5 overflow-x-auto pb-1">
           {dias.map((d) => {
             const fechado = !horariosDoDia(cfg, d.iso).length;
+            const bl = bloqueiosDoDia(cfg, d.iso).find((b) => !b.das);
             return (
               <button key={d.iso} onClick={() => setDia(d.iso)} className="shrink-0 rounded-lg px-3 py-2 text-[13px]"
                 style={{ ...chip(dia === d.iso), opacity: fechado && dia !== d.iso ? 0.45 : 1 }}>
-                {d.rot}<span className="block text-[10px] font-normal" style={{ opacity: 0.75 }}>{fechado ? "fechado" : d.dia}</span>
+                {d.rot}<span className="block text-[10px] font-normal" style={{ opacity: 0.75 }}>{bl ? (bl.motivo || "bloqueado").toLowerCase() : fechado ? "fechado" : d.dia}</span>
               </button>
             );
           })}
@@ -19192,6 +19268,10 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento, aoVerConversa }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
   const [ligando, setLigando] = useState(null);
+  // Os dias bloqueados (0155) aparecem na grade; o gerente bloqueia daqui mesmo.
+  const cfgAg = useConfigLoja();
+  const [cfgVivo, setCfgVivo] = useState(null);
+  const [verBloqueios, setVerBloqueios] = useState(false);
   const [agendando, setAgendando] = useState(null);
   const [voltando, setVoltando] = useState(null);
   const [desloc, setDesloc] = useState(0);
@@ -19337,9 +19417,20 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento, aoVerConversa }) {
       <div className="flex flex-wrap gap-2">
         <button onClick={() => setDeFluxo(true)} className="rounded-lg px-3.5 py-2 text-[13.5px] font-semibold"
           style={{ background: COR_FLUXO.borda, color: "#fff" }}>+ Cliente de fluxo</button>
+        {perfil && perfil.papel === "gerente" && (
+          <button onClick={() => setVerBloqueios(!verBloqueios)} className="rounded-lg border px-3 py-1.5 text-[12.5px] font-semibold" style={{ borderColor: C.laranja, color: C.laranja }}>
+            {verBloqueios ? "fechar" : "Bloquear dias (feriado)"}
+          </button>
+        )}
         <button onClick={() => setNovoAg(true)} className="rounded-lg px-3.5 py-2 text-[13.5px] font-semibold text-white"
           style={{ background: C.roxo }}>+ Agendamento</button>
       </div>
+      {verBloqueios && (
+        <div className="rounded-xl p-3" style={{ background: C.paper, border: `1px solid ${C.laranja}` }}>
+          <div className="mb-2 text-[14px] font-bold">Dias bloqueados na agenda</div>
+          <DiasBloqueados aoMudar={setCfgVivo} />
+        </div>
+      )}
       {lista && (
         <div>
           <div className="mb-2 flex items-center justify-between">
@@ -19389,6 +19480,11 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento, aoVerConversa }) {
                     <div className="mb-1.5 px-0.5">
                       <div className="text-[10px] uppercase tracking-[0.07em]" style={{ color: C.mute }}>{diaDaSemana(d).slice(0, 3)}</div>
                       <div className="text-[13px] font-bold" style={{ color: eHoje ? C.roxo : C.ink }}>{diaBR(d).slice(0, 5)}</div>
+                      {bloqueiosDoDia(cfgVivo || cfgAg, d).map((b, i) => (
+                        <div key={i} className="mt-0.5 rounded px-1 text-[10.5px] font-semibold" style={{ background: "#FDEDE6", color: C.laranja }}>
+                          {b.motivo || "bloqueado"}{b.das ? ` ${b.das}–${b.ate}` : ""}
+                        </div>
+                      ))}
                       <ContaDoDia c={c} futuro={d > hoje} />
                     </div>
                     <div className="space-y-1.5">
@@ -29851,6 +29947,8 @@ function TelaRecuperarLeads({ perfil }) {
   const [q, setQ] = useState(""); const [verFeitos, setVerFeitos] = useState(false);
   const [abrirDist, setAbrirDist] = useState(false);
   const [agendando, setAgendando] = useState(null); const [voltando, setVoltando] = useState(null); const [perdendo, setPerdendo] = useState(null);
+  // A conversa do WhatsApp com o lead, em janela (13/11/2026, o Derek): ler o que já foi dito antes de ligar.
+  const [conversando, setConversando] = useState(null);
   const [nota, setNota] = useState({}); const [aberto, setAberto] = useState({}); const [aviso, setAviso] = useState({});
   const carregar = () => {
     if (!quem) return;
@@ -29921,6 +30019,7 @@ function TelaRecuperarLeads({ perfil }) {
           {tel && <a href={`tel:+${tel.length <= 11 ? "55" + tel : tel}`} onClick={() => contato(l, "ligou")} className="rounded-lg px-3 py-1.5 text-[13px] font-bold text-white" style={{ background: C.verde }}>Ligar</a>}
           {tel && <a href={zap(l.telefone, `Oi ${String(l.nome || "").split(" ")[0]}, tudo bem? Aqui é ${(perfil && String(perfil.nome || "").split(" ")[0]) || ""} da Vaapty Joinville.`)} target="_blank" rel="noreferrer" onClick={() => contato(l, "mandou WhatsApp")}
             className="rounded-lg border px-3 py-1.5 text-[13px] font-semibold" style={{ borderColor: C.verde, color: C.verde }}>WhatsApp</a>}
+          {tel && <button onClick={() => setConversando(l)} className="rounded-lg border px-3 py-1.5 text-[13px] font-semibold" style={{ borderColor: C.line, color: C.ink }}>Ver a conversa</button>}
           <button onClick={() => setAgendando(l)} className="rounded-lg px-3 py-1.5 text-[13px] font-bold text-white" style={{ background: C.roxo }}>Agendar</button>
           <button onClick={() => setVoltando(l)} className="rounded-lg border px-3 py-1.5 text-[13px] font-semibold" style={{ borderColor: C.roxo, color: C.roxo }}>Retornar depois</button>
           <button onClick={() => setPerdendo(l)} className="rounded-lg border px-3 py-1.5 text-[13px]" style={{ borderColor: C.line, color: C.mute }}>Sem chance</button>
@@ -30012,6 +30111,7 @@ function TelaRecuperarLeads({ perfil }) {
           )}
         </>
       )}
+      {conversando && <ConversaPopup telefone={conversando.telefone} nome={conversando.nome} aoFechar={() => setConversando(null)} />}
       {agendando && (
         <Agendador lead={agendando} equipe={equipe || []} aoFechar={() => setAgendando(null)}
           aoAgendar={async (mud) => { const l = agendando; setAgendando(null); await mexerL(l, { ...mud, status: "agendado", proximo_contato: null }, "Agendado — está na agenda da loja."); }} />
@@ -34367,6 +34467,9 @@ function TelaGestao({ perfil, comp }) {
         <div className="contents">
           <Bloco titulo="Horários da loja e IA" sub="O que o agendador oferece e como a IA de atendimento se apresenta.">
             <ConfigLoja />
+          </Bloco>
+          <Bloco titulo="Dias bloqueados na agenda" sub="Feriado, evento, loja fechada: o agendador e a Flávia não oferecem horário nesses dias.">
+            <DiasBloqueados />
           </Bloco>
           <Bloco titulo="Planilha do CRM" sub="Cole o que copiou do Google Sheets. Cada linha vira um atendimento.">
             {importando

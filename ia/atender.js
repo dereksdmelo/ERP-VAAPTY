@@ -101,6 +101,7 @@ async function atenderFila(env) {
       const cfg = { ...FLAVIA.CONFIG_PADRAO };
       Object.keys(cfg).forEach((k) => { if (linha[k] !== undefined && linha[k] !== null) cfg[k] = typeof linha[k] === "string" ? linha[k].slice(0, 5) : linha[k]; });
       if (linha.ia_nome) cfg.ia_nome = linha.ia_nome;
+      if (Array.isArray(linha.bloqueios)) cfg.bloqueios = linha.bloqueios;
       const livres = FLAVIA.horariosLivres(cfg, agora, (ctx && ctx.ocupados) || []);
       // Conversa que a Flávia abriu procurando quem não veio (0084): ela
       // precisa saber o que está retomando.

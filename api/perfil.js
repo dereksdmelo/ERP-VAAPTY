@@ -737,6 +737,8 @@ function configDaLinha(l) {
   c.aviso_canal = texto(l.aviso_canal) || null;
   c.aviso_grupo = texto(l.aviso_grupo) || null;
   c.aviso_grupo_nome = texto(l.aviso_grupo_nome) || null;
+  // Os dias bloqueados (0155): feriado, evento, loja fechada — [{ dia, motivo, das?, ate? }].
+  c.bloqueios = Array.isArray(l.bloqueios) ? l.bloqueios : [];
   c.atualizado_em = l.atualizado_em || null;
   return c;
 }
@@ -836,8 +838,35 @@ async function configLoja(req, res, tok) {
   /* O AVISO DE CHEGADA (0074) grava à parte dos horários: são dois
      blocos da tela, e salvar um não pode apagar o outro. PATCH na linha
      que já existe — sem ela, não há loja configurada para avisar. */
+  const corpoPatch = req.method === "PATCH" ? (await lerCorpo(req)) : null;
+  if (req.method === "PATCH" && corpoPatch && Array.isArray(corpoPatch.bloqueios)) {
+    /* OS DIAS BLOQUEADOS (0155, 13/11/2026, o Derek: "bloquear a agenda em
+     * dia x… porque às vezes tem feriado"). O dia inteiro, ou só um trecho
+     * (das/até). Vale para o agendador da equipe e para a Flávia, que leem
+     * esta mesma linha. */
+    const lista = [];
+    for (const b of corpoPatch.bloqueios.slice(0, 200)) {
+      const dia = String((b && b.dia) || "");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dia)) return res.status(400).json({ erro: "Dia inválido." });
+      const das = horaCurta(b.das), ate = horaCurta(b.ate);
+      if ((das && !ate) || (!das && ate)) return res.status(400).json({ erro: `${dia.split("-").reverse().join("/")}: diga das e até, ou deixe os dois vazios para o dia inteiro.` });
+      if (das && ate && das >= ate) return res.status(400).json({ erro: `${dia.split("-").reverse().join("/")}: o "das" vem antes do "até".` });
+      lista.push({ dia, motivo: (texto(b.motivo) || "Feriado").slice(0, 80), ...(das ? { das, ate } : {}) });
+    }
+    lista.sort((a, b) => a.dia.localeCompare(b.dia));
+    const r = await fetch(`${base}?id=eq.1`, {
+      method: "PATCH", headers: { ...cab, "Content-Type": "application/json", Prefer: "return=representation" },
+      body: JSON.stringify({ bloqueios: lista, atualizado_em: new Date().toISOString(), atualizado_por: donoDoToken(tok) }),
+    });
+    if (!r.ok) return res.status(r.status === 401 ? 401 : 502).json({ erro: "O banco recusou a gravação." });
+    const d = await r.json().catch(() => []);
+    const salvo = Array.isArray(d) ? d[0] : d;
+    if (!salvo) return res.status(403).json({ erro: "Só o gerente bloqueia a agenda — e os horários da loja precisam ter sido gravados antes." });
+    return res.status(200).json({ ok: true, config: configDaLinha(salvo), padrao: false });
+  }
+
   if (req.method === "PATCH") {
-    const c = await lerCorpo(req);
+    const c = corpoPatch;
     if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
     const canal = texto(c.aviso_canal) || null;
     const grupo = texto(c.aviso_grupo) || null;

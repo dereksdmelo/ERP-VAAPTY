@@ -570,6 +570,7 @@ async function flavia(req, res, tok) {
     const cfg = { ...FLAVIA.CONFIG_PADRAO };
     Object.keys(cfg).forEach((k) => { if (linha[k] !== undefined) cfg[k] = typeof linha[k] === "string" ? linha[k].slice(0, 5) : linha[k]; });
     if (linha.ia_nome) cfg.ia_nome = linha.ia_nome;
+      if (Array.isArray(linha.bloqueios)) cfg.bloqueios = linha.bloqueios;
     const livres = FLAVIA.horariosLivres(cfg, agora, (ocup || []).map((o) => o.agendado_para));
     const sistema = FLAVIA.instrucao(cfg, agora, livres, ex || []);
 

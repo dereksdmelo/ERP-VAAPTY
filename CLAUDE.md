@@ -3345,6 +3345,13 @@ domingo é preencher três campos, sem migração. O banco recusa grupo
 pela metade, e o servidor diz qual dia antes de o banco dizer o nome
 da constraint.
 
+**Dias bloqueados (0155, 13/11/2026, o Derek: *"bloquear a agenda em dia x…
+porque às vezes tem feriado"*).** `config_loja.bloqueios`: [{dia, motivo,
+das?, ate?}]. O `horariosDoDia` da tela e o da Flávia tiram o dia inteiro, ou o
+trecho; o chip do agendador diz o motivo, a grade da agenda marca o dia, e a
+lista avisa quem já estava marcado ali para remarcar. O gerente edita em Equipe
+(junto dos horários) ou na Agenda ("Bloquear dias (feriado)").
+
 **O agendador da tela lê a MESMA linha**, e isso é a metade da
 decisão que importa hoje. O `HORARIOS` fixo oferecia 9h–18h todos os
 dias — **sábado às 16h com a loja fechada**. Se a IA e a tela lerem

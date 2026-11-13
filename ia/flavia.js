@@ -87,7 +87,10 @@ function horariosDoDia(cfg, iso) {
   const h = [];
   if (de == null || ate == null) return h;
   for (let m = de; m <= ate; m += passo) h.push(hhmm(m));
-  return h;
+  // Dia bloqueado (0155): feriado tira o dia inteiro; com das/até, só o trecho.
+  const bl = (Array.isArray(cfg.bloqueios) ? cfg.bloqueios : []).filter((b) => b && b.dia === iso);
+  if (bl.some((b) => !b.das)) return [];
+  return h.filter((x) => !bl.some((b) => x >= String(b.das).slice(0, 5) && x < String(b.ate).slice(0, 5)));
 }
 
 /**
