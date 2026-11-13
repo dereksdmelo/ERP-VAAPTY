@@ -1110,6 +1110,8 @@ function paraLead(c) {
   // "Vai voltar" sem data é promessa que ninguém cobra (0036).
   if (c.volta_em !== undefined) l.volta_em = data(c.volta_em);
   if (c.prospector_nome !== undefined) l.prospector_nome = texto(c.prospector_nome);
+  // Quem prospectou, escolhido no "+ Agendamento" (13/11/2026): vale por cima do carimbo de quem digitou.
+  if (c.agendado_por_nome !== undefined) l.agendado_por_nome = texto(c.agendado_por_nome);
   if (c.proximo_contato !== undefined) l.proximo_contato = data(c.proximo_contato);
   if (c.observacoes !== undefined) l.observacoes = texto(c.observacoes);
   if (c.agendado_para !== undefined) {

@@ -17235,7 +17235,15 @@ function JanelaChegou({ lead, equipe, aoFechar, aoPronto, fluxo }) {
  * na loja ou marca no balcão não tinha por onde entrar AQUI, que é onde
  * se olha a semana. O lead nasce com nome, telefone, carro e de onde
  * veio, e o agendador de três toques abre em seguida (decisão 27). */
-function NovoAgendamento({ aoFechar, aoCriado }) {
+// As IAs que agendam (decisão 51): o nome é o mesmo que `wa_lead_avanca` grava.
+const IAS_AGENDAM = ["IA - Flávia", "IA - Ana", "IA - Camila"];
+/* QUEM PROSPECTOU (13/11/2026, o Derek: "quando adicionar agendamento,
+ * colocar opção de qual pessoa está prospectando — qualquer pessoa da equipe
+ * ou IA"). Vira o "agendado por" do lead e o PROSPEC no "Chegou". */
+function NovoAgendamento({ aoFechar, aoCriado, equipe, perfil }) {
+  const nomesEquipe = Array.from(new Set((equipe || []).filter((n) => n.ativo !== false).map((n) => n.nome).filter(Boolean)
+    .concat(perfil && perfil.nome ? [perfil.nome] : []))).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  const [quem, setQuem] = useState((perfil && perfil.nome) || "");
   const [nome, setNome] = useState("");
   const [telefone, setTelefone] = useState("");
   const [carro, setCarro] = useState("");
@@ -17245,8 +17253,9 @@ function NovoAgendamento({ aoFechar, aoCriado }) {
   const seguir = async () => {
     setIndo(true); setErro("");
     try {
-      const l = await criarLead({ nome: nome.trim(), telefone: telefone.trim() || null, carro: carro.trim() || null, origem: origem || "outro", status: "em_contato" });
-      aoCriado(l);
+      const l = await criarLead({ nome: nome.trim(), telefone: telefone.trim() || null, carro: carro.trim() || null, origem: origem || "outro", status: "em_contato",
+        prospector_nome: quem || null });
+      aoCriado({ ...l, _prospector: quem || "" });
     } catch (e) { setErro(e.message); setIndo(false); }
   };
   return (
@@ -17269,6 +17278,12 @@ function NovoAgendamento({ aoFechar, aoCriado }) {
           <select className={inputCls} style={{ ...inputSty, borderColor: origem ? C.line : C.laranja }} value={origem} onChange={(e) => setOrigem(e.target.value)}>
             <option value="">Escolha</option>
             {ORIGENS.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
+          </select>
+        </Campo>
+        <Campo label="Quem prospectou (agendou)">
+          <select className={inputCls} style={inputSty} value={quem} onChange={(e) => setQuem(e.target.value)}>
+            <optgroup label="Equipe">{nomesEquipe.map((n) => <option key={n} value={n}>{n}</option>)}</optgroup>
+            <optgroup label="IA">{IAS_AGENDAM.map((n) => <option key={n} value={n}>{n}</option>)}</optgroup>
           </select>
         </Campo>
         {erro && <p className="text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
@@ -19770,11 +19785,15 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento, aoVerConversa }) {
         <JanelaChegou fluxo equipe={equipe} aoFechar={() => setDeFluxo(false)}
           aoPronto={(d) => { setDeFluxo(false); lerFluxos(); if (aoAbrirAtendimento && d && d.atendimento_id) aoAbrirAtendimento(d.atendimento_id); }} />
       )}
-      {novoAg && <NovoAgendamento aoFechar={() => setNovoAg(false)} aoCriado={(l) => { setNovoAg(false); setNovoLead(l); }} />}
+      {novoAg && <NovoAgendamento equipe={equipe} perfil={perfil} aoFechar={() => setNovoAg(false)} aoCriado={(l) => { setNovoAg(false); setNovoLead(l); }} />}
       {novoLead && (
         <Agendador lead={novoLead} equipe={equipe} aoFechar={() => { setNovoLead(null); carregar(); }}
           aoAgendar={async (dados) => {
-            try { await atualizarLead(novoLead.id, { ...dados, status: "agendado" }); }
+            try {
+              await atualizarLead(novoLead.id, { ...dados, status: "agendado" });
+              // O carimbo do banco põe quem digitou; o escolhido vale por cima (só quando é outra pessoa).
+              if (novoLead._prospector && novoLead._prospector !== (perfil && perfil.nome)) await atualizarLead(novoLead.id, { agendado_por_nome: novoLead._prospector });
+            }
             catch (e) { setErro(e.message); }
             setNovoLead(null); carregar();
           }} />

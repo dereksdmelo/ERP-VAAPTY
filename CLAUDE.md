@@ -2698,6 +2698,11 @@ como a 0060) e o fluxo também (gerente, apaga o atendimento). **Agendamento só
 gestão exclui** (13/11/2026, o Derek): lead agendado ou confirmado, o servidor
 recusa quem não é gerente — quem desmarcou é "não veio" ou remarcar.
 
+**Quem prospectou, no "+ Agendamento"** (13/11/2026, o Derek): a lista da
+equipe e as IAs (`IAS_AGENDAM`). Vai para `prospector_nome` e, depois de marcar o
+horário, para `agendado_por_nome` — o carimbo do banco põe quem digitou, e a
+escolha vale por cima (o PATCH aceita `agendado_por_nome`).
+
 **"Recuperação" muda a origem** (a Schell, 03/11/2026): é o cliente que a
 equipe foi buscar de volta, então o atendimento nasce `recuperacao`, com
 PROSPEC "RECUPERAÇÃO", e não `fluxo_loja`.
