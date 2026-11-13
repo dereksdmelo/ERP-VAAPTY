@@ -1110,6 +1110,8 @@ function paraLead(c) {
   // "Vai voltar" sem data é promessa que ninguém cobra (0036).
   if (c.volta_em !== undefined) l.volta_em = data(c.volta_em);
   if (c.prospector_nome !== undefined) l.prospector_nome = texto(c.prospector_nome);
+  // Mexeu pela tela Recuperar leads (0156): carimba que o lead foi trabalhado.
+  if (c.recuperacao_tocado) l.recuperacao_tocado_em = new Date().toISOString();
   // Quem prospectou, escolhido no "+ Agendamento" (13/11/2026): vale por cima do carimbo de quem digitou.
   if (c.agendado_por_nome !== undefined) l.agendado_por_nome = texto(c.agendado_por_nome);
   if (c.proximo_contato !== undefined) l.proximo_contato = data(c.proximo_contato);
@@ -1914,20 +1916,23 @@ async function leads(req, res, tok) {
       const quem = String(req.query.perfil || eu);
       if (quem !== eu && !gerente) return res.status(403).json({ erro: "Cada um vê a própria lista." });
       const sel = "id,nome,telefone,carro,cidade,origem,status,criado_em,agendado_para,proximo_contato,observacoes,ligacoes,ultima_ligacao_em," +
-        "recuperador_id,recuperador_nome,recuperacao_em,agendado_por_nome,atendimento_id";
+        "recuperador_id,recuperador_nome,recuperacao_em,recuperacao_tocado_em,agendado_por_nome,agendado_em,atendimento_id," +
+        "atendimento:atendimento_id(data,chegada_em,status,negociador_nome)";
       const f = quem === "*" ? "recuperador_id=not.is.null&excluido_em=is.null" : `recuperador_id=eq.${quem}&excluido_em=is.null`;
       const ls = await lerTodos(sel, f, 6000);
       // O placar, por pessoa: designados, procurados, agendados, vieram.
       const placar = {};
       ls.forEach((l) => {
         const k = l.recuperador_id;
-        const p = placar[k] || (placar[k] = { perfil_id: k, nome: l.recuperador_nome || "", designados: 0, procurados: 0, agendados: 0, vieram: 0, a_fazer: 0 });
+        const p = placar[k] || (placar[k] = { perfil_id: k, nome: l.recuperador_nome || "", designados: 0, procurados: 0, agendados: 0, vieram: 0, a_fazer: 0, faltando: 0 });
         p.designados += 1;
         const desde = l.recuperacao_em || "";
-        if (l.ultima_ligacao_em && l.ultima_ligacao_em >= desde) p.procurados += 1;
+        // Trabalhado: alguém ligou, mandou WhatsApp, anotou ou mexeu nele depois da designação (0156).
+        const tocado = (l.recuperacao_tocado_em && l.recuperacao_tocado_em >= desde) || (l.ultima_ligacao_em && l.ultima_ligacao_em >= desde);
+        if (tocado) p.procurados += 1;
         if (l.status === "agendado" || l.status === "confirmado") p.agendados += 1;
         else if (l.status === "compareceu") p.vieram += 1;
-        else p.a_fazer += 1;
+        else { p.faltando += 1; if (!tocado) p.a_fazer += 1; }
       });
       return res.status(200).json({ leads: quem === "*" ? [] : ls, placar: Object.values(placar), gerente });
     }
@@ -2100,7 +2105,7 @@ async function leads(req, res, tok) {
     if (!atual) return res.status(404).json({ erro: "Lead não encontrado." });
     const r = await banco(`${base}?id=eq.${id}`, {
       method: "PATCH", headers: json(tok, { Prefer: "return=representation" }),
-      body: JSON.stringify({ ligacoes: (Number(atual.ligacoes) || 0) + 1, ultima_ligacao_em: new Date().toISOString() }),
+      body: JSON.stringify({ ligacoes: (Number(atual.ligacoes) || 0) + 1, ultima_ligacao_em: new Date().toISOString(), recuperacao_tocado_em: new Date().toISOString() }),
     });
     const linha = (Array.isArray(r) ? r[0] : r) || null;
     if (!linha) return res.status(403).json({ erro: "Não consegui registrar a ligação." });

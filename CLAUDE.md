@@ -6331,7 +6331,12 @@ trabalha na ordem: retornar hoje, nunca procurados, já procurados (o mais
 antigo primeiro), retornos futuros; Ligar abre o discador do celular
 (`tel:`), WhatsApp o wa.me — os dois contam a tentativa e deixam uma linha nas
 anotações. O placar por pessoa: designados, a fazer, procurados, agendados,
-vieram; "recolher" tira os que ainda não agendaram.
+vieram; "recolher" tira os que ainda não agendaram. **A fazer** é quem ninguém
+trabalhou depois da designação (0156, `recuperacao_tocado_em`: ligar, WhatsApp,
+anotar, agendar, retornar, sem chance, ou uma ligação registrada em qualquer
+tela); **faltando** é quem ainda não agendou nem veio. Filtros na tela (todos, a
+fazer, faltando, agendados, vieram, sem chance) e os recuperados em cima, com
+cor e a prova: o horário e quem agendou, ou o dia em que veio e quem atendeu.
 
 **A tela da sala — gestão à vista (0121, 08/11/2026, o Derek: "uma tela
 dinâmica pra pendurar na sala… efeitos visuais quando alguém fecha um
