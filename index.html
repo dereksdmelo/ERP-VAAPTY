@@ -14949,6 +14949,164 @@ const PLAN = { grade: "#D5D9DE", cab: "#2F3B4C", cabTexto: "#FFFFFF", total: "#F
  * com o provável no lugar da venda. Marcar e desmarcar é só na tela: é
  * assim que se pergunta "e se vender só estes?". Nada disto é venda:
  * o carro continua no pátio, e a Rentabilidade do mês e o DRE não mudam. */
+/* A PREVISÃO DO MÊS PELA OPERAÇÃO (0157, 14/11/2026, o Derek: "a previsão
+ * de rentabilidade do mês considerando 3 métricas: o ticket médio previsto, a
+ * quantidade de carros em loja prevista e a conversão prevista… estime a
+ * rentabilidade da loja para mostrar aos gestores"). Rentabilidade prevista =
+ * clientes em loja × conversão × ticket médio. Cada métrica mostra o realizado
+ * até hoje, o ritmo (o realizado esticado até o fim do mês — aritmética, não
+ * previsão, decisão 22) e a média dos 3 meses anteriores, que é a sugestão
+ * quando o gerente ainda não escreveu a dele. Ticket = rentabilidade líquida ÷
+ * carros vendidos; conversão = fechados ÷ atendimentos (a do funil). */
+function PrevisaoOperacao({ comp, vendidos, gerente }) {
+  const rs = (v) => (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const mesDe = (c, k) => { const [a, m] = [Number(c.slice(0, 4)), Number(c.slice(5, 7))]; const d = new Date(Date.UTC(a, m - 1 + k, 1)); return d.toISOString().slice(0, 10); };
+  const fimDe = (c) => new Date(Date.UTC(Number(c.slice(0, 4)), Number(c.slice(5, 7)), 0)).toISOString().slice(0, 10);
+  const hoje = hojeEmSP();
+  const c0 = `${String(comp).slice(0, 7)}-01`;
+  const anteriores = [mesDe(c0, -1), mesDe(c0, -2), mesDe(c0, -3)];
+  const [conv, setConv] = useState(null);
+  const [meta, setMeta] = useState(null);
+  const [f, setF] = useState({ clientes: "", conversao: "", ticket: "" });
+  const [indo, setIndo] = useState(false); const [erro, setErro] = useState(""); const [ok, setOk] = useState("");
+  useEffect(() => {
+    setConv(null);
+    const ate0 = fimDe(c0) < hoje ? fimDe(c0) : hoje;
+    Promise.all([[c0, ate0]].concat(anteriores.map((a) => [a, fimDe(a)])).map(([de, ate]) =>
+      fetchAut(`/api/atendimento?recurso=conversao&de=${de}&ate=${ate}`).then((r) => r.json()).then((d) => d.periodo || { atendimentos: 0, fechados: 0 }).catch(() => ({ atendimentos: 0, fechados: 0 }))))
+      .then(setConv);
+    lerMetaLoja(c0).then((d) => {
+      const m = d.meta || {};
+      setMeta(m);
+      setF({ clientes: m.prev_clientes != null ? String(m.prev_clientes) : "",
+        conversao: m.prev_conversao != null ? String(Math.round(Number(m.prev_conversao) * 1000) / 10).replace(".", ",") : "",
+        ticket: m.prev_ticket != null ? String(m.prev_ticket).replace(".", ",") : "" });
+    }).catch(() => setMeta({}));
+  }, [c0]);
+  // Ticket por mês: rentabilidade líquida ÷ linhas vendidas no mês.
+  const rentDoMes = (c) => {
+    const xs = (vendidos || []).filter((e) => String(e.vendido_em || e.entrou_em || "").slice(0, 7) === c.slice(0, 7));
+    return { carros: xs.length, liquida: xs.reduce((t, e) => t + rentabilidadeDe(e).liquida, 0) };
+  };
+  const atual = rentDoMes(c0);
+  const ant = anteriores.map(rentDoMes);
+  if (!conv || !meta) return <p className="text-[13px]" style={{ color: C.mute }}>Juntando o mês…</p>;
+  const [cAt, ...cAnt] = conv;
+  const diasMes = Number(fimDe(c0).slice(8, 10));
+  const fechado = fimDe(c0) < hoje;
+  const diaHoje = fechado ? diasMes : Math.max(1, Number(hoje.slice(8, 10)));
+  const fator = diasMes / diaHoje;
+  const media = (xs) => (xs.length ? xs.reduce((t, x) => t + x, 0) / xs.length : 0);
+  const real = { clientes: cAt.atendimentos, conversao: cAt.atendimentos ? cAt.fechados / cAt.atendimentos : 0, ticket: atual.carros ? atual.liquida / atual.carros : 0 };
+  const ritmo = { clientes: Math.round(cAt.atendimentos * fator), conversao: real.conversao, ticket: real.ticket };
+  const med = {
+    clientes: Math.round(media(cAnt.map((x) => x.atendimentos))),
+    conversao: (() => { const a = cAnt.reduce((t, x) => t + x.atendimentos, 0), b = cAnt.reduce((t, x) => t + x.fechados, 0); return a ? b / a : 0; })(),
+    ticket: (() => { const n = ant.reduce((t, x) => t + x.carros, 0), l = ant.reduce((t, x) => t + x.liquida, 0); return n ? l / n : 0; })(),
+  };
+  const lido = { clientes: numeroBR(f.clientes) || 0, conversao: (numeroBR(f.conversao) || 0) / 100, ticket: numeroBR(f.ticket) || 0 };
+  const usado = { clientes: f.clientes !== "" ? lido.clientes : med.clientes, conversao: f.conversao !== "" ? lido.conversao : med.conversao, ticket: f.ticket !== "" ? lido.ticket : med.ticket };
+  const carrosPrev = usado.clientes * usado.conversao;
+  const rentPrev = carrosPrev * usado.ticket;
+  const rentRitmo = ritmo.clientes * ritmo.conversao * ritmo.ticket;
+  const metaValor = Number(meta.valor) || 0;
+  const faltaR = Math.max(0, rentPrev - atual.liquida);
+  const faltaC = Math.max(0, Math.round(carrosPrev) - atual.carros);
+  const pct = (v) => `${(Math.round(v * 1000) / 10).toString().replace(".", ",")}%`;
+  const fmt = { clientes: (v) => String(Math.round(v)), conversao: pct, ticket: (v) => `R$ ${rs(v)}` };
+  const salvar = async () => {
+    setIndo(true); setErro(""); setOk("");
+    try {
+      const corpo = { prev_clientes: f.clientes === "" ? null : lido.clientes, prev_conversao: f.conversao === "" ? null : lido.conversao, prev_ticket: f.ticket === "" ? null : lido.ticket };
+      const r = await fetchAut(`/api/perfil?recurso=meta-loja&competencia=${c0}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.erro || "Não consegui gravar.");
+      setMeta(d.meta || meta); setOk("Previsão gravada — os gestores veem a mesma.");
+    } catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+  const LINHAS = [
+    ["clientes", "Clientes em loja", "atendimentos no mês", "ex.: 180"],
+    ["conversao", "Conversão", "fechados ÷ atendimentos", "ex.: 22"],
+    ["ticket", "Ticket médio", "rentabilidade por carro", "ex.: 4500"],
+  ];
+  const cel = "px-3 py-2 text-right";
+  return (
+    <div className="rounded-xl p-4" style={{ background: C.paper, border: `1px solid ${C.roxo}` }}>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div>
+          <div className="text-[15px] font-bold">Previsão do mês pela operação · {rotuloMes(c0)}</div>
+          <div className="text-[12.5px]" style={{ color: C.mute }}>Rentabilidade = clientes em loja × conversão × ticket médio. Em branco, vale a média dos 3 meses anteriores.</div>
+        </div>
+      </div>
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full min-w-[640px] text-[13.5px]" style={{ fontVariantNumeric: "tabular-nums" }}>
+          <thead><tr className="text-[11px] uppercase tracking-[0.06em]" style={{ color: C.mute }}>
+            <th className="px-3 py-1.5 text-left">Métrica</th><th className={cel}>Previsto</th>
+            <th className={cel}>{fechado ? "No mês" : `Até hoje (dia ${diaHoje})`}</th>{!fechado && <th className={cel}>No ritmo</th>}<th className={cel}>Média 3 meses</th>
+          </tr></thead>
+          <tbody>
+            {LINHAS.map(([k, rot, sub, ph]) => (
+              <tr key={k} className="border-t" style={{ borderColor: C.line }}>
+                <td className="px-3 py-2"><b>{rot}</b><div className="text-[11.5px]" style={{ color: C.mute }}>{sub}</div></td>
+                <td className={cel}>
+                  {gerente ? (
+                    <span className="inline-flex items-center gap-1">
+                      {k === "ticket" && <span style={{ color: C.mute }}>R$</span>}
+                      <input className="w-24 rounded border px-2 py-1 text-right" style={{ borderColor: C.line }} inputMode="decimal" placeholder={k === "conversao" ? String(Math.round(med.conversao * 1000) / 10).replace(".", ",") : k === "ticket" ? rs(med.ticket) : String(med.clientes)}
+                        value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} />
+                      {k === "conversao" && <span style={{ color: C.mute }}>%</span>}
+                    </span>
+                  ) : <b>{fmt[k](usado[k])}</b>}
+                </td>
+                <td className={cel}>{fmt[k](real[k])}</td>
+                {!fechado && <td className={cel} style={{ color: C.mute }}>{fmt[k](ritmo[k])}</td>}
+                <td className={cel} style={{ color: C.mute }}>
+                  {fmt[k](med[k])}
+                  {gerente && <button onClick={() => setF({ ...f, [k]: k === "conversao" ? String(Math.round(med[k] * 1000) / 10).replace(".", ",") : k === "ticket" ? String(Math.round(med[k] * 100) / 100).replace(".", ",") : String(med[k]) })} className="ml-1.5 text-[11px] underline" style={{ color: C.roxo }}>usar</button>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
+        <div className="rounded-lg px-3 py-2" style={{ background: C.roxoFraco }}>
+          <div className="text-[10.5px] font-bold uppercase tracking-[0.06em]" style={{ color: C.roxo }}>Rentabilidade prevista</div>
+          <div className="text-[22px] font-extrabold" style={{ color: C.roxo, fontVariantNumeric: "tabular-nums" }}>R$ {rs(rentPrev)}</div>
+          <div className="text-[11.5px]" style={{ color: C.mute }}>{Math.round(carrosPrev * 10) / 10} carros previstos</div>
+        </div>
+        <div className="rounded-lg px-3 py-2" style={{ background: C.bg }}>
+          <div className="text-[10.5px] font-bold uppercase tracking-[0.06em]" style={{ color: C.mute }}>{fechado ? "Realizado" : "Realizado até hoje"}</div>
+          <div className="text-[18px] font-extrabold" style={{ fontVariantNumeric: "tabular-nums" }}>R$ {rs(atual.liquida)}</div>
+          <div className="text-[11.5px]" style={{ color: C.mute }}>{atual.carros} carros · {rentPrev ? pct(atual.liquida / rentPrev) : "—"} do previsto</div>
+        </div>
+        {!fechado && (
+          <div className="rounded-lg px-3 py-2" style={{ background: C.bg }}>
+            <div className="text-[10.5px] font-bold uppercase tracking-[0.06em]" style={{ color: C.mute }}>Falta para o previsto</div>
+            <div className="text-[18px] font-extrabold" style={{ fontVariantNumeric: "tabular-nums", color: faltaR ? C.laranja : C.verde }}>R$ {rs(faltaR)}</div>
+            <div className="text-[11.5px]" style={{ color: C.mute }}>{faltaC} carros em {diasMes - diaHoje} dias · no ritmo: R$ {rs(rentRitmo)}</div>
+          </div>
+        )}
+        <div className="rounded-lg px-3 py-2" style={{ background: C.bg }}>
+          <div className="text-[10.5px] font-bold uppercase tracking-[0.06em]" style={{ color: C.mute }}>Meta da loja</div>
+          <div className="text-[18px] font-extrabold" style={{ fontVariantNumeric: "tabular-nums" }}>{metaValor ? `R$ ${rs(metaValor)}` : "não definida"}</div>
+          <div className="text-[11.5px]" style={{ color: metaValor ? (rentPrev >= metaValor ? C.verde : C.laranja) : C.mute }}>
+            {metaValor ? (rentPrev >= metaValor ? `a previsão bate a meta (+R$ ${rs(rentPrev - metaValor)})` : `a previsão fica R$ ${rs(metaValor - rentPrev)} abaixo`) : "defina em Equipe"}
+          </div>
+        </div>
+      </div>
+      {gerente && (
+        <div className="mt-3 flex items-center gap-3">
+          <BotaoPrimario onClick={salvar} disabled={indo}>{indo ? "Gravando…" : "Gravar a previsão"}</BotaoPrimario>
+          {ok && <span className="text-[12.5px]" style={{ color: C.verde }}>{ok}</span>}
+          {erro && <span className="text-[12.5px]" style={{ color: C.laranja }}>{erro}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PrevisaoRentabilidade({ patio, realizadoMes, comp, aoMudar, aoAbrir }) {
   const rs = (v) => (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const [fora, setFora] = useState({});
@@ -15825,7 +15983,9 @@ function TelaEstoque({ perfil, comp, mes, modo, aoAbrir }) {
         <Rentabilidade comp={comp} aoAbrir={(id) => setAbrindo(id)} mes={soRentab ? mes : null}
           aoImportar={eGerente && !importando ? () => setImportando(true) : null}
           aoPrever={() => setPrevendo((x) => !x)} prevendo={prevendo}
-          previsao={prevendo ? (
+          previsao={prevendo ? (<>
+            <PrevisaoOperacao comp={comp} gerente={eGerente} vendidos={lista.filter((e) => e.situacao === "vendido")} />
+            <div className="mt-4 text-[13px] font-bold uppercase tracking-[0.06em]" style={{ color: C.mute }}>E o pátio: quanto rende vender os carros que já estão aqui</div>
             <PrevisaoRentabilidade comp={comp} aoAbrir={(id) => setAbrindo(id)}
               patio={lista.filter((e) => e.situacao === "em_estoque" && !naoEhCarro(e))}
               realizadoMes={lista.filter((e) => e.situacao === "vendido" && String(e.vendido_em || e.entrou_em || "").slice(0, 7) === String(comp).slice(0, 7))
@@ -15834,7 +15994,7 @@ function TelaEstoque({ perfil, comp, mes, modo, aoAbrir }) {
                 try { const novo = await atualizarEstoque(id, dados); if (novo) setLista((l) => l.map((x) => (x.id === id ? { ...x, ...novo } : x))); }
                 catch (err) { alert(err.message); }
               }} />
-          ) : null}
+          </>) : null}
           aoMudar={async (id, dados) => {
             try { const novo = await atualizarEstoque(id, dados); if (novo) setLista((l) => l.map((x) => (x.id === id ? { ...x, ...novo } : x))); }
             catch (err) { alert(err.message); }

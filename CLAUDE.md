@@ -4611,6 +4611,18 @@ se vender só estes?". Mostra também o mês já vendido + a previsão. **Não
 é venda**: o carro continua no pátio e nada muda na Rentabilidade do mês
 nem no DRE.
 
+**A previsão do mês pela operação (0157, 14/11/2026, o Derek: *"a previsão de
+rentabilidade do mês considerando 3 métricas: ticket médio, carros em loja e
+conversão previstos… para mostrar aos gestores"*).** No topo da Previsão
+(`PrevisaoOperacao`): clientes em loja × conversão × ticket médio = rentabilidade
+prevista. Para cada métrica, o realizado até hoje (atendimentos e fechados pelo
+contador do banco, `?recurso=conversao`; ticket = líquida ÷ carros vendidos), o
+ritmo (esticado até o fim do mês) e a média dos 3 meses anteriores, que vale
+quando o gerente deixa em branco. O gerente grava as três em `meta_loja`
+(`prev_clientes`, `prev_conversao`, `prev_ticket`, PATCH de `?recurso=meta-loja`)
+e os gestores veem a mesma; ao lado, o realizado, o que falta e a meta da loja.
+Abaixo continua a previsão do pátio (carro a carro).
+
 **Carro importado não tem atendimento**, então negociador, meio de
 alcance e prospector ficam em texto no `estoque` (como o lead de
 indicação). Carro que entra pela fila copia os três do atendimento.
