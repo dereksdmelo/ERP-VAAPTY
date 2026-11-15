@@ -15013,12 +15013,17 @@ function PrevisaoOperacao({ comp, vendidos, gerente }) {
    * ticket — nunca menos do que já entrou. */
   const base = !fechado && cAt.atendimentos ? ritmo : med;
   const usado = { clientes: f.clientes !== "" ? lido.clientes : base.clientes, conversao: f.conversao !== "" ? lido.conversao : base.conversao, ticket: f.ticket !== "" ? lido.ticket : base.ticket };
+  /* A BASE É A COMPRA (14/11/2026, o Derek: "temos vários carros que
+   * compramos e não vendemos ainda… a projeção vamos fazer a partir da base
+   * da compra mesmo, vezes o ticket médio"). Cada fechamento é um carro que
+   * vai render o ticket quando for vendido, esteja no pátio ou não. */
   const fechPrev = usado.clientes * usado.conversao;
   const faltaFech = fechado ? 0 : Math.max(0, fechPrev - cAt.fechados);
-  const rentPrev = fechado ? atual.liquida : atual.liquida + faltaFech * usado.ticket;
-  const rentRitmo = atual.liquida + Math.max(0, ritmo.clientes * ritmo.conversao - cAt.fechados) * ritmo.ticket;
+  const rentPrev = fechPrev * usado.ticket;
+  const rentRitmo = ritmo.clientes * ritmo.conversao * ritmo.ticket;
+  const rentFechados = cAt.fechados * usado.ticket;
   const metaValor = Number(meta.valor) || 0;
-  const faltaR = Math.max(0, rentPrev - atual.liquida);
+  const faltaR = faltaFech * usado.ticket;
   const faltaC = Math.round(faltaFech);
   const pct = (v) => `${(Math.round(v * 1000) / 10).toString().replace(".", ",")}%`;
   const fmt = { clientes: (v) => String(Math.round(v)), conversao: pct, ticket: (v) => `R$ ${rs(v)}` };
@@ -15044,7 +15049,7 @@ function PrevisaoOperacao({ comp, vendidos, gerente }) {
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
           <div className="text-[15px] font-bold">Previsão do mês pela operação · {rotuloMes(c0)}</div>
-          <div className="text-[12.5px]" style={{ color: C.mute }}>Fechamentos do mês = clientes em loja × conversão. Rentabilidade prevista = o que já entrou + os fechamentos que faltam × ticket médio. Em branco, vale o ritmo do mês.</div>
+          <div className="text-[12.5px]" style={{ color: C.mute }}>Fechamentos do mês = clientes em loja × conversão. Rentabilidade prevista = fechamentos × ticket médio — a base é a compra: cada carro fechado rende o ticket quando for vendido. Em branco, vale o ritmo do mês.</div>
         </div>
       </div>
       <div className="mt-3 overflow-x-auto">
@@ -15085,9 +15090,9 @@ function PrevisaoOperacao({ comp, vendidos, gerente }) {
           <div className="text-[11.5px]" style={{ color: C.mute }}>{Math.round(fechPrev)} fechamentos no mês ({cAt.fechados} já fechados)</div>
         </div>
         <div className="rounded-lg px-3 py-2" style={{ background: C.bg }}>
-          <div className="text-[10.5px] font-bold uppercase tracking-[0.06em]" style={{ color: C.mute }}>{fechado ? "Realizado" : "Realizado até hoje"}</div>
-          <div className="text-[18px] font-extrabold" style={{ fontVariantNumeric: "tabular-nums" }}>R$ {rs(atual.liquida)}</div>
-          <div className="text-[11.5px]" style={{ color: C.mute }}>{cAt.fechados} fechados · {atual.carros} carros vendidos · {rentPrev ? pct(atual.liquida / rentPrev) : "—"} do previsto</div>
+          <div className="text-[10.5px] font-bold uppercase tracking-[0.06em]" style={{ color: C.mute }}>{fechado ? "Fechados no mês" : "Fechados até hoje"}</div>
+          <div className="text-[18px] font-extrabold" style={{ fontVariantNumeric: "tabular-nums" }}>R$ {rs(rentFechados)}</div>
+          <div className="text-[11.5px]" style={{ color: C.mute }}>{cAt.fechados} fechados × ticket · {rentPrev ? pct(rentFechados / rentPrev) : "—"} do previsto · já vendidos: R$ {rs(atual.liquida)} ({atual.carros} carros)</div>
         </div>
         {!fechado && (
           <div className="rounded-lg px-3 py-2" style={{ background: C.bg }}>
