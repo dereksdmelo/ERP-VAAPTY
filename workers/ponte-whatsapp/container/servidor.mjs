@@ -483,7 +483,9 @@ http.createServer(async (req, res) => {
     if (req.headers["x-ponte-segredo"] !== SEGREDO) return json(res, 401, { ok: false, erro: "sem permissão" });
     const canal = u.searchParams.get("canal") || req.headers["x-canal"] || "";
     if (canal && !CANAL) { CANAL = canal; ligar(); }
-    if (u.pathname === "/estado") { if (!sock && !ligando && CANAL) ligar(); return json(res, 200, Object.assign({ ok: true, canal: CANAL, lids: lidPn.size, esperandoLid: [...esperandoLid.values()].reduce((a, l) => a + l.length, 0), pulados: pulados.slice(0, 10), testeBotoes: testeLog.slice(0, 9) }, st)); }
+    if (u.pathname === "/estado") { if (!sock && !ligando && CANAL) ligar(); return json(res, 200, Object.assign({ ok: true, canal: CANAL, lids: lidPn.size, esperandoLid: [...esperandoLid.values()].reduce((a, l) => a + l.length, 0), pulados: pulados.slice(0, 10), testeBotoes: testeLog.slice(0, 9),
+      // A memória usada (14/11/2026): é o que decide se o container cabe no "lite" (256 MB) em vez do "basic" (1 GB).
+      memoriaMB: Math.round(process.memoryUsage().rss / 1048576), heapMB: Math.round(process.memoryUsage().heapUsed / 1048576) }, st)); }
     if (u.pathname === "/enviar" && req.method === "POST") { const b = JSON.parse(await lerCorpo(req) || "{}"); return json(res, 200, await enviar(b.para, b.conteudo || {})); }
     /* OS GRUPOS DESTE NUMERO (22/10/2026), para o gerente escolher na tela para onde vai o aviso de chegada.
        So id, nome e quantos participantes: os numeros de quem esta no grupo nao saem daqui. */
