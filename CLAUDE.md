@@ -4614,8 +4614,11 @@ nem no DRE.
 **A previsão do mês pela operação (0157, 14/11/2026, o Derek: *"a previsão de
 rentabilidade do mês considerando 3 métricas: ticket médio, carros em loja e
 conversão previstos… para mostrar aos gestores"*).** No topo da Previsão
-(`PrevisaoOperacao`): clientes em loja × conversão × ticket médio = rentabilidade
-prevista. Para cada métrica, o realizado até hoje (atendimentos e fechados pelo
+(`PrevisaoOperacao`): fechamentos do mês = clientes em loja × conversão, e a
+rentabilidade prevista = a já realizada + os fechamentos que FALTAM × ticket — a
+primeira versão calculava o mês do zero pela média de 3 meses e previa 23 carros
+com 28 já fechados (*"não tá fechando essa conta"*). Em branco, vale o ritmo do
+mês; a média de 3 meses fica de referência. Para cada métrica, o realizado até hoje (atendimentos e fechados pelo
 contador do banco, `?recurso=conversao`; ticket = líquida ÷ carros vendidos), o
 ritmo (esticado até o fim do mês) e a média dos 3 meses anteriores, que vale
 quando o gerente deixa em branco. O gerente grava as três em `meta_loja`

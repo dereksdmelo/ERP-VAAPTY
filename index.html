@@ -15005,13 +15005,21 @@ function PrevisaoOperacao({ comp, vendidos, gerente }) {
     ticket: (() => { const n = ant.reduce((t, x) => t + x.carros, 0), l = ant.reduce((t, x) => t + x.liquida, 0); return n ? l / n : 0; })(),
   };
   const lido = { clientes: numeroBR(f.clientes) || 0, conversao: (numeroBR(f.conversao) || 0) / 100, ticket: numeroBR(f.ticket) || 0 };
-  const usado = { clientes: f.clientes !== "" ? lido.clientes : med.clientes, conversao: f.conversao !== "" ? lido.conversao : med.conversao, ticket: f.ticket !== "" ? lido.ticket : med.ticket };
-  const carrosPrev = usado.clientes * usado.conversao;
-  const rentPrev = carrosPrev * usado.ticket;
-  const rentRitmo = ritmo.clientes * ritmo.conversao * ritmo.ticket;
+  /* A CONTA PARTE DO QUE JÁ ACONTECEU (14/11/2026, o Derek: "não tá fechando
+   * essa conta" — previa 23 carros no mês com 28 fechados até o dia 14).
+   * Em branco, vale o RITMO do mês (a média de 3 meses é só referência: era
+   * ela que puxava a previsão para baixo do que já tinha sido feito). E a
+   * rentabilidade prevista é a já realizada + os fechamentos que faltam ×
+   * ticket — nunca menos do que já entrou. */
+  const base = !fechado && cAt.atendimentos ? ritmo : med;
+  const usado = { clientes: f.clientes !== "" ? lido.clientes : base.clientes, conversao: f.conversao !== "" ? lido.conversao : base.conversao, ticket: f.ticket !== "" ? lido.ticket : base.ticket };
+  const fechPrev = usado.clientes * usado.conversao;
+  const faltaFech = fechado ? 0 : Math.max(0, fechPrev - cAt.fechados);
+  const rentPrev = fechado ? atual.liquida : atual.liquida + faltaFech * usado.ticket;
+  const rentRitmo = atual.liquida + Math.max(0, ritmo.clientes * ritmo.conversao - cAt.fechados) * ritmo.ticket;
   const metaValor = Number(meta.valor) || 0;
   const faltaR = Math.max(0, rentPrev - atual.liquida);
-  const faltaC = Math.max(0, Math.round(carrosPrev) - atual.carros);
+  const faltaC = Math.round(faltaFech);
   const pct = (v) => `${(Math.round(v * 1000) / 10).toString().replace(".", ",")}%`;
   const fmt = { clientes: (v) => String(Math.round(v)), conversao: pct, ticket: (v) => `R$ ${rs(v)}` };
   const salvar = async () => {
@@ -15036,7 +15044,7 @@ function PrevisaoOperacao({ comp, vendidos, gerente }) {
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
           <div className="text-[15px] font-bold">Previsão do mês pela operação · {rotuloMes(c0)}</div>
-          <div className="text-[12.5px]" style={{ color: C.mute }}>Rentabilidade = clientes em loja × conversão × ticket médio. Em branco, vale a média dos 3 meses anteriores.</div>
+          <div className="text-[12.5px]" style={{ color: C.mute }}>Fechamentos do mês = clientes em loja × conversão. Rentabilidade prevista = o que já entrou + os fechamentos que faltam × ticket médio. Em branco, vale o ritmo do mês.</div>
         </div>
       </div>
       <div className="mt-3 overflow-x-auto">
@@ -15053,7 +15061,7 @@ function PrevisaoOperacao({ comp, vendidos, gerente }) {
                   {gerente ? (
                     <span className="inline-flex items-center gap-1">
                       {k === "ticket" && <span style={{ color: C.mute }}>R$</span>}
-                      <input className="w-24 rounded border px-2 py-1 text-right" style={{ borderColor: C.line }} inputMode="decimal" placeholder={k === "conversao" ? String(Math.round(med.conversao * 1000) / 10).replace(".", ",") : k === "ticket" ? rs(med.ticket) : String(med.clientes)}
+                      <input className="w-24 rounded border px-2 py-1 text-right" style={{ borderColor: C.line }} inputMode="decimal" placeholder={k === "conversao" ? String(Math.round(base.conversao * 1000) / 10).replace(".", ",") : k === "ticket" ? rs(base.ticket) : String(base.clientes)}
                         value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} />
                       {k === "conversao" && <span style={{ color: C.mute }}>%</span>}
                     </span>
@@ -15074,18 +15082,18 @@ function PrevisaoOperacao({ comp, vendidos, gerente }) {
         <div className="rounded-lg px-3 py-2" style={{ background: C.roxoFraco }}>
           <div className="text-[10.5px] font-bold uppercase tracking-[0.06em]" style={{ color: C.roxo }}>Rentabilidade prevista</div>
           <div className="text-[22px] font-extrabold" style={{ color: C.roxo, fontVariantNumeric: "tabular-nums" }}>R$ {rs(rentPrev)}</div>
-          <div className="text-[11.5px]" style={{ color: C.mute }}>{Math.round(carrosPrev * 10) / 10} carros previstos</div>
+          <div className="text-[11.5px]" style={{ color: C.mute }}>{Math.round(fechPrev)} fechamentos no mês ({cAt.fechados} já fechados)</div>
         </div>
         <div className="rounded-lg px-3 py-2" style={{ background: C.bg }}>
           <div className="text-[10.5px] font-bold uppercase tracking-[0.06em]" style={{ color: C.mute }}>{fechado ? "Realizado" : "Realizado até hoje"}</div>
           <div className="text-[18px] font-extrabold" style={{ fontVariantNumeric: "tabular-nums" }}>R$ {rs(atual.liquida)}</div>
-          <div className="text-[11.5px]" style={{ color: C.mute }}>{atual.carros} carros · {rentPrev ? pct(atual.liquida / rentPrev) : "—"} do previsto</div>
+          <div className="text-[11.5px]" style={{ color: C.mute }}>{cAt.fechados} fechados · {atual.carros} carros vendidos · {rentPrev ? pct(atual.liquida / rentPrev) : "—"} do previsto</div>
         </div>
         {!fechado && (
           <div className="rounded-lg px-3 py-2" style={{ background: C.bg }}>
             <div className="text-[10.5px] font-bold uppercase tracking-[0.06em]" style={{ color: C.mute }}>Falta para o previsto</div>
             <div className="text-[18px] font-extrabold" style={{ fontVariantNumeric: "tabular-nums", color: faltaR ? C.laranja : C.verde }}>R$ {rs(faltaR)}</div>
-            <div className="text-[11.5px]" style={{ color: C.mute }}>{faltaC} carros em {diasMes - diaHoje} dias · no ritmo: R$ {rs(rentRitmo)}</div>
+            <div className="text-[11.5px]" style={{ color: C.mute }}>{faltaC} fechamentos em {diasMes - diaHoje} dias · só no ritmo: R$ {rs(rentRitmo)}</div>
           </div>
         )}
         <div className="rounded-lg px-3 py-2" style={{ background: C.bg }}>
