@@ -640,30 +640,7 @@ async function desempenho(req, res, tok) {
     return res.status(200).json({ ok: true, desempenho: salvo });
   }
 
-  /* A PREVISÃO DO MÊS PELA OPERAÇÃO (0157): só as três métricas, sem mexer na
-   * meta (valor e volume). Upsert: o mês sem linha nasce com a meta zerada,
-   * que a tela já lê como "não definida". Só o gerente (a RLS da 0018). */
-  if (req.method === "PATCH") {
-    const c = await lerCorpo(req);
-    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
-    const n = (v) => (v === null || v === "" ? null : numero(v));
-    const linha = { competencia, atualizado_em: new Date().toISOString(), atualizado_por: donoDoToken(tok) };
-    if (c.prev_clientes !== undefined) { const v = n(c.prev_clientes); linha.prev_clientes = v == null ? null : Math.max(0, Math.trunc(v)); }
-    if (c.prev_conversao !== undefined) { const v = n(c.prev_conversao); if (v != null && (v < 0 || v > 1)) return res.status(400).json({ erro: "A conversão vai de 0% a 100%." }); linha.prev_conversao = v; }
-    if (c.prev_ticket !== undefined) { const v = n(c.prev_ticket); linha.prev_ticket = v == null ? null : Math.max(0, v); }
-    const r = await fetch(`${base}?on_conflict=competencia`, {
-      method: "POST",
-      headers: { ...cab, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=representation" },
-      body: JSON.stringify(linha),
-    });
-    if (!r.ok) return res.status(r.status === 401 ? 401 : 502).json({ erro: "O banco recusou a gravação." });
-    const d = await r.json().catch(() => []);
-    const salvo = Array.isArray(d) ? d[0] : d;
-    if (!salvo) return res.status(403).json({ erro: "Só o gerente define a previsão do mês." });
-    return res.status(200).json({ ok: true, competencia, meta: salvo });
-  }
-
-  res.setHeader("Allow", "GET, PUT, PATCH");
+  res.setHeader("Allow", "GET, PUT");
   return res.status(405).json({ erro: "Use GET ou PUT." });
 }
 
@@ -721,7 +698,30 @@ async function metaLoja(req, res, tok) {
     return res.status(200).json({ ok: true, competencia, meta: salvo });
   }
 
-  res.setHeader("Allow", "GET, PUT");
+  /* A PREVISÃO DO MÊS PELA OPERAÇÃO (0157): só as três métricas, sem mexer na
+   * meta (valor e volume). Upsert: o mês sem linha nasce com a meta zerada,
+   * que a tela já lê como "não definida". Só o gerente (a RLS da 0018). */
+  if (req.method === "PATCH") {
+    const c = await lerCorpo(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    const n = (v) => (v === null || v === "" ? null : numero(v));
+    const linha = { competencia, atualizado_em: new Date().toISOString(), atualizado_por: donoDoToken(tok) };
+    if (c.prev_clientes !== undefined) { const v = n(c.prev_clientes); linha.prev_clientes = v == null ? null : Math.max(0, Math.trunc(v)); }
+    if (c.prev_conversao !== undefined) { const v = n(c.prev_conversao); if (v != null && (v < 0 || v > 1)) return res.status(400).json({ erro: "A conversão vai de 0% a 100%." }); linha.prev_conversao = v; }
+    if (c.prev_ticket !== undefined) { const v = n(c.prev_ticket); linha.prev_ticket = v == null ? null : Math.max(0, v); }
+    const r = await fetch(`${base}?on_conflict=competencia`, {
+      method: "POST",
+      headers: { ...cab, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=representation" },
+      body: JSON.stringify(linha),
+    });
+    if (!r.ok) return res.status(r.status === 401 ? 401 : 502).json({ erro: "O banco recusou a gravação." });
+    const d = await r.json().catch(() => []);
+    const salvo = Array.isArray(d) ? d[0] : d;
+    if (!salvo) return res.status(403).json({ erro: "Só o gerente define a previsão do mês." });
+    return res.status(200).json({ ok: true, competencia, meta: salvo });
+  }
+
+  res.setHeader("Allow", "GET, PUT, PATCH");
   return res.status(405).json({ erro: "Use GET ou PUT." });
 }
 
