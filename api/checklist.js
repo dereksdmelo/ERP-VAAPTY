@@ -1212,10 +1212,13 @@ module.exports = async function handler(req, res) {
       if (c.observacoes !== undefined) linha.observacoes = texto(c.observacoes);
 
       // O carimbo da conferência é do servidor, não do cliente.
+      /* QUEM NÃO É DO ADMINISTRATIVO NÃO MEXE NA CONFERÊNCIA — mas o resto grava (16/11/2026). A tela do
+       * negociador manda o check list inteiro, e depois do primeiro salvamento ele volta do banco com os
+       * `adm_*` (falsos): daí em diante TODO salvamento do negociador era recusado com 403, e banco, PIX e
+       * itens se perdiam (o Pedro Ramos, MBD6025; "tem acontecido isso com frequência"). Gerente e adm nunca
+       * viam o erro. Agora os campos da conferência são descartados para quem não pode, e o resto entra. */
       if (ADM.some((k) => linha[k] !== undefined)) {
-        if (!(await eAdministrativo(tok))) {
-          return res.status(403).json({ erro: "A conferência é da tela do administrativo." });
-        }
+        if (!(await eAdministrativo(tok))) ADM.forEach((k) => { delete linha[k]; });
       }
       if (ADM.some((k) => linha[k])) {
         linha.adm_conferido_por = donoDoToken(tok);
