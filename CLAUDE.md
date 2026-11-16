@@ -1984,6 +1984,13 @@ mostra o botão. O caminho normal é **desativar**: `wa_receber()` recusa
 canal inativo, e o histórico fica de pé. Conferido em 01/10/2026 com um
 canal descartável: com uma conversa dentro, a recusa veio; vazio, saiu.
 
+**Desde 16/11/2026 é UM container para todos os números** (corte de custo: eram 5 containers de 1 GB ligados
+24 h, ~US$ 66/mês, usando ~150 MB cada). O `servidor.mjs` cria um `criarCanal(slug)` por número no mesmo
+processo; o Worker manda tudo para o container `todos-os-numeros` e usa o Durable Object de cada número só como
+cofre da sessão (`/_auth`) — nada pede QR. Na passagem, o container antigo de cada número é desligado antes de
+o novo conectar (`/_aposentar`, uma vez): duas conexões com a mesma sessão estragam as chaves. **"Reiniciar"
+agora reinicia todos os números juntos** (voltam sozinhos, sem QR). O texto abaixo é do desenho anterior.
+
 **Um container por número, então `max_instances` é o teto de números
 ligados ao mesmo tempo.** Estava em 4 — com a loja, as duas IAs, a TV e
 o administrativo já estourava, e o sintoma seria um canal que nunca sai

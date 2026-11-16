@@ -11,7 +11,11 @@
  * A SESSAO NAO MORA AQUI. O container e descartavel (a Cloudflare reinicia quando quer); as chaves
  * da sessao ficam no Durable Object da ponte (`/_auth`), senao cada reinicio pediria o QR de novo.
  *
- * Uma instancia deste programa = um numero (`canal`). */
+ * UM PROGRAMA, TODOS OS NUMEROS (16/11/2026). Era uma instancia por numero, cada uma num container de 1 GB
+ * ligado 24 h — os 5 numeros custavam ~US$ 66/mes na fatura do Cloudflare, usando ~150 MB cada. Agora um
+ * container so segura todos: cada numero e um `criarCanal(slug)` com o proprio socket, a propria fila e o
+ * proprio estado, criado na primeira pergunta que chega com aquele `?canal=`. A sessao continua no Durable
+ * Object DE CADA NUMERO (`/_auth?canal=`), entao nada pede QR de novo. */
 import http from "node:http";
 import https from "node:https";
 import makeWASocket, { DisconnectReason, BufferJSON, initAuthCreds, proto, fetchLatestBaileysVersion,
@@ -26,7 +30,9 @@ const log = pino({ level: process.env.LOG || "warn" });
 const BOTOES_COMO = process.env.BOTOES || "texto";   // "nativo" = botoes pra todo mundo
 // numeros que ja recebem os botoes nativos (teste antes de ligar pra todos)
 const NATIVO_PARA = String(process.env.BOTOES_NATIVO_PARA || "").split(",").map((x) => x.replace(/\D/g, "")).filter(Boolean);
-let CANAL = process.env.CANAL || "";
+
+/* ======================= um numero ======================= */
+function criarCanal(CANAL) {
 
 const st = { estado: "iniciando", qr: "", numero: "", nome: "", desde: Date.now(), erro: "" };
 let sock = null, ligando = false, tentativas = 0;
@@ -474,6 +480,20 @@ async function enviar(para, c) {
   return { ok: true, id };
 }
 
+  return {
+    get st() { return st; }, get sock() { return sock; }, get ligando() { return ligando; },
+    ligar, enviar, authZerar,
+    info: () => ({ lids: lidPn.size, esperandoLid: [...esperandoLid.values()].reduce((a, l) => a + l.length, 0), pulados: pulados.slice(0, 10), testeBotoes: testeLog.slice(0, 9) }),
+  };
+}
+
+const canais = new Map();
+function canalDe(nome) {
+  let c = canais.get(nome);
+  if (!c) { c = criarCanal(nome); canais.set(nome, c); c.ligar(); }
+  return c;
+}
+
 /* ---------- HTTP ---------- */
 function json(res, cod, obj) { res.writeHead(cod, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); }
 async function lerCorpo(req) { const partes = []; for await (const p of req) partes.push(p); return Buffer.concat(partes).toString("utf8"); }
@@ -481,12 +501,15 @@ http.createServer(async (req, res) => {
   try {
     const u = new URL(req.url, "http://x");
     if (req.headers["x-ponte-segredo"] !== SEGREDO) return json(res, 401, { ok: false, erro: "sem permissão" });
-    const canal = u.searchParams.get("canal") || req.headers["x-canal"] || "";
-    if (canal && !CANAL) { CANAL = canal; ligar(); }
-    if (u.pathname === "/estado") { if (!sock && !ligando && CANAL) ligar(); return json(res, 200, Object.assign({ ok: true, canal: CANAL, lids: lidPn.size, esperandoLid: [...esperandoLid.values()].reduce((a, l) => a + l.length, 0), pulados: pulados.slice(0, 10), testeBotoes: testeLog.slice(0, 9),
-      // A memória usada (14/11/2026): é o que decide se o container cabe no "lite" (256 MB) em vez do "basic" (1 GB).
-      memoriaMB: Math.round(process.memoryUsage().rss / 1048576), heapMB: Math.round(process.memoryUsage().heapUsed / 1048576) }, st)); }
-    if (u.pathname === "/enviar" && req.method === "POST") { const b = JSON.parse(await lerCorpo(req) || "{}"); return json(res, 200, await enviar(b.para, b.conteudo || {})); }
+    const canal = String(u.searchParams.get("canal") || req.headers["x-canal"] || "").replace(/[^\w\-]/g, "").slice(0, 60);
+    // A nota fiscal nao e de numero nenhum: nao liga canal so por passar por aqui.
+    const c = canal && u.pathname !== "/nfse" ? canalDe(canal) : null;
+    if (!c && u.pathname !== "/nfse") return json(res, 400, { ok: false, erro: "faltou o canal" });
+    if (u.pathname === "/estado") { if (!c.sock && !c.ligando) c.ligar(); return json(res, 200, Object.assign({ ok: true, canal }, c.info(), {
+      // A memória do container INTEIRO (todos os números juntos) e quantos números ele segura.
+      memoriaMB: Math.round(process.memoryUsage().rss / 1048576), heapMB: Math.round(process.memoryUsage().heapUsed / 1048576), numeros: canais.size }, c.st)); }
+    const sock = c && c.sock, st = c && c.st;
+    if (u.pathname === "/enviar" && req.method === "POST") { const b = JSON.parse(await lerCorpo(req) || "{}"); return json(res, 200, await c.enviar(b.para, b.conteudo || {})); }
     /* OS GRUPOS DESTE NUMERO (22/10/2026), para o gerente escolher na tela para onde vai o aviso de chegada.
        So id, nome e quantos participantes: os numeros de quem esta no grupo nao saem daqui. */
     if (u.pathname === "/grupos") {
@@ -519,7 +542,7 @@ http.createServer(async (req, res) => {
       });
       return json(res, 200, resp);
     }
-    if (u.pathname === "/sair" && req.method === "POST") { try { await sock.logout(); } catch (e) {} await authZerar(); return json(res, 200, { ok: true }); }
+    if (u.pathname === "/sair" && req.method === "POST") { try { await sock.logout(); } catch (e) {} await c.authZerar(); return json(res, 200, { ok: true }); }
     return json(res, 404, { ok: false, erro: "caminho desconhecido" });
   } catch (e) { return json(res, 500, { ok: false, erro: String((e && e.message) || e).slice(0, 200) }); }
 }).listen(8080, () => log.warn("ponte ouvindo na 8080"));

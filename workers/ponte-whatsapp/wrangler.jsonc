@@ -6,11 +6,10 @@
   "main": "src/index.js",
   "compatibility_date": "2026-09-01",
   "containers": [
-    // UM CONTAINER POR NÚMERO, e por isso o teto é o teto de números que
-    // a loja consegue ligar ao mesmo tempo. Estava em 4 -- com a loja, as
-    // duas IAs, o número da TV e o do administrativo já estourava, e o
-    // sintoma seria um canal que nunca sai de "ligando". **Quem cadastrar
-    // número novo confere este número.**
+    // UM CONTAINER PARA TODOS OS NÚMEROS desde 16/11/2026 (src/index.js,
+    // COMPARTILHADO). O teto de instâncias não limita mais os números; o que
+    // limita é a memória do "basic" (1 GB) — cada número usa uns 40–60 MB
+    // dentro do mesmo processo. Era um container por número (~US$ 66/mês).
     { "class_name": "Ponte", "image": "docker.io/library/node:22-slim", "max_instances": 12, "instance_type": "basic" }
   ],
   "durable_objects": { "bindings": [{ "name": "PONTE", "class_name": "Ponte" }] },

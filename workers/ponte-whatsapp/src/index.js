@@ -16,6 +16,14 @@ import CODIGO from "./gerado/ponte.txt";
 const CARREGADOR = "(async()=>{const r=await fetch(process.env.PONTE_URL+'/_codigo',{headers:{'x-ponte-segredo':process.env.PONTE_SEGREDO}});"
   + "if(!r.ok){console.error('nao baixei a ponte',r.status);process.exit(1)}require('fs').writeFileSync('/tmp/ponte.mjs',await r.text());await import('/tmp/ponte.mjs')})()";
 
+/* UM CONTAINER PARA TODOS OS NUMEROS (16/11/2026). Era um container por numero (5 x 1 GB ligados 24 h, ~US$ 66/mes);
+ * agora um so, com nome fixo, segura todos (`criarCanal` no servidor.mjs). O Durable Object DE CADA NUMERO continua
+ * existindo, mas so como cofre da sessao (`/_auth`) — ele nao liga container nenhum. Na passagem, o container antigo
+ * do numero e desligado ANTES de o novo conectar (`/_aposentar`): duas conexoes com a mesma sessao ao mesmo tempo
+ * brigam e podem estragar as chaves, e ai so com QR de novo. */
+const COMPARTILHADO = "todos-os-numeros";
+const aposentados = new Set();   // cache do isolate: o numero cujo container antigo ja foi desligado
+
 export class Ponte extends Container {
   defaultPort = 8080;
   // O cron do ERP (worker/index.js, `scheduled`) pergunta o estado a cada 5 minutos: na pratica,
@@ -32,6 +40,14 @@ export class Ponte extends Container {
   async fetch(req) {
     const u = new URL(req.url);
     if (u.pathname === "/_auth") return this.sessao(req);
+    // O container antigo deste numero sai de cena uma vez, para sempre (so nos DOs de numero).
+    if (u.pathname === "/_aposentar") {
+      if (!(await this.ctx.storage.get("aposentado"))) {
+        try { await this.destroy(); } catch (e) {}
+        await this.ctx.storage.put("aposentado", true);
+      }
+      return Response.json({ ok: true });
+    }
     /* REINICIAR sem desconectar (24/09/2026): o programa e baixado ao LIGAR, entao publicar uma
        versao nova nao muda o container que ja esta rodando. Parar e deixar a proxima pergunta
        (o cron de 1 minuto) ligar de novo — a sessao esta guardada aqui, o QR nao volta. */
@@ -80,10 +96,17 @@ export default {
     const u = new URL(req.url);
     if (u.pathname === "/_codigo") return new Response(CODIGO, { headers: { "content-type": "text/javascript; charset=utf-8" } });
     const canal = String(u.searchParams.get("canal") || "").replace(/[^\w\-]/g, "").slice(0, 60);
-    if (!canal) return Response.json({ ok: false, erro: "faltou o canal" }, { status: 400 });
+    if (!canal || canal === COMPARTILHADO) return Response.json({ ok: false, erro: "faltou o canal" }, { status: 400 });
     const h = new Headers(req.headers); h.set("x-canal", canal);
     try {
-      return await getContainer(env.PONTE, canal).fetch(new Request(req, { headers: h }));
+      // A sessao continua no cofre do proprio numero.
+      if (u.pathname === "/_auth") return await getContainer(env.PONTE, canal).fetch(new Request(req, { headers: h }));
+      if (!aposentados.has(canal)) {
+        await getContainer(env.PONTE, canal).fetch(new Request("https://ponte/_aposentar?canal=" + canal, { headers: h }));
+        aposentados.add(canal);
+      }
+      // Reiniciar (para carregar uma ponte publicada) reinicia o container de todos: os numeros voltam sozinhos, sem QR.
+      return await getContainer(env.PONTE, COMPARTILHADO).fetch(new Request(req, { headers: h }));
     } catch (e) {
       return Response.json({ ok: false, estado: "iniciando", erro: "a ponte está ligando: " + String((e && e.message) || e).slice(0, 160) }, { status: 503 });
     }
