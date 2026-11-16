@@ -4589,6 +4589,81 @@ ${CLAUSULA_ASSINATURA}
   return moldura({ titulo: "Termo de consignação", corpo, protocolo: protocolo(f, "CON") });
 }
 
+/* ---------------- desistência: termo e nota promissória ---------------- */
+
+/**
+ * OS PAPÉIS DA DESISTÊNCIA (16/11/2026, o Derek mandou as duas folhas assinadas pelo Valdivino, da Toro
+ * RNJ2E29). Transcritas palavra por palavra (decisão 7); só as lacunas saem preenchidas. A empresa vem do
+ * cadastro (decisão 73) — a folha dizia "Vaapty Intermediação de Vendas Joinville Ltda", que não é a razão
+ * social. Saem do "Cancelar com multa", no Fechamento.
+ */
+function termoDesistencia(f) {
+  const e = emp();
+  const end = [f.cliente_endereco, f.cliente_bairro, [f.cliente_cidade, f.cliente_uf].filter(Boolean).join("/")].filter(Boolean).join(", ");
+  const [dd, mm, aa] = diaDoc();
+  const corpo = `<h1>Termo de Desistência Unilateral</h1>
+
+<p><strong>IDENTIFICAÇÃO DO DECLARANTE:</strong></p>
+<p>Nome: ${ou(f.cliente_nome, "nome")} CPF: ${ou(f.cliente_cpf, "CPF")} Endereço: ${ou(end, "endereço")}.</p>
+
+<p><strong>IDENTIFICAÇÃO DO PRESTADOR</strong></p>
+<p>Nome: ${escDoc(e.razao)} CNPJ: ${e.cnpj} Endereço: ${e.rua}, ${e.numero} – ${e.bairro}, ${e.cidade}/${e.uf}</p>
+
+<p><strong>DADOS DO VEÍCULO:</strong></p>
+<p>Placa: ${ou(f.placa, "placa")}, Marca/Modelo: ${ou(f.modelo, "marca/modelo")} Ano/Modelo: ${ou(f.ano, "ano")}.</p>
+
+<p><strong>DECLARAÇÕES:</strong></p>
+<ol>
+  <li><strong><u>Desistência</u>:</strong> O(A) DECLARANTE, por meio deste termo, formaliza a desistência unilateral e imotivada do
+  pré-contrato e ou contrato firmado para a venda do veículo descrito acima.</li>
+  <li><strong><u>Recebimento do Veículo</u></strong>: O(A) DECLARANTE declara ter recebido o veículo mencionado em perfeitas condições,
+  sem nada a reclamar quanto à sua integridade, estado de conservação ou qualquer outra questão relativa ao veículo.</li>
+  <li><strong><u>Renúncia a Reivindicações</u></strong>: O(A) DECLARANTE, ao assinar este termo, renuncia a qualquer reivindicação
+  futura relativa ao veículo ou ao processo de intermediação, estando plenamente satisfeito(a) com as condições apresentadas.</li>
+  <li><strong><u>Da multa por quebra de contrato:</u></strong> O(A) DECLARANTE está ciente de que a desistência acarretará na
+  obrigação do pagamento no valor de 10% sobre o valor da proposta aceita.</li>
+</ol>
+
+<p style="margin-top:18px"><strong>${e.cidade}/${e.uf}, ${dd} de ${MESES_DOC[Number(mm) - 1]} de ${aa}.</strong></p>
+
+${assinaturas("DECLARANTE", "PRESTADOR")}`;
+  return moldura({ titulo: "Termo de desistência", corpo, protocolo: protocolo(f, "DES") });
+}
+
+function notaPromissoria(f, valor) {
+  const e = emp();
+  const v = numDoc(valor);
+  const ok = Number.isFinite(v) && v > 0;
+  const rs = ok ? `R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : `R$ ${vazio("valor")}`;
+  const ext = ok ? valorPorExtenso(v) : vazio("por extenso");
+  const [dd, mm, aa] = diaDoc();
+  const data = `${dd} de ${MESES_DOC[Number(mm) - 1]} de ${aa}`;
+  const corpo = `<h1 style="text-align:left;font-size:22pt;letter-spacing:.02em">NOTA PROMISSÓRIA</h1>
+
+<p><strong>VALOR: ${rs} (${ok ? escDoc(ext.toUpperCase()) : ext})</strong></p>
+
+<p><strong>DATA DE EMISSÃO:</strong> ${data}.</p>
+
+<p>Eu, <strong>${ou(f.cliente_nome, "nome")}</strong>, inscrito no CPF sob nº <strong>${ou(f.cliente_cpf, "CPF")}</strong>, comprometo-me
+pagar à empresa <strong>${escDoc(e.RAZAO)}</strong>, ou à sua ordem, a quantia de <strong>${rs} (${ext})</strong>.</p>
+
+<p>O referido valor é devido a título de <strong>multa por quebra contratual</strong>, referente à negociação do seguinte veículo:</p>
+
+<p><strong>Marca/Modelo:</strong> ${ou(f.modelo, "marca/modelo")}</p>
+<p><strong>Placa:</strong> ${ou(f.placa, "placa")}</p>
+
+<p>Comprometo-me a efetuar o pagamento integral do valor acima mencionado, conforme as condições acordadas entre as partes.</p>
+
+<p><strong>EMITENTE / DEVEDOR:</strong></p>
+<p>Nome: ${ou(f.cliente_nome, "nome")}</p>
+<p>CPF: ${ou(f.cliente_cpf, "CPF")}</p>
+
+<p style="margin-top:28px"><strong>ASSINATURA DO EMITENTE:</strong></p>
+<div style="margin-top:40px;border-top:1px solid #000;width:100%"></div>
+<p><strong>LOCAL E DATA: ${e.cidade} ${data}</strong></p>`;
+  return moldura({ titulo: "Nota promissória", corpo, protocolo: protocolo(f, "NP") });
+}
+
 /* ---------------- 3. pré-contrato de intermediação ---------------- */
 
 /**
@@ -4992,7 +5067,7 @@ function AssinadoForaDoZap({ atendimento }) {
   );
 }
 
-function CancelarComMulta({ atendimento, f, perfil, aoCancelar }) {
+function CancelarComMulta({ atendimento, f, perfil, aoCancelar, gerar, dadosDoc }) {
   const aid = atendimento && atendimento.id;
   const pode = !!(perfil && (perfil.papel === "gerente" || perfil.financeiro));
   const [aberto, setAberto] = useState(false);
@@ -5004,6 +5079,16 @@ function CancelarComMulta({ atendimento, f, perfil, aoCancelar }) {
   const base = numeroBR(f && f.valorFechado) || numeroBR(ult && ult.contra) || numeroBR(ult && ult.impresso);
   const sugerido = base > 0 ? Math.round(base * 0.1 * 100) / 100 : 0;
   const abrir = () => { setValor(sugerido ? String(sugerido).replace(".", ",") : ""); setErro(""); setAberto(true); };
+  /* Os dois papéis da desistência (16/11/2026): o termo e a nota promissória da multa. Imprimem-se antes ou
+     depois de registrar; a nota usa o valor da multa daqui. */
+  const papeis = gerar && dadosDoc ? (
+    <div className="flex flex-wrap gap-2">
+      <button onClick={() => gerar("termo_desistencia", "Termo de desistência", termoDesistencia(dadosDoc), null)}
+        className="rounded-md border px-3 py-1.5 text-[12px] font-semibold" style={{ borderColor: C.laranja, color: C.laranja }}>Imprimir o termo de desistência</button>
+      <button onClick={() => { const v = numeroBR(valor) || sugerido; if (!(v > 0)) { setErro("Informe o valor da multa para a nota promissória."); return; } gerar("nota_promissoria", "Nota promissória", notaPromissoria(dadosDoc, v), null); }}
+        className="rounded-md border px-3 py-1.5 text-[12px] font-semibold" style={{ borderColor: C.laranja, color: C.laranja }}>Imprimir a nota promissória{numeroBR(valor) || sugerido ? ` (${brl(numeroBR(valor) || sugerido)})` : ""}</button>
+    </div>
+  ) : null;
   const confirmar = async () => {
     const v = numeroBR(valor);
     if (!(v > 0)) { setErro("Informe o valor da multa."); return; }
@@ -5024,6 +5109,7 @@ function CancelarComMulta({ atendimento, f, perfil, aoCancelar }) {
     <div className="rounded-lg p-3" style={{ background: "#FCEBD9", border: `1px solid ${C.line}` }}>
       <div className="text-[12.5px] font-bold" style={{ color: C.laranja }}>Contrato cancelado com multa</div>
       <div className="mt-0.5 text-[12px]">A multa está na rentabilidade e nos títulos a receber. O atendimento foi para Rescisão.</div>
+      {papeis && <div className="mt-2">{papeis}</div>}
     </div>
   );
   if (!aberto) return (
@@ -5047,6 +5133,7 @@ function CancelarComMulta({ atendimento, f, perfil, aoCancelar }) {
           {sugerido ? `Sugerido: 10% de ${brl(base)} (${f.valorFechado ? "valor fechado" : "última proposta"}) = ${brl(sugerido)}.` : "Sem valor fechado nem proposta para calcular os 10% — digite a multa."}
           {" "}Se o carro já está no pátio, ele sai; o que já foi pago dele continua descontando.
         </p>
+        {papeis}
         {erro && <p className="text-[11.5px]" style={{ color: C.laranja }}>{erro}</p>}
         <div className="flex gap-2">
           <button disabled={ocupado} onClick={confirmar} className="flex-1 rounded-md py-2 text-[12.5px] font-semibold"
@@ -7928,7 +8015,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 parecia uma pilha de blocos. */}
             <TrilhoFechamento f={f} preContratoFeito={preContratoFeito} contratoLiberado={contratoLiberado} />
             <IndicacaoLojista atendimento={atendimento} f={f} perfil={perfil} />
-            <CancelarComMulta atendimento={atendimento} f={f} perfil={perfil} aoCancelar={() => setStatusAtual("rescisao")} />
+            <CancelarComMulta atendimento={atendimento} f={f} perfil={perfil} aoCancelar={() => setStatusAtual("rescisao")} gerar={gerarDocumento} dadosDoc={dadosDoc} />
 
             {/* Primeiro de propósito, a pedido do Derek: é aqui que o
                 valor fecha. O pré-contrato e o contrato final saem com
@@ -26438,6 +26525,7 @@ const ROT_DOC = {
   termo_aceite: "Termo de aceite", autorizacao_cautelar: "Autorização de cautelar",
   pre_contrato: "Pré-contrato", check_list: "Check list", extrato_ofertas: "Extrato de ofertas", contrato_lojista: "Contrato do lojista",
   extrato_revisao: "Extrato da revisão", contrato_final: "Contrato", termo_consignacao: "Termo de consignação",
+  termo_desistencia: "Termo de desistência", nota_promissoria: "Nota promissória",
 };
 
 async function lerChecklistDoc(atendimentoId) {

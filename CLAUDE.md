@@ -6779,3 +6779,10 @@ nem baixar"*): `GaleriaFotos` em tela cheia, a imagem inteira, setas, teclado, a
 miniaturas; "baixar" em cada foto e "Baixar todas" num .zip (JSZip do cdnjs, só na hora; sem ele, uma a uma),
 no Estoque e no bloco de Fotos do atendimento (toque na foto abre),
 com a placa no nome do arquivo.
+
+**A desistência tem papel (0160, 16/11/2026, o Derek mandou as duas folhas do Valdivino, Toro RNJ2E29).** No
+"Cancelar com multa" (Fechamento) saem o **Termo de desistência unilateral** (`termoDesistencia`) e a **Nota
+promissória** da multa (`notaPromissoria`, com o valor da multa daqui e o extenso), transcritos palavra por
+palavra (decisão 7); a empresa vem do cadastro (decisão 73) — a folha dizia "Vaapty Intermediação de Vendas
+Joinville Ltda". Imprimem-se antes ou depois de registrar a multa, e entram no registro de documentos. Na caneta:
+as folhas não têm cláusula de assinatura eletrônica.
