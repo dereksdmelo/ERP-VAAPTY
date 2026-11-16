@@ -3142,7 +3142,7 @@ final deste documento.</p>`;
  * cautelar** não precisa de assinatura; e os extratos são folha de
  * mesa, não instrumento — ninguém assina uma lista de propostas.
  */
-const ASSINAVEIS = ["pre_contrato", "termo_aceite", "check_list", "termo_consignacao"];
+const ASSINAVEIS = ["pre_contrato", "termo_aceite", "check_list", "termo_consignacao", "termo_desistencia", "nota_promissoria"];
 
 function moldura({ titulo, corpo, protocolo, logo, paisagem }) {
   return `<!DOCTYPE html>
@@ -4595,7 +4595,8 @@ ${CLAUSULA_ASSINATURA}
  * OS PAPÉIS DA DESISTÊNCIA (16/11/2026, o Derek mandou as duas folhas assinadas pelo Valdivino, da Toro
  * RNJ2E29). Transcritas palavra por palavra (decisão 7); só as lacunas saem preenchidas. A empresa vem do
  * cadastro (decisão 73) — a folha dizia "Vaapty Intermediação de Vendas Joinville Ltda", que não é a razão
- * social. Saem do "Cancelar com multa", no Fechamento.
+ * social. Saem do "Cliente desistiu?" desde o primeiro termo de aceite (Negociação) até o contrato final
+ * (Fechamento), e assinam-se na caneta ou digitalmente — por isso levam a CLAUSULA_ASSINATURA (decisão 42).
  */
 function termoDesistencia(f) {
   const e = emp();
@@ -4626,6 +4627,8 @@ function termoDesistencia(f) {
 
 <p style="margin-top:18px"><strong>${e.cidade}/${e.uf}, ${dd} de ${MESES_DOC[Number(mm) - 1]} de ${aa}.</strong></p>
 
+${CLAUSULA_ASSINATURA}
+
 ${assinaturas("DECLARANTE", "PRESTADOR")}`;
   return moldura({ titulo: "Termo de desistência", corpo, protocolo: protocolo(f, "DES") });
 }
@@ -4653,6 +4656,8 @@ pagar à empresa <strong>${escDoc(e.RAZAO)}</strong>, ou à sua ordem, a quantia
 <p><strong>Placa:</strong> ${ou(f.placa, "placa")}</p>
 
 <p>Comprometo-me a efetuar o pagamento integral do valor acima mencionado, conforme as condições acordadas entre as partes.</p>
+
+${CLAUSULA_ASSINATURA}
 
 <p><strong>EMITENTE / DEVEDOR:</strong></p>
 <p>Nome: ${ou(f.cliente_nome, "nome")}</p>
@@ -5067,13 +5072,13 @@ function AssinadoForaDoZap({ atendimento }) {
   );
 }
 
-function CancelarComMulta({ atendimento, f, perfil, aoCancelar, gerar, dadosDoc }) {
+function CancelarComMulta({ atendimento, f, perfil, aoCancelar, gerar, dadosDoc, docsDe, assin, setAssin, cliente, soPapeis }) {
   const aid = atendimento && atendimento.id;
   const pode = !!(perfil && (perfil.papel === "gerente" || perfil.financeiro));
   const [aberto, setAberto] = useState(false);
   const [valor, setValor] = useState(""); const [obs, setObs] = useState("");
   const [ocupado, setOcupado] = useState(false); const [erro, setErro] = useState(""); const [feito, setFeito] = useState(false);
-  if (!aid || !pode) return null;
+  if (!aid || (!pode && !soPapeis && !(gerar && dadosDoc))) return null;
   const rodadas = (f && f.rodadas) || [];
   const ult = rodadas[rodadas.length - 1] || null;
   const base = numeroBR(f && f.valorFechado) || numeroBR(ult && ult.contra) || numeroBR(ult && ult.impresso);
@@ -5087,6 +5092,14 @@ function CancelarComMulta({ atendimento, f, perfil, aoCancelar, gerar, dadosDoc 
         className="rounded-md border px-3 py-1.5 text-[12px] font-semibold" style={{ borderColor: C.laranja, color: C.laranja }}>Imprimir o termo de desistência</button>
       <button onClick={() => { const v = numeroBR(valor) || sugerido; if (!(v > 0)) { setErro("Informe o valor da multa para a nota promissória."); return; } gerar("nota_promissoria", "Nota promissória", notaPromissoria(dadosDoc, v), null); }}
         className="rounded-md border px-3 py-1.5 text-[12px] font-semibold" style={{ borderColor: C.laranja, color: C.laranja }}>Imprimir a nota promissória{numeroBR(valor) || sugerido ? ` (${brl(numeroBR(valor) || sugerido)})` : ""}</button>
+      {/* Caneta: assina o impresso. Digital: o link vai ao cliente. */}
+      {docsDe && (docsDe("termo_desistencia").concat(docsDe("nota_promissoria"))).map((d, k) => (
+        <div key={k} className="w-full text-[11px]" style={{ color: C.verde }}>
+          {d.rotulo} às {new Date(d.em).toTimeString().slice(0, 5)}{d.protocolo ? ` · ${d.protocolo}` : ""}
+          {cliente && setAssin && <MandarAssinar doc={d} telefone={cliente.cliente_telefone} nome={cliente.cliente_nome}
+            estado={(assin || {})[d.docId]} aoMudar={() => setAssin({ ...(assin || {}), [d.docId]: { situacao: "aguardando" } })} />}
+        </div>
+      ))}
     </div>
   ) : null;
   const confirmar = async () => {
@@ -5114,8 +5127,22 @@ function CancelarComMulta({ atendimento, f, perfil, aoCancelar, gerar, dadosDoc 
   );
   if (!aberto) return (
     <button onClick={abrir} className="text-[12px] font-semibold" style={{ color: C.laranja }}>
-      Cliente desistiu? Cancelar o contrato com multa →
+      {pode && !soPapeis ? "Cliente desistiu? Cancelar o contrato com multa →" : "Cliente desistiu? Termo de desistência e nota promissória →"}
     </button>
+  );
+  // Sem poder registrar a multa (negociador), ou na Negociação: só os papéis.
+  if (!pode || soPapeis) return (
+    <Bloco titulo="Cliente desistiu" sub="O termo de desistência e a nota promissória da multa (10% da proposta aceita). Na caneta ou digital.">
+      <div className="space-y-2.5">
+        <Campo label="Multa (vai na nota promissória)">
+          <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)} />
+        </Campo>
+        {papeis}
+        {erro && <p className="text-[11.5px]" style={{ color: C.laranja }}>{erro}</p>}
+        <p className="text-[11.5px]" style={{ color: C.mute }}>{pode ? "Registrar a multa (rentabilidade, título a receber, Rescisão) é no Fechamento." : "Registrar a multa no sistema é com o gerente ou o financeiro, no Fechamento."}</p>
+        <button onClick={() => setAberto(false)} className="text-[12px]" style={{ color: C.mute }}>fechar</button>
+      </div>
+    </Bloco>
   );
   return (
     <Bloco titulo="Cancelar o contrato com multa"
@@ -7949,6 +7976,13 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               </Bloco>
             )}
 
+            {/* DESISTÊNCIA (16/11/2026, o Derek: "pode ser usado a partir do primeiro termo de aceite, depois no
+                pré-contrato e no contrato final"): os papéis aparecem aqui assim que há um termo de aceite. */}
+            {docsDe("termo_aceite").length > 0 && (
+              <CancelarComMulta atendimento={atendimento} f={f} perfil={perfil} gerar={gerarDocumento} dadosDoc={dadosDoc}
+                docsDe={docsDe} assin={assin} setAssin={setAssin} cliente={cliente} soPapeis />
+            )}
+
             {/* CONSIGNAR O CARRO (0159, 16/11/2026, o Derek mandou a folha). O cliente não aceitou proposta e
                 deixa o carro na loja por um prazo: o termo sai daqui, e só com ele o status vira Consignado. */}
             <Bloco titulo="Consignar o carro" sub="Sem proposta aceita, o cliente deixa o carro conosco por um prazo. O termo é o que permite marcar Consignado.">
@@ -8015,7 +8049,8 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 parecia uma pilha de blocos. */}
             <TrilhoFechamento f={f} preContratoFeito={preContratoFeito} contratoLiberado={contratoLiberado} />
             <IndicacaoLojista atendimento={atendimento} f={f} perfil={perfil} />
-            <CancelarComMulta atendimento={atendimento} f={f} perfil={perfil} aoCancelar={() => setStatusAtual("rescisao")} gerar={gerarDocumento} dadosDoc={dadosDoc} />
+            <CancelarComMulta atendimento={atendimento} f={f} perfil={perfil} aoCancelar={() => setStatusAtual("rescisao")} gerar={gerarDocumento} dadosDoc={dadosDoc}
+              docsDe={docsDe} assin={assin} setAssin={setAssin} cliente={cliente} />
 
             {/* Primeiro de propósito, a pedido do Derek: é aqui que o
                 valor fecha. O pré-contrato e o contrato final saem com

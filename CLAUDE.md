@@ -6784,5 +6784,12 @@ com a placa no nome do arquivo.
 "Cancelar com multa" (Fechamento) saem o **Termo de desistência unilateral** (`termoDesistencia`) e a **Nota
 promissória** da multa (`notaPromissoria`, com o valor da multa daqui e o extenso), transcritos palavra por
 palavra (decisão 7); a empresa vem do cadastro (decisão 73) — a folha dizia "Vaapty Intermediação de Vendas
-Joinville Ltda". Imprimem-se antes ou depois de registrar a multa, e entram no registro de documentos. Na caneta:
-as folhas não têm cláusula de assinatura eletrônica.
+Joinville Ltda". Imprimem-se antes ou depois de registrar a multa, e entram no registro de documentos. **Na
+caneta ou digital** (levam a `CLAUSULA_ASSINATURA`, estão em `ASSINAVEIS`, com o "mandar assinar" ao lado). **Desde
+o primeiro termo de aceite**: o "Cliente desistiu?" aparece na Negociação (só os papéis, `soPapeis`) e no Fechamento;
+quem não é gerente nem financeiro imprime os papéis, mas registrar a multa continua deles.
+
+**O check list do negociador era recusado do 2º salvamento em diante (16/11/2026).** Depois de gravar, ele volta
+do banco com os `adm_*` (falsos), a tela os mandava de volta e o `api/checklist.js` recusava a gravação inteira
+("A conferência é da tela do administrativo") — banco, PIX e itens do Pedro Ramos (MBD6025) se perderam assim.
+Gerente e adm nunca viam. Agora os `adm_*` de quem não é adm são descartados e o resto grava.
