@@ -41,12 +41,18 @@ export class Ponte extends Container {
     const u = new URL(req.url);
     if (u.pathname === "/_auth") return this.sessao(req);
     // O container antigo deste numero sai de cena uma vez, para sempre (so nos DOs de numero).
+    /* 16/11/2026: a 1ª versao gravava "aposentado" mesmo quando o destroy falhava em silencio — e os containers
+       antigos seguiram ligados, disputando a sessao com o compartilhado (codigo 440). Agora a marca so e gravada
+       quando o container deste numero nao esta mais rodando, e a resposta diz o que aconteceu. */
     if (u.pathname === "/_aposentar") {
-      if (!(await this.ctx.storage.get("aposentado"))) {
-        try { await this.destroy(); } catch (e) {}
-        await this.ctx.storage.put("aposentado", true);
-      }
-      return Response.json({ ok: true });
+      if (await this.ctx.storage.get("aposentado2")) return Response.json({ ok: true, ja: true });
+      let erro = "", rodando = null;
+      try { rodando = this.ctx.container.running; } catch (e) {}
+      try { await this.ctx.container.destroy(); } catch (e) { erro = String((e && e.message) || e).slice(0, 150); }
+      let depois = null;
+      try { depois = this.ctx.container.running; } catch (e) {}
+      if (!depois) await this.ctx.storage.put("aposentado2", true);
+      return Response.json({ ok: !depois, rodando, depois, erro: erro || undefined });
     }
     /* REINICIAR sem desconectar (24/09/2026): o programa e baixado ao LIGAR, entao publicar uma
        versao nova nao muda o container que ja esta rodando. Parar e deixar a proxima pergunta
@@ -100,7 +106,14 @@ export default {
     const h = new Headers(req.headers); h.set("x-canal", canal);
     try {
       // A sessao continua no cofre do proprio numero.
-      if (u.pathname === "/_auth") return await getContainer(env.PONTE, canal).fetch(new Request(req, { headers: h }));
+      /* A sessao so abre para o container compartilhado (16/11/2026). Os containers antigos de cada numero
+         ficaram ligados e brigavam pela mesma sessao; sem a marca, eles nao conseguem reconectar na proxima queda. */
+      if (u.pathname === "/_auth") {
+        if (req.headers.get("x-ponte-dono") !== COMPARTILHADO)
+          return Response.json({ ok: false, erro: "a sessão deste número agora é do container compartilhado" }, { status: 409 });
+        return await getContainer(env.PONTE, canal).fetch(new Request(req, { headers: h }));
+      }
+      if (u.pathname === "/_aposentar_ver") return await getContainer(env.PONTE, canal).fetch(new Request("https://ponte/_aposentar?canal=" + canal, { headers: h }));
       if (!aposentados.has(canal)) {
         await getContainer(env.PONTE, canal).fetch(new Request("https://ponte/_aposentar?canal=" + canal, { headers: h }));
         aposentados.add(canal);

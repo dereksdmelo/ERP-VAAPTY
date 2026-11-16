@@ -58,7 +58,7 @@ const enviadosPorMim = new Set();                  // ids que ESTE programa mand
 const botoesPorConversa = new Map();               // jid -> [{id,title}] — pra entender "1", "2" ou o texto do botao
 
 /* ---------- a sessao, guardada fora ---------- */
-const H = () => ({ "x-ponte-segredo": SEGREDO, "content-type": "application/json" });
+const H = () => ({ "x-ponte-segredo": SEGREDO, "content-type": "application/json", "x-ponte-dono": "todos-os-numeros" });
 async function authCarregar() {
   const r = await fetch(PONTE_URL + "/_auth?canal=" + encodeURIComponent(CANAL), { headers: H() });
   if (!r.ok) throw new Error("não consegui ler a sessão guardada (" + r.status + ")");
