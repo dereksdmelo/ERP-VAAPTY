@@ -5912,6 +5912,9 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   // O termo de consignação impresso (0159): sem ele, o status Consignado é recusado.
   const [consigEm, setConsigEm] = useState((atendimento && atendimento.consignado_em) || null);
   const [consigIndo, setConsigIndo] = useState(false);
+  // A galeria das fotos do carro (16/11/2026): abrir, navegar e baixar.
+  const [galeriaFoto, setGaleriaFoto] = useState(null);
+  const [baixandoFotos, setBaixandoFotos] = useState(null);
   const imprimirConsignacao = async () => {
     const valor = numeroBR(f.consigValor), dias = Number(String(f.consigDias || "").replace(/\D/g, ""));
     if (!(valor > 0)) { setErroDoc("Digite o valor estimado de venda."); return; }
@@ -7171,13 +7174,20 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
               {erroFoto && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erroFoto}</p>}
               {!!fotos.length && (
                 <>
-                  <div className="mt-3 text-[11px]" style={{ color: subindo ? C.roxo : C.mute }}>
-                    {enviadas.length} de {fotos.length} no servidor{subindo ? " · enviando…" : ""}
+                  <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]" style={{ color: subindo ? C.roxo : C.mute }}>
+                    <span>{enviadas.length} de {fotos.length} no servidor{subindo ? " · enviando…" : ""} · toque na foto para abrir</span>
+                    {enviadas.some((p) => p.url) && (
+                      <button disabled={baixandoFotos != null} className="ml-auto rounded-md border px-2.5 py-1 text-[11.5px] font-semibold" style={{ borderColor: C.roxo, color: C.roxo }}
+                        onClick={async () => { setBaixandoFotos(0); await baixarFotosZip(enviadas.filter((p) => p.url), String(f.placa || "carro").toUpperCase().replace(/[^A-Z0-9]/g, "") || "carro", (k) => setBaixandoFotos(k)); setBaixandoFotos(null); }}>
+                        {baixandoFotos != null ? `Baixando ${baixandoFotos}…` : `Baixar todas (${enviadas.filter((p) => p.url).length})`}
+                      </button>
+                    )}
                   </div>
-                  <div className="mt-2 grid grid-cols-3 gap-2">
+                  <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-6">
                     {fotos.map((p, i) => (
-                      <div key={p.chave} className="relative overflow-hidden rounded-md" style={{ border: `1px solid ${p.estado === "erro" ? C.laranja : C.line}`, background: "#000" }}>
-                        <img src={p.url || p.local} alt={`Foto ${i + 1}`} className="block h-20 w-full object-cover"
+                      <div key={p.chave} className="relative overflow-hidden rounded-md" style={{ border: `1px solid ${p.estado === "erro" ? C.laranja : C.line}`, background: "#000", aspectRatio: "4 / 3" }}>
+                        <img src={p.url || p.local} alt={`Foto ${i + 1}`} className="block h-full w-full cursor-zoom-in object-cover"
+                          onClick={() => setGaleriaFoto(i)}
                           style={{ opacity: p.estado === "ok" ? 1 : 0.55 }} />
                         {i === 0 && <span className="absolute left-1 top-1 rounded px-1 py-0.5 text-[8px] font-bold uppercase" style={{ background: C.roxo, color: "#fff" }}>Capa</span>}
                         {p.estado !== "ok" && (
@@ -7198,6 +7208,10 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                       </div>
                     ))}
                   </div>
+                  {galeriaFoto != null && (
+                    <GaleriaFotos fotos={fotos.map((p) => ({ id: p.chave, url: p.url || p.local })).filter((p) => p.url)} inicio={galeriaFoto}
+                      base={String(f.placa || "carro").toUpperCase().replace(/[^A-Z0-9]/g, "") || "carro"} aoFechar={() => setGaleriaFoto(null)} />
+                  )}
                   {!veiculoId && fotos.some((p) => p.estado === "aguardando") && (
                     <p className="mt-2 text-[11px]" style={{ color: C.mute }}>
                       {RX_PLACA.test(placaFicha)

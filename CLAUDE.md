@@ -6777,4 +6777,5 @@ e também pra tirar carros que não estão consignados mais"*.
 **As fotos do carro no Estoque** (16/11/2026, o Derek: *"péssima visualização… não dá pra abrir nem navegar…
 nem baixar"*): `GaleriaFotos` em tela cheia, a imagem inteira, setas, teclado, arrastar com o dedo e a fila de
 miniaturas; "baixar" em cada foto e "Baixar todas" num .zip (JSZip do cdnjs, só na hora; sem ele, uma a uma),
+no Estoque e no bloco de Fotos do atendimento (toque na foto abre),
 com a placa no nome do arquivo.
