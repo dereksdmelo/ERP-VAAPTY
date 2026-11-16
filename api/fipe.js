@@ -85,7 +85,7 @@ async function sessaoValida(tok) {
   const ate = sessoesOk.get(tok);
   if (ate && ate > Date.now()) return true;
   try {
-    const r = await fetch(`${URL_B}/rest/v1/perfil?select=id&limit=1`, { headers: { apikey: ANON, Authorization: tok }, signal: AbortSignal.timeout(8000) });
+    const r = await fetch(`${URL_B}/rest/v1/perfil?select=id&ativo=eq.true&limit=1`, { headers: { apikey: ANON, Authorization: tok }, signal: AbortSignal.timeout(8000) });
     if (!r.ok) return false;
     const d = await r.json().catch(() => []);
     if (!Array.isArray(d) || !d.length) return false;

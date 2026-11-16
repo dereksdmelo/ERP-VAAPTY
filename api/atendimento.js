@@ -304,7 +304,7 @@ async function tatica(req, res, tok) {
   // A leitura por IA custa por chamada: confere no banco que o token é de um usuário ativo
   // (`tokenDe` só olha o formato do cabeçalho — varredura de 08/11/2026).
   try {
-    const eu = await banco(`${URL_BASE}/rest/v1/perfil?select=id&limit=1`, { headers: cabecalhos(tok) });
+    const eu = await banco(`${URL_BASE}/rest/v1/perfil?select=id&ativo=eq.true&limit=1`, { headers: cabecalhos(tok) });
     if (!Array.isArray(eu) || !eu.length) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
   } catch (e) { return res.status(401).json({ erro: "Sessão expirada. Entre de novo." }); }
   const c = await lerCorpo(req);

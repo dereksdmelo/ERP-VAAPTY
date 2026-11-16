@@ -158,8 +158,8 @@ async function cacheRpc(nome, corpo) {
 
 /* LOGIN OBRIGATÓRIO (16/11/2026). Era a única rota aberta que gastava dinheiro: quem descobrisse a URL queimava a
  * cota diária da Placa Fipe e deixava o negociador sem consulta (decisão 9 deixou anotado). Agora vale o mesmo do
- * api/fipe.js: o banco confirma que o token é de alguém da equipe com acesso — conta desativada não lê nem o
- * próprio perfil — e a resposta fica guardada 10 min por token. */
+ * api/fipe.js: o banco confirma o token e que o perfil dele está ATIVO (a conta desativada ainda lê o próprio
+ * perfil — por isso o `ativo=eq.true`, conferido na auditoria de 16/11/2026) — e a resposta fica 10 min por token. */
 const sessoesOk = new Map();
 function tokenDe(req) {
   const h = String((req.headers && (req.headers.authorization || req.headers.Authorization)) || "");
@@ -171,7 +171,7 @@ async function sessaoValida(tok) {
   const ate = sessoesOk.get(tok);
   if (ate && ate > Date.now()) return true;
   try {
-    const r = await fetch(`${URL_B}/rest/v1/perfil?select=id&limit=1`, { headers: { apikey: ANON, Authorization: tok }, signal: AbortSignal.timeout(8000) });
+    const r = await fetch(`${URL_B}/rest/v1/perfil?select=id&ativo=eq.true&limit=1`, { headers: { apikey: ANON, Authorization: tok }, signal: AbortSignal.timeout(8000) });
     if (!r.ok) return false;
     const d = await r.json().catch(() => []);
     if (!Array.isArray(d) || !d.length) return false;

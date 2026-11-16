@@ -758,6 +758,17 @@ login nasce só pelo "+ Adicionar pessoa" do gerente, pela API de administraçã
 gerente é conferido pelo token dele ANTES de a chave de serviço entrar, para uma chamada só — a ordem do "gerar
 senha", decisão 38). **Quem religar o cadastro público reabre a porta.**
 
+**A auditoria de 16/11/2026 (0161).** O verificador do Supabase não acusou erro (nenhuma tabela sem RLS); das 60
+funções que a chave anônima executa, todas exigem segredo de servidor ou token de link, menos `proximo_recibo`, que
+agora pede o financeiro. A simulação por papel (`set local role authenticated` + `request.jwt.claims` no editor SQL,
+contando linhas por tabela) mostrou que: a conta desativada vê só o próprio perfil, a agenda e a presença — **e por
+isso a checagem de login das rotas que custam (placa, fipe, tática) filtra `ativo=eq.true`**; o negociador não vê
+nada do financeiro nem as fichas de colaborador; mas lia o check list (conta e PIX) de 33 de 39 atendimentos, porque
+603 de 731 atendimentos não têm `negociador_id` e "sem dono" valia como "de todos". Agora `e_dono_do_atendimento`
+decide pelo id ou, sem ele, pelo NOME do negociador contra o do login/meta. **O mesmo "sem dono = de todos" ainda
+vale em `mensagem`, `escuta_sessao` e `negociacao_viva`** — o conserto de fundo é o atendimento nascer com o
+`negociador_id` (o "Chegou" da pré-venda), e está em PENDENCIAS.md.
+
 ### 10. O atendimento é o dono; a ficha é filha dele
 
 Até a etapa 3 o sistema era **um** atendimento por aparelho, no

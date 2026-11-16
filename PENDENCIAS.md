@@ -366,3 +366,11 @@ o microfone ligar. O que ficou:
   quebrado e, com a trava da etapa P, impediria o atendimento de seguir.
 - **Transição automática de status.** Descartada: o sistema não tem como
   saber que o cliente desistiu. Status errado é pior que desatualizado.
+
+## Atendimento sem `negociador_id` (16/11/2026, auditoria de segurança)
+
+603 de 731 atendimentos têm só o `negociador_nome`. As regras de acesso tratam "sem dono" como de toda a equipe
+(o check list já não: 0161, pelo nome). Falta: o "Chegou" da pré-venda e o "Novo atendimento" gravarem o
+`negociador_id` pelo `negociador.perfil_id` (no servidor), preencher os antigos pelo nome, e então tirar o
+`or negociador_id is null` de `mensagem`, `escuta_sessao` e `negociacao_viva`. Mexe em quem pode escrever em cada
+atendimento — testar com a fila (repasse) e o "juntar atendimentos" antes.
