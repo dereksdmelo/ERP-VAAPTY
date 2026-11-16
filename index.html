@@ -15890,7 +15890,7 @@ function ConsignadosNoEstoque({ aoAbrir }) {
                   <tr key={a.id} style={{ borderBottom: `1px solid #DCE7F3` }}>
                     <td className="px-2 py-1.5 text-[12.5px]">
                       <b style={{ fontFamily: F.mono }}>{v && v.placa ? v.placa : "—"}</b> {v ? `${v.marca_modelo || ""}${v.ano_modelo ? ` ${v.ano_modelo}` : ""}` : a.carro_descricao || ""}
-                      {v && v.km ? <span className="text-[11px]" style={{ color: C.mute }}> · {Number(v.km).toLocaleString("pt-BR")} km</span> : null}
+                      {v && v.km_atual ? <span className="text-[11px]" style={{ color: C.mute }}> · {Number(v.km_atual).toLocaleString("pt-BR")} km</span> : null}
                     </td>
                     <td className="px-2 py-1.5 text-[12.5px]">{a.cliente_nome || "—"}</td>
                     <td className="px-2 py-1.5 text-[12.5px]">{a.negociador_nome || "—"}</td>

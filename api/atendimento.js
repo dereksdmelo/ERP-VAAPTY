@@ -4285,7 +4285,7 @@ module.exports = async function handler(req, res) {
     try {
       if (req.method === "GET") {
         const lista = await banco(`${REST("atendimento")}?select=id,data,cliente_nome,cliente_telefone,negociador_nome,status,pretensao,` +
-          `consignado_em,consignado_valor,consignado_dias,consignado_ate,carro_descricao,veiculo(id,placa,marca_modelo,ano_modelo,km,fipe_valor,valor_por)` +
+          `consignado_em,consignado_valor,consignado_dias,consignado_ate,carro_descricao,veiculo(id,placa,marca_modelo,ano_modelo,km_atual,fipe_valor,valor_por)` +
           `&status=eq.consignado&order=consignado_em.desc.nullslast&limit=300`, { headers: cabecalhos(tok) });
         return res.status(200).json({ consignados: lista || [] });
       }
