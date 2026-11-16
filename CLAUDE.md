@@ -6763,8 +6763,9 @@ e também pra tirar carros que não estão consignados mais"*.
 
 - **O termo** (`termoConsignacao`) é a folha transcrita palavra por palavra (decisão 7 — inclusive o
   "inicialmente" repetido); as lacunas saem preenchidas (nome, CPF, carro, placa, RENAVAM, valor estimado com
-  extenso, prazo, data). Sem cláusula de assinatura eletrônica: o papel não a tem. Bloco "Consignar o carro" na
-  Negociação, com valor estimado e prazo (`f.consigValor`, `f.consigDias`).
+  extenso, prazo, data). **Assina-se na caneta ou digitalmente** (o Derek: *"assinatura digital ou caneta"*): leva
+  a `CLAUSULA_ASSINATURA` e está em `ASSINAVEIS`, com o "mandar assinar" ao lado do termo impresso. Bloco
+  "Consignar o carro" na Negociação, com valor estimado e prazo (`f.consigValor`, `f.consigDias`).
 - **Imprimir grava no atendimento** `consignado_em`, `consignado_valor`, `consignado_dias` e `consignado_ate`
   (`?recurso=consignacao`). **Sem `consignado_em`, o status Consignado é recusado** no PATCH e no "encerrar"
   (409). Os que já estavam em Consignado antes ganharam `consignado_em`.
@@ -6772,3 +6773,8 @@ e também pra tirar carros que não estão consignados mais"*.
   cliente, negociador, valor estimado (com `*` quando é só a pretensão), FIPE e prazo (laranja quando venceu), e
   o **potencial de venda** somado. Não são da loja: ficam fora do custo do pátio. "Não está mais consignado"
   muda o status (e grava `consignado_fim_em`); "Fechado" segue o caminho de sempre até o estoque.
+
+**As fotos do carro no Estoque** (16/11/2026, o Derek: *"péssima visualização… não dá pra abrir nem navegar…
+nem baixar"*): `GaleriaFotos` em tela cheia, a imagem inteira, setas, teclado, arrastar com o dedo e a fila de
+miniaturas; "baixar" em cada foto e "Baixar todas" num .zip (JSZip do cdnjs, só na hora; sem ele, uma a uma),
+com a placa no nome do arquivo.

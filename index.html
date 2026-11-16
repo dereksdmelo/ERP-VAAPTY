@@ -3142,7 +3142,7 @@ final deste documento.</p>`;
  * cautelar** não precisa de assinatura; e os extratos são folha de
  * mesa, não instrumento — ninguém assina uma lista de propostas.
  */
-const ASSINAVEIS = ["pre_contrato", "termo_aceite", "check_list"];
+const ASSINAVEIS = ["pre_contrato", "termo_aceite", "check_list", "termo_consignacao"];
 
 function moldura({ titulo, corpo, protocolo, logo, paisagem }) {
   return `<!DOCTYPE html>
@@ -4536,7 +4536,9 @@ ${assinaturas("Proprietário(a) do veículo", "Vaapty Intermediação Veicular")
  * quiserem consignar os carros dos clientes"). Transcrito do papel da casa, palavra por palavra — inclusive
  * o "inicialmente" repetido e o "à ser estipulada" (decisão 7: o que está aqui é o que o cliente assina).
  * As lacunas saem preenchidas: nome, CPF, carro, placa, RENAVAM, o valor estimado (com o extenso), o prazo
- * e a data. Sem a cláusula de assinatura eletrônica: o papel não a tem, e o termo se assina na caneta.
+ * e a data. Assina-se na caneta OU digitalmente (o Derek, no mesmo dia: "assinatura digital ou caneta"):
+ * por isso leva a cláusula de assinatura eletrônica (decisão 42), a mesma do pré-contrato — no papel ela só
+ * diz que a via digital também vale.
  */
 function termoConsignacao(f, cg) {
   const e = emp();
@@ -4577,6 +4579,8 @@ compradores para o mesmo;</p>
 </ol>
 
 <p style="text-indent:40px">Assim sendo, firmo as obrigações aqui expressas, por minha livre e espontânea vontade, de efeito imediato.</p>
+
+${CLAUSULA_ASSINATURA}
 
 <p style="margin-top:28px;text-align:center">${e.cidade}, ${dd} de ${MESES_DOC[Number(mm) - 1]} de ${aa}.</p>
 
@@ -7863,7 +7867,12 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 {!podeImprimir ? `Termo de consignação — falta ${faltamCliente.join(", ")}` : consigIndo ? "Registrando…" : consigEm ? "Imprimir o termo de novo" : "Imprimir o termo de consignação"}
               </button>
               {docsDe("termo_consignacao").map((d, k) => (
-                <div key={k} className="mt-1 text-[11px]" style={{ color: C.verde }}>{d.rotulo} às {hhmm(d.em)}{d.protocolo ? ` · ${d.protocolo}` : ""}</div>
+                <div key={k} className="mt-1 text-[11px]" style={{ color: C.verde }}>
+                  {d.rotulo} às {hhmm(d.em)}{d.protocolo ? ` · ${d.protocolo}` : ""}{d.noBanco ? "" : " · fora do banco"}
+                  {/* Caneta: assina o impresso. Digital: o link vai ao cliente. */}
+                  <MandarAssinar doc={d} telefone={cliente.cliente_telefone} nome={cliente.cliente_nome}
+                    estado={assin[d.docId]} aoMudar={() => setAssin({ ...assin, [d.docId]: { situacao: "aguardando" } })} />
+                </div>
               ))}
               {consigEm && (
                 <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md p-2 text-[12.5px]" style={{ background: "#E8F0F7", color: "#1B5FA8" }}>
@@ -16421,11 +16430,115 @@ function TelaEstoque({ perfil, comp, mes, modo, aoAbrir }) {
  * (decisão 6) —, com o mesmo caminho: `comprimir()` (1280 px, JPEG) e
  * `api/foto.js`, que põe a recusada depois da última se a posição
  * estiver ocupada. Tocar abre o visor; "capa" põe na frente. */
-function FotosDoCarro({ veiculoId, aoMudar }) {
+/* AS FOTOS DO CARRO, PARA VER E BAIXAR (16/11/2026, o Derek: "as fotos dos carros em estoque quando abre estão
+ * com uma péssima visualização e não dá pra abrir nem navegar por elas e também não dá pra baixá-la, nem
+ * individualmente nem todas"). O visor de documentos servia a PDF; foto pede tela cheia, a imagem inteira
+ * (sem corte), setas, teclado e o dedo no celular, e a fila de miniaturas embaixo. "Baixar todas" junta num
+ * .zip (JSZip, do CDN, só na hora); sem ele, baixa uma a uma. O nome do arquivo leva a placa e o número. */
+async function baixarArquivo(url, nome) {
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error();
+    const b = await r.blob();
+    const u = URL.createObjectURL(b);
+    const a = document.createElement("a"); a.href = u; a.download = nome; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(u), 4000);
+  } catch (e) { window.open(url, "_blank"); }
+}
+async function baixarFotosZip(fotos, base, aoProgresso) {
+  try {
+    await carregarScript("https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js");
+    const zip = new window.JSZip();
+    let n = 0;
+    for (const [i, f] of fotos.entries()) {
+      const r = await fetch(f.url); if (!r.ok) continue;
+      zip.file(`${base}-${String(i + 1).padStart(2, "0")}.jpg`, await r.blob());
+      n += 1; if (aoProgresso) aoProgresso(n);
+    }
+    const b = await zip.generateAsync({ type: "blob" });
+    const u = URL.createObjectURL(b);
+    const a = document.createElement("a"); a.href = u; a.download = `${base}-fotos.zip`; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(u), 8000);
+  } catch (e) {
+    for (const [i, f] of fotos.entries()) { await baixarArquivo(f.url, `${base}-${String(i + 1).padStart(2, "0")}.jpg`); }
+  }
+}
+
+function GaleriaFotos({ fotos, inicio, base, aoFechar }) {
+  const [i, setI] = useState(inicio || 0);
+  const n = fotos.length;
+  const ir = (d) => setI((x) => (x + d + n) % n);
+  const toque = useRef(null);
+  const tira = useRef(null);
+  useEffect(() => {
+    const t = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); aoFechar(); }
+      if (e.key === "ArrowRight") ir(1);
+      if (e.key === "ArrowLeft") ir(-1);
+    };
+    window.addEventListener("keydown", t);
+    const corpo = document.body.style.overflow; document.body.style.overflow = "hidden";
+    return () => { window.removeEventListener("keydown", t); document.body.style.overflow = corpo; };
+  }, [n]);
+  useEffect(() => {
+    const el = tira.current && tira.current.children[i];
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
+  }, [i]);
+  const f = fotos[i];
+  if (!f) return null;
+  const nome = `${base}-${String(i + 1).padStart(2, "0")}.jpg`;
+  const btn = "rounded-md px-3 py-1.5 text-[13px] font-semibold";
+  const seta = (d, rot) => (
+    <button onClick={(e) => { e.stopPropagation(); ir(d); }} aria-label={rot}
+      className="absolute top-1/2 hidden h-14 w-14 -translate-y-1/2 items-center justify-center rounded-full text-[30px] sm:flex"
+      style={{ [d < 0 ? "left" : "right"]: 16, background: "rgba(255,255,255,0.14)", color: "#fff" }}>{d < 0 ? "‹" : "›"}</button>
+  );
+  return (
+    <div className="fixed inset-0 z-[60] flex flex-col" style={{ background: "rgba(12,9,18,0.96)" }}>
+      <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 text-[13px]" style={{ color: "#fff" }}>
+        <b>{base}</b><span style={{ opacity: 0.7 }}>foto {i + 1} de {n}{i === 0 ? " · capa" : ""}</span>
+        <span className="ml-auto flex flex-wrap gap-2">
+          <button onClick={() => baixarArquivo(f.url, nome)} className={btn} style={{ background: "rgba(255,255,255,0.14)", color: "#fff" }}>Baixar esta</button>
+          <button onClick={() => window.open(f.url, "_blank")} className={btn} style={{ background: "rgba(255,255,255,0.14)", color: "#fff" }}>Abrir em outra aba</button>
+          <button onClick={aoFechar} className={btn} style={{ background: "#fff", color: C.ink }}>Fechar ✕</button>
+        </span>
+      </div>
+      <div className="relative flex min-h-0 flex-1 items-center justify-center px-2"
+        onClick={aoFechar}
+        onTouchStart={(e) => { toque.current = e.touches[0].clientX; }}
+        onTouchEnd={(e) => { const x0 = toque.current; toque.current = null; if (x0 == null) return; const dx = e.changedTouches[0].clientX - x0; if (Math.abs(dx) > 40) ir(dx < 0 ? 1 : -1); }}>
+        <img key={f.id} src={f.url} alt={nome} onClick={(e) => e.stopPropagation()}
+          className="max-h-full max-w-full select-none object-contain" style={{ boxShadow: "0 8px 40px rgba(0,0,0,0.5)" }} draggable={false} />
+        {n > 1 && seta(-1, "Foto anterior")}
+        {n > 1 && seta(1, "Próxima foto")}
+      </div>
+      {n > 1 && (
+        <div ref={tira} className="rolar flex gap-1.5 overflow-x-auto px-3 py-2.5">
+          {fotos.map((x, k) => (
+            <button key={x.id} onClick={() => setI(k)} className="h-14 w-20 shrink-0 overflow-hidden rounded"
+              style={{ outline: k === i ? "2px solid #fff" : "none", opacity: k === i ? 1 : 0.55 }}>
+              <img src={x.url} alt="" loading="lazy" className="h-full w-full object-cover" />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FotosDoCarro({ veiculoId, aoMudar, placa }) {
   const [fotos, setFotos] = useState(null);
   const [erro, setErro] = useState("");
   const [subindo, setSubindo] = useState(0);
   const [visor, setVisor] = useState(null);
+  const [baixando, setBaixando] = useState(null);
+  const base = String(placa || "carro").toUpperCase().replace(/[^A-Z0-9]/g, "") || "carro";
+  const baixarTodas = async () => {
+    if (!fotos || !fotos.length) return;
+    setBaixando(0);
+    await baixarFotosZip(fotos.filter((f) => f.url), base, (k) => setBaixando(k));
+    setBaixando(null);
+  };
   const ler = () => listarFotos(veiculoId).then((l) => { setFotos(l); setErro(""); }).catch((e) => setErro(e.message));
   useEffect(() => { if (veiculoId) ler(); }, [veiculoId]);
   const enviar = async (arquivos) => {
@@ -16454,7 +16567,11 @@ function FotosDoCarro({ veiculoId, aoMudar }) {
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[15px] font-semibold">Fotos</span>
         <span className="text-[12px]" style={{ color: C.mute }}>{fotos ? `${fotos.length} foto${fotos.length === 1 ? "" : "s"}` : "carregando…"}{subindo ? ` · enviando ${subindo}…` : ""}</span>
-        <label className="ml-auto cursor-pointer rounded-md px-3 py-1.5 text-[12.5px] font-semibold text-white" style={{ background: C.roxo }}>
+        {!!(fotos && fotos.length) && (
+          <button onClick={baixarTodas} disabled={baixando != null} className="ml-auto rounded-md border px-3 py-1.5 text-[12.5px] font-semibold"
+            style={{ borderColor: C.roxo, color: C.roxo }}>{baixando != null ? `Baixando ${baixando}/${fotos.length}…` : `Baixar todas (${fotos.length})`}</button>
+        )}
+        <label className={`${fotos && fotos.length ? "" : "ml-auto "}cursor-pointer rounded-md px-3 py-1.5 text-[12.5px] font-semibold text-white`} style={{ background: C.roxo }}>
           + Adicionar fotos
           <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { enviar(e.target.files); e.target.value = ""; }} />
         </label>
@@ -16462,13 +16579,14 @@ function FotosDoCarro({ veiculoId, aoMudar }) {
       {erro && <p className="mt-1 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
       {fotos && !fotos.length && !subindo && <p className="mt-2 text-[12.5px]" style={{ color: C.mute }}>Nenhuma foto deste carro ainda.</p>}
       {!!(fotos && fotos.length) && (
-        <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-5 lg:grid-cols-6">
+        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
           {fotos.map((f, i) => (
             <div key={f.id} className="group relative overflow-hidden rounded-md" style={{ aspectRatio: "4 / 3", background: C.bg }}>
-              {f.url && <img src={f.url} alt={`Foto ${i + 1}`} loading="lazy" className="h-full w-full cursor-pointer object-cover"
+              {f.url && <img src={f.url} alt={`Foto ${i + 1}`} loading="lazy" className="h-full w-full cursor-zoom-in object-cover transition-transform group-hover:scale-[1.03]"
                 onClick={() => setVisor(i)} />}
               {i === 0 && <span className="absolute left-1 top-1 rounded px-1.5 text-[10px] font-bold text-white" style={{ background: C.roxo }}>CAPA</span>}
-              <span className="absolute bottom-1 right-1 hidden gap-1 group-hover:flex">
+              <span className="absolute bottom-1 right-1 flex gap-1 opacity-90 lg:hidden lg:group-hover:flex">
+                <button onClick={() => baixarArquivo(f.url, `${base}-${String(i + 1).padStart(2, "0")}.jpg`)} className="rounded bg-white px-1.5 text-[10.5px] font-semibold" style={{ color: C.ink }}>baixar</button>
                 {i > 0 && <button onClick={() => capa(f.id)} className="rounded bg-white px-1.5 text-[10.5px] font-semibold" style={{ color: C.roxo }}>capa</button>}
                 <button onClick={() => apagar(f.id)} className="rounded bg-white px-1.5 text-[10.5px]" style={{ color: C.laranja }}>apagar</button>
               </span>
@@ -16477,8 +16595,7 @@ function FotosDoCarro({ veiculoId, aoMudar }) {
         </div>
       )}
       {visor != null && fotos && (
-        <VisorAnexos anexos={fotos.map((f, i) => ({ id: f.id, url: f.url, nome: `Foto ${i + 1} do carro`, tipo: "image/jpeg" }))}
-          inicio={visor} aoFechar={() => setVisor(null)} />
+        <GaleriaFotos fotos={fotos.filter((f) => f.url)} inicio={visor} base={base} aoFechar={() => setVisor(null)} />
       )}
     </div>
   );
@@ -16689,7 +16806,7 @@ function FichaEstoque({ id, perfil, aoVoltar, aoAbrir }) {
 
       {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
 
-      <FotosDoCarro veiculoId={e.veiculo_id} />
+      <FotosDoCarro veiculoId={e.veiculo_id} placa={e.veiculo && e.veiculo.placa} />
 
       <NegociacaoDoCarro e={e} aoAbrir={aoAbrir} />
 
