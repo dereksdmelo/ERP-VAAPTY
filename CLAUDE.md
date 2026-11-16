@@ -1667,6 +1667,13 @@ sido gravados**: `somenteEnviadas` só aceitava coluna com entrada no
 `FONTE`, e eles não tinham — o servidor respondia ok e descartava.
 Agora coluna sem entrada vale pelo próprio nome.
 
+**Abrir um atendimento por cima de outro levava a ficha junto (16/11/2026).** O Marcos estava no Palio da Roseli, o
+aviso da fila abriu o da Gabrielle (Lancer) por cima e a tela do atendimento não foi recriada: a ficha do Palio ficou
+na memória e subiu para o Lancer, com as duas rodadas e os três documentos (a primeira folha do Lancer saiu como "3ª
+rodada"). Agora `VaaptyAponte` tem `key={aberto.id}`, e `soDesteAtendimento` descarta rodada, documento e revisão de
+antes de o atendimento existir (5 min de folga), na leitura do aparelho e em cada volta — limpa o que vazou e o que
+uma aba antiga ainda mandar. **Quem trocar de atendimento sem desmontar a tela reintroduz isto.**
+
 **`ferramentas-sincronizacao.js` guarda a regra**, com dezoito casos
 lidos do próprio `index.html` — cópia de código de teste envelhece
 calada, e aí o teste passa enquanto a tela erra.

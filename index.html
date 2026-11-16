@@ -2911,6 +2911,25 @@ function sanearRodadas(lista, documentos) {
     return !!(R[i - 1] && R[i - 1].esperaEm);
   });
 }
+/* O REGISTRO DE OUTRO ATENDIMENTO SAI (16/11/2026). O Marcos estava no Palio da Roseli, o aviso da fila abriu o
+ * atendimento da Gabrielle por cima, e a tela não foi recriada: a ficha do Palio ficou na memória e foi sincronizada
+ * para o Lancer — as duas rodadas e os três documentos dele apareceram lá, e a primeira folha do Lancer saiu como
+ * "3ª rodada". A tela agora nasce de novo a cada atendimento (`key`), e isto limpa o que já vazou e o que uma aba
+ * antiga ainda mandar: rodada, documento ou revisão de ANTES de o atendimento existir não é dele (5 min de folga
+ * para relógio de aparelho). */
+function soDesteAtendimento(f, criadoEm) {
+  const t0 = Date.parse(criadoEm || "");
+  if (!f || !t0) return f;
+  const corte = t0 - 5 * 60000;
+  const dele = (x) => !(x && x.em && Date.parse(x.em) < corte);
+  let n = f;
+  Object.keys(REGISTROS_DA_FICHA).forEach((k) => {
+    if (!Array.isArray(f[k])) return;
+    const l = f[k].filter(dele);
+    if (l.length !== f[k].length) { if (n === f) n = { ...f }; n[k] = l; }
+  });
+  return n;
+}
 function unirDaFicha(k, local, remoto) {
   return unirRegistros(local, remoto, REGISTROS_DA_FICHA[k]);
 }
@@ -5670,7 +5689,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     (async () => {
       try {
         const r = await window.storage.get(CH_AT);
-        if (r && r.value) { const n = { ...VAZIO, ...JSON.parse(r.value) }; fRef.current = n; setF(n); }
+        if (r && r.value) { const n = soDesteAtendimento({ ...VAZIO, ...JSON.parse(r.value) }, atendimento && atendimento.criado_em); fRef.current = n; setF(n); }
       } catch (e) {}
 
       // O negociador é quem está logado — perguntar o nome de quem
@@ -6551,9 +6570,12 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
         let atual = fRef.current || VAZIO;
         if (r) {
           const remota = { ...(r.ficha || {}), transcricao: r.transcricao || "" };
-          const junto = reconciliar(baseRef.current, atual, remota);
+          const junto = soDesteAtendimento(reconciliar(baseRef.current, atual, remota), atendimento.criado_em);
           baseRef.current = remota;
           if (JSON.stringify(junto) !== JSON.stringify(atual)) { guardarFicha(junto); atual = junto; }
+        } else {
+          const limpo = soDesteAtendimento(atual, atendimento.criado_em);
+          if (limpo !== atual) { guardarFicha(limpo); atual = limpo; }
         }
         await mandar(atual);
         if (vivo) setSinc({ estado: "ok", em: Date.now(), erro: "" });
@@ -35944,7 +35966,7 @@ function App() {
     return (
       <>
         <RedeDeErro onde={`atendimento ${aberto.id}`} chave={aberto.id}>
-          <VaaptyAponte perfil={perfil} atendimento={aberto}
+          <VaaptyAponte key={aberto.id} perfil={perfil} atendimento={aberto}
             aoVoltar={() => setAberto(null)}
             aoRecarregar={async () => { try { setAberto(await lerAtendimento(aberto.id)); } catch (e) {} }} />
         </RedeDeErro>
