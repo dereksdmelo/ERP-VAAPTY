@@ -2442,6 +2442,8 @@ function comprimir(file, max = 1280, q = 0.72) {
 const VAZIO = {
   // O dono do carro é o próprio cliente: uma CNH vale pelas duas.
   proprietarioMesmo: false,
+  // Consignação (0159): o valor estimado e o prazo do termo.
+  consigValor: "", consigDias: "",
   // veículo
   modelo: "", ano: "", cambio: "", km: "", kmEntrada: "", placa: "",
   fipe: "", fipeCodigo: "", fipeDesval: "", pedida: "", por: "", gastos: "",
@@ -4527,6 +4529,62 @@ ${assinaturas("Proprietário(a) do veículo", "Vaapty Intermediação Veicular")
   return moldura({ titulo: "Autorização de vistoria cautelar", corpo, protocolo: protocolo(f, "CAU") });
 }
 
+/* ---------------- termo de consignação ---------------- */
+
+/**
+ * TERMO DE CONSIGNAÇÃO DE VEÍCULO (16/11/2026, o Derek mandou a folha: "pra quando os negociadores
+ * quiserem consignar os carros dos clientes"). Transcrito do papel da casa, palavra por palavra — inclusive
+ * o "inicialmente" repetido e o "à ser estipulada" (decisão 7: o que está aqui é o que o cliente assina).
+ * As lacunas saem preenchidas: nome, CPF, carro, placa, RENAVAM, o valor estimado (com o extenso), o prazo
+ * e a data. Sem a cláusula de assinatura eletrônica: o papel não a tem, e o termo se assina na caneta.
+ */
+function termoConsignacao(f, cg) {
+  const e = emp();
+  const v = numDoc(cg && cg.valor);
+  const valorOk = Number.isFinite(v) && v > 0;
+  const dias = cg && Number(cg.dias) > 0 ? String(Math.round(Number(cg.dias))) : "";
+  const [dd, mm, aa] = diaDoc();
+  const corpo = `<h1 style="text-decoration:underline">TERMO DE CONSIGNAÇÃO DE VEÍCULO</h1>
+
+<p>Eu, <u>${ou(f.cliente_nome, "nome")}</u>, inscrito no CPF sob o nº <u>${ou(f.cliente_cpf, "CPF")}</u>, venho através deste termo
+que firmo junto à <strong>${e.RAZAO}.</strong>, de nome “${escDoc(e.unidade)}” pessoa jurídica de direito privado, inscrita no CNPJ
+sob o nº ${e.cnpj}, com sede à ${e.rua}, nº ${e.numero}, bairro ${e.bairro}, ${e.cidade}/${e.uf}, assumir os compromissos a seguir expostos.</p>
+
+<p style="text-indent:40px">Considerando que sou o legítimo proprietário do veículo modelo <u>${ou(f.modelo, "modelo")}</u>, Placa
+<u>${ou(f.placa, "placa")}</u> e RENAVAM <u>${ou(f.renavam, "RENAVAM")}</u> e pretendo a intermediação da venda do mesmo
+pela Vaapty Joinville, com a venda em um valor estimado R$ <u>${valorOk ? v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : vazio("valor estimado")}</u>
+(<u>${valorOk ? valorPorExtenso(v) : vazio("valor por extenso")}</u>);</p>
+
+<p style="text-indent:40px">Considerando, que inicialmente não houve propostas de compra e venda inicialmente, contudo pretendo que a
+Vaapty permaneça na posse do veículo pelo prazo de <u>${dias || vazio("prazo")}</u> dias, a fim de agenciar e buscar possíveis
+compradores para o mesmo;</p>
+
+<p style="text-indent:40px">Firmo os seguintes compromissos e responsabilidades:</p>
+<ol>
+  <li>Deixar o veículo na posse da Vaapty acima descrita, esta a qual por sua vez deverá manter e preservar o veículo nas mesmas
+  condições em que recebeu;</li>
+  <li>O presente termo possui caráter de pré-contrato, oportunidade na qual, uma vez encontrado potencial comprador para o veículo
+  supra descrito no valor supra descrito, assumo o compromisso de firmar o devido “Contrato Particular de Intermediação para venda
+  de veículo usado em consignação, mediante pagamento de comissão” junto à Vaapty acima descrita ou outra que a mesma indicar, sob
+  pena de multa, em favor da Vaapty, equivalente a 10% (dez por cento) sobre o valor total da proposta do veículo, acrescida das
+  despesas e custos despendidos ao longo da intermediação;</li>
+  <li>Uma vez decorrido o prazo previsto neste instrumento, sem que tenham surgido propostas de venda, firmarei extensão do prazo
+  junto à Vaapty ou retomarei a posse do veículo em um prazo de 24 (vinte e quatro) horas, sob pena de multa diária à ser
+  estipulada, isentando a Vaapty de qualquer responsabilidade por eventuais danos ocorridos com o veículo em caso de não retirada
+  do mesmo.</li>
+  <li>Me comprometo a não alienar o veículo sem intermediação da Vaapty, durante o prazo previsto neste instrumento, sob pena de
+  multa, em favor da Vaapty, equivalente a 10% (dez por cento) sobre o valor de venda veículo.</li>
+</ol>
+
+<p style="text-indent:40px">Assim sendo, firmo as obrigações aqui expressas, por minha livre e espontânea vontade, de efeito imediato.</p>
+
+<p style="margin-top:28px;text-align:center">${e.cidade}, ${dd} de ${MESES_DOC[Number(mm) - 1]} de ${aa}.</p>
+
+<div style="margin:56px auto 0;width:280px;border-top:1px solid #000;padding-top:4px;text-align:center">COMPROMISSÁRIO</div>`;
+
+  return moldura({ titulo: "Termo de consignação", corpo, protocolo: protocolo(f, "CON") });
+}
+
 /* ---------------- 3. pré-contrato de intermediação ---------------- */
 
 /**
@@ -5847,6 +5905,25 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   // lista (0036). Escolher o status abre o campo, logo ali.
   const [voltaEm, setVoltaEm] = useState((atendimento && atendimento.volta_em) || "");
   const [pedeVolta, setPedeVolta] = useState(false);
+  // O termo de consignação impresso (0159): sem ele, o status Consignado é recusado.
+  const [consigEm, setConsigEm] = useState((atendimento && atendimento.consignado_em) || null);
+  const [consigIndo, setConsigIndo] = useState(false);
+  const imprimirConsignacao = async () => {
+    const valor = numeroBR(f.consigValor), dias = Number(String(f.consigDias || "").replace(/\D/g, ""));
+    if (!(valor > 0)) { setErroDoc("Digite o valor estimado de venda."); return; }
+    if (!(dias > 0)) { setErroDoc("Digite o prazo, em dias."); return; }
+    const reg = await gerarDocumento("termo_consignacao", "Termo de consignação", termoConsignacao(dadosDoc, { valor, dias }), null);
+    if (!reg || !atendimento) return;
+    setConsigIndo(true);
+    try {
+      const r = await fetchAut("/api/atendimento?recurso=consignacao", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ atendimento_id: atendimento.id, valor, dias }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.erro || "Não consegui registrar o termo.");
+      setConsigEm((d.atendimento && d.atendimento.consignado_em) || new Date().toISOString());
+    } catch (e) { setErroDoc(e.message); }
+    setConsigIndo(false);
+  };
   const gravarVolta = async (d) => {
     setVoltaEm(d); setErroStatus("");
     if (!atendimento) return;
@@ -7766,6 +7843,38 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 </div>
               </Bloco>
             )}
+
+            {/* CONSIGNAR O CARRO (0159, 16/11/2026, o Derek mandou a folha). O cliente não aceitou proposta e
+                deixa o carro na loja por um prazo: o termo sai daqui, e só com ele o status vira Consignado. */}
+            <Bloco titulo="Consignar o carro" sub="Sem proposta aceita, o cliente deixa o carro conosco por um prazo. O termo é o que permite marcar Consignado.">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Campo label="Valor estimado de venda (R$)">
+                  <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal" value={f.consigValor || ""}
+                    onChange={(e) => set("consigValor", e.target.value)} placeholder={f.pretensao ? String(f.pretensao) : "ex.: 45.000"} />
+                </Campo>
+                <Campo label="Prazo (dias)">
+                  <input className={inputCls} style={inputSty} inputMode="numeric" value={f.consigDias || ""}
+                    onChange={(e) => set("consigDias", e.target.value.replace(/\D/g, "").slice(0, 3))} placeholder="ex.: 30" />
+                </Campo>
+              </div>
+              <button disabled={!podeImprimir || consigIndo} onClick={imprimirConsignacao}
+                className="mt-2 w-full rounded-md py-2.5 text-[13px] font-semibold"
+                style={{ background: podeImprimir ? C.roxo : "#E7E3EC", color: podeImprimir ? "#fff" : C.mute }}>
+                {!podeImprimir ? `Termo de consignação — falta ${faltamCliente.join(", ")}` : consigIndo ? "Registrando…" : consigEm ? "Imprimir o termo de novo" : "Imprimir o termo de consignação"}
+              </button>
+              {docsDe("termo_consignacao").map((d, k) => (
+                <div key={k} className="mt-1 text-[11px]" style={{ color: C.verde }}>{d.rotulo} às {hhmm(d.em)}{d.protocolo ? ` · ${d.protocolo}` : ""}</div>
+              ))}
+              {consigEm && (
+                <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md p-2 text-[12.5px]" style={{ background: "#E8F0F7", color: "#1B5FA8" }}>
+                  <span>Termo registrado em {new Date(consigEm).toLocaleDateString("pt-BR")}.</span>
+                  {statusAtual === "consignado"
+                    ? <b>Status: Consignado — o carro aparece no Estoque, em azul.</b>
+                    : <button onClick={() => mudarStatus("consignado", true)} className="rounded-md px-3 py-1 font-semibold text-white" style={{ background: "#1B5FA8" }}>Marcar como Consignado</button>}
+                </div>
+              )}
+              {erroDoc && <p className="mt-1 text-[12px]" style={{ color: C.laranja }}>{erroDoc}</p>}
+            </Bloco>
 
             <Bloco titulo="Escutar a conversa" sub="Os ganchos do que ele falar aqui são o argumento da próxima rodada.">
               <EscutaPainel escuta={escuta} f={f} set={set} atendimentoId={aid} taticas />
@@ -15729,6 +15838,96 @@ function PacoteLojistas({ carros, aoTirar }) {
   );
 }
 
+/* OS CONSIGNADOS NO ESTOQUE (0159, 16/11/2026, o Derek: "devem aparecer no estoque, de maneira separada,
+ * com uma cor diferente, pro gestor saber que tem aqueles carros pra vender e aquele potencial de venda. E
+ * também pra tirar carros que não estão consignados mais"). O carro não é da loja: não entra na tabela do
+ * pátio nem no custo. É a lista dos atendimentos em Consignado, com o valor estimado e o prazo do termo. */
+const AZUL_CONSIG = "#1B5FA8";
+function ConsignadosNoEstoque({ aoAbrir }) {
+  const [l, setL] = useState(null); const [erro, setErro] = useState(""); const [aberto, setAberto] = useState(true);
+  const [tirando, setTirando] = useState(null); const [novoStatus, setNovoStatus] = useState("vendeu_fora"); const [indo, setIndo] = useState(false);
+  const ler = () => fetchAut("/api/atendimento?recurso=consignacao").then((r) => r.json().then((d) => {
+    if (!r.ok) throw new Error(d.erro || "Não consegui ler os consignados."); setL(d.consignados || []); setErro("");
+  })).catch((e) => setErro(e.message));
+  useEffect(() => { ler(); }, []);
+  const tirar = async (a) => {
+    setIndo(true);
+    try {
+      const r = await fetchAut("/api/atendimento?recurso=consignacao&acao=tirar", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ atendimento_id: a.id, status: novoStatus }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.erro || "Não consegui mudar.");
+      setTirando(null); ler();
+    } catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+  if (l === null) return erro ? <p className="mb-3 text-[12.5px]" style={{ color: C.laranja }}>{erro}</p> : null;
+  if (!l.length) return null;
+  const hoje = hojeEmSP();
+  const num = (v) => Number(v) || 0;
+  const potencial = l.reduce((t, a) => t + (num(a.consignado_valor) || num(a.pretensao)), 0);
+  const carro = (a) => (Array.isArray(a.veiculo) ? a.veiculo[0] : a.veiculo) || null;
+  const fipe = l.reduce((t, a) => t + num(carro(a) && carro(a).fipe_valor), 0);
+  return (
+    <div className="mb-3 rounded-xl" style={{ border: `1.5px solid ${AZUL_CONSIG}`, background: "#F3F7FC" }}>
+      <button onClick={() => setAberto(!aberto)} className="flex w-full flex-wrap items-baseline gap-x-4 gap-y-1 px-3 py-2 text-left">
+        <span className="text-[13.5px] font-bold" style={{ color: AZUL_CONSIG }}>{aberto ? "▾" : "▸"} Consignados ({l.length})</span>
+        <span className="text-[12.5px]" style={{ color: AZUL_CONSIG }}>potencial de venda <b style={{ fontVariantNumeric: "tabular-nums" }}>R$ {rs2(potencial)}</b>{fipe ? ` · FIPE R$ ${rs2(fipe)}` : ""}</span>
+        <span className="text-[11.5px]" style={{ color: C.mute }}>não são da loja: ficam fora do custo do pátio</span>
+      </button>
+      {aberto && (
+        <div className="rolar overflow-x-auto px-2 pb-2">
+          <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 760 }}>
+            <thead><tr>{["Carro", "Cliente", "Negociador", "Valor estimado", "FIPE", "Prazo", ""].map((h, i) => (
+              <th key={i} className="whitespace-nowrap px-2 py-1.5 text-left text-[10.5px] font-semibold uppercase tracking-[0.04em]" style={{ color: AZUL_CONSIG, borderBottom: `1px solid #C9DBEE`, textAlign: i === 3 || i === 4 ? "right" : "left" }}>{h}</th>))}</tr></thead>
+            <tbody>
+              {l.map((a) => {
+                const v = carro(a);
+                const ate = a.consignado_ate ? String(a.consignado_ate).slice(0, 10) : "";
+                const venceu = ate && ate < hoje;
+                const faltam = ate ? Math.round((Date.parse(ate) - Date.parse(hoje)) / 86400000) : null;
+                return [
+                  <tr key={a.id} style={{ borderBottom: `1px solid #DCE7F3` }}>
+                    <td className="px-2 py-1.5 text-[12.5px]">
+                      <b style={{ fontFamily: F.mono }}>{v && v.placa ? v.placa : "—"}</b> {v ? `${v.marca_modelo || ""}${v.ano_modelo ? ` ${v.ano_modelo}` : ""}` : a.carro_descricao || ""}
+                      {v && v.km ? <span className="text-[11px]" style={{ color: C.mute }}> · {Number(v.km).toLocaleString("pt-BR")} km</span> : null}
+                    </td>
+                    <td className="px-2 py-1.5 text-[12.5px]">{a.cliente_nome || "—"}</td>
+                    <td className="px-2 py-1.5 text-[12.5px]">{a.negociador_nome || "—"}</td>
+                    <td className="px-2 py-1.5 text-right text-[12.5px] font-semibold" style={{ fontVariantNumeric: "tabular-nums" }}>{num(a.consignado_valor) ? rs2(a.consignado_valor) : num(a.pretensao) ? <span title="Sem termo no sistema: a pretensão do cliente">{rs2(a.pretensao)}*</span> : "—"}</td>
+                    <td className="px-2 py-1.5 text-right text-[12px]" style={{ fontVariantNumeric: "tabular-nums", color: C.mute }}>{v && num(v.fipe_valor) ? rs2(v.fipe_valor) : "—"}</td>
+                    <td className="whitespace-nowrap px-2 py-1.5 text-[12px]" style={{ color: venceu ? C.laranja : C.ink, fontWeight: venceu ? 700 : 400 }}>
+                      {ate ? (venceu ? `venceu ${diaBR(ate)}` : `até ${diaBR(ate)} · ${faltam} d`) : a.consignado_dias ? `${a.consignado_dias} dias` : "sem prazo"}
+                    </td>
+                    <td className="whitespace-nowrap px-2 py-1.5 text-right text-[12px]">
+                      {aoAbrir && <button onClick={() => aoAbrir(a.id)} className="font-semibold" style={{ color: AZUL_CONSIG }}>abrir</button>}
+                      <button onClick={() => setTirando(tirando === a.id ? null : a.id)} className="ml-3" style={{ color: C.mute }}>não está mais consignado</button>
+                    </td>
+                  </tr>,
+                  tirando === a.id && (
+                    <tr key={a.id + "-t"}><td colSpan={7} className="px-2 py-2">
+                      <div className="flex flex-wrap items-center gap-2 rounded-md p-2 text-[12.5px]" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
+                        <span>Como ficou?</span>
+                        <select value={novoStatus} onChange={(e) => setNovoStatus(e.target.value)} className="rounded border px-2 py-1 text-[12.5px] outline-none" style={inputSty}>
+                          {STATUS_AT.filter((x) => x[0] !== "consignado" && x[0] !== "cliente_na_loja").map((x) => <option key={x[0]} value={x[0]}>{x[1]}</option>)}
+                        </select>
+                        <button onClick={() => tirar(a)} disabled={indo} className="rounded-md px-3 py-1 font-semibold text-white" style={{ background: AZUL_CONSIG }}>{indo ? "Mudando…" : "Tirar dos consignados"}</button>
+                        <button onClick={() => setTirando(null)} style={{ color: C.mute }}>cancelar</button>
+                        <span className="text-[11.5px]" style={{ color: C.mute }}>O atendimento muda para esse status. "Fechado" é a compra: ela segue o caminho de sempre até o estoque.</span>
+                      </div>
+                    </td></tr>
+                  ),
+                ];
+              })}
+            </tbody>
+          </table>
+          {erro && <p className="px-2 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TelaEstoque({ perfil, comp, mes, modo, aoAbrir }) {
   const [lista, setLista] = useState(null);
   const [fila, setFila] = useState([]);
@@ -16037,6 +16236,7 @@ function TelaEstoque({ perfil, comp, mes, modo, aoAbrir }) {
        * quebrarem a linha: placa, custo e dias são o que decide, e o
        * resto cabe quando a tela comporta.
        */}
+      {filtro === "em_estoque" && !buscando && !soRentab && <ConsignadosNoEstoque aoAbrir={aoAbrir} />}
       {/* LIMPAR O PÁTIO (04/11/2026, o Derek: "tenho que fazer uma limpa
           nos carros de estoque que estão errados… tem alguma maneira?").
           Marca vários e tira de uma vez: teste, entrada repetida, carro
@@ -26102,7 +26302,7 @@ const DOC_DE_ITEM = {
 const ROT_DOC = {
   termo_aceite: "Termo de aceite", autorizacao_cautelar: "Autorização de cautelar",
   pre_contrato: "Pré-contrato", check_list: "Check list", extrato_ofertas: "Extrato de ofertas", contrato_lojista: "Contrato do lojista",
-  extrato_revisao: "Extrato da revisão", contrato_final: "Contrato",
+  extrato_revisao: "Extrato da revisão", contrato_final: "Contrato", termo_consignacao: "Termo de consignação",
 };
 
 async function lerChecklistDoc(atendimentoId) {

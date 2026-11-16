@@ -134,6 +134,15 @@ const FONTE = {
   observacoes: "observacoes", chegada_em: "chegada_em", como_conheceu: "como_conheceu",
 };
 
+/* CONSIGNADO SÓ COM O TERMO (0159, 16/11/2026, o Derek: "pra colocar status consignado tem que ter esse
+ * termo"). O termo impresso na Negociação grava `consignado_em`; sem ele, o status é recusado aqui — a tela
+ * esconder é conveniência. */
+async function semTermoDeConsignacao(tok, id) {
+  const a = ((await banco(`${REST("atendimento")}?select=consignado_em,status&id=eq.${id}`, { headers: cabecalhos(tok) }).catch(() => [])) || [])[0];
+  return !(a && (a.consignado_em || a.status === "consignado"));
+}
+const ERRO_SEM_TERMO = "Para Consignado, imprima antes o Termo de consignação, na Negociação.";
+
 function paraColunas(c) {
   return {
     data: data(c.data),
@@ -1638,6 +1647,7 @@ async function vez(req, res, tok) {
       if (atual && atual.status !== "cliente_na_loja") st = atual.status;
     }
     if (!st || st === "cliente_na_loja") return res.status(400).json({ erro: "Escolha como o atendimento ficou." });
+    if (st === "consignado" && await semTermoDeConsignacao(tok, id)) return res.status(409).json({ erro: ERRO_SEM_TERMO });
     const d = await banco(`${REST("atendimento")}?id=eq.${id}`, {
       method: "PATCH",
       headers: json(tok, { Prefer: "return=representation" }),
@@ -4268,6 +4278,42 @@ module.exports = async function handler(req, res) {
     } catch (e) { return res.status(e.status || 502).json({ erro: limpar(e.message) }); }
   }
 
+  /* OS CONSIGNADOS (0159). GET: os atendimentos em Consignado, com o carro, o valor estimado e o prazo —
+   * é o que o Estoque mostra à parte, em azul. POST {atendimento_id, valor, dias}: o termo foi impresso.
+   * POST ?acao=tirar {atendimento_id, status}: o carro não está mais consignado (vendeu, o cliente levou). */
+  if (String(req.query.recurso || "") === "consignacao") {
+    try {
+      if (req.method === "GET") {
+        const lista = await banco(`${REST("atendimento")}?select=id,data,cliente_nome,cliente_telefone,negociador_nome,status,pretensao,` +
+          `consignado_em,consignado_valor,consignado_dias,consignado_ate,carro_descricao,veiculo(id,placa,marca_modelo,ano_modelo,km,fipe_valor,valor_por)` +
+          `&status=eq.consignado&order=consignado_em.desc.nullslast&limit=300`, { headers: cabecalhos(tok) });
+        return res.status(200).json({ consignados: lista || [] });
+      }
+      if (req.method !== "POST") { res.setHeader("Allow", "GET, POST"); return res.status(405).json({ erro: "Use GET ou POST." }); }
+      const c = await lerCorpo(req) || {};
+      const aid = String(c.atendimento_id || "");
+      if (!RX_UUID.test(aid)) return res.status(400).json({ erro: "atendimento_id inválido." });
+      if (String(req.query.acao || "") === "tirar") {
+        const st = daLista(c.status, STATUS);
+        if (!st || st === "consignado") return res.status(400).json({ erro: "Escolha como o atendimento ficou." });
+        const r = await banco(`${REST("atendimento")}?id=eq.${aid}`, { method: "PATCH", headers: json(tok, { Prefer: "return=representation" }),
+          body: JSON.stringify({ status: st, consignado_fim_em: new Date().toISOString() }) });
+        const linha = (Array.isArray(r) ? r[0] : r) || null;
+        if (!linha) return res.status(403).json({ erro: "Só quem atende (ou o gerente) muda este atendimento." });
+        const estoque = st === "fechado" ? await entrarNoEstoqueAoFechar(tok, aid) : undefined;
+        return res.status(200).json({ ok: true, atendimento: comEmLoja(linha), estoque });
+      }
+      const valor = decimal(c.valor);
+      const dias = Math.max(1, Math.min(365, Math.round(Number(c.dias) || 0))) || null;
+      const ate = dias ? new Date(Date.parse(hojeAqui() + "T12:00:00Z") + dias * 86400000).toISOString().slice(0, 10) : null;
+      const r = await banco(`${REST("atendimento")}?id=eq.${aid}`, { method: "PATCH", headers: json(tok, { Prefer: "return=representation" }),
+        body: JSON.stringify({ consignado_em: new Date().toISOString(), consignado_valor: valor, consignado_dias: dias, consignado_ate: ate, consignado_fim_em: null }) });
+      const linha = (Array.isArray(r) ? r[0] : r) || null;
+      if (!linha) return res.status(403).json({ erro: "Só quem atende (ou o gerente) registra a consignação." });
+      return res.status(200).json({ ok: true, atendimento: comEmLoja(linha) });
+    } catch (e) { return res.status(e.status || 502).json({ erro: limpar(e.message) }); }
+  }
+
   if (String(req.query.recurso || "") === "contrato-fora" && req.method === "POST") {
     try {
       const c = await lerCorpo(req) || {};
@@ -4398,6 +4444,7 @@ module.exports = async function handler(req, res) {
         if (antes && String(antes.data) !== hojeAqui() && String(antes.data).slice(0, 7) === hojeAqui().slice(0, 7) && antes.status !== "cliente_na_loja") linha.voltou_em = new Date().toISOString();
       }
       if (!Object.keys(linha).length) return res.status(400).json({ erro: "Nada para atualizar." });
+      if (linha.status === "consignado" && await semTermoDeConsignacao(tok, id)) return res.status(409).json({ erro: ERRO_SEM_TERMO });
 
       const r = await banco(`${REST("atendimento")}?id=eq.${id}`, {
         method: "PATCH",
