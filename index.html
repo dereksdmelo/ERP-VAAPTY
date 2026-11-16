@@ -15844,7 +15844,11 @@ function PacoteLojistas({ carros, aoTirar }) {
  * pátio nem no custo. É a lista dos atendimentos em Consignado, com o valor estimado e o prazo do termo. */
 const AZUL_CONSIG = "#1B5FA8";
 function ConsignadosNoEstoque({ aoAbrir }) {
-  const [l, setL] = useState(null); const [erro, setErro] = useState(""); const [aberto, setAberto] = useState(true);
+  // Fechado por padrão (o cabeçalho já diz quantos e o potencial), para não empurrar o pátio para baixo;
+  // a escolha fica no aparelho.
+  const [l, setL] = useState(null); const [erro, setErro] = useState("");
+  const [aberto, setAbertoSt] = useState(() => { try { return localStorage.getItem("vaapty:consignados-aberto") === "1"; } catch (e) { return false; } });
+  const setAberto = (v) => { setAbertoSt(v); try { localStorage.setItem("vaapty:consignados-aberto", v ? "1" : "0"); } catch (e) {} };
   const [tirando, setTirando] = useState(null); const [novoStatus, setNovoStatus] = useState("vendeu_fora"); const [indo, setIndo] = useState(false);
   const ler = () => fetchAut("/api/atendimento?recurso=consignacao").then((r) => r.json().then((d) => {
     if (!r.ok) throw new Error(d.erro || "Não consegui ler os consignados."); setL(d.consignados || []); setErro("");

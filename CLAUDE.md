@@ -6717,3 +6717,58 @@ líquido ao cliente nem conta no check list (`entrarAoFechar` e a entrada à mã
 check list é preenchido (`puxarDoChecklist`: o líquido entra no lugar, mesmo zero) ou quando alguém
 digita a compra. `AvisoComprasProvisorias` mostra os carros em Atendimentos (o negociador vê os dele, a
 gestão vê todos, com "abrir") e nas Pendências do financeiro; o Estoque e o Balanço marcam "provisório".
+
+### 76. Investidores e sócios, e centros de custo (0158)
+
+O Derek, em 16/11/2026: *"estamos pegando dinheiro a juros de alguns investidores… com cada um combinamos
+uma taxa de juros mensal… tem que lançar no DRE e na contas a pagar o valor dos juros no dia que ele faz
+aniversário. No caso do dinheiro do sócio, a mesma coisa… só que é mais dinâmico, tem mais entra e sai… computa
+o dinheiro que tinha no final do mês"*. Financeiro → fim do mês → **Investidores** (`FinInvestidores`,
+`?recurso=investidor` no `api/financeiro.js`) e Financeiro → cadastros → **Centros de custo** (`FinCentros`).
+
+**O saldo de cada um não é digitado**: saldo inicial (com data) + as linhas efetivadas com o investidor na conta
+**9.10 Capital de investidores e sócios** (`pede_investidor`, fora do DRE). Aporte e resgate entram pela
+**conciliação**: na linha do extrato, a conta 9.10 pede o investidor (crédito = aporte, débito = resgate); com o
+CPF/CNPJ no cadastro, a importação já reconhece.
+
+**Os juros, por pessoa — pagos ou capitalizados** (`juros_modo`):
+- **investidor**: no dia do aniversário, sobre o **menor saldo** entre o aniversário anterior e este (dinheiro
+  que ficou o mês inteiro; aporte no meio do mês rende a partir do aniversário seguinte; quem começou depois do
+  aniversário anterior não ganha o primeiro mês);
+- **sócio**: sobre o saldo do **último dia do mês**; o título vence no dia escolhido do mês seguinte.
+- "pago" vira **título a pagar em 7.01 Juros** (vencimento no aniversário); "soma ao saldo" vira um **par de
+  linhas** na conta interna "Juros capitalizados" (`tipo = 'interna'`, inativa): débito em Juros (DRE) e crédito
+  no Capital (saldo dele) — o caixa não se mexe e o saldo da conta interna é sempre zero.
+
+**A conta mora no banco** (`fin_investidores_mes`, `fin_inv_juros_de`, `fin_juros_gerar`), para a tela e o cron
+lerem a mesma regra. **Os juros nascem sozinhos**: o `scheduled` do Worker chama `fin_juros_gerar` (mês atual e
+anterior, duas vezes por hora, com o IA_SEGREDO); o botão da tela gera na hora o que já venceu. Um juro por
+pessoa por mês: a guarda olha a linha em 7.01 com o investidor na competência (inclusive o título ligado ao
+extrato, que fica cancelado com `extrato_id`).
+
+**Centro de custo no financeiro inteiro**: `fin_lancamento.centro_custo_id` (e `fin_conta_fixa`, que passa ao
+título). Escolhe-se no título, na linha da conciliação (seletor pequeno sob a descrição) e na conta fixa; a linha
+com investidor herda o centro dele (gatilho). O **DRE filtra por centro** (`?centro=<id>|sem`): com filtro, só as
+linhas daquele centro, sem a rentabilidade dos carros e sem a projeção de folha e contas fixas. O investidor e o
+centro passam adiante em todo caminho do título (importação, ligar, parcial, série, divisão).
+
+**No Balanço**, "Investidores e sócios" é passivo (o saldo de cada um) e os juros em aberto têm grupo próprio.
+
+### 77. Consignação: o termo, o status e o Estoque (0159)
+
+O Derek, em 16/11/2026, com a folha "TERMO DE CONSIGNAÇÃO DE VEÍCULO": *"pra quando os negociadores quiserem
+consignar os carros dos clientes. Precisa estar na fase de negociação. E pra colocar status consignado tem que
+ter esse termo… os carros consignados devem aparecer no estoque, de maneira separada, com uma cor diferente…
+e também pra tirar carros que não estão consignados mais"*.
+
+- **O termo** (`termoConsignacao`) é a folha transcrita palavra por palavra (decisão 7 — inclusive o
+  "inicialmente" repetido); as lacunas saem preenchidas (nome, CPF, carro, placa, RENAVAM, valor estimado com
+  extenso, prazo, data). Sem cláusula de assinatura eletrônica: o papel não a tem. Bloco "Consignar o carro" na
+  Negociação, com valor estimado e prazo (`f.consigValor`, `f.consigDias`).
+- **Imprimir grava no atendimento** `consignado_em`, `consignado_valor`, `consignado_dias` e `consignado_ate`
+  (`?recurso=consignacao`). **Sem `consignado_em`, o status Consignado é recusado** no PATCH e no "encerrar"
+  (409). Os que já estavam em Consignado antes ganharam `consignado_em`.
+- **No Estoque** (`ConsignadosNoEstoque`), em azul e à parte do pátio: os atendimentos em Consignado, com carro,
+  cliente, negociador, valor estimado (com `*` quando é só a pretensão), FIPE e prazo (laranja quando venceu), e
+  o **potencial de venda** somado. Não são da loja: ficam fora do custo do pátio. "Não está mais consignado"
+  muda o status (e grava `consignado_fim_em`); "Fechado" segue o caminho de sempre até o estoque.
