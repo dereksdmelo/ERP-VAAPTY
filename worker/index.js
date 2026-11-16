@@ -198,9 +198,28 @@ export default {
       // Os lembretes de prazo de transferência aos lojistas (0092): um
       // por volta, e o banco decide se é hora e se está ligado.
       avisarPrazos(env).catch((e) => console.error("lojistas:", String((e && e.message) || e).slice(0, 200))),
+      // Os juros dos investidores e sócios (0158): no aniversário de cada um (e no fim do mês, o do sócio)
+      // o título a pagar ou o juro capitalizado nasce sozinho. Duas vezes por hora basta.
+      jurosInvestidores(env).catch((e) => console.error("juros:", String((e && e.message) || e).slice(0, 200))),
     ]);
   },
 };
+
+async function jurosInvestidores(env) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY || !env.IA_SEGREDO) return;
+  if (new Date().getUTCMinutes() % 30 > 2) return;
+  const hoje = new Date(Date.now() - 3 * 3600000);
+  const comp = (d) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-01`;
+  const antes = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth() - 1, 1));
+  for (const c of [comp(antes), comp(hoje)]) {
+    const r = await fetch(`${env.SUPABASE_URL}/rest/v1/rpc/fin_juros_gerar`, {
+      method: "POST", signal: AbortSignal.timeout(20000),
+      headers: { apikey: env.SUPABASE_ANON_KEY, Authorization: `Bearer ${env.SUPABASE_ANON_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ p_comp: c, p_segredo: env.IA_SEGREDO }),
+    });
+    if (!r.ok) console.error("juros:", c, r.status, (await r.text()).slice(0, 150));
+  }
+}
 
 async function despertar(env) {
     if (!env.PONTE || !env.PONTE_SEGREDO || !env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return;

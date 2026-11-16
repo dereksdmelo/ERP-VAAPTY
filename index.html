@@ -20384,7 +20384,7 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
    * atalho para a mesma tela seria menu que promete o que não tem. */
   const TITULO = { pendencias: "Pendências", lancamentos: "Conciliação bancária", recebimentos: "Recebimentos", contas: "Títulos financeiros", cartoes: "Cartões de crédito", notas: "Notas fiscais",
     carros: "Carros", fechamento: "Fechamento", dre: "DRE", ano: "Ano", balanco: "Balanço patrimonial", folha: "Folha", caixas: "Contas e caixas",
-    fixas: "Contas fixas", plano: "Plano de contas" };
+    fixas: "Contas fixas", plano: "Plano de contas", investidores: "Investidores e sócios", centros: "Centros de custo" };
   const SUB = {
     notas: "Nota fiscal de serviço, direto na Receita.",
     pendencias: "Tudo que pede ação, num lugar só.",
@@ -20401,13 +20401,15 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
     caixas: "Os bancos e o dinheiro em espécie: quanto tem em cada lugar.",
     fixas: "O que sai todo mês: gera os títulos do mês e entra na projeção do DRE.",
     plano: "As categorias do DRE: em que grupo cada uma entra, e se é custo fixo ou variável.",
+    investidores: "O dinheiro de investidores e sócios na loja, e os juros de cada mês.",
+    centros: "Para separar o financeiro por centro — o DRE filtra por eles.",
   };
   // Quem vem de uma pendência chega no MÊS dela: o lançamento sem
   // categoria de agosto não está na tela de outubro.
   const irPara = (a, c) => { if (c && aoMudarMes) aoMudarMes(competenciaDe(c)); if (aoIrPara) aoIrPara(a); };
   return (
     <div>
-      <Cabecalho titulo={TITULO[aba] || "Financeiro"} mes={aba === "pendencias" || aba === "caixas" || aba === "cartoes" || aba === "notas" || aba === "ano" || aba === "balanco" || aba === "plano" ? null : mes} sub={SUB[aba]} />
+      <Cabecalho titulo={TITULO[aba] || "Financeiro"} mes={aba === "pendencias" || aba === "caixas" || aba === "cartoes" || aba === "notas" || aba === "ano" || aba === "balanco" || aba === "plano" || aba === "centros" ? null : mes} sub={SUB[aba]} />
       {aba === "pendencias" && <FinPendencias aoIr={irPara} />}
       {aba === "lancamentos" && <FinLancamentos comp={comp} aoIrTitulos={() => irPara("contas")} />}
       {aba === "recebimentos" && <FinRecebimentos comp={comp} />}
@@ -20423,6 +20425,8 @@ function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
       {aba === "caixas" && <FinCaixas />}
       {aba === "fixas" && <FinContasFixas comp={comp} />}
       {aba === "plano" && <FinPlanoContas />}
+      {aba === "investidores" && <FinInvestidores comp={comp} />}
+      {aba === "centros" && <FinCentros />}
     </div>
   );
 }
@@ -20438,6 +20442,7 @@ function FinContasFixas({ comp }) {
   const [d, setD] = useState(null); const [erro, setErro] = useState(""); const [aviso, setAviso] = useState("");
   const [cats, setCats] = useCategoriasFin(true); const [contas, setContas] = useState([]);
   const [nova, setNova] = useState(null); const [indo, setIndo] = useState(false);
+  const [centros] = useCentrosCusto();
   const carregar = () => fin("contas-fixas", { competencia: comp }).then((x) => { setD(x); setErro(""); }).catch((e) => setErro(e.message));
   useEffect(() => { setD(null); carregar(); }, [comp]);
   useEffect(() => {
@@ -20485,6 +20490,11 @@ function FinContasFixas({ comp }) {
       <label className="flex items-center gap-1 text-[12px]" style={{ color: C.mute }} title="Paga uma vez por mês a esse favorecido, em qualquer valor: o extrato liga o PIX a esta conta pelo nome, sem olhar o valor.">
         <input type="checkbox" checked={!!c.valor_livre} onChange={(e) => mudar({ valor_livre: e.target.checked })} /> 1× por mês, qualquer valor
       </label>
+      {centros.length > 0 && (
+        <select className={sel} style={inputSty} value={c.centro_custo_id || ""} onChange={(e) => mudar({ centro_custo_id: e.target.value || null })}>
+          <option value="">centro de custo…</option>{centros.map((k) => <option key={k.id} value={k.id}>{k.nome}</option>)}
+        </select>
+      )}
     </>
   );
   return (
@@ -20561,6 +20571,268 @@ function FinContasFixas({ comp }) {
   );
 }
 
+/* INVESTIDORES E SÓCIOS (0158, 16/11/2026, o Derek: "estamos pegando dinheiro a juros de alguns
+ * investidores… com cada um combinamos uma taxa de juros mensal… lançar no DRE e na contas a pagar o valor
+ * dos juros no dia que ele faz aniversário… o sócio é mais dinâmico, tem mais entra e sai… computa o
+ * dinheiro que tinha no final do mês"). O saldo não é digitado: é o saldo inicial mais o que a conciliação
+ * pôs na conta 9.10 Capital com o nome dele. Os juros nascem sozinhos no dia (o cron), e o botão daqui gera
+ * na hora o que já venceu. */
+function FinInvestidores({ comp }) {
+  const [d, setD] = useState(null); const [erro, setErro] = useState(""); const [aviso, setAviso] = useState("");
+  const [editando, setEditando] = useState(null); const [extrato, setExtrato] = useState(null); const [indo, setIndo] = useState(false);
+  const [contas, setContas] = useState([]); const [centros] = useCentrosCusto();
+  const carregar = () => fin("investidor", { competencia: comp }).then((x) => { setD(x); setErro(""); }).catch((e) => setErro(e.message));
+  useEffect(() => { setD(null); carregar(); }, [comp]);
+  useEffect(() => { fin("conta").then((x) => setContas((x.lista || []).filter((c) => c.ativa !== false && c.tipo !== "interna"))).catch(() => {}); }, []);
+  const gerar = async () => {
+    setIndo(true); setAviso("");
+    try { const r = await fin("investidor", { competencia: comp, acao: "gerar" }, finJson("POST", {}));
+      setAviso(r.criados ? `${r.criados} juro${r.criados === 1 ? "" : "s"} gerado${r.criados === 1 ? "" : "s"} — os pagos estão em Títulos financeiros, os capitalizados já somaram ao saldo.` : "Nada para gerar agora."); carregar(); }
+    catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+  if (erro && !d) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
+  if (!d) return <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>;
+  const lista = d.lista || [];
+  const ativos = lista.filter((x) => x.investidor.ativo);
+  const inativos = lista.filter((x) => !x.investidor.ativo);
+  const total = ativos.reduce((t, x) => t + (Number(x.saldo_hoje) || 0), 0);
+  const jurosMes = ativos.reduce((t, x) => t + (Number(x.juros.juros) || 0), 0);
+  const aGerar = ativos.filter((x) => x.juros.devido && !x.juros.gerado && Number(x.juros.juros) > 0).length;
+  const combinado = (i) => {
+    const taxa = `${String(Number(i.taxa_mensal) || 0).replace(".", ",")}% ao mês`;
+    const modo = i.juros_modo === "capitaliza" ? "soma ao saldo" : "pago";
+    return i.tipo === "socio"
+      ? `${taxa} sobre o saldo do fim do mês · ${modo}${i.juros_modo === "capitaliza" ? "" : `, dia ${i.dia_aniversario || 5} do mês seguinte`}`
+      : `${taxa} · aniversário dia ${i.dia_aniversario || "—"} · ${modo}`;
+  };
+  const situacao = (x) => {
+    const j = x.juros, g = j.gerado;
+    if (g) {
+      if (g.origem === "juros_capitalizado") return <span style={{ color: C.verde, fontWeight: 600 }}>somado ao saldo</span>;
+      if (g.situacao === "efetivado") return <span style={{ color: C.verde, fontWeight: 600 }}>pago</span>;
+      return <span style={{ color: AMARELO.texto, fontWeight: 600 }}>a pagar · vence {diaBR(g.vencimento || j.vencimento)}</span>;
+    }
+    if (!(Number(j.juros) > 0)) return <span style={{ color: C.mute }}>{Number(x.investidor.taxa_mensal) > 0 ? "sem saldo no período" : "sem taxa"}</span>;
+    if (j.devido) return <span style={{ color: C.laranja, fontWeight: 600 }}>venceu — gerar</span>;
+    return <span style={{ color: C.mute }}>{x.investidor.tipo === "socio" ? "no fim do mês" : `em ${diaBR(j.referencia)}`}</span>;
+  };
+  const th = "whitespace-nowrap px-2 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.04em]";
+  const linhaInv = (x) => (
+    <tr key={x.investidor.id} style={{ borderBottom: `1px solid ${C.line}`, opacity: x.investidor.ativo ? 1 : 0.55 }}>
+      <td className="px-2 py-1.5 text-[13px] font-semibold">
+        {x.investidor.nome}
+        <span className="ml-1.5 rounded px-1.5 py-px text-[10.5px] font-bold" style={{ background: x.investidor.tipo === "socio" ? C.roxoFraco : "#E8F0F7", color: x.investidor.tipo === "socio" ? C.roxo : "#2C5D86" }}>
+          {x.investidor.tipo === "socio" ? "sócio" : "investidor"}</span>
+      </td>
+      <td className="px-2 py-1.5 text-[12px]" style={{ color: C.mute }}>{combinado(x.investidor)}</td>
+      <td className="px-2 py-1.5 text-right text-[13px] font-semibold" style={{ fontVariantNumeric: "tabular-nums" }}>{rs2(x.saldo_hoje)}</td>
+      <td className="px-2 py-1.5 text-right text-[12.5px]" style={{ fontVariantNumeric: "tabular-nums" }}>
+        {rs2(x.juros.gerado ? x.juros.gerado.valor : x.juros.juros)}
+        <div className="text-[10.5px]" style={{ color: C.mute }}>sobre {rs2(x.juros.base)}</div>
+      </td>
+      <td className="px-2 py-1.5 text-[12px]">{situacao(x)}</td>
+      <td className="whitespace-nowrap px-2 py-1.5 text-right text-[12px]">
+        <button onClick={() => setExtrato(x)} className="font-semibold" style={{ color: C.roxo }}>extrato</button>
+        <button onClick={() => setEditando({ ...x.investidor })} className="ml-3 font-semibold" style={{ color: C.roxo }}>editar</button>
+      </td>
+    </tr>
+  );
+  return (
+    <div className="space-y-4">
+      {(erro || aviso) && <p className="text-[13px]" style={{ color: erro ? C.laranja : C.verde }}>{erro || aviso}</p>}
+      <div className="flex flex-wrap items-center gap-5 rounded-xl p-3" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        <div>
+          <div className="text-[12px]" style={{ color: C.mute }}>Dinheiro deles na loja, hoje</div>
+          <div className="text-[20px] font-bold" style={{ fontVariantNumeric: "tabular-nums" }}>{rs2(total)}</div>
+        </div>
+        <div>
+          <div className="text-[12px]" style={{ color: C.mute }}>Juros de {rotuloMes(comp)}</div>
+          <div className="text-[20px] font-bold" style={{ fontVariantNumeric: "tabular-nums", color: C.laranja }}>{rs2(jurosMes)}</div>
+        </div>
+        <div className="flex flex-wrap gap-2 lg:ml-auto">
+          <button onClick={() => setEditando({ nome: "", tipo: "investidor", taxa_mensal: "", juros_modo: "pago", dia_aniversario: "", ativo: true, saldo_inicial: "", saldo_inicial_em: "" })}
+            className="rounded-lg px-3 py-2 text-[13px] font-semibold" style={{ color: C.roxo, border: `1px solid ${C.roxo}` }}>+ investidor ou sócio</button>
+          <button onClick={gerar} disabled={indo || !aGerar} className="rounded-lg px-4 py-2 text-[13px] font-semibold text-white"
+            style={{ background: indo || !aGerar ? C.line : C.roxo }} title="Os juros também nascem sozinhos no dia; este botão gera na hora o que já venceu.">
+            {indo ? "Gerando…" : aGerar ? `Gerar ${aGerar} juro${aGerar === 1 ? "" : "s"} vencido${aGerar === 1 ? "" : "s"}` : "Juros em dia"}</button>
+        </div>
+      </div>
+      <div className="rolar overflow-x-auto rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 860 }}>
+          <thead><tr>{["Nome", "Combinado", "Saldo hoje", `Juros de ${rotuloMes(comp)}`, "Situação", ""].map((h, i) => (
+            <th key={i} className={th} style={{ color: C.mute, borderBottom: `1px solid ${C.line}`, textAlign: i === 2 || i === 3 ? "right" : "left" }}>{h}</th>))}</tr></thead>
+          <tbody>
+            {ativos.map(linhaInv)}
+            {!ativos.length && <tr><td colSpan={6} className="px-3 py-6 text-center text-[13px]" style={{ color: C.mute }}>Ninguém cadastrado. Comece pelo "+ investidor ou sócio".</td></tr>}
+            {inativos.map(linhaInv)}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[12px] leading-relaxed" style={{ color: C.mute }}>
+        <b>Como o saldo anda:</b> na Conciliação bancária, ponha o PIX que ele mandou (ou o que saiu para ele) na conta <b>9.10 Capital de investidores e sócios</b> e escolha o nome — entrada é aporte, saída é resgate.
+        Com o CPF/CNPJ no cadastro, o extrato importado já reconhece. <b>Os juros:</b> o investidor recebe no aniversário, sobre o menor saldo do mês que passou (o dinheiro que ficou o mês inteiro);
+        o sócio, sobre o saldo do fim do mês. "Pago" vira título a pagar em 7.01 Juros; "soma ao saldo" entra no DRE como despesa e aumenta o dinheiro dele na loja.
+      </p>
+      {editando && <EditarInvestidor inv={editando} contas={contas} centros={centros} aoFechar={() => setEditando(null)} aoMudou={carregar} />}
+      {extrato && <ExtratoInvestidor x={extrato} aoFechar={() => setExtrato(null)} />}
+    </div>
+  );
+}
+
+function EditarInvestidor({ inv, contas, centros, aoFechar, aoMudou }) {
+  const [f, setF] = useState({ ...inv, taxa_mensal: inv.taxa_mensal == null || inv.taxa_mensal === "" ? "" : String(inv.taxa_mensal).replace(".", ","),
+    saldo_inicial: inv.saldo_inicial ? centavosBR(inv.saldo_inicial) : "", saldo_inicial_em: String(inv.saldo_inicial_em || "").slice(0, 10) });
+  const [erro, setErro] = useState(""); const [indo, setIndo] = useState(false);
+  const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+  const socio = f.tipo === "socio";
+  const salvar = async () => {
+    if (!String(f.nome || "").trim()) { setErro("Escreva o nome."); return; }
+    setIndo(true); setErro("");
+    const corpo = { nome: f.nome, tipo: f.tipo, documento: f.documento || null, telefone: f.telefone || null, pix: f.pix || null,
+      taxa_mensal: numeroBR(f.taxa_mensal) || 0, juros_modo: f.juros_modo, dia_aniversario: f.dia_aniversario || null,
+      conta_id: f.conta_id || null, centro_custo_id: f.centro_custo_id || null, saldo_inicial: numeroBR(f.saldo_inicial) || 0,
+      saldo_inicial_em: f.saldo_inicial_em || null, ativo: f.ativo !== false, observacao: f.observacao || null };
+    try { await fin("investidor", inv.id ? { id: inv.id } : null, finJson(inv.id ? "PATCH" : "POST", corpo)); aoMudou(); aoFechar(); }
+    catch (e) { setErro(e.message); setIndo(false); }
+  };
+  const campo = (rot, el, cls) => <label className={`block ${cls || ""}`}><Rotulo>{rot}</Rotulo>{el}</label>;
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-3 lg:p-8" style={{ background: "rgba(24,18,33,0.45)" }} onClick={aoFechar}>
+      <div className="w-full max-w-2xl rounded-xl p-4" style={{ background: C.paper }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-baseline justify-between gap-3">
+          <div className="text-[17px] font-bold">{inv.id ? inv.nome : "Novo investidor ou sócio"}</div>
+          <button onClick={aoFechar} className="text-[13px]" style={{ color: C.mute }}>fechar</button>
+        </div>
+        <div className="mt-3 grid gap-2 lg:grid-cols-4">
+          {campo("Nome", <input className={inputCls} style={inputSty} value={f.nome || ""} onChange={(e) => set("nome", e.target.value)} />, "lg:col-span-2")}
+          {campo("É", (
+            <select className={inputCls} style={inputSty} value={f.tipo} onChange={(e) => set("tipo", e.target.value)}>
+              <option value="investidor">investidor</option><option value="socio">sócio</option>
+            </select>
+          ))}
+          {campo("CPF / CNPJ", <input className={inputCls} style={inputSty} value={f.documento || ""} onChange={(e) => set("documento", e.target.value)} />)}
+          {campo("Taxa de juros (% ao mês)", <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal" placeholder="ex.: 1,5" value={f.taxa_mensal} onChange={(e) => set("taxa_mensal", e.target.value)} />)}
+          {campo("Os juros", (
+            <select className={inputCls} style={inputSty} value={f.juros_modo} onChange={(e) => set("juros_modo", e.target.value)}>
+              <option value="pago">são pagos a ele todo mês</option><option value="capitaliza">somam ao saldo dele</option>
+            </select>
+          ), "lg:col-span-2")}
+          {campo(socio ? "Dia do pagamento (mês seguinte)" : "Dia do aniversário", <input className={inputCls} style={inputSty} inputMode="numeric" placeholder={socio ? "5" : "dia do aporte"} value={f.dia_aniversario || ""} onChange={(e) => set("dia_aniversario", e.target.value.replace(/\D/g, "").slice(0, 2))} />)}
+          {campo("Sai da conta", (
+            <select className={inputCls} style={inputSty} value={f.conta_id || ""} onChange={(e) => set("conta_id", e.target.value)}>
+              <option value="">— qualquer —</option>{contas.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+            </select>
+          ))}
+          {campo("Centro de custo", (
+            <select className={inputCls} style={inputSty} value={f.centro_custo_id || ""} onChange={(e) => set("centro_custo_id", e.target.value)}>
+              <option value="">{inv.id ? "—" : "Investidores e sócios"}</option>{centros.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+            </select>
+          ), "lg:col-span-2")}
+          {campo("Saldo que ele já tinha", <input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal" placeholder="0,00" value={f.saldo_inicial} onChange={(e) => set("saldo_inicial", e.target.value)} />)}
+          {campo("Desde quando", <input type="date" className={inputCls} style={inputSty} value={f.saldo_inicial_em} onChange={(e) => set("saldo_inicial_em", e.target.value)} />)}
+          {campo("Telefone", <input className={inputCls} style={inputSty} value={f.telefone || ""} onChange={(e) => set("telefone", e.target.value)} />)}
+          {campo("Chave PIX", <input className={inputCls} style={inputSty} value={f.pix || ""} onChange={(e) => set("pix", e.target.value)} />, "lg:col-span-3")}
+          {campo("Observação", <input className={inputCls} style={inputSty} value={f.observacao || ""} onChange={(e) => set("observacao", e.target.value)} />, "lg:col-span-4")}
+        </div>
+        <p className="mt-2 text-[11.5px] leading-relaxed" style={{ color: C.mute }}>
+          "Saldo que ele já tinha" é o dinheiro dele na loja antes de começar a lançar aqui; o que entrar e sair depois da data vem da conciliação.
+          {socio ? " Os juros do sócio são sobre o saldo do último dia de cada mês." : " Os juros são sobre o menor saldo entre um aniversário e o seguinte — dinheiro que entrou no meio do mês começa a render no aniversário seguinte."}
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <BotaoPrimario onClick={salvar} disabled={indo}>{indo ? "Salvando…" : "Salvar"}</BotaoPrimario>
+          {inv.id && <label className="ml-auto flex items-center gap-1.5 text-[12.5px]" style={{ color: C.mute }}>
+            <input type="checkbox" checked={f.ativo !== false} onChange={(e) => set("ativo", e.target.checked)} /> ativo (gera juros)</label>}
+        </div>
+        {erro && <p className="mt-2 text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
+      </div>
+    </div>
+  );
+}
+
+function ExtratoInvestidor({ x, aoFechar }) {
+  const [l, setL] = useState(null); const [erro, setErro] = useState("");
+  useEffect(() => { fin("investidor", { acao: "extrato", id: x.investidor.id }).then((r) => setL(r.linhas || [])).catch((e) => setErro(e.message)); }, [x.investidor.id]);
+  const i = x.investidor;
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-3 lg:p-8" style={{ background: "rgba(24,18,33,0.45)" }} onClick={aoFechar}>
+      <div className="w-full max-w-3xl rounded-xl p-4" style={{ background: C.paper }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-baseline justify-between gap-3">
+          <div>
+            <div className="text-[17px] font-bold">{i.nome}</div>
+            <div className="text-[12px]" style={{ color: C.mute }}>Saldo hoje {rs2(x.saldo_hoje)}{Number(i.saldo_inicial) ? ` · saldo inicial ${rs2(i.saldo_inicial)}${i.saldo_inicial_em ? ` em ${diaBR(i.saldo_inicial_em)}` : ""}` : ""}</div>
+          </div>
+          <button onClick={aoFechar} className="text-[13px]" style={{ color: C.mute }}>fechar</button>
+        </div>
+        {erro && <p className="mt-2 text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
+        {!l ? <p className="mt-3 text-[13px]" style={{ color: C.mute }}>Carregando…</p> : !l.length ? (
+          <p className="mt-3 text-[13px]" style={{ color: C.mute }}>Nada lançado ainda. Na Conciliação bancária, ponha o PIX dele na conta 9.10 Capital e escolha o nome.</p>
+        ) : (
+          <div className="rolar mt-3 overflow-x-auto">
+            <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 620 }}>
+              <thead><tr>{["Data", "O quê", "Entrou", "Saiu", ""].map((h, k) => (
+                <th key={k} className="px-2 py-1.5 text-left text-[11px] font-semibold uppercase" style={{ color: C.mute, borderBottom: `1px solid ${C.line}`, textAlign: k === 2 || k === 3 ? "right" : "left" }}>{h}</th>))}</tr></thead>
+              <tbody>
+                {l.map((m) => {
+                  const capital = m.fin_categoria && m.fin_categoria.pede_investidor;
+                  const tipo = capital ? (m.origem === "juros_capitalizado" ? "juros somados" : Number(m.credito) > 0 ? "aporte" : "resgate")
+                    : m.situacao === "aberto" ? "juros a pagar" : m.origem === "juros_capitalizado" ? "despesa de juros (DRE)" : "juros pagos";
+                  return (
+                    <tr key={m.id} style={{ borderBottom: `1px solid ${C.line}`, opacity: capital ? 1 : 0.75 }}>
+                      <td className="whitespace-nowrap px-2 py-1 text-[12px]">{diaBR(m.data || m.vencimento)}</td>
+                      <td className="px-2 py-1 text-[12px]"><b>{tipo}</b> <span style={{ color: C.mute }}>· {m.descricao}</span></td>
+                      <td className="px-2 py-1 text-right text-[12px]" style={{ fontVariantNumeric: "tabular-nums", color: C.verde }}>{capital && Number(m.credito) ? rs2(m.credito) : ""}</td>
+                      <td className="px-2 py-1 text-right text-[12px]" style={{ fontVariantNumeric: "tabular-nums", color: C.laranja }}>{capital && Number(m.debito) ? rs2(m.debito) : !capital && m.origem !== "juros_capitalizado" ? rs2(m.debito) : ""}</td>
+                      <td className="px-2 py-1 text-[11px]" style={{ color: C.mute }}>{capital ? "saldo" : "juros"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* CENTROS DE CUSTO (0158): o financeiro inteiro pode separar por eles — o título, a linha do extrato e a
+ * conta fixa levam um, e o DRE filtra. Desativa-se, não se apaga. */
+function FinCentros() {
+  const [l, setL] = useState(null); const [erro, setErro] = useState(""); const [novo, setNovo] = useState("");
+  const ler = () => fin("centro").then((x) => setL(x.lista || [])).catch((e) => setErro(e.message));
+  useEffect(() => { ler(); }, []);
+  const salvar = async (id, mud) => {
+    try { await fin("centro", id ? { id } : null, finJson(id ? "PATCH" : "POST", mud)); ler(); return true; }
+    catch (e) { setErro(e.message); return false; }
+  };
+  if (!l) return <p className="text-[13px]" style={{ color: erro ? C.laranja : C.mute }}>{erro || "Carregando…"}</p>;
+  return (
+    <div className="max-w-2xl space-y-3">
+      {erro && <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+      <div className="rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+        {l.map((c) => (
+          <div key={c.id} className="flex flex-wrap items-center gap-2 px-3 py-2" style={{ borderBottom: `1px solid ${C.line}`, opacity: c.ativo === false ? 0.5 : 1 }}>
+            <input className="w-14 rounded border px-1.5 py-1 text-[12.5px] outline-none" style={inputSty} defaultValue={c.codigo || ""} placeholder="cód."
+              onBlur={(e) => { if (e.target.value !== (c.codigo || "")) salvar(c.id, { codigo: e.target.value }); }} />
+            <input className="min-w-[200px] flex-1 rounded border px-1.5 py-1 text-[13px] outline-none" style={inputSty} defaultValue={c.nome}
+              onBlur={(e) => { if (e.target.value.trim() && e.target.value !== c.nome) salvar(c.id, { nome: e.target.value }); }} />
+            <button onClick={() => salvar(c.id, { ativo: c.ativo === false })} className="text-[12px]" style={{ color: C.mute }}>{c.ativo === false ? "reativar" : "desativar"}</button>
+          </div>
+        ))}
+        <div className="flex items-center gap-2 px-3 py-2">
+          <input className="flex-1 rounded border px-2 py-1 text-[13px] outline-none" style={inputSty} placeholder="Novo centro de custo (ex.: Feirão, Filial Itajaí)" value={novo}
+            onChange={(e) => setNovo(e.target.value)} onKeyDown={async (e) => { if (e.key === "Enter" && novo.trim() && await salvar(null, { nome: novo.trim(), ordem: (l.length + 1) * 10 })) setNovo(""); }} />
+          <button onClick={async () => { if (novo.trim() && await salvar(null, { nome: novo.trim(), ordem: (l.length + 1) * 10 })) setNovo(""); }}
+            className="rounded-md px-3 py-1.5 text-[12.5px] font-semibold text-white" style={{ background: novo.trim() ? C.roxo : C.line }}>adicionar</button>
+        </div>
+      </div>
+      <p className="text-[12px]" style={{ color: C.mute }}>O centro vai no título (Títulos financeiros), na linha do extrato (Conciliação) e na conta fixa. O DRE filtra por ele.
+        O que é de investidor ou sócio já nasce no centro do cadastro dele.</p>
+    </div>
+  );
+}
+
 /* AS CATEGORIAS SE RELEEM (07/11/2026, o Derek: "adicionamos uma
  * categoria no plano de contas e ela não está aparecendo pra selecionar
  * na conciliação"). Cada tela lia a lista uma vez, ao abrir: a categoria
@@ -20571,6 +20843,18 @@ function FinContasFixas({ comp }) {
 function avisarCategorias() { try { window.dispatchEvent(new Event("vaapty:categorias")); } catch (e) {} }
 /** "3.04 Vale": o código do plano de contas na frente do nome (0129). */
 const rotCat = (c) => (c && c.codigo ? `${c.codigo} ` : "") + (c ? c.nome : "");
+
+/* Centros de custo e investidores (0158), para os seletores. */
+function useCentrosCusto() {
+  const [l, setL] = useState([]);
+  useEffect(() => { fin("centro").then((x) => setL((x.lista || []).filter((c) => c.ativo !== false))).catch(() => {}); }, []);
+  return [l, setL];
+}
+function useInvestidoresFin() {
+  const [l, setL] = useState([]);
+  useEffect(() => { fin("investidor", { acao: "lista" }).then((x) => setL(x.lista || [])).catch(() => {}); }, []);
+  return [l, setL];
+}
 
 function useCategoriasFin(soAtivas) {
   const [cats, setCats] = useState([]);
@@ -21296,6 +21580,7 @@ function FinLancamentos({ comp, aoIrTitulos }) {
   const [fech, setFech] = useState(null);
   const [carros, setCarros] = useState([]);
   const [funcs, setFuncs] = useState([]);
+  const [centros] = useCentrosCusto(); const [invs] = useInvestidoresFin();
   const [repartindo, setRepartindo] = useState("");
   const [dividindo, setDividindo] = useState("");
   const [ligando, setLigando] = useState("");
@@ -21590,6 +21875,14 @@ function FinLancamentos({ comp, aoIrTitulos }) {
                       {l.fin_favorecido ? <span className="block text-[10px]" style={{ color: C.mute }}>{l.descricao}</span> : l.descricao}
                       {l.tipo_negociacao && <span className="ml-1 text-[10px]" style={{ color: C.mute }}>· {TIPOS_NEG_ROT[l.tipo_negociacao]}</span>}
                       <ObsLancamento valor={l.observacao} aoGravar={(t) => mudar(l, { observacao: t })} />
+                      {centros.length > 0 && (
+                        <select value={l.centro_custo_id || ""} onChange={(e) => mudar(l, { centro_custo_id: e.target.value || null })}
+                          className="mt-0.5 block max-w-[170px] rounded border-0 bg-transparent p-0 text-[10.5px] outline-none" style={{ color: l.centro_custo_id ? C.roxo : C.mute }}
+                          title="Centro de custo desta linha">
+                          <option value="">centro de custo…</option>
+                          {centros.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                        </select>
+                      )}
                       {/* A QUE TÍTULO ESTA LINHA SE REFERE (07/11/2026). O que o
                           sistema reconheceu sozinho fica em amarelo até alguém
                           conferir — "QUANDO RECONHECER AUTOMATICAMENTE DEVE FICAR
@@ -21633,6 +21926,14 @@ function FinLancamentos({ comp, aoIrTitulos }) {
                             {Object.keys(TIPOS_NEG_ROT).map((t) => <option key={t} value={t}>{TIPOS_NEG_ROT[t]}</option>)}
                           </select>
                         </span>
+                      ) : cat && cat.pede_investidor ? (
+                        /* Aporte (crédito) ou resgate (débito) de um investidor ou sócio (0158). */
+                        <select value={l.investidor_id || ""} onChange={(e) => mudar(l, { investidor_id: e.target.value || null })}
+                          className="max-w-[150px] rounded border px-1 py-0.5 text-[11px] outline-none" style={{ ...inputSty, borderColor: l.investidor_id ? C.line : C.laranja }}
+                          title={Number(l.credito) > 0 ? "Aporte: o dinheiro dele entrou na loja" : "Resgate: o dinheiro dele saiu da loja"}>
+                          <option value="">— investidor —</option>
+                          {invs.filter((x) => x.ativo !== false || x.id === l.investidor_id).map((x) => <option key={x.id} value={x.id}>{x.nome}{x.tipo === "socio" ? " (sócio)" : ""}</option>)}
+                        </select>
                       ) : cat && cat.pede_funcionario ? (
                         <select value={l.funcionario_id || ""} onChange={(e) => mudar(l, { funcionario_id: e.target.value || null })}
                           className="max-w-[130px] rounded border px-1 py-0.5 text-[11px] outline-none" style={{ ...inputSty, borderColor: l.funcionario_id ? C.line : C.laranja }}>
@@ -22317,8 +22618,9 @@ function EditarTitulo({ titulo, aoFechar, aoMudou, novo }) {
     vencimento: String(t0.vencimento || "").slice(0, 10), data: String(t0.data || "").slice(0, 10),
     competencia: String(t0.competencia || "").slice(0, 7), conta_id: t0.conta_id || "", categoria_id: t0.categoria_id || "",
     estoque_id: t0.estoque_id || null, tipo_negociacao: t0.tipo_negociacao || "", funcionario_id: t0.funcionario_id || "",
-    observacao: t0.observacao || "",
+    observacao: t0.observacao || "", investidor_id: t0.investidor_id || "", centro_custo_id: t0.centro_custo_id || "",
   });
+  const [centros] = useCentrosCusto(); const [invs] = useInvestidoresFin();
   const [pg, setPg] = useState({ data: hojeEmSP(), valor: centavosBR(valor0), conta_id: t0.conta_id || "" });
   const [erro, setErro] = useState(""); const [indo, setIndo] = useState("");
   const [carroCusto, setCarroCusto] = useState(null);
@@ -22352,7 +22654,7 @@ function EditarTitulo({ titulo, aoFechar, aoMudou, novo }) {
       descricao: f.descricao, favorecido_id: f.favorecido_id || null, favorecido: f.favorecido_id ? null : (f.favorecido || null),
       competencia: f.competencia ? `${f.competencia}-01` : undefined, conta_id: f.conta_id || null, categoria_id: f.categoria_id || null,
       estoque_id: f.estoque_id || null, tipo_negociacao: f.tipo_negociacao || null, funcionario_id: f.funcionario_id || null,
-      observacao: f.observacao || null,
+      observacao: f.observacao || null, investidor_id: f.investidor_id || null, centro_custo_id: f.centro_custo_id || null,
     };
     if (aberto) mud.vencimento = f.vencimento || null;
     if (!doBanco) {
@@ -22395,6 +22697,7 @@ function EditarTitulo({ titulo, aoFechar, aoMudou, novo }) {
   const salvarAntes = async () => {
     const mud = { descricao: f.descricao, categoria_id: f.categoria_id || null, favorecido_id: f.favorecido_id || null,
       estoque_id: f.estoque_id || null, tipo_negociacao: f.tipo_negociacao || null, funcionario_id: f.funcionario_id || null,
+      investidor_id: f.investidor_id || null, centro_custo_id: f.centro_custo_id || null,
       competencia: f.competencia ? `${f.competencia}-01` : undefined, observacao: f.observacao || null };
     Object.keys(mud).forEach((k) => { if (mud[k] === undefined) delete mud[k]; });
     await fin("lancamento", { id: t0.id }, finJson("PATCH", mud));
@@ -22457,6 +22760,16 @@ function EditarTitulo({ titulo, aoFechar, aoMudou, novo }) {
           {(cat && cat.pede_funcionario || f.funcionario_id) && campo("Pessoa da folha", (
             <select className={inputCls} style={inputSty} value={f.funcionario_id} onChange={(e) => set("funcionario_id", e.target.value)}>
               <option value="">—</option>{funcs.map((p) => <option key={p.id} value={p.id}>{p.nome}</option>)}
+            </select>
+          ), "lg:col-span-2")}
+          {(cat && cat.pede_investidor || f.investidor_id || (cat && cat.codigo === "7.01")) && campo("Investidor / sócio", (
+            <select className={inputCls} style={{ ...inputSty, borderColor: f.investidor_id || !(cat && cat.pede_investidor) ? C.line : C.laranja }} value={f.investidor_id} onChange={(e) => set("investidor_id", e.target.value)}>
+              <option value="">—</option>{invs.map((x) => <option key={x.id} value={x.id}>{x.nome}{x.tipo === "socio" ? " (sócio)" : ""}</option>)}
+            </select>
+          ), "lg:col-span-2")}
+          {centros.length > 0 && campo("Centro de custo", (
+            <select className={inputCls} style={inputSty} value={f.centro_custo_id} onChange={(e) => set("centro_custo_id", e.target.value)}>
+              <option value="">—</option>{centros.map((c) => <option key={c.id} value={c.id}>{c.codigo ? `${c.codigo} ` : ""}{c.nome}</option>)}
             </select>
           ), "lg:col-span-2")}
           {campo("Observação", <input className={inputCls} style={inputSty} value={f.observacao} onChange={(e) => set("observacao", e.target.value)} />, "lg:col-span-4")}
@@ -24044,14 +24357,14 @@ function FolhaProjetada({ comp }) {
  * "igual ao DRE do Camisetas Já"). Antes abria uma janela por cima; agora a linha se
  * expande embaixo, com a seta, a etiqueta de cada título (banco / em aberto), o valor e
  * um ✎ que mostra os campos de correção (categoria e competência) naquele título. */
-function DetalheDRE({ comp, linha, aoMudou }) {
+function DetalheDRE({ comp, linha, aoMudou, centro }) {
   const [d, setD] = useState(null); const [erro, setErro] = useState("");
   const [cats] = useCategoriasFin(true);
   const [mexido, setMexido] = useState({});
   const [editando, setEditando] = useState(null);
-  const ler = () => fin("dre", { competencia: comp, acao: "detalhe", categoria_id: linha.id || "sem" })
+  const ler = () => fin("dre", { competencia: comp, acao: "detalhe", categoria_id: linha.id || "sem", ...(centro ? { centro } : {}) })
     .then((x) => { setD(x); setErro(""); }).catch((e) => setErro(e.message));
-  useEffect(() => { setD(null); ler(); }, [comp, linha.id]);
+  useEffect(() => { setD(null); ler(); }, [comp, linha.id, centro]);
   const mudar = async (it, mud) => {
     try {
       await fin("lancamento", { id: it.id }, finJson("PATCH", mud));
@@ -24134,8 +24447,10 @@ function FinDRE({ comp }) {
   const [abrir, setAbrir] = useState(null);
   const [maes, setMaes] = useState({});   // categorias-mãe abertas (Pessoas…)
   const [vers, setVers] = useState(0);
+  // O centro de custo (0158): "" é a loja inteira.
+  const [centro, setCentro] = useState(""); const [centros] = useCentrosCusto();
   // Corrigir na janela relê o DRE por baixo, sem apagar a tela.
-  useEffect(() => { if (!vers) setD(null); fin("dre", { competencia: comp }).then(setD).catch((e) => setErro(e.message)); }, [comp, vers]);
+  useEffect(() => { if (!vers) setD(null); fin("dre", { competencia: comp, ...(centro ? { centro } : {}) }).then(setD).catch((e) => setErro(e.message)); }, [comp, vers, centro]);
   useEffect(() => {
     if (meses === 1) { setMm(null); return; }
     setMm(null); fin("dre", { competencia: comp, meses }).then(setMm).catch((e) => setErro(e.message));
@@ -24146,6 +24461,14 @@ function FinDRE({ comp }) {
         <button key={n} onClick={() => setMeses(n)} className="rounded-full px-3 py-1 font-semibold"
           style={{ background: meses === n ? C.roxoFraco : "transparent", color: meses === n ? C.roxo : C.mute }}>{r}</button>
       ))}
+      {meses === 1 && centros.length > 0 && (
+        <select value={centro} onChange={(e) => { setD(null); setCentro(e.target.value); }} className="rounded border px-2 py-1 text-[12.5px] outline-none" style={inputSty}
+          title="Centro de custo: mostra só as linhas daquele centro">
+          <option value="">Todos os centros de custo</option>
+          {centros.map((c) => <option key={c.id} value={c.id}>{c.codigo ? `${c.codigo} ` : ""}{c.nome}</option>)}
+          <option value="sem">Sem centro de custo</option>
+        </select>
+      )}
       {mm && <button onClick={() => baixarCSV(`dre-${meses}m-${String(comp).slice(0, 7)}.csv`,
           ["Categoria"].concat(mm.meses.map((x) => rotuloMes(x))),
           mm.linhas.map((l) => [l.nome].concat(mm.meses.map((x) => l.por_mes[x] || 0)))
@@ -24192,7 +24515,7 @@ function FinDRE({ comp }) {
             {Math.abs(v) < 0.005 && abrirCom.previsto ? <span style={{ color: C.mute }}>—</span> : rs2(v)}
           </span>
         </button>
-        {aberta && <DetalheDRE comp={comp} linha={abrirCom} aoMudou={() => setVers((x) => x + 1)} />}
+        {aberta && <DetalheDRE comp={comp} linha={abrirCom} centro={centro} aoMudou={() => setVers((x) => x + 1)} />}
       </div>
     );
   };
@@ -24798,6 +25121,11 @@ function FinBalanco({ aoIr }) {
           {d.manuais.filter((x) => x.lado === "passivo").map((x) => linha("m" + x.id, x.nome, x.valor, { sub: true,
             nota: x.credor || (x.tipo === "emprestimo" ? "empréstimo" : "outra obrigação") }))}
           {!d.manuais.some((x) => x.lado === "passivo") && <p className="px-6 py-1 text-[12px]" style={{ color: C.mute }}>Nada cadastrado — use o cadastro abaixo.</p>}
+          {(d.investidores || []).length > 0 && <>
+            {faixa("Investidores e sócios")}
+            {d.investidores.map((x) => linha("i" + x.id, x.nome, x.saldo, { sub: true, nota: x.tipo === "socio" ? "sócio — dinheiro na loja" : "investidor" }))}
+            <div className="px-6">{ir("Investidores", "investidores")}</div>
+          </>}
           {linha("tps", "TOTAL DO PASSIVO", d.passivo.total, { forte: true, fundo: C.bg })}
           {faixa("Patrimônio líquido")}
           {linha("pl", "Ativo − passivo", pl, { sub: true, cor: pl >= 0 ? C.verde : "#C0281B" })}
@@ -31197,8 +31525,10 @@ function destinosPara(perfil) {
       { id: "fin_balanco",     rot: "Balanço patrimonial", curto: "Financ.", area: "financeiro", aba: "balanco",   grupo: "fim do mês", icone: "financeiro" },
       { id: "fin_folha",       rot: "Folha",             curto: "Financ.", area: "financeiro", aba: "folha",       grupo: "fim do mês", icone: "financeiro" },
       { id: "fin_fixas",       rot: "Contas fixas",      curto: "Financ.", area: "financeiro", aba: "fixas",       grupo: "fim do mês", icone: "financeiro" },
+      { id: "fin_investidores", rot: "Investidores",     curto: "Financ.", area: "financeiro", aba: "investidores", grupo: "fim do mês", icone: "financeiro" },
       { id: "fin_caixas",      rot: "Contas e caixas",   curto: "Financ.", area: "financeiro", aba: "caixas",      grupo: "cadastros",  icone: "financeiro" },
       { id: "fin_plano",       rot: "Plano de contas",   curto: "Financ.", area: "financeiro", aba: "plano",       grupo: "cadastros",  icone: "financeiro" },
+      { id: "fin_centros",     rot: "Centros de custo",  curto: "Financ.", area: "financeiro", aba: "centros",     grupo: "cadastros",  icone: "financeiro" },
     ] : []),
 
     // ---- o papel e a operação ----
@@ -34754,7 +35084,7 @@ function TelaGestao({ perfil, comp }) {
 const ABA_FIN = {
   fin_pendencias: "pendencias", fin_lancamentos: "lancamentos", fin_recebimentos: "recebimentos", fin_contas: "contas", fin_cartoes: "cartoes", fin_notas: "notas",
   fin_carros: "carros", fin_fechamento: "fechamento", fin_dre: "dre", fin_ano: "ano", fin_balanco: "balanco", fin_folha: "folha", fin_caixas: "caixas",
-  fin_fixas: "fixas", fin_plano: "plano",
+  fin_fixas: "fixas", fin_plano: "plano", fin_investidores: "investidores", fin_centros: "centros",
 };
 const DESTINO_FIN = Object.fromEntries(Object.entries(ABA_FIN).map(([d, a]) => [a, d]));
 

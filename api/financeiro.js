@@ -211,7 +211,10 @@ const TIPOS_CUSTO = ["receita", "variavel", "fixa", "fora"];
 const tipoCusto = (v) => (TIPOS_CUSTO.indexOf(String(v)) >= 0 ? String(v) : "fixa");
 const categoria = cadastro("fin_categoria",
   [["nome", texto], ["grupo", grupo], ["no_dre", bool], ["ordem", inteiro], ["ativa", bool],
-   ["pede_funcionario", bool], ["tipo_custo", tipoCusto], ["pai_id", idOuNulo], ["codigo", texto]], "ordem.asc,nome.asc");
+   ["pede_funcionario", bool], ["tipo_custo", tipoCusto], ["pai_id", idOuNulo], ["codigo", texto], ["pede_investidor", bool]], "ordem.asc,nome.asc");
+// Centros de custo (0158): o financeiro inteiro pode separar por eles; o DRE filtra.
+const centroCusto = cadastro("fin_centro_custo",
+  [["nome", texto], ["codigo", texto], ["ordem", inteiro], ["ativo", bool], ["observacao", texto]], "ordem.asc,nome.asc");
 const funcionarioCad = cadastro("fin_funcionario",
   [["nome", texto], ["salario_base", (v) => decimal(v) || 0], ["negociador_id", idOuNulo], ["ativo", bool]], "nome.asc");
 /* JUNTAR E TIRAR PESSOA DA FOLHA (0117, 07/11/2026, o Derek: "duplicou
@@ -271,7 +274,7 @@ async function funcionario(req, res, tok) {
 const TIPOS_NEG = ["pagto_cliente", "quitacao", "debitos", "pagto_lojista", "reembolso", "outro"];
 const SITUACOES = ["aberto", "efetivado", "cancelado"];
 const CAMPOS_LANC = "*,fin_categoria(id,nome,grupo,no_dre,pede_funcionario),fin_conta_fixa(id,nome)," +
-  "fin_conta(id,nome,empresa),fin_favorecido(id,nome,documento),estoque(id,veiculo(placa,marca_modelo)),fin_funcionario(id,nome)," +
+  "fin_conta(id,nome,empresa),fin_favorecido(id,nome,documento),estoque(id,veiculo(placa,marca_modelo)),fin_funcionario(id,nome),fin_investidor(id,nome)," +
   "fin_rateio(id,valor,categoria_id,estoque_id,tipo_negociacao,funcionario_id,descricao)";
 
 /**
@@ -348,6 +351,9 @@ function linhaLancamento(c, tok) {
   if (c.observacao !== undefined) l.observacao = texto(c.observacao);
   if (c.revisar !== undefined) l.revisar = !!c.revisar;
   if (c.favorecido_id !== undefined) l.favorecido_id = idOuNulo(c.favorecido_id);
+  // Investidores e centros de custo (0158).
+  if (c.investidor_id !== undefined) l.investidor_id = idOuNulo(c.investidor_id);
+  if (c.centro_custo_id !== undefined) l.centro_custo_id = idOuNulo(c.centro_custo_id);
   return l;
 }
 
@@ -553,6 +559,11 @@ async function importar(req, res, tok) {
     (est || []).forEach((e) => { const p = e.veiculo && e.veiculo.placa; if (p && !estoquePorPlaca[p]) estoquePorPlaca[p] = e.id; });
   }
 
+  // Os investidores com documento (0158): o PIX dele é aporte ou resgate, na conta do capital.
+  const invPorDoc = {};
+  const capitalCat = (um(await supa(`${base("fin_categoria")}?select=id&pede_investidor=eq.true&limit=1`, { headers: cab(tok) }).catch(() => [])) || {}).id || null;
+  ((await supa(`${base("fin_investidor")}?select=id,documento,centro_custo_id&ativo=eq.true`, { headers: cab(tok) }).catch(() => [])) || [])
+    .forEach((x) => { const d = String(x.documento || "").replace(/\D/g, ""); if (d.length >= 11) invPorDoc[d] = x; });
   // Memória de categoria para o que vier sem "Tipo pgt".
   const hist = await supa(`${base("fin_lancamento")}?select=descricao,categoria_id&categoria_id=not.is.null&order=criado_em.desc&limit=5000`, { headers: cab(tok) });
   const memoria = {};
@@ -563,7 +574,7 @@ async function importar(req, res, tok) {
   // com o que se digitou, e casar por nome erraria mais que acertaria.
   const abertos = await supa(
     `${base("fin_lancamento")}?select=id,debito,credito,vencimento,descricao,favorecido,conta_id,conta_fixa_id,categoria_id,competencia,` +
-    `favorecido_id,funcionario_id,estoque_id,tipo_negociacao,observacao,item_contrato,fin_conta_fixa(nome,favorecido,valor_livre)&situacao=eq.aberto&uniao_id=is.null&limit=2000`,
+    `favorecido_id,funcionario_id,estoque_id,tipo_negociacao,observacao,item_contrato,investidor_id,centro_custo_id,fin_conta_fixa(nome,favorecido,valor_livre)&situacao=eq.aberto&uniao_id=is.null&limit=2000`,
     { headers: cab(tok) });
   const casados = [];
   const usados = {};
@@ -780,6 +791,7 @@ async function importar(req, res, tok) {
           estoque_id: t.estoque_id || (placa ? estoquePorPlaca[placa] || null : null),
           tipo_negociacao: t.tipo_negociacao || null, funcionario_id: t.funcionario_id || null,
           conta_fixa_id: t.conta_fixa_id || null, observacao: t.observacao || null, item_contrato: t.item_contrato || null,
+          investidor_id: t.investidor_id || null, centro_custo_id: t.centro_custo_id || null,
           favorecido_id: t.favorecido_id || favPor[docNa(l.descricao)] || null, favorecido: t.favorecido || null,
           conciliado: true, revisar: true, origem: fitid ? "ofx" : "planilha", chave_extrato: chave,
         },
@@ -787,9 +799,12 @@ async function importar(req, res, tok) {
       return;
     }
 
+    // O documento de um investidor na descrição (0158): é aporte ou resgate dele.
+    const inv = invPorDoc[docNa(l.descricao) || ""] || null;
     corpo.push({
       conta_id: contaId, data, competencia: competenciaDe(l.competencia) || competenciaDe(data),
-      categoria_id: catId, descricao: texto(l.descricao), debito: deb, credito: cred,
+      categoria_id: inv && capitalCat ? capitalCat : catId, descricao: texto(l.descricao), debito: deb, credito: cred,
+      investidor_id: inv && capitalCat ? inv.id : null, centro_custo_id: inv && capitalCat ? inv.centro_custo_id || null : null,
       estoque_id: placa ? estoquePorPlaca[placa] || null : null,
       tipo_negociacao: cat && cat.grupo === "negociacao" ? (tipoNegNa(l.descricao) || "outro") : null,
       conciliado: true, origem: fitid ? "ofx" : "planilha",
@@ -822,6 +837,7 @@ async function importar(req, res, tok) {
       const x = k.linha;
       corpo.push({ conta_id: x.conta_id, data: x.data, competencia: x.competencia, categoria_id: x.categoria_id, descricao: x.descricao,
         debito: x.debito, credito: x.credito, estoque_id: x.estoque_id, tipo_negociacao: x.tipo_negociacao,
+        investidor_id: x.investidor_id || null, centro_custo_id: x.centro_custo_id || null,
         conciliado: true, origem: x.origem, favorecido_id: x.favorecido_id, chave_extrato: x.chave_extrato });
       continue;
     }
@@ -1006,8 +1022,8 @@ async function dreDetalhe(req, res, tok, comp) {
   const [lanc, fixas] = await Promise.all([
     supa(`${base("fin_lancamento")}?select=id,data,vencimento,competencia,descricao,debito,credito,situacao,categoria_id,observacao,` +
       `fin_conta(nome),fin_favorecido(nome),fin_funcionario(nome),fin_rateio(valor,categoria_id,estoque_id,tipo_negociacao,funcionario_id)` +
-      `&situacao=in.(aberto,efetivado)&competencia=eq.${comp}&order=data.asc.nullslast&limit=10000`, { headers: cab(tok) }),
-    sem ? Promise.resolve(null) : fixasDoMes(tok, comp).catch(() => null),
+      `&situacao=in.(aberto,efetivado)&competencia=eq.${comp}${filtroCentro(req.query.centro)}&order=data.asc.nullslast&limit=10000`, { headers: cab(tok) }),
+    sem || filtroCentro(req.query.centro) ? Promise.resolve(null) : fixasDoMes(tok, comp).catch(() => null),
   ]);
   const itens = [];
   (lanc || []).forEach((l) => {
@@ -1323,11 +1339,33 @@ async function lucroParaFolha(tok, comp) {
   return { agora, ritmo, realizado: Math.round(d.lucro * 100) / 100 };
 }
 
+/* O filtro de centro de custo (0158): "sem" é o que ainda não tem centro; um id é aquele centro. Com filtro,
+ * o DRE mostra só as linhas daquele centro, sem a rentabilidade dos carros (que não tem centro) e sem a
+ * projeção da folha e das contas fixas. */
+const filtroCentro = (v) => { const c = String(v || ""); return c === "sem" ? "&centro_custo_id=is.null" : idOuNulo(c) ? `&centro_custo_id=eq.${c}` : ""; };
 async function dre(req, res, tok) {
   const comp = competenciaDe(req.query.competencia) || competenciaDe(hojeAqui());
   if (String(req.query.acao || "") === "detalhe") return dreDetalhe(req, res, tok, comp);
   const n = Math.min(24, Math.max(0, Number(req.query.meses) || 0));
   if (n > 1) return dreMeses(req, res, tok, comp, n);
+  const centro = filtroCentro(req.query.centro);
+  if (centro) {
+    const d = await dreDoMes(tok, comp, centro);
+    const prev = {};
+    Object.keys(d.aberto_por_cat || {}).forEach((k) => { prev[k] = d.aberto_por_cat[k]; });
+    const porId = {}; d.linhas.forEach((l) => { porId[l.id] = l; });
+    Object.keys(prev).forEach((k) => {
+      const c = (d.categorias || {})[k]; if (!c || !c.no_dre || Math.abs(prev[k]) < 0.01) return;
+      if (!porId[k]) { porId[k] = { id: c.id, nome: c.nome, grupo: c.grupo, ordem: c.ordem, valor: 0, codigo: c.codigo || null, pai_id: c.pai_id || null,
+        pai_nome: c.pai_id && d.categorias[c.pai_id] ? d.categorias[c.pai_id].nome : null, pai_codigo: c.pai_id && d.categorias[c.pai_id] ? d.categorias[c.pai_id].codigo || null : null };
+        d.linhas.push(porId[k]); }
+      porId[k].previsto = Math.round(prev[k] * 100) / 100;
+    });
+    d.linhas.sort((x, y) => (x.ordem || 0) - (y.ordem || 0) || String(x.nome).localeCompare(String(y.nome)));
+    d.total_previsto = Math.round(d.linhas.reduce((t, l) => t + (l.previsto || 0), 0) * 100) / 100;
+    delete d.categorias; delete d.aberto_por_cat;
+    return res.status(200).json({ ...d, centro_filtrado: true });
+  }
   const d = await dreDoMes(tok, comp);
   /* O DRE PROJETADO (28/10/2026, o Derek: "porque os salários da galera
    * não tá aparecendo direito no DRE projetado?"). O DRE do mês continua
@@ -1434,7 +1472,7 @@ async function contasFixas(req, res, tok) {
       const venc = `${comp.slice(0, 8)}${dia}`;
       return { conta_id: x.conta_id || null, data: venc, competencia: comp, categoria_id: x.categoria_id || null,
         descricao: x.nome, favorecido: x.favorecido || null, debito: x.estimativa, credito: 0,
-        situacao: "aberto", vencimento: venc, origem: "conta_fixa", conta_fixa_id: x.id,
+        situacao: "aberto", vencimento: venc, origem: "conta_fixa", conta_fixa_id: x.id, centro_custo_id: x.centro_custo_id || null,
         observacao: x.tipo === "variavel" ? "Valor estimado — ajuste quando a conta chegar." : null };
     }).filter((x) => x.debito > 0);
     if (!novos.length) return res.status(200).json({ ok: true, criados: 0 });
@@ -1465,6 +1503,7 @@ async function contasFixas(req, res, tok) {
     if (c.ativo !== undefined) linha.ativo = !!c.ativo;
     if (c.valor_livre !== undefined) linha.valor_livre = !!c.valor_livre;
     if (c.observacao !== undefined) linha.observacao = texto(c.observacao);
+    if (c.centro_custo_id !== undefined) linha.centro_custo_id = idOuNulo(c.centro_custo_id);
     if (req.method === "POST" && !linha.nome) return res.status(400).json({ erro: "Dê um nome à conta." });
     const r = await supa(req.method === "POST" ? base("fin_conta_fixa") : `${base("fin_conta_fixa")}?id=eq.${id}`,
       { method: req.method, headers: cab(tok, REP), body: JSON.stringify(linha) });
@@ -1477,10 +1516,10 @@ async function contasFixas(req, res, tok) {
 
 // O DRE de um mês, como objeto: a tela o lê pelo `dre`, e o combinado de
 // remuneração usa o mesmo lucro — duas contas do lucro seriam dois DREs.
-async function dreDoMes(tok, comp) {
+async function dreDoMes(tok, comp, centro) {
   const [lanc, cats] = await Promise.all([
     supa(`${base("fin_lancamento")}?select=debito,credito,situacao,categoria_id,estoque_id,tipo_negociacao,funcionario_id,` +
-      `fin_rateio(valor,categoria_id,estoque_id,tipo_negociacao,funcionario_id)&situacao=in.(aberto,efetivado)&competencia=eq.${comp}&limit=10000`,
+      `fin_rateio(valor,categoria_id,estoque_id,tipo_negociacao,funcionario_id)&situacao=in.(aberto,efetivado)&competencia=eq.${comp}${centro || ""}&limit=10000`,
       { headers: cab(tok) }),
     supa(`${base("fin_categoria")}?select=id,nome,grupo,no_dre,ordem,pede_funcionario,pai_id,codigo`, { headers: cab(tok) }),
   ]);
@@ -1526,7 +1565,7 @@ async function dreDoMes(tok, comp) {
   const linhas = Object.keys(por).map((k) => por[k]).sort((a, b) => a.ordem - b.ordem || a.nome.localeCompare(b.nome));
   const totalDespesas = linhas.reduce((t, x) => t + x.valor, 0);
 
-  const vendidos = await vendidosNoMes(tok, comp);
+  const vendidos = centro ? [] : await vendidosNoMes(tok, comp);
   const rent = vendidos.reduce((t, e) => { const r = rentabilidadeDe(e); return { bruta: t.bruta + r.bruta, liquida: t.liquida + r.liquida, venda: t.venda + r.venda }; },
     { bruta: 0, liquida: 0, venda: 0 });
 
@@ -1635,7 +1674,7 @@ async function parteDoTitulo(tok, t, valor, extra, linhaId) {
   let parte;
   if (linhaId) {
     const mud = { conciliado: true, revisar: false, competencia: t.competencia };
-    ["categoria_id", "estoque_id", "tipo_negociacao", "funcionario_id", "favorecido_id"].forEach((k) => { if (t[k]) mud[k] = t[k]; });
+    ["categoria_id", "estoque_id", "tipo_negociacao", "funcionario_id", "favorecido_id", "investidor_id", "centro_custo_id"].forEach((k) => { if (t[k]) mud[k] = t[k]; });
     if (item) mud.item_contrato = item;
     mud.observacao = `Parte do título "${t.descricao || ""}" (${total.toFixed(2).replace(".", ",")})`;
     parte = um(await supa(`${base("fin_lancamento")}?id=eq.${linhaId}`, { method: "PATCH", headers: cab(tok, REP), body: JSON.stringify(mud) }));
@@ -1644,6 +1683,7 @@ async function parteDoTitulo(tok, t, valor, extra, linhaId) {
       situacao: "efetivado", origem: "parcial", conta_id: extra.conta_id, data: extra.data, conciliado: !!extra.conciliado,
       competencia: t.competencia, categoria_id: t.categoria_id, estoque_id: t.estoque_id, tipo_negociacao: t.tipo_negociacao,
       funcionario_id: t.funcionario_id, favorecido_id: t.favorecido_id, favorecido: t.favorecido,
+      investidor_id: t.investidor_id || null, centro_custo_id: t.centro_custo_id || null,
       descricao: `${t.descricao || "Título"} (parcial)`, item_contrato: item,
       debito: saida ? valor : 0, credito: saida ? 0 : valor,
     }) }));
@@ -1909,7 +1949,7 @@ async function titulo(req, res, tok) {
         debito: Number(base0.debito) > 0 ? dessa : 0,
         credito: Number(base0.credito) > 0 ? dessa : 0,
         estoque_id: base0.estoque_id, tipo_negociacao: base0.tipo_negociacao,
-        funcionario_id: base0.funcionario_id,
+        funcionario_id: base0.funcionario_id, investidor_id: base0.investidor_id || null, centro_custo_id: base0.centro_custo_id || null,
         situacao: "aberto", vencimento: venc, origem: "serie",
         grupo_id: grupo, parcela: i + 1, parcelas: n + 1,
       });
@@ -1966,7 +2006,7 @@ async function titulo(req, res, tok) {
       conta_id: l.conta_id, data: l.data, competencia: l.competencia, categoria_id: l.categoria_id,
       descricao, debito: deb ? v : 0, credito: cred ? v : 0,
       favorecido_id: l.favorecido_id, estoque_id: l.estoque_id, tipo_negociacao: l.tipo_negociacao,
-      funcionario_id: l.funcionario_id,
+      funcionario_id: l.funcionario_id, investidor_id: l.investidor_id || null, centro_custo_id: l.centro_custo_id || null,
       situacao: "efetivado", conciliado: true, origem: "divisao", extrato_id: l.id,
     });
     const novos = partes.map((x, i) => pedaco(x.descricao || `${l.descricao || "Movimento do banco"} (parte ${i + 1})`, x.valor));
@@ -2019,8 +2059,9 @@ async function titulo(req, res, tok) {
     if (t.competencia) mud.competencia = t.competencia;
     if (t.conta_fixa_id) mud.conta_fixa_id = t.conta_fixa_id;
     if (!(l.fin_rateio || []).length) {
-      ["categoria_id", "estoque_id", "tipo_negociacao", "funcionario_id"].forEach((k) => { if (t[k]) mud[k] = t[k]; });
+      ["categoria_id", "estoque_id", "tipo_negociacao", "funcionario_id", "investidor_id"].forEach((k) => { if (t[k]) mud[k] = t[k]; });
     }
+    if (t.centro_custo_id && !l.centro_custo_id) mud.centro_custo_id = t.centro_custo_id;
     ["favorecido_id", "favorecido"].forEach((k) => { if (t[k] && !l[k]) mud[k] = t[k]; });
     if (t.observacao && !l.observacao) mud.observacao = t.observacao;
     // O item do contrato (0119) passa para a linha: o título da compra ou
@@ -3366,13 +3407,17 @@ async function balanco(req, res, tok) {
   const [contas, movs, abertos, estoque, manuais] = await Promise.all([
     supa(`${base("fin_conta")}?select=id,nome,tipo,ativa,saldo_inicial,saldo_inicial_em&order=nome.asc`, { headers: cab(tok) }),
     supa(`${base("fin_lancamento")}?select=conta_id,data,debito,credito&situacao=eq.efetivado&conta_id=not.is.null&data=lte.${hoje}&limit=100000`, { headers: cab(tok) }),
-    supa(`${base("fin_lancamento")}?select=id,descricao,favorecido,vencimento,competencia,debito,credito,estoque_id,tipo_negociacao,` +
+    supa(`${base("fin_lancamento")}?select=id,descricao,favorecido,vencimento,competencia,debito,credito,estoque_id,tipo_negociacao,investidor_id,` +
       `fin_favorecido(nome),fin_categoria(nome,grupo,pede_funcionario)&situacao=eq.aberto&limit=20000`, { headers: cab(tok) }),
     supa(`${base("estoque")}?select=id,entrou_em,valor_compra,compra_provisoria,natureza,veiculo(placa,marca_modelo),estoque_custo(tipo,previsto,realizado)` +
       `&situacao=eq.em_estoque&limit=2000`, { headers: cab(tok) }),
     // Sem a 0140 rodada, o balanço continua de pé sem os itens manuais.
     supa(`${base("fin_patrimonio")}?select=*&ativo=eq.true&order=nome.asc`, { headers: cab(tok) }).catch(() => null),
   ]);
+  // O dinheiro dos investidores e sócios na loja (0158): é dívida da empresa com eles.
+  const invs = ((await supa(`${base("rpc/fin_investidores_mes")}`, { method: "POST", headers: cab(tok), body: JSON.stringify({ p_comp: competenciaDe(hoje) }) })
+    .catch(() => null)) || []).filter((x) => x && x.investidor && (x.investidor.ativo || Math.abs(Number(x.saldo_hoje) || 0) > 0.004))
+    .map((x) => ({ id: x.investidor.id, nome: x.investidor.nome, tipo: x.investidor.tipo, saldo: r2(Number(x.saldo_hoje) || 0) }));
   const itens = (manuais || []).map((x) => ({ id: x.id, lado: x.lado, tipo: x.tipo, nome: x.nome, credor: x.credor, ...valorNoBalanco(x, hoje) }));
   const somaTipo = (t) => r2(itens.filter((x) => x.tipo === t).reduce((s, x) => s + x.valor, 0));
 
@@ -3415,6 +3460,7 @@ async function balanco(req, res, tok) {
       else poe("receber", "outros", "Outros valores a receber", l);
     } else {
       if (doCarro) poe("pagar", "carros", "Compra de carros a pagar (clientes, quitações, débitos)", l);
+      else if (l.investidor_id) poe("pagar", "juros_investidores", "Juros a pagar a investidores e sócios", l);
       else if (c.grupo === "retirada") poe("pagar", "retiradas", "Retiradas dos sócios a pagar", l);
       else if (c.pede_funcionario) poe("pagar", "folha", "Folha a pagar", l);
       else poe("pagar", "fornecedores", "Fornecedores e contas a pagar", l);
@@ -3454,14 +3500,15 @@ async function balanco(req, res, tok) {
     cartoes: r2(-soma(cartaoDeve, "saldo")),
     contas_negativas: r2(-soma(caixaNeg, "saldo")),
     emprestimos: somaTipo("emprestimo"),
+    investidores: r2(invs.reduce((t, x) => t + x.saldo, 0)),
     outros: somaTipo("outro_passivo"),
   };
-  passivo.total = r2(passivo.pagar + passivo.cartoes + passivo.contas_negativas + passivo.emprestimos + passivo.outros);
+  passivo.total = r2(passivo.pagar + passivo.cartoes + passivo.contas_negativas + passivo.emprestimos + passivo.investidores + passivo.outros);
 
   return res.status(200).json({
     hoje, ativo, passivo, patrimonio_liquido: r2(ativo.total - passivo.total),
     contas: caixa, cartoes, receber, pagar, carros, carros_sem_compra: semCompra,
-    manuais: itens, manuais_ligado: manuais != null,
+    manuais: itens, manuais_ligado: manuais != null, investidores: invs,
   });
 }
 
@@ -4035,10 +4082,73 @@ async function nfse(req, res, tok) {
   return res.status(405).json({ erro: "Use GET, POST ou DELETE." });
 }
 
+/* INVESTIDORES E SÓCIOS (0158, 16/11/2026). O saldo de cada um não é digitado: é o saldo inicial mais as
+ * linhas do financeiro na conta "9.10 Capital" com o investidor — aporte e resgate entram pela conciliação.
+ * Os juros do mês (no aniversário, ou no fim do mês para o sócio) saem de `fin_investidores_mes`, a mesma
+ * conta que a geração automática (cron) usa: "pago" vira título a pagar em 7.01 Juros; "capitaliza" soma ao
+ * saldo e entra no DRE como despesa.
+ *   GET  ?competencia=            a lista, com saldo de hoje e os juros do mês
+ *   GET  ?id=&acao=extrato        o que entrou e saiu dele, linha a linha
+ *   POST / PATCH ?id=             o cadastro
+ *   POST ?acao=gerar&competencia= gera os juros devidos */
+const CAMPOS_INV = [["nome", texto], ["tipo", (v) => (String(v) === "socio" ? "socio" : "investidor")], ["documento", documento],
+  ["telefone", texto], ["pix", texto], ["favorecido_id", idOuNulo],
+  ["taxa_mensal", (v) => Math.max(0, Math.min(99, decimal(v) || 0))], ["juros_modo", (v) => (String(v) === "capitaliza" ? "capitaliza" : "pago")],
+  ["dia_aniversario", (v) => (v === "" || v == null ? null : Math.min(31, Math.max(1, inteiro(v))))],
+  ["conta_id", idOuNulo], ["centro_custo_id", idOuNulo], ["saldo_inicial", (v) => decimal(v) || 0], ["saldo_inicial_em", dataISO],
+  ["ativo", bool], ["observacao", texto]];
+async function investidor(req, res, tok) {
+  const acao = String(req.query.acao || "");
+  const comp = competenciaDe(req.query.competencia) || competenciaDe(hojeAqui());
+  if (req.method === "GET" && acao === "lista") {
+    const lista = await supa(`${base("fin_investidor")}?select=id,nome,tipo,ativo,centro_custo_id&order=nome.asc`, { headers: cab(tok) });
+    return res.status(200).json({ lista: lista || [] });
+  }
+  if (req.method === "GET" && acao === "extrato") {
+    const id = idOuNulo(req.query.id);
+    if (!id) return res.status(400).json({ erro: "id inválido." });
+    const linhas = await supa(`${base("fin_lancamento")}?select=id,data,competencia,descricao,debito,credito,situacao,origem,vencimento,` +
+      `fin_categoria(nome,codigo,pede_investidor),fin_conta(nome,tipo)&investidor_id=eq.${id}&situacao=neq.cancelado&order=data.desc,criado_em.desc&limit=1000`,
+      { headers: cab(tok) });
+    return res.status(200).json({ linhas: linhas || [] });
+  }
+  if (req.method === "GET") {
+    const lista = await supa(`${base("rpc/fin_investidores_mes")}`, { method: "POST", headers: cab(tok), body: JSON.stringify({ p_comp: comp }) });
+    return res.status(200).json({ competencia: comp, lista: lista || [] });
+  }
+  if (req.method === "POST" && acao === "gerar") {
+    const n = await supa(`${base("rpc/fin_juros_gerar")}`, { method: "POST", headers: cab(tok), body: JSON.stringify({ p_comp: comp }) });
+    return res.status(200).json({ ok: true, criados: Number(n) || 0 });
+  }
+  if (req.method === "POST" || req.method === "PATCH") {
+    const c = await corpoDe(req) || {};
+    const linha = {};
+    CAMPOS_INV.forEach(([k, conv]) => { if (c[k] !== undefined) linha[k] = conv(c[k]); });
+    if (req.method === "POST") {
+      if (!linha.nome) return res.status(400).json({ erro: "Escreva o nome." });
+      if (!linha.centro_custo_id) {
+        const cc = um(await supa(`${base("fin_centro_custo")}?select=id&nome=ilike.*investidor*&limit=1`, { headers: cab(tok) }).catch(() => []));
+        if (cc) linha.centro_custo_id = cc.id;
+      }
+      const r = await supa(base("fin_investidor"), { method: "POST", headers: cab(tok, REP), body: JSON.stringify(linha) });
+      if (!um(r)) return recusado(res);
+      return res.status(201).json({ ok: true, item: um(r) });
+    }
+    const id = idOuNulo(req.query.id);
+    if (!id) return res.status(400).json({ erro: "id inválido." });
+    linha.atualizado_em = new Date().toISOString();
+    const r = await supa(`${base("fin_investidor")}?id=eq.${id}`, { method: "PATCH", headers: cab(tok, REP), body: JSON.stringify(linha) });
+    if (!um(r)) return recusado(res);
+    return res.status(200).json({ ok: true, item: um(r) });
+  }
+  res.setHeader("Allow", "GET, POST, PATCH");
+  return res.status(405).json({ erro: "Use GET, POST ou PATCH." });
+}
+
 const RECURSOS = { nfse, cartao, conta, categoria, funcionario, favorecido, lancamento, importar, dre, carros, vale, folha, remuneracao,
                    "contas-fixas": contasFixas, "config-folha": configFolha,
                    "perfil-remuneracao": perfilRemuneracao,
-                   fechamento, orcamento, ano: anoGestao, "ano-antigo": ano, rateio, negociacao, titulo, fluxo, log, recibo, pendencias, recebimentos, saldos, balanco, patrimonio,
+                   fechamento, orcamento, ano: anoGestao, "ano-antigo": ano, rateio, negociacao, titulo, fluxo, log, recibo, pendencias, recebimentos, saldos, balanco, patrimonio, investidor, centro: centroCusto,
                    estoque: estoqueLista };
 
 module.exports = async function handler(req, res) {
