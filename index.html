@@ -34834,10 +34834,14 @@ function QuadroEquipe({ perfil, negs, recarregarNegs }) {
   // Conta desativada é quem SAIU — salvo a recém-criada, que é alguém
   // que se cadastrou na tela de entrada e espera ser liberado. As duas
   // eram uma tarja amarela só, e a pessoa que saiu cobrava ação todo dia.
+  // "Pedindo" é só quem se cadastrou sozinho e nunca foi liberado. Conta que o gerente criou (senha provisória) ou já
+  // ligada a uma meta foi de alguém da equipe: desativada, é ex-prestador mesmo recém-criada (16/11/2026, o Pedro
+  // Dutka ficava em "pedindo acesso" depois de sair, e não havia como mandá-lo para os ex-prestadores).
   const recente = (a) => a && !a.ativo && a.criado_em && Date.now() - Date.parse(a.criado_em) < 14 * 864e5;
-  const pedindo = pessoas.filter((pe) => recente(pe.acesso));
-  const ex = (pe) => !recente(pe.acesso) && ((pe.acesso && !pe.acesso.ativo) || (!pe.acesso && pe.neg && !pe.neg.ativo));
-  const ativas = pessoas.filter((pe) => !ex(pe) && !recente(pe.acesso));
+  const pedindoAcesso = (pe) => recente(pe.acesso) && !pe.acesso.senha_provisoria && !pe.neg;
+  const pedindo = pessoas.filter(pedindoAcesso);
+  const ex = (pe) => !pedindoAcesso(pe) && ((pe.acesso && !pe.acesso.ativo) || (!pe.acesso && pe.neg && !pe.neg.ativo));
+  const ativas = pessoas.filter((pe) => !ex(pe) && !pedindoAcesso(pe));
   const inativas = pessoas.filter(ex);
   const doSetor = (k) => ativas.filter((pe) => setorDe(pe) === k).sort((x, y) => nomeChave((x.acesso || x.neg).nome).localeCompare(nomeChave((y.acesso || y.neg).nome)));
   // As metas que não estão ligadas a login nenhum: é delas que sai o "ligar à meta de…".
