@@ -156,11 +156,37 @@ async function cacheRpc(nome, corpo) {
   } catch (e) { return null; }
 }
 
+/* LOGIN OBRIGATÓRIO (16/11/2026). Era a única rota aberta que gastava dinheiro: quem descobrisse a URL queimava a
+ * cota diária da Placa Fipe e deixava o negociador sem consulta (decisão 9 deixou anotado). Agora vale o mesmo do
+ * api/fipe.js: o banco confirma que o token é de alguém da equipe com acesso — conta desativada não lê nem o
+ * próprio perfil — e a resposta fica guardada 10 min por token. */
+const sessoesOk = new Map();
+function tokenDe(req) {
+  const h = String((req.headers && (req.headers.authorization || req.headers.Authorization)) || "");
+  return /^Bearer\s+[\w-]+\.[\w-]+\.[\w-]+$/.test(h) ? h : null;
+}
+async function sessaoValida(tok) {
+  const URL_B = (process.env.SUPABASE_URL || "").replace(/\/+$/, ""), ANON = process.env.SUPABASE_ANON_KEY;
+  if (!tok || !URL_B || !ANON) return false;
+  const ate = sessoesOk.get(tok);
+  if (ate && ate > Date.now()) return true;
+  try {
+    const r = await fetch(`${URL_B}/rest/v1/perfil?select=id&limit=1`, { headers: { apikey: ANON, Authorization: tok }, signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return false;
+    const d = await r.json().catch(() => []);
+    if (!Array.isArray(d) || !d.length) return false;
+    if (sessoesOk.size > 200) sessoesOk.clear();
+    sessoesOk.set(tok, Date.now() + 10 * 60000);
+    return true;
+  } catch (e) { return false; }
+}
+
 module.exports = async function handler(req, res) {
   const token = process.env.PLACAFIPE_TOKEN;
   if (!token) {
     return res.status(500).json({ erro: "PLACAFIPE_TOKEN não configurado na Vercel." });
   }
+  if (!(await sessaoValida(tokenDe(req)))) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
 
   const acao = String(req.query.acao || "");
   if (acao === "cota") return cota(res, token);

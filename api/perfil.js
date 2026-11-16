@@ -428,18 +428,23 @@ async function novaPessoa(req, res, tok) {
   const meu = r0.ok ? (await r0.json().catch(() => []))[0] : null;
   if (!meu || meu.papel !== "gerente") return res.status(403).json({ erro: "Só o gerente cria login para outra pessoa." });
 
+  /* O CADASTRO PÚBLICO FOI DESLIGADO (16/11/2026). Uma conta "redteam.probe.vaapty" se cadastrou de madrugada pela
+     tela de entrada — não viu nada (nasceu sem acesso), mas qualquer um conseguia ter conta. Com o cadastro público
+     desligado no Supabase, o login da equipe nasce só aqui, pela API de administração: a chave de serviço entra DEPOIS
+     de o gerente ser conferido pelo token dele, para uma chamada só — a mesma ordem do "gerar senha" (decisão 38). */
+  if (!CHAVE) return res.status(503).json({ erro: "Criar login precisa da SUPABASE_SERVICE_KEY nas variáveis de ambiente." });
   const senhaNova = senhaAleatoria();
-  const r = await fetch(`${URL_BASE}/auth/v1/signup`, {
+  const r = await fetch(`${URL_BASE}/auth/v1/admin/users`, {
     method: "POST",
-    headers: { apikey: ANON, "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password: senhaNova, data: { nome } }),
+    headers: { apikey: CHAVE, Authorization: `Bearer ${CHAVE}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password: senhaNova, email_confirm: true, user_metadata: { nome } }),
   });
   const t = await r.text();
   let d = null; try { d = t ? JSON.parse(t) : null; } catch (e) {}
   const usuario = d && (d.user || (d.id ? d : null));
   // Com confirmação ligada, e-mail repetido volta 200 com `identities`
   // vazio em vez de erro — é o Supabase não entregando quem tem conta.
-  const repetido = (!r.ok && /registered|already|exists/i.test(String((d && (d.msg || d.message || d.error_description)) || "")))
+  const repetido = (!r.ok && /registered|already|exists|email_exists/i.test(String((d && (d.msg || d.message || d.error_description)) || "")))
     || (usuario && Array.isArray(usuario.identities) && usuario.identities.length === 0);
   if (repetido) {
     return res.status(409).json({ erro: "Já existe uma conta com esse e-mail. Procure a pessoa em \"Ex-prestadores\" e marque \"entra\", ou use \"gerar senha\"." });

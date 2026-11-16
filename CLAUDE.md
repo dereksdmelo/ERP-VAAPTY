@@ -747,10 +747,16 @@ sem tratamento viraria uma tela vazia inexplicável. `api/perfil.js`
 devolve `liberado: false` nesse caso, e o App mostra "acesso ainda não
 liberado".
 
-**`/api/placa` e `/api/cota` continuam abertos.** São os únicos sem
-login, porque mexer neles estava fora do combinado. Consequência real:
-quem descobrir a URL queima as 20 consultas diárias da Placa Fipe.
-Fechar é uma linha em cada arquivo, o mesmo `tokenDe()`.
+**`/api/placa` (placa, cota e desvalorizômetro) exige login desde 16/11/2026**, com a mesma conferência do
+`api/fipe.js` (`sessaoValida`: o banco confirma o token e que a conta tem acesso). Antes era aberto, e quem
+descobrisse a URL queimava a cota diária da Placa Fipe.
+
+**O cadastro público está DESLIGADO (16/11/2026).** Uma conta de fora, "redteam.probe.vaapty", se cadastrou de
+madrugada pela tela de entrada. Não viu nada (nasceu sem acesso, e foi apagada), mas qualquer um conseguia ter
+conta. Agora a tela de entrada não tem "Criar conta", o "Allow new users to sign up" está desligado no Supabase, e o
+login nasce só pelo "+ Adicionar pessoa" do gerente, pela API de administração (`novaPessoa` no `api/perfil.js`: o
+gerente é conferido pelo token dele ANTES de a chave de serviço entrar, para uma chamada só — a ordem do "gerar
+senha", decisão 38). **Quem religar o cadastro público reabre a porta.**
 
 ### 10. O atendimento é o dono; a ficha é filha dele
 

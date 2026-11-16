@@ -498,7 +498,7 @@ async function consultarPerfil() {
 
 /* ===================== API ===================== */
 async function consultarPlaca(placa, nova) {
-  const r = await fetch(`/api/placa?placa=${encodeURIComponent(placa)}${nova ? "&nova=1" : ""}`);
+  const r = await fetchAut(`/api/placa?placa=${encodeURIComponent(placa)}${nova ? "&nova=1" : ""}`);
   const d = await r.json().catch(() => ({}));
   if (!r.ok) {
     const e = new Error(d.erro || "Falha na consulta.");
@@ -528,13 +528,13 @@ function consultarDesvalorizacao(chave) {
   return _desval[chave];
 }
 async function buscarDesvalorizacao(chave) {
-  const r = await fetch(`/api/placa?acao=desvalorizacao&chave=${encodeURIComponent(chave)}`);
+  const r = await fetchAut(`/api/placa?acao=desvalorizacao&chave=${encodeURIComponent(chave)}`);
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.erro || "Histórico indisponível.");
   return d;
 }
 async function consultarCota() {
-  try { const r = await fetch("/api/placa?acao=cota"); return r.ok ? await r.json() : null; } catch (e) { return null; }
+  try { const r = await fetchAut("/api/placa?acao=cota"); return r.ok ? await r.json() : null; } catch (e) { return null; }
 }
 async function salvarFicha(ficha) {
   const r = await fetchAut("/api/veiculo", {
@@ -15061,13 +15061,17 @@ function Login({ aoEntrar }) {
           </button>
         )}
 
-        <button onClick={() => { setModo(criando || esquecido ? "entrar" : "criar"); setErro(""); }}
-          className="mt-4 w-full text-[13px] font-semibold" style={{ color: C.roxo }}>
-          {criando ? "Já tenho conta — entrar" : esquecido ? "Voltar para entrar" : "Primeira vez aqui? Criar conta"}
-        </button>
+        {/* Sem "criar conta" (16/11/2026): o cadastro público foi desligado depois de uma conta de fora
+            ("redteam.probe") se cadastrar de madrugada. O login nasce com o gerente, em Equipe → + Adicionar pessoa. */}
+        {esquecido && (
+          <button onClick={() => { setModo("entrar"); setErro(""); }}
+            className="mt-4 w-full text-[13px] font-semibold" style={{ color: C.roxo }}>
+            Voltar para entrar
+          </button>
+        )}
 
         <p className="mt-5 text-[11px] leading-relaxed" style={{ color: C.mute }}>
-          Conta nova precisa ser liberada pelo gerente antes de funcionar — aqui dentro tem dado de cliente. Se você acabou de criar a sua e não entra, é isso.
+          Não tem acesso? Peça ao gerente: ele cria o seu login em Equipe e te passa uma senha provisória.
         </p>
       </div>
     </div>
