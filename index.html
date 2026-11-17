@@ -9940,15 +9940,27 @@ function ChecklistDigital({ atendimentoId, ficha, perfil, aoCarregar }) {
   const baseRef = useRef(null);
   const clRef = useRef(null);
   clRef.current = cl;
+  /* A LINHA DE DÉBITO RECÉM-ACRESCENTADA SUMIA (17/11/2026, o Derek: "ao adicionar o item, quando vai digitar, ele
+   * some"). O servidor descarta item de lista sem descrição e sem valor (`itensDeValor`) e devolve o valor como
+   * número; a gravação automática mandava a linha em branco, voltava a lista sem ela, e a tela adotava a do banco.
+   * As listas são comparadas pelo que o banco guardaria delas, e quando dá o mesmo fica a da tela — com a linha em
+   * branco e o número do jeito que foi digitado. */
+  const comoNoBanco = (v) => (Array.isArray(v)
+    ? v.map((x) => ({ descricao: String((x && x.descricao) || "").trim(), valor: numeroBR(x && x.valor) || 0 }))
+        .filter((x) => x.descricao || x.valor)
+    : v ?? null);
+  const mesmoValor = (a, b) => JSON.stringify(comoNoBanco(a)) === JSON.stringify(comoNoBanco(b));
   const mudados = (atual, base) => {
     const b = base || {};
-    return Object.keys(atual || {}).filter((k) => JSON.stringify(atual[k] ?? null) !== JSON.stringify(b[k] ?? null));
+    return Object.keys(atual || {}).filter((k) => !mesmoValor(atual[k], b[k]));
   };
   const juntarDoBanco = (atual, base, banco) => {
     if (!atual) return banco;
     const meus = mudados(atual, base);
     const n = { ...banco };
-    meus.forEach((k) => { n[k] = atual[k]; });
+    Object.keys(atual).forEach((k) => {
+      if (meus.indexOf(k) >= 0 || (Array.isArray(atual[k]) && mesmoValor(atual[k], banco[k]))) n[k] = atual[k];
+    });
     return n;
   };
   useEffect(() => {
@@ -9985,8 +9997,9 @@ function ChecklistDigital({ atendimentoId, ficha, perfil, aoCarregar }) {
       lerChecklist(atendimentoId).then((d) => {
         if (!vivo || !d || ocupadoRef.current) return;
         // Nada por gravar aqui: a tela passa a ser o banco (inclusive os números que ela só tinha puxado da ficha).
+        // (a linha de lista em branco que esta tela acabou de abrir fica: o banco não guarda linha vazia).
         const semPendencia = JSON.stringify(clRef.current) === salvoRef.current;
-        const n = semPendencia ? d : juntarDoBanco(clRef.current, baseRef.current, d);
+        const n = juntarDoBanco(clRef.current, semPendencia ? clRef.current : baseRef.current, d);
         baseRef.current = d;
         if (!mudados(n, d).length) salvoRef.current = JSON.stringify(n);
         clRef.current = n;
