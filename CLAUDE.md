@@ -555,6 +555,22 @@ de qualquer `await` em `gerarDocumento()`
 é bloqueado pelo navegador. Quem inverter essa ordem quebra a impressão
 em silêncio.
 
+**A impressão não pode congelar o sistema (17/11/2026).** O negociador
+imprimia o extrato, voltava à aba do sistema para pôr o CPF e o campo
+não aceitava; para tirar o termo de aceite, atualizava a página. A janela
+nascia de `window.open("")` com o documento escrito nela: as duas abas
+dividem o processo, e o `print()` da janela do documento para o
+JavaScript das DUAS enquanto a caixa de impressão está aberta — conferido
+no Chrome, com um contador parado na aba de origem. Agora `abrirDocumento`
+abre o documento num endereço blob com `noopener` (outro processo) e a
+impressão sai de lá. Sem a janela de volta (decisão 8), o bloqueio de
+pop-up é deduzido: se a aba continua à vista e com foco 1,5 s depois,
+aparece "O documento não abriu? Abrir o documento". **Quem voltar a
+escrever o documento numa janela aberta daqui e chamar `print()` nela
+reabre isto.** O recibo e o DANFSe do financeiro ainda abrem assim (a
+janela precisa nascer antes do `await`, e com `noopener` não há como
+escrever nela depois).
+
 **O protocolo liga papel e banco.** Ele é gerado dentro do HTML, no
 rodapé, e `extrairProtocolo()` o tira de lá por regex — assim as funções
 de documento continuam devolvendo só o HTML, como no arquivo original.

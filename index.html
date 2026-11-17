@@ -4854,13 +4854,49 @@ ${assinaturas("Administrativo", "Financeiro")}
   return moldura({ titulo: "Check list", corpo, protocolo: protocolo(f, "CHK") });
 }
 
+/* A IMPRESSÃO NÃO PODE CONGELAR O SISTEMA (17/11/2026, o Derek: o negociador imprimiu o extrato, voltou para pôr o
+ * CPF e o campo não aceitava; "tem que atualizar pra gerar o termo depois do extrato"). A janela era aberta com
+ * `window.open("")` e o documento escrito nela: as duas abas ficam no MESMO processo do navegador, e o `print()`
+ * da janela do documento PARA o JavaScript das duas enquanto a caixa de impressão está aberta. Quem voltava para a
+ * aba do sistema sem fechar a caixa encontrava a tela morta: digitar não entrava, botão não respondia (conferido no
+ * Chrome, com um contador parado). Agora o documento vai num endereço próprio (blob) aberto com `noopener`, que
+ * nasce em outro processo: a caixa de impressão de lá não toca nesta aba. Com `noopener` o navegador não devolve a
+ * janela (decisão 8), então não dá para saber na hora se ela foi bloqueada: se esta aba continuar à vista e com o
+ * foco, aparece um aviso com o link para abrir o documento à mão. */
 function abrirDocumento(html) {
-  const j = window.open("", "_blank");
-  if (!j) return { ok: false, erro: "O navegador bloqueou a janela. Libere pop-ups para este site." };
-  j.document.write(html);
-  j.document.close();
-  setTimeout(() => j.print(), 400);
+  const s = String(html || "");
+  const imprime = "<script>addEventListener('load',function(){setTimeout(function(){window.print()},400)})<\/script>";
+  const corpo = /<\/body>/i.test(s) ? s.replace(/<\/body>(?![\s\S]*<\/body>)/i, imprime + "</body>") : s + imprime;
+  let url;
+  try { url = URL.createObjectURL(new Blob([corpo], { type: "text/html;charset=utf-8" })); }
+  catch (e) { return { ok: false, erro: "Não consegui montar o documento neste navegador." }; }
+  window.open(url, "_blank", "noopener");
+  setTimeout(() => {
+    if (document.visibilityState === "visible" && document.hasFocus()) avisoDocumentoBloqueado(url);
+  }, 1500);
+  setTimeout(() => { try { URL.revokeObjectURL(url); } catch (e) {} }, 10 * 60 * 1000);
   return { ok: true };
+}
+function avisoDocumentoBloqueado(url) {
+  const velho = document.getElementById("vp-doc-bloqueado");
+  if (velho) velho.remove();
+  const d = document.createElement("div");
+  d.id = "vp-doc-bloqueado";
+  d.style.cssText = "position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:9999;background:#2A1838;color:#fff;"
+    + "padding:12px 16px;border-radius:10px;font:14px system-ui;box-shadow:0 6px 24px rgba(0,0,0,.25);display:flex;gap:12px;align-items:center;max-width:92vw";
+  const t = document.createElement("span");
+  t.textContent = "O documento não abriu?";
+  const a = document.createElement("a");
+  a.href = url; a.target = "_blank"; a.rel = "noopener"; a.textContent = "Abrir o documento";
+  a.style.cssText = "color:#fff;font-weight:700;text-decoration:underline";
+  const x = document.createElement("button");
+  x.textContent = "×"; x.setAttribute("aria-label", "Fechar");
+  x.style.cssText = "background:none;border:0;color:#fff;font-size:18px;cursor:pointer";
+  const fechar = () => d.remove();
+  a.onclick = () => setTimeout(fechar, 300); x.onclick = fechar;
+  d.append(t, a, x);
+  document.body.appendChild(d);
+  setTimeout(fechar, 20000);
 }
 
 // O protocolo vive dentro do HTML gerado, no rodapé. Tirá-lo de lá
