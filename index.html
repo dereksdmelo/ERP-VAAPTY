@@ -26479,11 +26479,20 @@ function VisorAnexos({ anexos, inicio, aoFechar, conferencia }) {
     return () => window.removeEventListener("keydown", t);
   }, [anexos.length]);
 
-  const doc = a && a.docId;
+  /* O DOCUMENTO ASSINADO ABRE COM A ASSINATURA (17/11/2026, o Derek: "o pré-contrato que vai anexado
+   * é o sem assinatura"). Assinado pelo link (decisão 42), a assinatura mora na tabela `assinatura` e o
+   * `documento` continua sendo a folha em branco; com `codigo`, o visor pede a via montada pelo servidor
+   * (`?recurso=assinado`) — a folha mais o bloco da assinatura. */
+  const docCod = a && a.docId && a.codigo;
+  const doc = a && a.docId ? (docCod ? `${a.docId}:${docCod}` : a.docId) : null;
   useEffect(() => {
     if (!doc || htmls[doc] !== undefined) return;
     let vivo = true;
-    lerDocumento(doc)
+    const ler = docCod
+      ? fetchAut(`/api/documento?recurso=assinado&codigo=${encodeURIComponent(docCod)}`)
+          .then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.erro || "Não consegui abrir a via assinada."); return { conteudo: d.html }; })
+      : lerDocumento(a.docId);
+    ler
       .then((d) => { if (vivo) setHtmls((h) => ({ ...h, [doc]: d.conteudo || "ERRO:Registrado sem o conteúdo — saiu antes de a ficha ir ao banco." })); })
       .catch((e) => { if (vivo) setHtmls((h) => ({ ...h, [doc]: `ERRO:${e.message}` })); });
     return () => { vivo = false; };
@@ -27457,18 +27466,29 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
     let vivo = true;
     veiculoDoAtendimento(atendimentoId)
       .then((v) => (v && v.id ? listarDocumentos(v.id) : []))
-      .then((ls) => { if (vivo) setDocs(ls); })
+      .then(async (ls) => {
+        if (vivo) setDocs(ls);
+        // Qual deles foi assinado pelo link: é essa via que vale como papel do item.
+        const ids = (ls || []).filter((x) => ASSINAVEIS.indexOf(x.tipo) >= 0).map((x) => x.id);
+        const est = ids.length ? await lerEstadosAssinatura(ids).catch(() => ({})) : {};
+        if (vivo) setAssinados(est);
+      })
       .catch(() => {});
     return () => { vivo = false; };
   }, [atendimentoId]);
+  const [assinados, setAssinados] = useState({});
+  const assinaturaDe = (x) => { const e = assinados[x.id]; return e && e.situacao === "assinado" ? e : null; };
 
   // O documento gerado abre no mesmo visor dos anexos. Aba nova quebra
   // a conferência no celular: cada papel custa um gesto a mais para
   // voltar, e são 37 itens.
-  const comoItem = (x) => ({
-    id: `d${x.id}`, docId: x.id, tipo: "documento",
-    nome: `${ROT_DOC[x.tipo] || x.tipo} · ${diaBR(x.gerado_em)}${x.protocolo ? ` · ${x.protocolo}` : ""}`,
-  });
+  const comoItem = (x) => {
+    const e = assinaturaDe(x);
+    return {
+      id: `d${x.id}`, docId: x.id, tipo: "documento", codigo: e ? e.codigo : null,
+      nome: `${ROT_DOC[x.tipo] || x.tipo}${e ? " assinado" : ""} · ${diaBR(e ? e.assinado_em : x.gerado_em)}${x.protocolo ? ` · ${x.protocolo}` : ""}`,
+    };
+  };
 
   const criarItem = async () => {
     const rot = novoItem.trim();
@@ -27494,7 +27514,11 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
   // rótulo "doc:<código>". Bucket novo significaria política nova de
   // Storage e mais um lugar para o arquivo se perder.
   const doItem = (cod) => anexos.filter((a) => a.rotulo === `doc:${cod}` || [].concat(ANEXO_DE_ITEM[a.rotulo] || []).indexOf(cod) >= 0);
-  const geradosDoItem = (cod) => docs.filter((x) => DOC_DE_ITEM[x.tipo] === cod);
+  // A via assinada vem primeiro: é ela que vale como papel do item, e as outras ficam recolhidas.
+  const geradosDoItem = (cod) => {
+    const ls = docs.filter((x) => DOC_DE_ITEM[x.tipo] === cod);
+    return ls.filter((x) => assinaturaDe(x)).concat(ls.filter((x) => !assinaturaDe(x)));
+  };
   // Para o contador de papéis, documento gerado vale como papel: o
   // contrato existe, ele só não foi anexado como arquivo.
   const temPapel = (cod) => !!(doItem(cod).length || geradosDoItem(cod).length);
@@ -27732,7 +27756,7 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
                           {vis.map((x, gk) => (
                             <span key={x.id} className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px]" style={{ background: C.roxoFraco }}>
                               <button onClick={() => abrirNaFila(it[0], `d${x.id}`)} className="font-semibold" style={{ color: C.roxo }}>
-                                {ROT_DOC[x.tipo] || x.tipo} · {diaBR(x.gerado_em)}{x.protocolo ? ` · ${x.protocolo}` : ""}{gk === 0 && gs.length > 1 ? " · a mais recente" : ""}
+                                {assinaturaDe(x) ? "✓ " : ""}{comoItem(x).nome}{gk === 0 && gs.length > 1 && !assinaturaDe(x) ? " · a mais recente" : ""}
                               </button>
                               {eGerente && <button onClick={() => excluirDoc(x)} style={{ color: C.mute }} title="excluir este registro">×</button>}
                             </span>

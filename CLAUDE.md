@@ -5236,6 +5236,12 @@ Detran também se anexa ali e no fechamento. E a via assinada do ZapSign
 vai sozinha para os anexos quando alguém abre o atendimento assinado (a
 mesma chamada idempotente do botão).
 
+**O documento assinado pelo link vale com a assinatura (17/11/2026, o Derek: *"o pré-contrato que vai
+anexado é o sem assinatura"*).** Assinado pelo assinador próprio (decisão 42), o `documento` continua sendo a
+folha em branco e a assinatura mora em `assinatura`. O check list lê o estado das assinaturas
+(`?recurso=assinar-estado`), põe a via assinada primeiro ("✓ Pré-contrato assinado"), e o visor a abre
+montada pelo servidor (`?recurso=assinado`, a folha mais o bloco da assinatura).
+
 **Os revisores são lembrados das aprovações de dez em dez minutos**
 (`AvisoAprovacoes`, `?recurso=esteira&resumo=1`): só o que espera a
 aprovação DELE, sem dado bancário.
