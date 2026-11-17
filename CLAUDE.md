@@ -593,6 +593,15 @@ dependia do botão. Agora grava 1,5 s depois de parar de digitar
 tela e vai na volta seguinte; sair da página com algo por gravar faz o
 navegador perguntar. O botão continua, para quem quer ter certeza.
 
+**Duas telas no mesmo check list não se apagam mais (17/11/2026, o Derek: *"um problema muito sério, precisa ser
+resolvido de uma vez por todas"*).** O check list gravava o formulário INTEIRO a cada mudança, e a tela aberta antes
+gravava os campos vazios dela por cima do que a outra tinha digitado (o Onix do Wivaldo, o Clio do Pedro Ramos). Agora é
+a regra de três pontas da decisão 44: `baseRef` guarda o que o banco tinha da última conversa, sobe SÓ o campo que esta
+tela mudou (o `api/checklist.js` grava só as chaves que recebe), o líquido ao cliente vai só quando um número mudou aqui,
+e de 15 em 15 s o banco é relido — campo não tocado aqui passa a mostrar o do banco. O "corrigir e reemitir" do
+administrativo (`ContratoDoNegocio`) também manda só o que corrigiu. **Quem voltar a mandar o check list inteiro
+reabre isto.**
+
 **Cada geração é uma linha.** Segunda via é evento novo, com protocolo
 novo: é assim que se sabe quantas vias existem circulando. Por isso a
 0003 não tem índice único.

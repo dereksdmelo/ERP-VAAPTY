@@ -9893,6 +9893,28 @@ function ChecklistDigital({ atendimentoId, ficha, perfil, aoCarregar }) {
   const [erro, setErro] = useState("");
   const [salvoEm, setSalvoEm] = useState(null);
 
+  /* DUAS TELAS NÃO SE APAGAM MAIS (17/11/2026, o Derek: "um problema muito sério, precisa ser resolvido de uma
+   * vez por todas"). O check list gravava o formulário INTEIRO a cada mudança: com o celular e o computador (ou
+   * o negociador e o administrativo) no mesmo atendimento, a tela aberta antes não tinha o que a outra digitou e,
+   * no primeiro toque, gravava os campos vazios dela por cima — o Onix do Wivaldo e o Clio do Pedro Ramos
+   * apareceram em branco assim. Agora é a regra de três pontas dos dados do cliente (decisão 44): `baseRef` é o
+   * que o banco tinha da última vez que esta tela falou com ele; sobe SÓ o campo que esta tela mudou desde então
+   * (o servidor grava só as chaves que recebe), e de 15 em 15 s o banco é relido — o campo que esta tela não
+   * tocou passa a mostrar o do banco, o que ela está editando fica. */
+  const baseRef = useRef(null);
+  const clRef = useRef(null);
+  clRef.current = cl;
+  const mudados = (atual, base) => {
+    const b = base || {};
+    return Object.keys(atual || {}).filter((k) => JSON.stringify(atual[k] ?? null) !== JSON.stringify(b[k] ?? null));
+  };
+  const juntarDoBanco = (atual, base, banco) => {
+    if (!atual) return banco;
+    const meus = mudados(atual, base);
+    const n = { ...banco };
+    meus.forEach((k) => { n[k] = atual[k]; });
+    return n;
+  };
   useEffect(() => {
     if (!atendimentoId) return;
     lerChecklist(atendimentoId)
@@ -9904,6 +9926,7 @@ function ChecklistDigital({ atendimentoId, ficha, perfil, aoCarregar }) {
           valor_debitos: ficha.debitos || "",
           valor_quitacao: ficha.quitacao || "",
         };
+        baseRef.current = d || {};
         setCl(base);
         salvoRef.current = JSON.stringify(base);
         if (aoCarregar) aoCarregar(base);
@@ -9914,33 +9937,39 @@ function ChecklistDigital({ atendimentoId, ficha, perfil, aoCarregar }) {
   /* O CONTRATO SAI COM O QUE ESTÁ NA TELA (04/11/2026). O pai (o
    * atendimento) só recebia o check list ao abrir e ao salvar: corrigir o
    * desconto do vidro e imprimir sem apertar "Salvar" imprimia a conta
-   * velha. Agora toda mudança chega a ele — e, com a aba voltando a ficar
-   * à vista sem nada por salvar aqui, relê o banco: a correção pode ter
-   * sido feita no outro aparelho. */
+   * velha. Agora toda mudança chega a ele. */
   const salvoRef = useRef("");
   useEffect(() => { if (cl && aoCarregar) aoCarregar(cl); }, [cl]);
+  const ocupadoRef = useRef(false);
   useEffect(() => {
     if (!atendimentoId) return;
-    const vis = () => {
-      if (document.hidden) return;
-      setCl((atual) => {
-        if (atual && JSON.stringify(atual) !== salvoRef.current) return atual;   // edição em curso aqui
-        lerChecklist(atendimentoId).then((d) => { if (d) { salvoRef.current = JSON.stringify(d); setCl(d); } }).catch(() => {});
-        return atual;
-      });
+    let vivo = true;
+    const reler = () => {
+      if (document.hidden || ocupadoRef.current || baseRef.current == null) return;
+      lerChecklist(atendimentoId).then((d) => {
+        if (!vivo || !d || ocupadoRef.current) return;
+        // Nada por gravar aqui: a tela passa a ser o banco (inclusive os números que ela só tinha puxado da ficha).
+        const semPendencia = JSON.stringify(clRef.current) === salvoRef.current;
+        const n = semPendencia ? d : juntarDoBanco(clRef.current, baseRef.current, d);
+        baseRef.current = d;
+        if (!mudados(n, d).length) salvoRef.current = JSON.stringify(n);
+        clRef.current = n;
+        setCl(n);
+      }).catch(() => {});
     };
+    const t = setInterval(reler, 15000);
+    const vis = () => { if (!document.hidden) reler(); };
     document.addEventListener("visibilitychange", vis);
-    return () => document.removeEventListener("visibilitychange", vis);
+    return () => { vivo = false; clearInterval(t); document.removeEventListener("visibilitychange", vis); };
   }, [atendimentoId]);
   /* O CHECK LIST SALVA SOZINHO (12/11/2026, o Derek: "tem acontecido de não
    * salvar os dados, em várias etapas, diversas vezes" — os dados bancários
-   * do Grand Siena digitados e perdidos). Era o único bloco do atendimento
-   * que dependia de apertar "Salvar": quem saía da tela, recarregava ou ia
-   * ao outro aparelho perdia o que tinha digitado. Agora grava 1,5 s depois
-   * de parar de digitar, como os dados do cliente (decisão 44). */
+   * do Grand Siena digitados e perdidos). Grava 1,5 s depois de parar de
+   * digitar, como os dados do cliente (decisão 44). */
   const gravarRef = useRef(null);
   useEffect(() => {
     if (!cl || JSON.stringify(cl) === salvoRef.current) return;
+    if (baseRef.current != null && !mudados(cl, baseRef.current).length) { salvoRef.current = JSON.stringify(cl); return; }
     const t = setTimeout(() => { if (gravarRef.current) gravarRef.current(true); }, 1500);
     return () => clearTimeout(t);
   }, [cl]);
@@ -10000,18 +10029,29 @@ function ChecklistDigital({ atendimentoId, ficha, perfil, aoCarregar }) {
 
   const gravar = async (auto) => {
     const auto_ = auto === true;
-    const enviado = JSON.stringify(cl);
-    setErro(""); setIndo(true);
+    const enviado = cl;
+    // Só o que esta tela mudou desde a última conversa com o banco. O líquido ao cliente é conta da tela: vai só
+    // quando um número da conta mudou aqui — senão uma tela atrasada mandaria a conta velha.
+    const base = baseRef.current || {};
+    const chaves = mudados(enviado, base);
+    const corpo = {};
+    chaves.forEach((k) => { corpo[k] = enviado[k]; });
+    if (chaves.some((k) => typeof enviado[k] !== "boolean")) corpo.valor_cliente = liquido;
+    if (!Object.keys(corpo).length && !auto_) corpo.valor_cliente = liquido;
+    if (!Object.keys(corpo).length) { salvoRef.current = JSON.stringify(enviado); return; }
+    setErro(""); setIndo(true); ocupadoRef.current = true;
     try {
-      const d = await salvarChecklist(atendimentoId, { ...cl, valor_cliente: liquido });
+      const d = await salvarChecklist(atendimentoId, corpo);
       // Digitou enquanto gravava: fica o que está na tela, e a próxima volta grava o resto.
-      setCl((atual) => {
-        if (JSON.stringify(atual) === enviado) { salvoRef.current = JSON.stringify(d); return d; }
-        salvoRef.current = enviado; return atual;
-      });
+      const n = juntarDoBanco(clRef.current, enviado, d);
+      baseRef.current = d;
+      salvoRef.current = JSON.stringify(mudados(n, d).length ? enviado : n);
+      clRef.current = n;
+      setCl(n);
       setSalvoEm(new Date());
       if (aoCarregar) aoCarregar(d);
     } catch (e) { setErro(auto_ ? `Não salvou sozinho: ${e.message} — aperte "Salvar check list".` : e.message); }
+    ocupadoRef.current = false;
     setIndo(false);
   };
   gravarRef.current = gravar;
@@ -26970,8 +27010,13 @@ function ContratoDoNegocio({ atendimento, checklist, perfil, aoSalvarChecklist }
           chassi: veic.chassi, cor: veic.cor, km: veic.km,
         });
       }
-      if (cl) {
-        const d = await salvarChecklist(atendimento.id, cl);
+      // Só o que foi corrigido aqui (17/11/2026): mandar o check list inteiro gravava por cima o que o
+      // negociador digitou depois de esta tela abrir.
+      const base = checklist || {};
+      const so = {};
+      if (cl) Object.keys(cl).forEach((k) => { if (JSON.stringify(cl[k] ?? null) !== JSON.stringify(base[k] ?? null)) so[k] = cl[k]; });
+      if (cl && Object.keys(so).length) {
+        const d = await salvarChecklist(atendimento.id, so);
         setCl(d); if (aoSalvarChecklist) aoSalvarChecklist(d);
       }
       setAviso("Dados salvos. O contrato sai com estes números.");
