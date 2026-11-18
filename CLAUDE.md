@@ -6638,6 +6638,19 @@ os lançamentos em categoria de retirada; acumulado = o do mês anterior + resul
 dos R$ 62.643,23 de setembro (o último da planilha). `anoGestao` em `api/financeiro.js`; o Ano antigo
 (por categoria) segue em `?recurso=ano-antigo`.
 
+**Zero de área no sistema pode ser falta de lançamento, e a tela diz (18/11/2026).** O Derek viu
+outubro com 7 Financeiro e 8 Impostos em 0,00. A conta estava certa: não havia lançamento nem título
+com competência de outubro nesses grupos — o DAS de outubro vence em 20/11 e não existe ainda, o DAS
+de setembro (pago 20/10) e a fatura BUSINESS de 15/10 estão com competência de setembro (mês da
+planilha, que já os conta), e os juros do giro ("Juros Capital 16/48") estão em 9.07, fora do DRE. A
+planilha é por competência (o aluguel e as retiradas de setembro pagos em outubro batem com ela), então
+não há buraco na virada. O defeito era o 0,00 calado: `regras/ano.js` marca a área que teve valor nos
+três meses da planilha antes do corte e não tem nada no mês do sistema, e a célula vira "sem
+lançamento", com a média da planilha. **O resultado do mês não é estimado** — continua sem a área, e o
+aviso diz isso. Teste: `node ferramentas-ano.js`. **O importador põe a competência no mês do
+pagamento** (DAS, DARF e fatura do cartão são do mês anterior): quem lança corrige à mão, senão o
+imposto de outubro cai em novembro.
+
 ### 71. Unir títulos num pagamento só, e o custo que vai para o carro (0134)
 
 O Derek, em 08/11/2026, com o relatório de cautelares da TMH: as cautelares das negociações já estão

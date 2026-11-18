@@ -25768,7 +25768,16 @@ function FinAno({ comp, aoIr }) {
     <tr key={rot} style={{ borderBottom: `1px solid ${C.line}`, background: o.fundo }}>
       <td className="whitespace-nowrap px-2 py-1 text-[12.5px]" style={{ fontWeight: o.forte ? 700 : 400, paddingLeft: o.sub ? 26 : 8, color: o.corRot }}>
         {o.abre ? <button onClick={o.abre} className="text-left">{o.abertoAgora ? "▾ " : "▸ "}{rot}</button> : rot}</td>
-      {ms.map((m, i) => <React.Fragment key={i}>{cel(tem(m) ? f(m) : null, o)}</React.Fragment>)}
+      {ms.map((m, i) => {
+        // Área sem NENHUM lançamento no mês do sistema, quando tinha valor em todo mês da planilha
+        // (regras/ano.js): o 0,00 se leria como "não houve gasto" — o DAS de out/2026.
+        const fz = o.falta && tem(m) ? o.falta(m) : null;
+        if (fz) return (
+          <td key={i} className="whitespace-nowrap px-2 py-1 text-right text-[11px] font-semibold" style={{ color: AMARELO.texto, background: AMARELO.fundo }}
+            title={`Nenhum lançamento nem título com esta competência. Na planilha eram ${rs2(-fz.media)}/mês${fz.linhas.length ? ` (${fz.linhas.join(", ")})` : ""}. O resultado do mês está sem esta área.`}>
+            sem lançamento</td>);
+        return <React.Fragment key={i}>{cel(tem(m) ? f(m) : null, o)}</React.Fragment>;
+      })}
       {cel(o.semTotal ? null : tot(f), { ...o, forte: true })}
     </tr>
   );
@@ -25793,6 +25802,17 @@ function FinAno({ comp, aoIr }) {
             <span className="block text-[18px] font-bold" style={{ fontVariantNumeric: "tabular-nums", color: cor }}>{v == null ? "—" : rs2(v)}</span>
           </div>))}
       </div>
+      {comDado.some((m) => (m.faltando || []).length) && (
+        <div className="rounded-xl px-3 py-2 text-[12px] leading-snug" style={{ background: AMARELO.fundo, color: AMARELO.texto, border: `1px solid ${AMARELO.borda || C.line}` }}>
+          {comDado.filter((m) => (m.faltando || []).length).map((m) => (
+            <div key={m.competencia}>
+              <b>{rotuloMes(m.competencia)}{m.fonte === "andamento" ? " (em andamento)" : ""}:</b>{" "}
+              {m.faltando.map((x) => `${x.grupo} ${x.nome}`).join(" e ")} sem nenhum lançamento nem título com esta competência
+              {" "}(na planilha, {m.faltando.map((x) => `${rs2(-x.media)}/mês`).join(" e ")}). O resultado do mês está sem {m.faltando.length > 1 ? "elas" : "ela"} —
+              falta lançar, ou o lançamento está em outra competência ou numa categoria fora do DRE.
+            </div>))}
+        </div>
+      )}
       <div className="rolar overflow-x-auto rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
         <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 1180 }}>
           <thead><tr>
@@ -25812,7 +25832,8 @@ function FinAno({ comp, aoIr }) {
               const ab = !!aberto[g.codigo];
               return (
                 <React.Fragment key={g.codigo}>
-                  {linha(`${g.codigo} ${g.nome}`, (m) => -((m.grupos || {})[g.codigo] || 0), { abre: () => setAberto((x) => ({ ...x, [g.codigo]: !x[g.codigo] })), abertoAgora: ab })}
+                  {linha(`${g.codigo} ${g.nome}`, (m) => -((m.grupos || {})[g.codigo] || 0), { abre: () => setAberto((x) => ({ ...x, [g.codigo]: !x[g.codigo] })), abertoAgora: ab,
+                    falta: (m) => (m.faltando || []).find((x) => x.grupo === g.codigo) || null })}
                   {ab && linhasDe(g.codigo).map((n) => linha(n, (m) => -(((m.linhas || {})[g.codigo] || {})[n] || 0), { sub: true, cor: C.mute, corRot: C.mute }))}
                 </React.Fragment>
               );

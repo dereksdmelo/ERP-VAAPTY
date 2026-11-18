@@ -2859,6 +2859,10 @@ async function anoGestao(req, res, tok) {
     x.acumulado = acumulado;
     Object.keys(x.grupos).forEach((g) => { x.grupos[g] = r2(x.grupos[g]); });
   }
+  // Área que tinha valor em todo mês da planilha e no sistema não tem nada: o zero é falta de
+  // lançamento, não ausência de gasto (o DAS de out/2026, 18/11/2026). Ver regras/ano.js.
+  const falta = require("../regras/ano.js").faltando(meses.filter((m) => porMes[m]).map((m) => ({ competencia: m, ...porMes[m] })), grupos);
+  Object.keys(falta).forEach((m) => { if (porMes[m]) porMes[m].faltando = falta[m]; });
   const doAno = Array.from({ length: 12 }, (_, i) => `${a}-${String(i + 1).padStart(2, "0")}-01`);
   const antes = meses.filter((m) => m < doAno[0] && porMes[m]).pop();
   return res.status(200).json({
