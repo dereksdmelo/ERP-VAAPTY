@@ -1,0 +1,134 @@
+# Backup noturno do sistema para o Google Drive do Derek, CRIPTOGRAFADO.
+#
+# Por que existe (18/11/2026, o Derek: "esses dados são muito importantes,
+# preciso me certificar que não perca nenhum"): o Supabase guarda 7 dias de
+# backup do BANCO, no mesmo lugar que o sistema, e NÃO guarda os arquivos do
+# Storage (fotos, CNH, CRLV, contratos assinados, mídia do WhatsApp) — o
+# próprio painel avisa. Isto leva os dois para fora, toda noite.
+#
+# O que vai para o Drive, na pasta "Vaapty-backup", tudo cifrado pelo rclone
+# crypt (conteúdo E nomes): sem a senha, são arquivos ilegíveis.
+#   banco/AAAA-MM-DD.dump   pg_dump do banco (formato custom), um por dia
+#   arquivos/<bucket>/...   cópia dos buckets; só o que é novo sobe, e
+#                           arquivo apagado no Supabase NÃO é apagado aqui
+#   ULTIMO-BACKUP.txt       data e tamanhos do último backup que deu certo
+# Fica o banco dos últimos 35 dias e o do dia 1º de cada mês para sempre.
+#
+# Segredos (GitHub > Settings > Secrets and variables > Actions), todos
+# colocados pelo Derek — nenhum passa pelo repositório:
+#   BACKUP_DB_URL         Supabase > Connect > Session pooler (com a senha)
+#   BACKUP_S3_KEY_ID      Supabase > Storage > S3 > New access key
+#   BACKUP_S3_SECRET      idem
+#   BACKUP_DRIVE_TOKEN    o JSON que o `rclone authorize "drive"` imprime
+#   BACKUP_SENHA          a senha da criptografia. PERDEU A SENHA, PERDEU O
+#                         BACKUP: ela fica no gerenciador de senhas do Derek.
+#
+# O REPOSITÓRIO É PÚBLICO, e o log das Actions também: nada aqui imprime dado
+# nem segredo (o GitHub mascara os segredos, mas não confie nisso para nomes
+# de arquivo de cliente — por isso o rclone roda sem -v nos arquivos).
+#
+# A agenda (schedule) só roda pelo arquivo da branch PADRÃO (main). Este
+# arquivo existe nas duas; quem mexer aqui mexe nas duas.
+#
+# Como restaurar: BACKUP.md.
+name: Backup para o Google Drive
+
+on:
+  schedule:
+    - cron: "0 6 * * *"   # 03h em Joinville
+  workflow_dispatch:
+
+concurrency:
+  group: backup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      RCLONE_CONFIG_SUPA_TYPE: s3
+      RCLONE_CONFIG_SUPA_PROVIDER: Other
+      RCLONE_CONFIG_SUPA_ENDPOINT: https://mcqskeismgjdwznpgzhy.storage.supabase.co/storage/v1/s3
+      RCLONE_CONFIG_SUPA_REGION: us-west-2
+      RCLONE_CONFIG_SUPA_FORCE_PATH_STYLE: "true"
+      RCLONE_CONFIG_SUPA_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_KEY_ID }}
+      RCLONE_CONFIG_SUPA_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET }}
+      RCLONE_CONFIG_GDRIVE_TYPE: drive
+      RCLONE_CONFIG_GDRIVE_SCOPE: drive
+      RCLONE_CONFIG_GDRIVE_TOKEN: ${{ secrets.BACKUP_DRIVE_TOKEN }}
+      RCLONE_CONFIG_COFRE_TYPE: crypt
+      RCLONE_CONFIG_COFRE_REMOTE: gdrive:Vaapty-backup
+      RCLONE_CONFIG_COFRE_FILENAME_ENCRYPTION: standard
+      RCLONE_CONFIG_COFRE_DIRECTORY_NAME_ENCRYPTION: "true"
+    steps:
+      - name: Conferir os segredos
+        env:
+          A: ${{ secrets.BACKUP_DB_URL }}
+          B: ${{ secrets.BACKUP_S3_KEY_ID }}
+          C: ${{ secrets.BACKUP_S3_SECRET }}
+          D: ${{ secrets.BACKUP_DRIVE_TOKEN }}
+          E: ${{ secrets.BACKUP_SENHA }}
+        run: |
+          falta=""
+          [ -n "$A" ] || falta="$falta BACKUP_DB_URL"
+          [ -n "$B" ] || falta="$falta BACKUP_S3_KEY_ID"
+          [ -n "$C" ] || falta="$falta BACKUP_S3_SECRET"
+          [ -n "$D" ] || falta="$falta BACKUP_DRIVE_TOKEN"
+          [ -n "$E" ] || falta="$falta BACKUP_SENHA"
+          if [ -n "$falta" ]; then echo "::error::Faltam os segredos:$falta"; exit 1; fi
+
+      - name: Instalar pg_dump 17 e rclone
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsS -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17 > /dev/null
+          curl -fsS https://rclone.org/install.sh | sudo bash > /dev/null
+          pg_dump --version; rclone version | head -1
+
+      - name: Senha da criptografia
+        env:
+          SENHA: ${{ secrets.BACKUP_SENHA }}
+        run: |
+          OB=$(rclone obscure "$SENHA")
+          echo "::add-mask::$OB"
+          echo "RCLONE_CONFIG_COFRE_PASSWORD=$OB" >> "$GITHUB_ENV"
+
+      - name: Banco (pg_dump)
+        env:
+          DB: ${{ secrets.BACKUP_DB_URL }}
+        run: |
+          DIA=$(TZ=America/Sao_Paulo date +%F)
+          # As três schemas com dado da casa: public (tudo do ERP), auth (os
+          # logins) e storage (o registro de cada arquivo do bucket).
+          pg_dump "$DB" -Fc -Z 6 -n public -n auth -n storage -f banco.dump
+          pg_restore --list banco.dump > lista.txt
+          N=$(grep -c "TABLE DATA" lista.txt || true)
+          T=$(stat -c %s banco.dump)
+          echo "Dump: $T bytes, $N tabelas com dados"
+          if [ "$T" -lt 1000000 ] || [ "$N" -lt 50 ]; then echo "::error::Dump pequeno demais — não é o banco inteiro."; exit 1; fi
+          rclone copyto banco.dump "cofre:banco/$DIA.dump"
+          echo "DIA=$DIA" >> "$GITHUB_ENV"
+          echo "TAM_BANCO=$T" >> "$GITHUB_ENV"
+
+      - name: Arquivos (buckets do Storage)
+        run: |
+          # copy, não sync: o que foi apagado no Supabase continua no backup.
+          for b in $(rclone lsf supa: --dirs-only | tr -d '/'); do
+            rclone copy "supa:$b" "cofre:arquivos/$b" --transfers 8 --checkers 16 --fast-list --stats-one-line --stats 5m
+          done
+
+      - name: Retenção e recibo
+        run: |
+          # O banco de mais de 35 dias sai, menos o do dia 1º de cada mês.
+          for f in $(rclone lsf cofre:banco --files-only --min-age 35d); do
+            case "$f" in *-01.dump) ;; *) rclone deletefile "cofre:banco/$f" ;; esac
+          done
+          QTD=$(rclone lsf -R cofre:arquivos --files-only | wc -l)
+          printf "Último backup: %s\nBanco: %s bytes\nArquivos guardados: %s\n" "$(TZ=America/Sao_Paulo date '+%d/%m/%Y %H:%M')" "$TAM_BANCO" "$QTD" | rclone rcat cofre:ULTIMO-BACKUP.txt
+          echo "Backup de $DIA: banco $TAM_BANCO bytes, $QTD arquivos no cofre."
