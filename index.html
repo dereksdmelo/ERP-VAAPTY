@@ -36059,10 +36059,13 @@ function JanelaSuporte({ perfil, onde, print, aviso, aoFechar }) {
         desenhar(riscos);
         imagem = quadro.current.toDataURL("image/jpeg", 0.8);
       }
-      const r = await fetchAut("/api/foto?recurso=suporte", {
+      // Uma segunda tentativa sozinha: no primeiro teste o Storage recusou uma vez, sem motivo, e a seguinte passou.
+      const mandar = () => fetchAut("/api/foto?recurso=suporte", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tipo, texto: texto.trim(), tela: onde || "", endereco: location.pathname + location.search, nome: perfil.nome || "", print: imagem }),
       });
+      let r = await mandar();
+      if (r.status >= 500) { await new Promise((ok) => setTimeout(ok, 1500)); r = await mandar(); }
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.erro || "Não consegui mandar o pedido.");
       setEnviado(true);
