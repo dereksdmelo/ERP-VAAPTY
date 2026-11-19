@@ -6868,3 +6868,21 @@ quem não é gerente nem financeiro imprime os papéis, mas registrar a multa co
 do banco com os `adm_*` (falsos), a tela os mandava de volta e o `api/checklist.js` recusava a gravação inteira
 ("A conferência é da tela do administrativo") — banco, PIX e itens do Pedro Ramos (MBD6025) se perderam assim.
 Gerente e adm nunca viam. Agora os `adm_*` de quem não é adm são descartados e o resto grava.
+
+### 78. Suporte e melhorias: o pedido sai de qualquer tela, com o print riscado (0162)
+
+O Derek, em 19/11/2026: *"um botão no sistema, no cantinho, que aparece em qualquer tela… tira um print da tela, a
+pessoa pode desenhar com um lapisinho onde é o problema e escrever um texto"* — e a fila é para um agente: *"faz todas
+as melhorias que forem bugs ou coisas que precisa resolver, e me consulta quando for alguma mudança grande"*.
+
+- **O botão é a aba "? Suporte" na borda direita, no meio da altura** (`BotaoSuporte`), em toda tela e também com um
+  atendimento aberto. O canto de baixo já é dos lembretes. O print é o html2canvas (cdnjs, só no clique), sem a própria
+  aba; imagem de fora que "suja" o print sai dele. Sem print, vai só o texto.
+- **A janela** (`JanelaSuporte`): problema ou sugestão, o lápis em três cores com desfazer e limpar, o texto, e "meus
+  pedidos" — cada um vê a situação e a resposta dos seus.
+- **`suporte_pedido`**: quem pediu (só como si mesmo), a tela, o print em `documentos-veiculo/suporte/`, a SITUAÇÃO
+  (novo, em andamento, esperando o Derek, resolvido, não vai ser feito) e a CLASSE (bug, pequena, grande). Gravar e ler
+  passam por `api/foto.js?recurso=suporte` (a linha pelo token, a chave só no Storage, decisão 9). O gerente lê todos e
+  responde em Gestão → **Suporte e melhorias** (`TelaSuporte`).
+- **O agente**: bug e mudança pequena ele resolve e marca "resolvido" com o commit (`commit_feito`) e uma resposta;
+  mudança grande vai para "esperando o Derek" com a proposta escrita na resposta, e só anda com o ok dele.

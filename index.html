@@ -32109,6 +32109,7 @@ function destinosPara(perfil) {
     // financeiro e do gerente, como a ficha.
     (gerente || (perfil && perfil.financeiro)) ? { id: "remuneracao", rot: "Perfis de remuneração", curto: "Remuner.", area: "gestao" } : null,
     (gerente || (perfil && perfil.financeiro)) ? { id: "empresa", rot: "Cadastro da empresa", curto: "Empresa", area: "gestao" } : null,
+    gerente ? { id: "suporte", rot: "Suporte e melhorias", curto: "Suporte", area: "gestao" } : null,
     // Ligar um número da loja é ato de gerente — e o servidor confere
     // de novo, porque esconder o item é conveniência, não controle. Mora
     // em Gestão desde 28/10/2026 (o Derek): é cadastro da loja, não
@@ -35935,6 +35936,320 @@ function TelaEmpresa({ perfil }) {
   );
 }
 
+/* ===== SUPORTE E MELHORIAS (0162, 19/11/2026) =====
+ * O Derek: "um botão no sistema, no cantinho, que aparece em qualquer tela… tira
+ * um print da tela, a pessoa pode desenhar com um lapisinho onde é o problema e
+ * escrever um texto explicando". E a fila serve a um agente: o bug e a mudança
+ * pequena ele resolve; a grande espera o Derek ("aguardando_derek").
+ *
+ * O botão é uma aba presa na borda direita, no meio da altura: o canto de baixo
+ * já é dos lembretes (fila, aprovações, versão). O print é o html2canvas, do
+ * cdnjs, carregado só no clique; a própria aba fica de fora dele. Sem print
+ * (a captura falhou, ou a pessoa tirou), o pedido vai só com o texto. */
+const SITUACAO_SUPORTE = {
+  novo: ["Novo", "#EEF2FF", "#3B4CB8"],
+  em_andamento: ["Em andamento", "#FFF4DE", "#8A5A00"],
+  aguardando_derek: ["Esperando o Derek decidir", "#F1E8F7", "#6D1B9E"],
+  feito: ["Resolvido", "#E4F1E8", "#1D7F58"],
+  recusado: ["Não vai ser feito", "#F2F0F4", "#6E6879"],
+};
+const CLASSE_SUPORTE = { bug: "Bug", pequena: "Mudança pequena", grande: "Mudança grande" };
+let html2canvasPronto = null;
+async function tirarPrintDaTela() {
+  if (!html2canvasPronto) html2canvasPronto = carregarScript("https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js").catch((e) => { html2canvasPronto = null; throw e; });
+  await html2canvasPronto;
+  const opcoes = {
+    x: window.scrollX, y: window.scrollY, width: window.innerWidth, height: window.innerHeight,
+    windowWidth: window.innerWidth, windowHeight: window.innerHeight,
+    scale: Math.min(window.devicePixelRatio || 1, 1.5), useCORS: true, logging: false, backgroundColor: C.bg,
+    ignoreElements: (el) => !!(el && el.dataset && el.dataset.suporteFora !== undefined),
+  };
+  let tela = await window.html2canvas(document.body, opcoes);
+  try { tela.toDataURL("image/jpeg", 0.5); }
+  catch (e) {
+    // Imagem de outro endereço sem permissão "suja" o print; sem as imagens, sai.
+    tela = await window.html2canvas(document.body, { ...opcoes, ignoreElements: (el) => opcoes.ignoreElements(el) || el.tagName === "IMG" });
+  }
+  return tela;
+}
+
+function BotaoSuporte({ perfil, onde }) {
+  const [fase, setFase] = useState(null); // null | "capturando" | "janela"
+  const [print, setPrint] = useState(null);
+  const [falhou, setFalhou] = useState("");
+  if (!perfil) return null;
+  const abrir = async () => {
+    setFase("capturando"); setFalhou("");
+    try { setPrint(await tirarPrintDaTela()); }
+    catch (e) { setPrint(null); setFalhou("Não consegui tirar o print desta tela. Pode mandar só o texto."); }
+    setFase("janela");
+  };
+  return (
+    <>
+      {fase !== "janela" && (
+        <button data-suporte-fora onClick={abrir} disabled={fase === "capturando"} title="Suporte e sugestões de melhoria"
+          className="fixed right-0 top-[58%] z-[45] rounded-l-lg px-1.5 py-2.5 text-[11.5px] font-bold text-white shadow-lg"
+          style={{ background: C.roxo, writingMode: "vertical-rl", transform: "rotate(180deg)", opacity: fase === "capturando" ? 0.5 : 0.92 }}>
+          {fase === "capturando" ? "tirando o print…" : "? Suporte"}
+        </button>
+      )}
+      {fase === "janela" && (
+        <JanelaSuporte perfil={perfil} onde={onde} print={print} aviso={falhou}
+          aoFechar={() => { setFase(null); setPrint(null); }} />
+      )}
+    </>
+  );
+}
+
+function JanelaSuporte({ perfil, onde, print, aviso, aoFechar }) {
+  const [tipo, setTipo] = useState("problema");
+  const [texto, setTexto] = useState("");
+  const [comPrint, setComPrint] = useState(!!print);
+  const [riscos, setRiscos] = useState([]);
+  const [cor, setCor] = useState("#E1251B");
+  const [enviando, setEnviando] = useState(false);
+  const [erro, setErro] = useState("");
+  const [enviado, setEnviado] = useState(false);
+  const [vendoMeus, setVendoMeus] = useState(false);
+  const quadro = useRef(null);
+  const atual = useRef(null);
+
+  // O quadro é o print com os riscos por cima, redesenhado a cada traço.
+  const desenhar = (lista) => {
+    const cv = quadro.current;
+    if (!cv || !print) return;
+    const g = cv.getContext("2d");
+    g.drawImage(print, 0, 0);
+    const largura = Math.max(3, Math.round(print.width / 260));
+    lista.forEach((r) => {
+      if (!r.pts.length) return;
+      g.strokeStyle = r.cor; g.lineWidth = largura; g.lineCap = "round"; g.lineJoin = "round";
+      g.beginPath(); g.moveTo(r.pts[0][0], r.pts[0][1]);
+      r.pts.forEach((p) => g.lineTo(p[0], p[1]));
+      if (r.pts.length === 1) g.lineTo(r.pts[0][0] + 0.1, r.pts[0][1]);
+      g.stroke();
+    });
+  };
+  useEffect(() => {
+    const cv = quadro.current;
+    if (!cv || !print || !comPrint) return;
+    cv.width = print.width; cv.height = print.height;
+    desenhar(riscos);
+  }, [print, comPrint]);
+  useEffect(() => { if (comPrint) desenhar(riscos); }, [riscos]);
+
+  const ponto = (e) => {
+    const cv = quadro.current, b = cv.getBoundingClientRect();
+    return [((e.clientX - b.left) / b.width) * cv.width, ((e.clientY - b.top) / b.height) * cv.height];
+  };
+  const comecar = (e) => { e.preventDefault(); try { e.target.setPointerCapture(e.pointerId); } catch (x) {} atual.current = { cor, pts: [ponto(e)] }; setRiscos((l) => l.concat([atual.current])); };
+  const mover = (e) => {
+    if (!atual.current) return;
+    atual.current.pts.push(ponto(e));
+    desenhar(riscos.filter((r) => r !== atual.current).concat([atual.current]));
+  };
+  const soltar = () => { if (atual.current) { atual.current = null; setRiscos((l) => l.slice()); } };
+
+  const enviar = async () => {
+    if (texto.trim().length < 3) { setErro("Escreva o que precisa mudar ou resolver."); return; }
+    setEnviando(true); setErro("");
+    try {
+      let imagem = null;
+      if (comPrint && quadro.current) {
+        desenhar(riscos);
+        imagem = quadro.current.toDataURL("image/jpeg", 0.8);
+      }
+      const r = await fetchAut("/api/foto?recurso=suporte", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tipo, texto: texto.trim(), tela: onde || "", endereco: location.pathname + location.search, nome: perfil.nome || "", print: imagem }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.erro || "Não consegui mandar o pedido.");
+      setEnviado(true);
+    } catch (e) { setErro(e.message); }
+    setEnviando(false);
+  };
+
+  const chip = (v, rot) => (
+    <button key={v} onClick={() => setTipo(v)} className="rounded-full border px-3 py-1.5 text-[13px] font-semibold"
+      style={tipo === v ? { background: C.roxo, borderColor: C.roxo, color: "#fff" } : { background: C.paper, borderColor: C.line, color: C.ink }}>{rot}</button>
+  );
+
+  return (
+    <div data-suporte-fora className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto p-3 sm:p-6" style={{ background: "rgba(24,18,33,0.6)" }} onClick={aoFechar}>
+      <div className="w-full max-w-[920px] rounded-xl p-4" style={{ background: C.paper }} onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-baseline justify-between gap-3">
+          <div className="text-[17px] font-extrabold" style={{ fontFamily: F.disp }}>Suporte e melhorias</div>
+          <div className="flex items-center gap-3 text-[13px]">
+            <button onClick={() => setVendoMeus(!vendoMeus)} className="font-semibold underline" style={{ color: C.roxo }}>{vendoMeus ? "voltar ao pedido" : "meus pedidos"}</button>
+            <button onClick={aoFechar} style={{ color: C.mute }}>fechar</button>
+          </div>
+        </div>
+
+        {vendoMeus ? <MeusPedidosSuporte perfil={perfil} /> : enviado ? (
+          <div className="rounded-lg p-4 text-[14px]" style={{ background: "#E4F1E8", color: C.verde }}>
+            <b>Recebido.</b> O pedido entrou na fila. A resposta aparece em "meus pedidos", aqui nesta janela.
+            <div className="mt-3"><button onClick={aoFechar} className="rounded-lg px-4 py-2 text-[13px] font-bold text-white" style={{ background: C.verde }}>Fechar</button></div>
+          </div>
+        ) : (
+          <>
+            <div className="mb-3 flex flex-wrap gap-2">
+              {chip("problema", "Problema no sistema")}
+              {chip("melhoria", "Sugestão de melhoria")}
+            </div>
+
+            {aviso && <p className="mb-2 text-[12.5px]" style={{ color: C.laranja }}>{aviso}</p>}
+            {print && comPrint && (
+              <div className="mb-3">
+                <div className="mb-1.5 flex flex-wrap items-center gap-2 text-[12.5px]">
+                  <span style={{ color: C.mute }}>Risque no print onde está o problema:</span>
+                  {["#E1251B", "#1D7F58", "#1B1523"].map((k) => (
+                    <button key={k} onClick={() => setCor(k)} title="cor do lápis" className="h-5 w-5 rounded-full"
+                      style={{ background: k, outline: cor === k ? `2px solid ${C.roxo}` : "none", outlineOffset: 2 }} />
+                  ))}
+                  <button onClick={() => setRiscos((l) => l.slice(0, -1))} disabled={!riscos.length} className="font-semibold underline" style={{ color: C.roxo, opacity: riscos.length ? 1 : 0.4 }}>desfazer</button>
+                  <button onClick={() => setRiscos([])} disabled={!riscos.length} className="font-semibold underline" style={{ color: C.roxo, opacity: riscos.length ? 1 : 0.4 }}>limpar riscos</button>
+                  <button onClick={() => setComPrint(false)} className="ml-auto underline" style={{ color: C.mute }}>mandar sem o print</button>
+                </div>
+                <canvas ref={quadro} onPointerDown={comecar} onPointerMove={mover} onPointerUp={soltar} onPointerCancel={soltar}
+                  className="mx-auto block rounded-lg border" style={{ borderColor: C.line, cursor: "crosshair", touchAction: "none", maxWidth: "100%", maxHeight: "58vh" }} />
+              </div>
+            )}
+            {print && !comPrint && (
+              <p className="mb-2 text-[12.5px]" style={{ color: C.mute }}>Vai sem o print. <button onClick={() => setComPrint(true)} className="font-semibold underline" style={{ color: C.roxo }}>pôr o print de volta</button></p>
+            )}
+
+            <textarea value={texto} onChange={(e) => setTexto(e.target.value)} rows={4} autoFocus={!print}
+              placeholder={tipo === "problema" ? "O que aconteceu? O que você estava fazendo, e o que esperava que acontecesse?" : "O que poderia ser diferente, e por quê ajudaria no dia a dia?"}
+              className="w-full rounded-lg border px-3 py-2 text-[14px] outline-none" style={{ borderColor: C.line }} />
+            {erro && <p className="mt-1 text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <span className="text-[11.5px]" style={{ color: C.mute }}>Vai junto: a tela em que você está ({onde || "—"}) e o seu nome.</span>
+              <button onClick={enviar} disabled={enviando} className="rounded-lg px-5 py-2.5 text-[14px] font-bold text-white" style={{ background: C.roxo, opacity: enviando ? 0.6 : 1 }}>
+                {enviando ? "Mandando…" : "Mandar"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+async function lerPedidosSuporte(q) {
+  const r = await fetchAut(`/api/foto?recurso=suporte${q || ""}`);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui ler os pedidos.");
+  return d.pedidos || [];
+}
+function SeloSituacao({ s }) {
+  const [rot, fundo, cor] = SITUACAO_SUPORTE[s] || [s, C.bg, C.mute];
+  return <span className="rounded-full px-2 py-0.5 text-[11px] font-bold" style={{ background: fundo, color: cor }}>{rot}</span>;
+}
+function MeusPedidosSuporte({ perfil }) {
+  const [lista, setLista] = useState(null);
+  const [erro, setErro] = useState("");
+  useEffect(() => { lerPedidosSuporte(`&meus=${perfil.id}`).then(setLista).catch((e) => setErro(e.message)); }, []);
+  if (erro) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
+  if (!lista) return <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>;
+  if (!lista.length) return <p className="text-[13px]" style={{ color: C.mute }}>Você ainda não mandou nenhum pedido.</p>;
+  return (
+    <div className="space-y-2">
+      {lista.map((p) => (
+        <div key={p.id} className="rounded-lg border p-3 text-[13px]" style={{ borderColor: C.line }}>
+          <div className="flex flex-wrap items-center gap-2">
+            <SeloSituacao s={p.situacao} />
+            <span style={{ color: C.mute }}>{p.tipo === "melhoria" ? "Sugestão" : "Problema"} · {diaBR(p.criado_em)}</span>
+          </div>
+          <div className="mt-1 whitespace-pre-wrap">{p.texto}</div>
+          {p.resposta && <div className="mt-2 rounded-md p-2 whitespace-pre-wrap" style={{ background: C.roxoFraco }}><b>Resposta:</b> {p.resposta}</div>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* A FILA DO GERENTE: o que entrou, com o print, e onde ele marca a situação, a
+ * classe e responde. É a mesma fila que o agente lê. */
+function TelaSuporte() {
+  const [lista, setLista] = useState(null);
+  const [filtro, setFiltro] = useState("abertos");
+  const [erro, setErro] = useState("");
+  const [rascunho, setRascunho] = useState({});
+  const carregar = () => lerPedidosSuporte("").then(setLista).catch((e) => setErro(e.message));
+  useEffect(() => { carregar(); }, []);
+  const mudar = async (p, m) => {
+    setErro("");
+    setLista((l) => l.map((x) => (x.id === p.id ? { ...x, ...m } : x)));
+    try {
+      const r = await fetchAut(`/api/foto?recurso=suporte&id=${p.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(m) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.erro || "Não consegui gravar.");
+    } catch (e) { setErro(e.message); carregar(); }
+  };
+  const ABERTOS = ["novo", "em_andamento", "aguardando_derek"];
+  const vis = (lista || []).filter((p) => filtro === "todos" || (filtro === "abertos" ? ABERTOS.indexOf(p.situacao) >= 0 : p.situacao === filtro));
+  const conta = (f) => (lista || []).filter((p) => (f === "abertos" ? ABERTOS.indexOf(p.situacao) >= 0 : p.situacao === f)).length;
+  const sel = "rounded-lg border px-2 py-1 text-[12.5px] outline-none";
+  return (
+    <div>
+      <Cabecalho titulo="Suporte e melhorias" sub="O que a equipe mandou pelo botão de suporte, com o print." />
+      <div className="mb-3 flex flex-wrap gap-2">
+        {[["abertos", "Abertos"], ["aguardando_derek", "Esperando você"], ["feito", "Resolvidos"], ["recusado", "Não vão ser feitos"], ["todos", "Todos"]].map(([v, rot]) => (
+          <button key={v} onClick={() => setFiltro(v)} className="rounded-full border px-3 py-1 text-[12.5px] font-semibold"
+            style={filtro === v ? { background: C.roxo, borderColor: C.roxo, color: "#fff" } : { background: C.paper, borderColor: C.line }}>
+            {rot}{v !== "todos" && lista ? ` · ${conta(v)}` : ""}
+          </button>
+        ))}
+      </div>
+      {erro && <p className="mb-2 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+      {!lista ? <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p> : !vis.length ? (
+        <p className="text-[13px]" style={{ color: C.mute }}>Nada aqui.</p>
+      ) : (
+        <div className="space-y-3">
+          {vis.map((p) => (
+            <div key={p.id} className="flex flex-col gap-3 rounded-xl border p-3 sm:flex-row" style={{ background: C.paper, borderColor: C.line }}>
+              {p.print_url ? (
+                <a href={p.print_url} target="_blank" rel="noreferrer" className="shrink-0 sm:w-[260px]">
+                  <img src={p.print_url} alt="print da tela" className="w-full rounded-lg border" style={{ borderColor: C.line }} />
+                </a>
+              ) : <div className="shrink-0 rounded-lg p-3 text-center text-[12px] sm:w-[260px]" style={{ background: C.bg, color: C.mute }}>sem print</div>}
+              <div className="min-w-0 flex-1 text-[13px]">
+                <div className="flex flex-wrap items-center gap-2">
+                  <SeloSituacao s={p.situacao} />
+                  <b>{p.tipo === "melhoria" ? "Sugestão de melhoria" : "Problema no sistema"}</b>
+                  <span style={{ color: C.mute }}>{p.nome || "—"} · {diaBR(p.criado_em)} {horaBR(p.criado_em)} · tela: {p.tela || "—"}</span>
+                </div>
+                <div className="mt-1.5 whitespace-pre-wrap text-[14px]">{p.texto}</div>
+                <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                  <select className={sel} style={{ borderColor: C.line }} value={p.situacao} onChange={(e) => mudar(p, { situacao: e.target.value })}>
+                    {Object.keys(SITUACAO_SUPORTE).map((k) => <option key={k} value={k}>{SITUACAO_SUPORTE[k][0]}</option>)}
+                  </select>
+                  <select className={sel} style={{ borderColor: C.line }} value={p.classe || ""} onChange={(e) => mudar(p, { classe: e.target.value || null })}>
+                    <option value="">sem classe</option>
+                    {Object.keys(CLASSE_SUPORTE).map((k) => <option key={k} value={k}>{CLASSE_SUPORTE[k]}</option>)}
+                  </select>
+                  {p.commit_feito && <span className="text-[11.5px]" style={{ color: C.mute, fontFamily: F.mono }}>{p.commit_feito}</span>}
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <textarea rows={2} className="flex-1 rounded-lg border px-2 py-1.5 text-[13px] outline-none" style={{ borderColor: C.line }}
+                    placeholder="Resposta para quem pediu (aparece em 'meus pedidos')"
+                    value={rascunho[p.id] !== undefined ? rascunho[p.id] : p.resposta || ""}
+                    onChange={(e) => setRascunho({ ...rascunho, [p.id]: e.target.value })} />
+                  {rascunho[p.id] !== undefined && rascunho[p.id] !== (p.resposta || "") && (
+                    <button onClick={() => { mudar(p, { resposta: rascunho[p.id] }); setRascunho((r) => { const n = { ...r }; delete n[p.id]; return n; }); }}
+                      className="self-start rounded-lg px-3 py-1.5 text-[12.5px] font-bold text-white" style={{ background: C.roxo }}>Responder</button>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function App() {
   const [estado, setEstado] = useState("carregando");   // carregando | fora | esperando | dentro | erro
   const [perfil, setPerfil] = useState(null);
@@ -36118,6 +36433,7 @@ function App() {
             aoRecarregar={async () => { try { setAberto(await lerAtendimento(aberto.id)); } catch (e) {} }} />
         </RedeDeErro>
         {avisosFila}
+        <RedeDeErro onde="suporte"><BotaoSuporte perfil={perfil} onde={`atendimento ${aberto.id}`} /></RedeDeErro>
       {perfil && (perfil.papel === "gerente" || perfil.financeiro) && (
         <RedeDeErro onde="aprovações"><AvisoAprovacoes aoAbrir={() => setTela("adm_aprovacoes")} /></RedeDeErro>
       )}
@@ -36164,6 +36480,7 @@ function App() {
       {tela === "gestao" && <TelaGestao perfil={perfil} comp={compOuAtual} />}
       {tela === "remuneracao" && <TelaPerfisRemuneracao />}
       {tela === "empresa" && <TelaEmpresa perfil={perfil} />}
+      {tela === "suporte" && <TelaSuporte />}
       {tela === "adm_whats" && <TelaConversas key="adm" operacao />}
       {tela === "whats_neg" && <TelaConversas key="neg" negociacao aoAbrir={abrir} alvo={conversaAlvoNeg} aoConsumirAlvo={() => setConversaAlvoNeg(null)} />}
       {tela === "adm_transf" && <TelaTransferencias />}
@@ -36179,6 +36496,7 @@ function App() {
       {tela === "lojistas" && podeGestao && <TelaVendaLojistas perfil={perfil} />}
       {tela === "cad_lojistas" && podeGestao && <TelaLojistas />}
       </RedeDeErro>
+      <RedeDeErro onde="suporte"><BotaoSuporte perfil={perfil} onde={tela} /></RedeDeErro>
     </Shell>
   );
 }

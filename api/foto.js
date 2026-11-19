@@ -1059,6 +1059,103 @@ async function anexosEmpresa(req, res, tok) {
   return res.status(405).json({ erro: "Use GET, POST ou DELETE." });
 }
 
+/* SUPORTE E MELHORIAS (0162, 19/11/2026). O pedido sai de qualquer tela, com o
+ * print riscado. A linha vai pelo token de quem pede (a RLS só deixa gravar como
+ * si mesmo, e ler os seus); a chave só toca o Storage, para guardar e assinar o
+ * print (decisão 9). O gerente lê todos e responde (PATCH). */
+const SITUACOES_SUPORTE = ["novo", "em_andamento", "aguardando_derek", "feito", "recusado"];
+async function suporte(req, res, tok) {
+  const assinar = async (caminhos) => {
+    if (!caminhos.length) return {};
+    const r = await arquivos(`${STORAGE()}/object/sign/${BUCKET_DOC}`, {
+      method: "POST", headers: jsonArquivo(), body: JSON.stringify({ expiresIn: VALIDADE, paths: caminhos }),
+    });
+    const mapa = {};
+    (Array.isArray(r) ? r : []).forEach((x) => {
+      const a = x && (x.signedURL || x.signedUrl);
+      if (a) mapa[x.path] = a.charAt(0) === "/" ? `${STORAGE()}${a}` : a;
+    });
+    return mapa;
+  };
+  const corpoDe = () => {
+    let c = req.body;
+    if (c && typeof Buffer !== "undefined" && Buffer.isBuffer(c)) c = c.toString("utf8");
+    if (typeof c === "string") { try { c = JSON.parse(c); } catch (e) { c = null; } }
+    return c && typeof c === "object" ? c : null;
+  };
+  if (req.method === "GET") {
+    const so = String(req.query.situacao || "");
+    const filtro = SITUACOES_SUPORTE.indexOf(so) >= 0 ? `&situacao=eq.${so}` : "";
+    const meus = req.query.meus ? "&perfil_id=eq." + encodeURIComponent(String(req.query.meus)) : "";
+    const linhas = await banco(`${REST("suporte_pedido")}?select=*&order=criado_em.desc&limit=300${filtro}${RX_UUID.test(String(req.query.meus || "")) ? meus : ""}`,
+      { headers: cabecalhos(tok) });
+    const lista = Array.isArray(linhas) ? linhas : [];
+    const urls = await assinar(lista.map((x) => x.print_caminho).filter(Boolean));
+    return res.status(200).json({ pedidos: lista.map((x) => ({ ...x, print_url: x.print_caminho ? urls[x.print_caminho] || null : null })) });
+  }
+  if (req.method === "POST") {
+    const c = corpoDe();
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    const texto = String(c.texto || "").trim().slice(0, 4000);
+    if (texto.length < 3) return res.status(400).json({ erro: "Escreva o que precisa mudar ou resolver." });
+    let caminho = null;
+    let bruto = String(c.print || "").trim();
+    if (bruto) {
+      const virgula = bruto.indexOf(",");
+      if (bruto.slice(0, 5) === "data:" && virgula > 0) bruto = bruto.slice(virgula + 1);
+      bruto = bruto.replace(/\s/g, "");
+      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(bruto)) return res.status(400).json({ erro: "O print veio fora do formato." });
+      const buf = Buffer.from(bruto, "base64");
+      if (buf.length > MAX_DOC) return res.status(413).json({ erro: "O print passou de 10 MB." });
+      if (!(buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff)) return res.status(415).json({ erro: "O print precisa ser JPEG." });
+      caminho = `suporte/${Date.now()}-${sufixo()}.jpg`;
+      await arquivos(`${STORAGE()}/object/${BUCKET_DOC}/${paraURL(caminho)}`, {
+        method: "POST", headers: hArquivo({ "Content-Type": "image/jpeg", "Cache-Control": "3600", "x-upsert": "false" }), body: buf,
+      });
+    }
+    let linha;
+    try {
+      const r = await banco(REST("suporte_pedido"), {
+        method: "POST", headers: json(tok, { Prefer: "return=representation" }),
+        body: JSON.stringify({
+          tipo: c.tipo === "melhoria" ? "melhoria" : "problema", texto,
+          nome: String(c.nome || "").slice(0, 120) || null,
+          tela: String(c.tela || "").slice(0, 200) || null,
+          endereco: String(c.endereco || "").slice(0, 500) || null,
+          navegador: String(req.headers["user-agent"] || "").slice(0, 300) || null,
+          print_caminho: caminho,
+        }),
+      });
+      linha = Array.isArray(r) ? r[0] : r;
+      if (!linha) throw Object.assign(new Error("Não consegui registrar o pedido."), { status: 403 });
+    } catch (e) { if (caminho) await apagarDoc(caminho); throw e; }
+    return res.status(201).json({ ok: true, pedido: linha });
+  }
+  if (req.method === "PATCH") {
+    const id = String(req.query.id || "");
+    if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido." });
+    const c = corpoDe() || {};
+    const m = { atualizado_em: new Date().toISOString() };
+    if (c.situacao !== undefined) {
+      if (SITUACOES_SUPORTE.indexOf(c.situacao) < 0) return res.status(400).json({ erro: "Situação inválida." });
+      m.situacao = c.situacao;
+    }
+    if (c.classe !== undefined) {
+      if (c.classe !== null && ["bug", "pequena", "grande"].indexOf(c.classe) < 0) return res.status(400).json({ erro: "Classe inválida." });
+      m.classe = c.classe;
+    }
+    if (c.resposta !== undefined) { m.resposta = String(c.resposta || "").slice(0, 4000) || null; m.respondido_em = m.resposta ? m.atualizado_em : null; }
+    if (c.commit_feito !== undefined) m.commit_feito = String(c.commit_feito || "").slice(0, 80) || null;
+    const r = await banco(`${REST("suporte_pedido")}?id=eq.${id}`, {
+      method: "PATCH", headers: json(tok, { Prefer: "return=representation" }), body: JSON.stringify(m),
+    });
+    if (!(Array.isArray(r) && r.length)) return res.status(403).json({ erro: "Só o gerente responde os pedidos." });
+    return res.status(200).json({ ok: true, pedido: r[0] });
+  }
+  res.setHeader("Allow", "GET, POST, PATCH");
+  return res.status(405).json({ erro: "Use GET, POST ou PATCH." });
+}
+
 const ROTULOS_COLAB = ["Documento (RG/CNH)", "CPF", "Comprovante de residência", "Contrato de prestação de serviços", "Distrato / desligamento", "Outro"];
 async function anexosColaborador(req, res, tok) {
   const assinar = async (caminhos) => {
@@ -1658,6 +1755,10 @@ module.exports = async function handler(req, res) {
     catch (e) { return res.status(e.status || 500).json({ erro: limpar(e.message) || "Falha no envio ao Shinkai." }); }
   }
 
+  if (String(req.query.recurso || "") === "suporte") {
+    try { return await suporte(req, res, tok); }
+    catch (e) { return res.status(e.status || 500).json({ erro: limpar(e.message) || "Falha no pedido de suporte." }); }
+  }
   if (String(req.query.recurso || "") === "empresa-anexo") {
     try { return await anexosEmpresa(req, res, tok); }
     catch (e) { return res.status(e.status || 500).json({ erro: limpar(e.message) || "Falha no documento." }); }
