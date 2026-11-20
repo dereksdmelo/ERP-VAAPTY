@@ -7639,13 +7639,21 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
           <>
             <div className="rounded-lg p-3" style={{ background: liberado ? "#E7F4EE" : "#FDEDE6", border: `1px solid ${liberado ? C.verde : C.laranja}` }}>
               <div className="text-[12px] font-semibold" style={{ color: liberado ? C.verde : C.laranja }}>
-                {liberado ? "Ficha completa — descritivo liberado" : `Faltam ${faltas.length} campos`}
+                {liberado ? "Ficha completa — descritivo liberado" : faltas.length === 1 ? "Falta 1 campo" : `Faltam ${faltas.length} campos`}
               </div>
-              {!liberado && <div className="mt-1 text-[11px]" style={{ color: C.mute }}>{faltas.map((x) => x[1]).join(" · ")}</div>}
-              {!liberado && (
-                <button onClick={() => { const el = document.getElementById("fotos-e-ficha"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }}
-                  className="mt-1.5 text-[12px] font-semibold underline" style={{ color: C.laranja }}>completar as fotos e a ficha ↑ (logo abaixo do carro, na Pesquisa)</button>
-              )}
+              {/* O aviso diz SÓ o que falta (19/11/2026, o André Bruno: "não está deixando enviar ao Shinkai, alegando
+                  que não enviei as fotos" — as 15 fotos estavam no servidor e faltava a condição dos pneus; o link
+                  dizia "completar as fotos e a ficha" sempre). */}
+              {!liberado && <div className="mt-1 text-[12px] font-semibold" style={{ color: C.ink }}>{faltas.map((x) => x[1]).join(" · ")}</div>}
+              {!liberado && (() => {
+                const semFoto = faltas.some((x) => x[0] === "fotos"), outros = faltas.some((x) => x[0] !== "fotos");
+                return (
+                  <button onClick={() => { const el = document.getElementById("fotos-e-ficha"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }}
+                    className="mt-1.5 text-[12px] font-semibold underline" style={{ color: C.laranja }}>
+                    {semFoto && outros ? "completar as fotos e a ficha" : semFoto ? "pôr ao menos uma foto" : "completar a ficha"} ↑ (logo abaixo do carro, na Pesquisa)
+                  </button>
+                );
+              })()}
             </div>
 
             {!!f.placa && !f.fipeConferida && <AvisoFipe />}
@@ -7706,6 +7714,11 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                       : fotosPendentes > 0 ? `Esperando as fotos subirem (${enviadas.length} de ${fotos.length})…`
                       : f.shinkaiEm ? "Enviar de novo ao Shinkai" : "Enviar ao Shinkai"}
                   </button>
+                  {!liberado && (
+                    <p className="mt-1.5 text-[11.5px] font-semibold leading-snug" style={{ color: C.laranja }}>
+                      Libera quando a ficha estiver completa. Falta: {faltas.map((x) => x[1]).join(" · ")}.
+                    </p>
+                  )}
                   {veiculoId && fotosPendentes > 0 && (
                     <p className="mt-1.5 text-[11px] leading-snug" style={{ color: C.mute }}>
                       O Shinkai leva só o que já está no servidor. Mandar agora deixaria o carro lá
@@ -16219,6 +16232,9 @@ function TelaEstoque({ perfil, comp, mes, modo, aoAbrir }) {
   // quadro da pré-venda: a resposta é "está em tal lugar", não "está,
   // mas o filtro o escondeu".
   const [busca, setBusca] = useState("");
+  // Filtrar por negociador (19/11/2026, a Schell pelo botão de suporte). Pela chave sem acento, como a
+  // Rentabilidade: "ANDRE BRUNO" e "ANDRÉ BRUNO" são a mesma pessoa.
+  const [neg, setNeg] = useState("");
   const [prevendo, setPrevendo] = useState(false);
 
   const carregar = async () => {
@@ -16332,9 +16348,19 @@ function TelaEstoque({ perfil, comp, mes, modo, aoAbrir }) {
     const alvoPlaca = String(v.placa || "").toLowerCase().replace(/[^a-z0-9]/g, "");
     return termos.every((t) => alvo.indexOf(t) >= 0 || (t.replace(/[^a-z0-9]/g, "") && alvoPlaca.indexOf(t.replace(/[^a-z0-9]/g, "")) >= 0));
   };
-  const visivel = termos.length
+  const visivel = (termos.length
     ? (lista || []).filter(casaBusca)
-    : (lista || []).filter((e) => filtro === "todos" || e.situacao === filtro);
+    : (lista || []).filter((e) => filtro === "todos" || e.situacao === filtro))
+    .filter((e) => !neg || chaveNeg(e.negociador_nome) === neg);
+  // Os negociadores que têm carro na lista, com a grafia mais usada de cada um.
+  const negsDoEstoque = (() => {
+    const m = {};
+    (lista || []).forEach((e) => {
+      const k = chaveNeg(e.negociador_nome); if (!k) return;
+      m[k] = m[k] || {}; m[k][e.negociador_nome] = (m[k][e.negociador_nome] || 0) + 1;
+    });
+    return Object.keys(m).map((k) => [k, Object.keys(m[k]).sort((a, b) => m[k][b] - m[k][a])[0]]).sort((a, b) => a[1].localeCompare(b[1]));
+  })();
   const soma = visivel.reduce((t, e) => {
     const c = contaDoEstoque(e);
     return { custo: t.custo + c.atual, margem: t.margem + (c.margem || 0) };
@@ -16434,6 +16460,14 @@ function TelaEstoque({ perfil, comp, mes, modo, aoAbrir }) {
               style={{ borderColor: busca ? C.roxo : C.line, background: "#fff" }} />
             {busca && <button onClick={() => setBusca("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-[12px]" style={{ color: C.mute }} aria-label="Limpar a busca">✕</button>}
           </span>
+        )}
+        {!soRentab && negsDoEstoque.length > 0 && (
+          <select value={neg} onChange={(ev) => setNeg(ev.target.value)} aria-label="Filtrar por negociador"
+            className="rounded-full border px-3 py-1 text-[12.5px] outline-none"
+            style={{ borderColor: neg ? C.roxo : C.line, background: "#fff", color: neg ? C.roxo : C.ink }}>
+            <option value="">Todos os negociadores</option>
+            {negsDoEstoque.map(([k, nome]) => <option key={k} value={k}>{nome}</option>)}
+          </select>
         )}
         {buscando && (
           <span className="text-[11.5px]" style={{ color: C.mute }}>

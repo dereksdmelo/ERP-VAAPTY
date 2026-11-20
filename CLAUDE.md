@@ -2981,6 +2981,11 @@ Foto com `erro` não trava — a pessoa pode ter desistido dela —, mas a
 tela avisa que ela não vai e manda usar o "Tentar". **Quem afrouxar
 essa espera reintroduz o carro pela metade, e sem volta.**
 
+**O aviso diz só o que falta (19/11/2026, o André Bruno pelo botão de suporte: *"não está deixando enviar ao
+Shinkai, alegando que não enviei as fotos"*).** As 15 fotos estavam no servidor; faltava a condição dos pneus, e o
+link do Lançamento dizia "completar as fotos e a ficha" em qualquer caso. Agora ele nomeia o que falta, e o botão
+apagado do Shinkai diz "Libera quando a ficha estiver completa. Falta: …".
+
 **O número que a tela mostra é o DELES.** "11 fotos enviadas" era o
 nosso número e dizia que estava tudo certo enquanto o Shinkai
 registrava 0. Agora sai "11 enviadas · o Shinkai registrou N", e
@@ -4411,6 +4416,9 @@ assinatura** (`SituacaoContratoLojista`): enviado e aguardando, assinado
 (com a via), ou — nos mandados antes do ZapSign pelo link próprio — se o
 link foi usado ou venceu. O Derek: *"depois que sair já não consigo mais
 acompanhar se ele assinou"*.
+
+**O Estoque filtra por negociador** (19/11/2026, a Schell pelo botão de suporte): a lista ao lado da busca, pela
+chave sem acento (`chaveNeg`), como a Rentabilidade; vale junto com o filtro de situação e com a busca.
 
 **Limpar o pátio** (gerente): na lista "No pátio", "limpar o pátio"
 marca vários e escolhe. **Baixar (0110)** é para o que já saiu no passado
