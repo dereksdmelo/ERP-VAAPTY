@@ -16116,10 +16116,10 @@ function PacoteLojistas({ carros, aoTirar }) {
  * também pra tirar carros que não estão consignados mais"). O carro não é da loja: não entra na tabela do
  * pátio nem no custo. É a lista dos atendimentos em Consignado, com o valor estimado e o prazo do termo. */
 const AZUL_CONSIG = "#1B5FA8";
-function ConsignadosNoEstoque({ aoAbrir }) {
+function ConsignadosNoEstoque({ aoAbrir, neg }) {
   // Fechado por padrão (o cabeçalho já diz quantos e o potencial), para não empurrar o pátio para baixo;
   // a escolha fica no aparelho.
-  const [l, setL] = useState(null); const [erro, setErro] = useState("");
+  const [l0, setL] = useState(null); const [erro, setErro] = useState("");
   const [aberto, setAbertoSt] = useState(() => { try { return localStorage.getItem("vaapty:consignados-aberto") === "1"; } catch (e) { return false; } });
   const setAberto = (v) => { setAbertoSt(v); try { localStorage.setItem("vaapty:consignados-aberto", v ? "1" : "0"); } catch (e) {} };
   const [tirando, setTirando] = useState(null); const [novoStatus, setNovoStatus] = useState("vendeu_fora"); const [indo, setIndo] = useState(false);
@@ -16138,7 +16138,9 @@ function ConsignadosNoEstoque({ aoAbrir }) {
     } catch (e) { setErro(e.message); }
     setIndo(false);
   };
-  if (l === null) return erro ? <p className="mb-3 text-[12.5px]" style={{ color: C.laranja }}>{erro}</p> : null;
+  if (l0 === null) return erro ? <p className="mb-3 text-[12.5px]" style={{ color: C.laranja }}>{erro}</p> : null;
+  // O filtro de negociador do Estoque vale aqui também.
+  const l = neg ? l0.filter((a) => chaveNeg(a.negociador_nome) === neg) : l0;
   if (!l.length) return null;
   const hoje = hojeEmSP();
   const num = (v) => Number(v) || 0;
@@ -16534,7 +16536,7 @@ function TelaEstoque({ perfil, comp, mes, modo, aoAbrir }) {
        * quebrarem a linha: placa, custo e dias são o que decide, e o
        * resto cabe quando a tela comporta.
        */}
-      {filtro === "em_estoque" && !buscando && !soRentab && <ConsignadosNoEstoque aoAbrir={aoAbrir} />}
+      {filtro === "em_estoque" && !buscando && !soRentab && <ConsignadosNoEstoque aoAbrir={aoAbrir} neg={neg} />}
       {/* LIMPAR O PÁTIO (04/11/2026, o Derek: "tenho que fazer uma limpa
           nos carros de estoque que estão errados… tem alguma maneira?").
           Marca vários e tira de uma vez: teste, entrada repetida, carro
