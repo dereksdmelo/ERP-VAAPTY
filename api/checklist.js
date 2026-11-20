@@ -439,7 +439,7 @@ const ANEXO_DE_ITEM = {
   "Laudo cautelar": "cautelar", "Contrato assinado": "contrato", "CRLV": "crlv",
 };
 const DOC_DE_ITEM = {
-  contrato_lojista: "arq_contrato_lojista", contrato_final: "contrato", pre_contrato: "pre_contrato",
+  contrato_lojista: "arq_contrato_lojista", contrato_final: "contrato", pre_contrato: "pre_contrato", protocolo_retirada: "arq_protocolo_retirada",
   check_list: "fechamento", autorizacao_cautelar: "cautelar",
 };
 

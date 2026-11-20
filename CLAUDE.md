@@ -5250,6 +5250,14 @@ folha em branco e a assinatura mora em `assinatura`. O check list lê o estado d
 (`?recurso=assinar-estado`), põe a via assinada primeiro ("✓ Pré-contrato assinado"), e o visor a abre
 montada pelo servidor (`?recurso=assinado`, a folha mais o bloco da assinatura).
 
+**O protocolo de retirada sai do check list (0163, 20/11/2026, a Bruna pelo botão de suporte, aprovado pelo
+Derek).** No item "Protocolo de Retirada", "gerar o protocolo" (`ProtocoloRetirada`) monta a folha "Retirada de
+veículo" da casa (`protocoloRetirada`, transcrita dos protocolos que o adm anexava): carro e placa da ficha, quem
+retirou, CPF, data e hora, e Cópia documento / Manual / Chave reserva / DUT reconhecido / Procuração (sem resposta,
+as caixas saem vazias para a caneta). "Imprimir" é para a caneta; "Assinar no celular" gera o link do assinador
+próprio (decisão 42). Os dois entram no registro do carro (`protocolo_retirada`, `DOC_DE_ITEM`), e a via assinada
+aparece primeiro no item. A cópia do documento de quem retirou continua sendo anexo.
+
 **Os revisores são lembrados das aprovações de dez em dez minutos**
 (`AvisoAprovacoes`, `?recurso=esteira&resumo=1`): só o que espera a
 aprovação DELE, sem dado bancário.

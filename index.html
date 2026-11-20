@@ -3161,7 +3161,7 @@ final deste documento.</p>`;
  * cautelar** não precisa de assinatura; e os extratos são folha de
  * mesa, não instrumento — ninguém assina uma lista de propostas.
  */
-const ASSINAVEIS = ["pre_contrato", "termo_aceite", "check_list", "termo_consignacao", "termo_desistencia", "nota_promissoria"];
+const ASSINAVEIS = ["pre_contrato", "termo_aceite", "check_list", "termo_consignacao", "termo_desistencia", "nota_promissoria", "protocolo_retirada"];
 
 function moldura({ titulo, corpo, protocolo, logo, paisagem }) {
   return `<!DOCTYPE html>
@@ -4686,6 +4686,46 @@ ${CLAUSULA_ASSINATURA}
 <div style="margin-top:40px;border-top:1px solid #000;width:100%"></div>
 <p><strong>LOCAL E DATA: ${e.cidade} ${data}</strong></p>`;
   return moldura({ titulo: "Nota promissória", corpo, protocolo: protocolo(f, "NP") });
+}
+
+/* ---------------- protocolo de retirada do veículo ---------------- */
+
+/**
+ * A FOLHA "RETIRADA DE VEÍCULO" (20/11/2026, pedido da Bruna pelo botão de suporte, aprovado pelo Derek): a
+ * que o adm imprimia, o lojista assinava na caneta e voltava escaneada para o item "Protocolo de Retirada" do
+ * arquivamento. Transcrita do papel da casa (decisão 7): carro, placa, data e hora, quem retirou e o CPF, as
+ * cinco perguntas de Sim/Não e a assinatura. Pergunta sem resposta sai com as duas caixas vazias, para a
+ * caneta. Assina-se na caneta ou pelo link (por isso leva a CLAUSULA_ASSINATURA, decisão 42); a via assinada
+ * vale como papel do item (`DOC_DE_ITEM`).
+ */
+const PERGUNTAS_RETIRADA = [
+  ["copia_documento", "Cópia documento"], ["manual", "Manual"], ["chave_reserva", "Chave reserva"],
+  ["dut_reconhecido", "DUT reconhecido"], ["procuracao", "Procuração"],
+];
+function protocoloRetirada(r) {
+  const caixa = (marcada) => `<span style="display:inline-block;width:12px;height:12px;border:1px solid #15121a;margin:0 4px 0 10px;vertical-align:-1px;text-align:center;line-height:11px;font-size:10px">${marcada ? "✕" : ""}</span>`;
+  const quando = r.quando ? new Date(r.quando) : new Date();
+  const data = quando.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+  const hh = quando.toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
+  const linhas = PERGUNTAS_RETIRADA.map(([k, rot]) => {
+    const v = (r.respostas || {})[k];
+    return `<tr><td style="padding:3px 18px 3px 0">${rot}:</td><td>${caixa(v === true)}Sim ${caixa(v === false)}Não</td></tr>`;
+  }).join("");
+  const corpo = `<h1>Retirada de veículo:</h1>
+
+<p style="line-height:2">Carro: ${ou(r.carro, "marca/modelo")}<br>
+Placa: ${ou(r.placa, "placa")}<br>
+Data: ${data} – ${hh}H<br>
+Retirou: ${ou(r.nome ? String(r.nome).toUpperCase() : "", "nome de quem retirou")}<br>
+CPF: ${ou(r.cpf, "CPF")}</p>
+
+<table style="margin:26px 0;border-collapse:collapse">${linhas}</table>
+${r.obs ? `<p>Observação: ${escDoc(r.obs)}</p>` : ""}
+
+${CLAUSULA_ASSINATURA}
+
+<div style="margin:60px 0 0 auto;width:300px;border-top:1px solid #000;padding-top:4px;text-align:center;font-weight:bold">ASSINATURA</div>`;
+  return moldura({ titulo: "Retirada de veículo", corpo, protocolo: protocolo({ placa: r.placa }, "RET"), logo: true });
 }
 
 /* ---------------- 3. pré-contrato de intermediação ---------------- */
@@ -26732,6 +26772,7 @@ const ANEXO_DE_ITEM = {
 // E o documento que o próprio sistema gerou também é papel do item.
 const DOC_DE_ITEM = {
   contrato_lojista: "arq_contrato_lojista",
+  protocolo_retirada: "arq_protocolo_retirada",
   contrato_final: "contrato",
   pre_contrato: "pre_contrato",
   check_list: "fechamento",
@@ -26741,7 +26782,7 @@ const ROT_DOC = {
   termo_aceite: "Termo de aceite", autorizacao_cautelar: "Autorização de cautelar",
   pre_contrato: "Pré-contrato", check_list: "Check list", extrato_ofertas: "Extrato de ofertas", contrato_lojista: "Contrato do lojista",
   extrato_revisao: "Extrato da revisão", contrato_final: "Contrato", termo_consignacao: "Termo de consignação",
-  termo_desistencia: "Termo de desistência", nota_promissoria: "Nota promissória",
+  termo_desistencia: "Termo de desistência", nota_promissoria: "Nota promissória", protocolo_retirada: "Protocolo de retirada",
 };
 
 async function lerChecklistDoc(atendimentoId) {
@@ -27475,6 +27516,133 @@ function EditorDocsExigidos({ aoFechar, aoSalvar }) {
   );
 }
 
+/* O PROTOCOLO DE RETIRADA SAI DAQUI (20/11/2026, a Bruna). O carro e a placa vêm da ficha, o lojista do
+ * estoque; quem retirou, o CPF, a hora e as cinco perguntas se preenchem na hora. "Imprimir" é para a caneta;
+ * "Assinar no celular" gera o link do assinador próprio (decisão 42) para quem retira, que pode assinar no
+ * aparelho dele ou no da loja. Os dois entram no registro do carro, e a via assinada aparece no item. */
+function ProtocoloRetirada({ atendimentoId, aoFechar, aoGerar }) {
+  const agoraSP = () => {
+    const p = new Date().toLocaleString("sv-SE", { timeZone: "America/Sao_Paulo" });
+    return p.slice(0, 16).replace(" ", "T");
+  };
+  const [v, setV] = useState(null); const [est, setEst] = useState(null);
+  const [nome, setNome] = useState(""); const [cpf, setCpf] = useState(""); const [tel, setTel] = useState("");
+  const [quando, setQuando] = useState(agoraSP()); const [resp, setResp] = useState({}); const [obs, setObs] = useState("");
+  const [erro, setErro] = useState(""); const [indo, setIndo] = useState(false);
+  const [doc, setDoc] = useState(null); const [assin, setAssin] = useState({}); const [digital, setDigital] = useState(false);
+  useEffect(() => {
+    veiculoDoAtendimento(atendimentoId).then(setV).catch((e) => setErro(e.message));
+    estoqueDoAtendimento(atendimentoId).then((e) => {
+      setEst(e);
+      const c = e && e.comprador;
+      if (c && c.telefone) setTel((t) => t || c.telefone);
+    }).catch(() => {});
+  }, [atendimentoId]);
+  const carro = v ? (v.marca_modelo || [v.marca, v.modelo].filter(Boolean).join(" ")) : "";
+  const montar = () => protocoloRetirada({
+    carro, placa: v && v.placa, nome: nome.trim(), cpf: cpf.trim(),
+    // A hora digitada é a de Joinville: "-03:00" para o Date não lê-la como a do aparelho.
+    quando: quando ? `${quando}:00-03:00` : null, respostas: resp, obs: obs.trim(),
+  });
+  const gerar = async (paraAssinar) => {
+    setErro("");
+    if (!v || !v.id) { setErro("Este atendimento não tem a ficha do carro — sem ela o protocolo não entra no registro."); return; }
+    if (paraAssinar && !nome.trim()) { setErro("Diga quem está retirando: o nome vai no protocolo e no link."); return; }
+    const html = montar();
+    // A janela abre no clique, antes de qualquer espera (decisão 15).
+    if (!paraAssinar) { const r = abrirDocumento(html); if (!r.ok) { setErro(r.erro); return; } }
+    setIndo(true);
+    try {
+      const d = await registrarDocumento({ veiculo_id: v.id, tipo: "protocolo_retirada", rodada: null,
+        protocolo: extrairProtocolo(html), conteudo: html, negociador: (est && est.negociador_nome) || null });
+      setDoc({ docId: d.id, tipo: "protocolo_retirada", rotulo: "Protocolo de retirada", protocolo: extrairProtocolo(html) });
+      setDigital(!!paraAssinar);
+      aoGerar && aoGerar();
+    } catch (e) { setErro(paraAssinar ? e.message : `Impresso, mas não entrou no registro: ${e.message}`); }
+    setIndo(false);
+  };
+  const inp = "w-full rounded-md border px-2 py-1.5 text-[13px]";
+  const rot = (t) => <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.mute }}>{t}</span>;
+  const lojista = est && est.comprador && est.comprador.nome;
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-3 sm:items-center" style={{ background: "rgba(20,12,30,.45)" }}
+      onClick={(e) => { if (e.target === e.currentTarget) aoFechar(); }}>
+      <div className="w-full max-w-lg rounded-xl p-4" style={{ background: "#fff" }}>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[16px] font-bold">Protocolo de retirada</div>
+            <div className="text-[12px]" style={{ color: C.mute }}>
+              {v ? `${carro || "carro sem modelo"} · ${v.placa || "sem placa"}` : "carregando o carro…"}{lojista ? ` · vendido para ${lojista}` : ""}
+            </div>
+          </div>
+          <button onClick={aoFechar} className="text-[20px] leading-none" style={{ color: C.mute }} aria-label="Fechar">×</button>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <label className="col-span-2">{rot("Quem retirou")}
+            <input className={inp} style={{ borderColor: C.line }} value={nome} onChange={(e) => setNome(e.target.value)} placeholder="nome completo, como no documento" /></label>
+          <label>{rot("CPF")}
+            <input className={inp} style={{ borderColor: C.line }} value={cpf} onChange={(e) => setCpf(e.target.value)} inputMode="numeric" /></label>
+          <label>{rot("Data e hora")}
+            <input type="datetime-local" className={inp} style={{ borderColor: C.line }} value={quando} onChange={(e) => setQuando(e.target.value)} /></label>
+        </div>
+
+        <div className="mt-3">
+          {PERGUNTAS_RETIRADA.map(([k, r]) => (
+            <div key={k} className="flex items-center justify-between py-1 text-[13px]" style={{ borderBottom: `1px solid ${C.line}` }}>
+              <span>{r}</span>
+              <span className="flex gap-1">
+                {[[true, "Sim"], [false, "Não"]].map(([val, t]) => {
+                  const on = resp[k] === val;
+                  return (
+                    <button key={t} onClick={() => setResp({ ...resp, [k]: on ? undefined : val })}
+                      className="rounded-md border px-3 py-1 text-[12px] font-semibold"
+                      style={on ? { background: val ? C.verde : C.laranja, borderColor: val ? C.verde : C.laranja, color: "#fff" } : { borderColor: C.line, color: C.mute }}>{t}</button>
+                  );
+                })}
+              </span>
+            </div>
+          ))}
+          <p className="mt-1 text-[11px]" style={{ color: C.mute }}>Sem resposta, as caixas saem vazias para marcar na caneta.</p>
+        </div>
+
+        <label className="mt-2 block">{rot("Observação (opcional)")}
+          <input className={inp} style={{ borderColor: C.line }} value={obs} onChange={(e) => setObs(e.target.value)} placeholder="ex.: manual e chave reserva vão pelos Correios" /></label>
+
+        {!doc ? (
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button disabled={indo || !v} onClick={() => gerar(true)} className="rounded-md px-3 py-2 text-[13px] font-semibold"
+              style={{ background: C.roxo, color: "#fff", opacity: indo || !v ? 0.5 : 1 }}>{indo ? "Gerando…" : "Assinar no celular (link)"}</button>
+            <button disabled={indo || !v} onClick={() => gerar(false)} className="rounded-md border px-3 py-2 text-[13px] font-semibold"
+              style={{ borderColor: C.roxo, color: C.roxo, opacity: indo || !v ? 0.5 : 1 }}>Imprimir (assina na caneta)</button>
+          </div>
+        ) : (
+          <div className="mt-4 rounded-md p-3" style={{ background: C.roxoFraco }}>
+            <div className="text-[12.5px] font-semibold" style={{ color: C.roxo }}>
+              Protocolo {doc.protocolo || ""} registrado — já aparece no item "Protocolo de Retirada".
+            </div>
+            {digital ? (
+              <>
+                <div className="mt-1 text-[12px]">Mande o link para quem retira, ou abra-o neste aparelho e passe para ele assinar. Assinado, a via assinada vale como o papel do item.</div>
+                <div className="mt-1.5">
+                  <MandarAssinar doc={doc} telefone={tel} nome={nome.trim()} estado={assin[doc.docId]} auto
+                    aoMudar={() => setAssin({ ...assin, [doc.docId]: { situacao: "aguardando" } })} />
+                </div>
+                <label className="mt-2 block">{rot("WhatsApp de quem retira (para o link)")}
+                  <input className={inp} style={{ borderColor: C.line }} value={tel} onChange={(e) => setTel(e.target.value)} inputMode="tel" /></label>
+              </>
+            ) : (
+              <div className="mt-1 text-[12px]">Assinado na caneta, anexe a folha escaneada (e a cópia do documento de quem retirou) no item, em "+ anexar outro".</div>
+            )}
+            <button onClick={() => { setDoc(null); setAssin({}); }} className="mt-2 text-[11.5px] underline" style={{ color: C.mute }}>gerar outro</button>
+          </div>
+        )}
+        {erro && <p className="mt-2 text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+      </div>
+    </div>
+  );
+}
+
 function ChecklistDocumentos({ atendimentoId, perfil }) {
   const [d, setD] = useState(null);
   const [erro, setErro] = useState("");
@@ -27485,6 +27653,8 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
   const podeVisto = !!(perfil && (perfil.administrativo || perfil.papel === "gerente"));
 
   const [docs, setDocs] = useState([]);
+  // O protocolo de retirada gerado aqui volta ao item na hora (20/11/2026).
+  const [retirada, setRetirada] = useState(false); const [docsVez, setDocsVez] = useState(0);
   // As vias antigas de um documento gerado ficam recolhidas: o MGX1133
   // tinha doze contratos impressos na linha do item.
   const [verVias, setVerVias] = useState({});
@@ -27532,7 +27702,7 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
       })
       .catch(() => {});
     return () => { vivo = false; };
-  }, [atendimentoId]);
+  }, [atendimentoId, docsVez]);
   const [assinados, setAssinados] = useState({});
   const assinaturaDe = (x) => { const e = assinados[x.id]; return e && e.situacao === "assinado" ? e : null; };
 
@@ -27835,6 +28005,11 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
                         <button onClick={() => tirar(a)} style={{ color: C.mute }} title="tirar">×</button>
                       </span>
                     ))}
+                    {it[0] === "arq_protocolo_retirada" && (
+                      <button onClick={() => setRetirada(true)} className="rounded-md border px-2 py-0.5 text-[11px] font-semibold" style={{ borderColor: C.roxo, color: C.roxo }}>
+                        gerar o protocolo
+                      </button>
+                    )}
                     <label className="cursor-pointer text-[11px] font-semibold" style={{ color: arqs.length ? C.mute : C.laranja }}>
                       {subindo === it[0] ? "enviando…" : arqs.length ? "+ anexar outro" : "anexar o documento"}
                       <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden"
@@ -27853,6 +28028,7 @@ function ChecklistDocumentos({ atendimentoId, perfil }) {
           pagamento, extrato, termo de aceite. Some da conferência se não
           aparecer em lugar nenhum, e é papel do mesmo negócio. */}
       <DocumentosAssinados atendimentoId={atendimentoId} perfil={perfil} />
+      {retirada && <ProtocoloRetirada atendimentoId={atendimentoId} aoFechar={() => setRetirada(false)} aoGerar={() => setDocsVez((n) => n + 1)} />}
 
       {(() => {
         const usados = {};
