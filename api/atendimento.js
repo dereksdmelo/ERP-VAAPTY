@@ -947,6 +947,25 @@ async function recuperacao(req, res, tok) {
       c.vezes += 1; if (!c.ultimo) { c.ultimo = x.criado_em; c.ultimo_titulo = x.titulo; }
     });
   }
+  // A ANOTAÇÃO TAMBÉM É CONTATO (23/11/2026, o André Bruno: "muitos desses que aparecem como nunca procurados, foram
+  // atualizados e foi clicado anotar"). O "Anotar" escreve nas observações ("[dd/mm hh:mm · Nome] texto"), não na
+  // agenda, e a lista só contava a agenda. Conta a anotação feita DEPOIS do dia do atendimento (a do dia é a da mesa).
+  // O ano não vem na anotação: é o deste ano, ou o do anterior se a data ficaria no futuro.
+  const anoHoje = Number(hoje.slice(0, 4));
+  meus.forEach((a) => {
+    const linhas = String(a.observacoes || "").split("\n");
+    linhas.forEach((l) => {
+      const m = l.match(/^\[(\d{2})\/(\d{2}),? (\d{2}):(\d{2})/);
+      if (!m) return;
+      let dia = `${anoHoje}-${m[2]}-${m[1]}`;
+      if (dia > hoje) dia = `${anoHoje - 1}-${m[2]}-${m[1]}`;
+      if (a.data && dia <= String(a.data).slice(0, 10)) return;
+      const quando = `${dia}T${m[3]}:${m[4]}:00-03:00`;
+      const c = contato[a.id] || (contato[a.id] = { vezes: 0, ultimo: null, ultimo_titulo: null });
+      c.vezes += 1;
+      if (!c.ultimo || Date.parse(quando) > Date.parse(c.ultimo)) { c.ultimo = new Date(Date.parse(quando)).toISOString(); c.ultimo_titulo = `Anotou: ${l.replace(/^\[[^\]]*\]\s*/, "").slice(0, 80)}`; }
+    });
+  });
   // As recuperações AGENDADAS (o "Agendar recuperação"): ação planejada no
   // Meu dia, ainda não feita, ligada ao atendimento. Vêm todas as que não
   // foram feitas até a semana que vem — a tela separa as de hoje e as que
@@ -1342,7 +1361,9 @@ async function estadoDaFila(tok, ignorar) {
   const cab = { headers: cabecalhos(tok) };
   const mes = await contaDoMes(tok, hoje);
   const [presencas, deHoje, sinais, eventos, diaLinha, transb, cfgTb] = await Promise.all([
-    banco(`${REST("presenca")}?select=perfil_id,chegou_em,saiu_em,abriu_em,saida_manual&dia=eq.${hoje}`, cab),
+    banco(`${REST("presenca")}?select=perfil_id,chegou_em,saiu_em,abriu_em,saida_manual,livre_em&dia=eq.${hoje}`, cab)
+      // Sem a coluna da 0164 (banco ainda sem a migração), lê como antes.
+      .catch(() => banco(`${REST("presenca")}?select=perfil_id,chegou_em,saiu_em,abriu_em,saida_manual&dia=eq.${hoje}`, cab)),
     banco(`${REST("atendimento")}?select=id,negociador_id,negociador_nome,cliente_nome,carro_descricao,status,` +
           `chegada_em,criado_em,atendimento_fim_em,voltou_em,data&or=(data.eq.${hoje},voltou_em.gte.${hoje}T00:00:00-03:00)&limit=500`, cab),
     banco(`${URL_BASE}/rest/v1/rpc/agenda_ultimo_sinal`, { method: "POST", headers: json(tok), body: JSON.stringify({ p_dia: hoje }) })
@@ -1351,7 +1372,9 @@ async function estadoDaFila(tok, ignorar) {
     banco(`${REST("fila_dia")}?select=*&dia=eq.${hoje}`, cab).catch(() => []),
     banco(`${REST("fila_transbordo")}?select=*`, cab).catch(() => []),
     // O gatilho do transbordo é lido sempre (a conta do mês fica 5 min guardada).
-    banco(`${REST("config_loja")}?id=eq.1&select=transbordo_auto,transbordo_abaixo,transbordo_minimo,transbordo_dia_de,transbordo_dia_ate,transbordo_base`, cab).catch(() => []),
+    banco(`${REST("config_loja")}?id=eq.1&select=transbordo_auto,transbordo_abaixo,transbordo_minimo,transbordo_dia_de,transbordo_dia_ate,transbordo_base,fila_espera_livre_min`, cab)
+      .catch(() => banco(`${REST("config_loja")}?id=eq.1&select=transbordo_auto,transbordo_abaixo,transbordo_minimo,transbordo_dia_de,transbordo_dia_ate,transbordo_base`, cab))
+      .catch(() => []),
   ]);
   const tbCfg = (cfgTb || [])[0] || null;
   const diaDoMes = Number(hoje.slice(8, 10));
@@ -1389,6 +1412,11 @@ async function estadoDaFila(tok, ignorar) {
     // vez devida.
     const fimUltimo = Math.max(0, ...ats.filter(dele).map((a) => Date.parse(a.atendimento_fim_em) || 0));
     const pres = (presencas || []).find((x) => x.perfil_id === p.id) || null;
+    // QUANDO FICOU LIVRE (23/11/2026, o Derek: dez minutos, do gerente, antes de ser a vez de quem acabou de se
+    // liberar): o fim do último atendimento, ou o "Estou livre" de quem estava fora da fila — o que vier depois.
+    const livreEm = pres && pres.livre_em ? Date.parse(pres.livre_em) || 0 : 0;
+    const liberou = Math.max(fimUltimo, livreEm);
+    const liberouPor = liberou && liberou === livreEm && livreEm > fimUltimo ? "livre" : "fim";
     /* NA FILA (0088): marcou presença, não apertou "Saí", e está
      * atendendo OU deu sinal nos últimos trinta minutos — abriu o
      * sistema, ou respondeu o lembrete. */
@@ -1420,6 +1448,7 @@ async function estadoDaFila(tok, ignorar) {
       sem_meta: !meta,
       atendendo: naMesa,
       fim_ultimo: fimUltimo,
+      liberou, liberou_por: liberouPor,
       transbordo: (() => {
         const marca = (transb || []).find((x) => x.perfil_id === p.id) || null;
         const cvOntem = doDia.fluxo ? doDia.vendas / doDia.fluxo : 0;
@@ -1447,9 +1476,16 @@ async function estadoDaFila(tok, ignorar) {
   const circulo = F.circuloDoDia(veio.map((p) => ({ ...p, indice_at: p.indice_dia })), congelada);
   const st = F.estadoDosEventos(eventos || []);
   const porId = {};
-  pessoas.forEach((p) => { porId[p.perfil_id] = { presente: p.presente, atendendo: p.atendendo.length, fim_ultimo: p.fim_ultimo }; });
+  pessoas.forEach((p) => { porId[p.perfil_id] = { presente: p.presente, atendendo: p.atendendo.length, fim_ultimo: p.fim_ultimo, liberou: p.liberou, liberou_por: p.liberou_por }; });
+  const minEspera = tbCfg && tbCfg.fila_espera_livre_min != null ? Number(tbCfg.fila_espera_livre_min) : 10;
+  const esperaLivreMs = Math.max(0, minEspera) * 60000;
+  // Quem está na espera: a tela mostra "livre — entra na vez às hh:mm".
+  pessoas.forEach((p) => {
+    const ate = p.liberou && !p.atendendo.length ? p.liberou + esperaLivreMs : 0;
+    p.espera_ate = esperaLivreMs && ate > agora ? new Date(ate).toISOString() : null;
+  });
   const transbordo = pessoas.filter((p) => p.transbordo.em).map((p) => p.perfil_id);
-  const est = { circulo, pessoas: porId, ponteiro: st.ponteiro, creditos: st.creditos, forcado: st.forcado, transbordo, aberto, agora };
+  const est = { circulo, pessoas: porId, ponteiro: st.ponteiro, creditos: st.creditos, forcado: st.forcado, transbordo, aberto, agora, espera_livre_ms: esperaLivreMs };
   const vez = F.escolher(est);
   const segundo = vez ? F.escolher(F.aplicar(est, vez)) : null;
   // De quem é a vez PELA RODA, presente ou não: é quem leva o alerta de
@@ -1620,6 +1656,12 @@ async function vez(req, res, tok) {
         body: JSON.stringify({ perfil_id: quem, dia: hoje, saiu_em: null, saida_manual: false,
           abriu_em: new Date().toISOString(), atualizado_em: new Date().toISOString() }),
       });
+      // "Estou livre" de quem estava fora da fila começa a espera antes da vez (0164). Falha (banco sem a
+      // coluna) não derruba a presença.
+      if (c.livre && Array.isArray(d) && d.length) {
+        await banco(`${REST("presenca")}?perfil_id=eq.${quem}&dia=eq.${hoje}`, { method: "PATCH", headers: json(tok, { Prefer: "return=minimal" }),
+          body: JSON.stringify({ livre_em: new Date().toISOString() }) }).catch(() => {});
+      }
     } else {
       d = await banco(`${REST("presenca")}?perfil_id=eq.${quem}&dia=eq.${hoje}`, {
         method: "PATCH",
@@ -1692,9 +1734,18 @@ async function vez(req, res, tok) {
   /* O TRANSBORDO (0144) — só o gerente:
    *   acao=transbordo        { perfil_id, modo: dentro | fora | auto }
    *   acao=transbordo-config { ligado, abaixo (fração), minimo, dia_de, dia_ate } */
-  if (req.method === "POST" && (acao === "transbordo" || acao === "transbordo-config")) {
+  if (req.method === "POST" && (acao === "transbordo" || acao === "transbordo-config" || acao === "espera-config")) {
     const perfil = await banco(`${URL_BASE}/rest/v1/perfil?select=papel&id=eq.${eu}`, { headers: cabecalhos(tok) });
     if (!(perfil && perfil[0] && perfil[0].papel === "gerente")) return res.status(403).json({ erro: "Só o gerente mexe no transbordo." });
+    // A espera depois de ficar livre (0164): minutos, de 0 (desligada) a 60.
+    if (acao === "espera-config") {
+      const m = Number(c.minutos);
+      if (!(Number.isInteger(m) && m >= 0 && m <= 60)) return res.status(400).json({ erro: "A espera vai de 0 a 60 minutos." });
+      const r = await banco(`${REST("config_loja")}?id=eq.1`, { method: "PATCH", headers: json(tok, { Prefer: "return=representation" }),
+        body: JSON.stringify({ fila_espera_livre_min: m }) });
+      if (!Array.isArray(r) || !r.length) return res.status(403).json({ erro: "O banco não gravou a configuração." });
+      return res.status(200).json({ ok: true });
+    }
     if (acao === "transbordo") {
       const quem = String(c.perfil_id || "");
       if (!RX_UUID.test(quem)) return res.status(400).json({ erro: "perfil_id inválido." });

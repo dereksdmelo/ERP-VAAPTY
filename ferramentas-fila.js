@@ -121,5 +121,22 @@ ok(F.horarioAberto(null, Date.parse("2026-11-07T17:00:00Z")) === false, "sábado
   ok(F.noTransbordo(null, {}, { modo: "dentro" }, 1).em === true, "o gerente põe à mão, sem gatilho");
 }
 
+// 23/11/2026: quem acabou de ficar livre espera (o Derek: dez minutos, configurável).
+{
+  const ESP = 10 * 60000;
+  let e2 = est({ T: { presente: true, atendendo: 0, liberou: AGORA - 2 * 60000, liberou_por: "fim", fim_ultimo: AGORA - 2 * 60000 }, A: livre }, { espera_livre_ms: ESP });
+  let y = F.escolher(e2);
+  ok(y.quem === "A" && y.pulos[0].motivo === "ocupado", "encerrou há 2 min: pulado como ocupado (fica devendo)");
+  e2 = est({ T: { presente: true, atendendo: 0, liberou: AGORA - 2 * 60000, liberou_por: "livre" }, A: livre }, { espera_livre_ms: ESP });
+  y = F.escolher(e2);
+  ok(y.quem === "A" && y.pulos[0].motivo === "ausente", "marcou livre há 2 min: pulado como ausente (sem crédito)");
+  e2.pessoas.T.liberou = AGORA - 11 * 60000;
+  ok(F.escolher(e2).quem === "T", "passados os dez minutos, a vez é dele");
+  e2 = est({ T: { presente: true, atendendo: 0, liberou: AGORA - 60000, liberou_por: "livre" }, A: ocupado }, { espera_livre_ms: ESP });
+  ok(F.escolher(e2).quem === "T", "com todos ocupados, quem está esperando pega mesmo assim");
+  e2 = est({ T: { presente: true, atendendo: 0, liberou: AGORA - 60000, liberou_por: "livre" }, A: livre }, { espera_livre_ms: 0 });
+  ok(F.escolher(e2).quem === "T", "com a espera em zero, vale como antes");
+}
+
 if (falhas) { console.log(`\n${falhas} falha(s).`); process.exit(1); }
 console.log("\ntodos os casos passaram.");

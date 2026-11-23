@@ -5296,7 +5296,21 @@ function IndicacaoLojista({ atendimento, f, perfil }) {
   const noPatio = !!(est && (est.natureza || "compra") === "compra" && est.situacao === "em_estoque");
   if (est && est.natureza !== "indicacao" && !noPatio) return null;
 
-  if (est && !noPatio) {
+  // A indicação cuja venda foi desfeita (23/11/2026, a Amanda): sem lojista nem comissão, ela se lança de novo daqui.
+  const desfeita = !!(est && est.natureza === "indicacao" && est.situacao !== "vendido");
+  if (desfeita && !aberto) {
+    return (
+      <div className="rounded-lg p-3" style={{ background: AMARELO.fundo, border: `1px solid ${AMARELO.borda}` }}>
+        <div className="text-[12.5px] font-bold" style={{ color: AMARELO.texto }}>A indicação foi desfeita</div>
+        <div className="mt-0.5 text-[11.5px]" style={{ color: AMARELO.texto }}>
+          Está sem lojista e sem comissão, e não conta na rentabilidade. Resolvida a pendência, lance de novo.
+        </div>
+        <button onClick={() => setAberto(true)} className="mt-2 rounded-md border px-3 py-1 text-[12px] font-semibold"
+          style={{ borderColor: AMARELO.texto, color: AMARELO.texto, background: "#fff" }}>Lançar a comissão de novo</button>
+      </div>
+    );
+  }
+  if (est && !noPatio && !desfeita) {
     return (
       <div className="rounded-lg p-3" style={{ background: "#F1ECF8", border: `1px solid ${C.line}` }}>
         <div className="text-[12.5px] font-bold" style={{ color: C.roxo }}>Indicação registrada</div>
@@ -5321,8 +5335,8 @@ function IndicacaoLojista({ atendimento, f, perfil }) {
     setOcupado(true); setErro("");
     try {
       await entrarNoEstoque({
-        veiculo_id: veiculoId || null, atendimento_id: aid, natureza: "indicacao",
-        descricao_carro: veiculoId ? null : ([f.modelo || atendimento.carro_descricao, f.ano].filter(Boolean).join(" ") || null),
+        veiculo_id: (desfeita ? est.veiculo_id : veiculoId) || null, atendimento_id: aid, natureza: "indicacao",
+        descricao_carro: (desfeita ? est.veiculo_id : veiculoId) ? null : ([f.modelo || atendimento.carro_descricao, f.ano].filter(Boolean).join(" ") || null),
         comprador_id: compId || null, comprador_nome: compId ? null : novoNome.trim(),
         valor_venda: valor,
         observacoes: `Indicação — ${solucao}${obs.trim() ? `. ${obs.trim()}` : ""}`,
@@ -30992,7 +31006,7 @@ function PerguntaForaDaFila({ eu, d, aoFeito, aoAgoraNao, proximo }) {
 
         {!modo && (
           <div className="mt-3 grid gap-2">
-            {op("Estou livre na loja", "Entro na fila agora.", () => fazer(() => mexerNaVez("presente")), C.verde)}
+            {op("Estou livre na loja", "Entro na fila agora.", () => fazer(() => mexerNaVez("presente", { livre: true })), C.verde)}
             {op("Estou atendendo um cliente", "Diga qual — você fica na fila como ocupado.", () => setModo("atendendo"), C.roxo)}
             <div className="grid grid-cols-2 gap-2">
               {op("Almoço", null, () => agenda("almoco", "Almoço"))}
@@ -31146,6 +31160,33 @@ function ChamadaDaVez({ ch, aoResponder, aoAbrir }) {
  * 20 em 20 segundos com a aba à vista — é o que faz o pop-up aparecer
  * quando a pré-venda marca "Chegou".
  */
+// A faixa da vez senta EM CIMA da barra do celular, medida de verdade (23/11/2026, o André Bruno: "tampou a parte de
+// baixo"). Os 58 px fixos não contavam a margem do iPhone, e a faixa cobria os ícones da barra; e a página não sabia
+// que havia uma faixa, então o fim da lista ficava embaixo dela. Agora a altura da barra é lida (data-barra-inferior),
+// e o corpo da página ganha embaixo a altura da faixa enquanto ela está à vista.
+function FaixaDaVez({ style, children }) {
+  const ref = useRef(null);
+  const [embaixo, setEmbaixo] = useState(0);
+  useEffect(() => {
+    const medir = () => {
+      const nav = document.querySelector("[data-barra-inferior]");
+      const b = nav && nav.offsetParent !== null ? nav.getBoundingClientRect().height : 0;
+      setEmbaixo(Math.round(b));
+      const h = ref.current ? ref.current.getBoundingClientRect().height : 0;
+      document.body.style.paddingBottom = `${Math.round(h)}px`;
+    };
+    medir();
+    const t = setInterval(medir, 1500);
+    window.addEventListener("resize", medir);
+    return () => { clearInterval(t); window.removeEventListener("resize", medir); document.body.style.paddingBottom = ""; };
+  }, []);
+  return (
+    <div ref={ref} className="fixed inset-x-0 z-40 flex items-stretch" style={{ ...style, bottom: embaixo }}>
+      {children}
+    </div>
+  );
+}
+
 function AvisosDaFila({ perfil, aoAbrir, aoIrParaFila }) {
   const [d, setD] = useState(null);
   const [respondidas, setRespondidas] = useState({});
@@ -31250,8 +31291,7 @@ function AvisosDaFila({ perfil, aoAbrir, aoIrParaFila }) {
   const chaveFaixa = `${chave}:${souVez ? "vez" : "proximo"}`;
   if (faixaFechada === chaveFaixa) return null;
   return (
-    <div className="fixed inset-x-0 bottom-[58px] z-40 flex items-stretch lg:bottom-0"
-      style={{ background: souVez ? C.roxo : C.paper, color: souVez ? "#fff" : C.ink, borderTop: souVez ? "none" : `3px solid ${C.roxo}`, boxShadow: "0 -6px 18px rgba(24,20,32,0.18)" }}>
+    <FaixaDaVez style={{ background: souVez ? C.roxo : C.paper, color: souVez ? "#fff" : C.ink, borderTop: souVez ? "none" : `3px solid ${C.roxo}`, boxShadow: "0 -6px 18px rgba(24,20,32,0.18)" }}>
       <button onClick={aoIrParaFila} className="flex-1 px-4 py-2 text-center">
         <span className="text-[16px] font-extrabold sm:text-[18px]">{souVez ? "Você é a vez" : "Você é o próximo depois da vez"}</span>
         <span className="ml-3 text-[13px] sm:text-[15px]" style={{ opacity: 0.9 }}>
@@ -31260,7 +31300,7 @@ function AvisosDaFila({ perfil, aoAbrir, aoIrParaFila }) {
       </button>
       <button onClick={() => setFaixaFechada(chaveFaixa)} aria-label="Fechar o aviso" title="Fechar o aviso"
         className="px-4 text-[22px] font-bold leading-none" style={{ opacity: 0.85 }}>×</button>
-    </div>
+    </FaixaDaVez>
   );
 }
 
@@ -31772,6 +31812,7 @@ function TelaRecuperacao({ perfil, aoAbrir, aoConversar }) {
       const d = await r.json(); if (!r.ok) throw new Error(d.erro || "Não consegui anotar.");
       setNota((m) => ({ ...m, [a.id]: "" })); setPainel((m) => ({ ...m, [a.id]: "" })); setAviso((m) => ({ ...m, [a.id]: "Anotado no atendimento." }));
       if (d.observacoes != null) setAnot((m) => ({ ...m, [a.id]: d.observacoes }));
+      carregar(true);
     } catch (e) { setErro(e.message); }
   };
   const agendarRec = async (a) => {
@@ -31991,6 +32032,44 @@ function TelaRecuperacao({ perfil, aoAbrir, aoConversar }) {
   );
 }
 
+/* A ESPERA DEPOIS DE FICAR LIVRE (0164, 23/11/2026, o Derek): quem encerra um atendimento ou volta para a fila
+ * com "Estou livre" só é a vez depois destes minutos — assim ninguém deixa o atendimento aberto e se libera bem na
+ * hora em que chega o cliente que quer. O gerente escolhe os minutos; zero desliga. A regra mora em regras/fila.js. */
+function EsperaDaFila({ d, gerente, aoMudar }) {
+  const cfg = d.transbordo_cfg || {};
+  const atual = cfg.fila_espera_livre_min == null ? 10 : Number(cfg.fila_espera_livre_min);
+  const [editando, setEditando] = useState(false);
+  const [min, setMin] = useState("");
+  const [indo, setIndo] = useState(false);
+  const [erro, setErro] = useState("");
+  if (!gerente) return null;
+  const salvar = async () => {
+    setIndo(true); setErro("");
+    try { await mexerNaVez("espera-config", { minutos: Number(min) }); setEditando(false); aoMudar && aoMudar(); }
+    catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+  return (
+    <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-xl border px-4 py-2.5 text-[13px]" style={{ borderColor: C.line, background: C.paper }}>
+      <b style={{ color: C.roxo }}>Espera depois de ficar livre</b>
+      {!editando ? (
+        <>
+          <span>{atual > 0 ? `${atual} min — quem encerra um atendimento ou marca "Estou livre" só é a vez depois disso` : "desligada — quem fica livre já pode ser a vez"}</span>
+          <button onClick={() => { setMin(String(atual)); setErro(""); setEditando(true); }} className="font-semibold underline" style={{ color: C.roxo }}>mudar</button>
+        </>
+      ) : (
+        <>
+          <input className="w-16 rounded border px-2 py-1" style={{ borderColor: C.line }} inputMode="numeric" value={min} onChange={(e) => setMin(e.target.value.replace(/\D/g, ""))} />
+          <span style={{ color: C.mute }}>minutos (0 desliga, até 60)</span>
+          <BotaoPrimario onClick={salvar} disabled={indo || min === ""}>{indo ? "Gravando…" : "Salvar"}</BotaoPrimario>
+          <button onClick={() => setEditando(false)} className="underline" style={{ color: C.mute }}>cancelar</button>
+        </>
+      )}
+      {erro && <span className="w-full text-[12.5px]" style={{ color: C.laranja }}>{erro}</span>}
+    </div>
+  );
+}
+
 /* O TRANSBORDO (0144, o Derek, 10/11/2026): em certas épocas do mês, quem
  * está com conversão abaixo do corte só atende quando todos os outros estão
  * atendendo. Só o gerente põe e tira — à mão, na linha de cada um, ou pelo
@@ -32163,6 +32242,7 @@ function TelaFilaDaVez({ perfil, aoAbrir }) {
         </div>
       </div>
 
+      <EsperaDaFila d={d} gerente={gerente} aoMudar={carregar} />
       <TransbordoDaFila d={d} gerente={gerente} aoMudar={carregar} todos={todos} />
 
       <div className="overflow-x-auto rounded-xl border" style={{ borderColor: C.line, background: C.paper }}>
@@ -32201,6 +32281,9 @@ function TelaFilaDaVez({ perfil, aoAbrir }) {
                     {(p.perfil_id === d.eu || gerente) && <BotaoFinalizar a={a} aoFinalizar={() => carregar()} />}
                   </span>
                 ))}
+                {p.espera_ate && <span style={{ color: C.laranja, fontWeight: 600 }}>
+                  acabou de ficar livre · entra na vez às {horaSP(p.espera_ate)}
+                </span>}
                 {p.deve_vez > 0 && <span style={{ color: C.roxo, fontWeight: 600 }}>
                   deve {p.deve_vez > 1 ? `${p.deve_vez} vezes` : "a vez"}{p.vez_devida_em ? ` · volta às ${horaSP(p.vez_devida_em)}` : " · volta 10 min depois de encerrar"}
                 </span>}
@@ -32960,7 +33043,7 @@ function Shell({ perfil, tela, setTela, children, cheia }) {
       {/* ---- barra inferior (celular) ----
           Três destinos de todo dia e um "mais". O polegar alcança;
           a sanfona no meio da lista, não. */}
-      <nav className="fixed inset-x-0 bottom-0 z-30 flex lg:hidden"
+      <nav data-barra-inferior="1" className="fixed inset-x-0 bottom-0 z-30 flex lg:hidden"
         style={{ background: C.paper, borderTop: `1px solid ${C.line}`, paddingBottom: "env(safe-area-inset-bottom)" }}>
         {principais.map((d) => itemInferior(d, () => ir(d.id), tela === d.id))}
         <button onClick={() => setMais(!mais)} className="flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px]"

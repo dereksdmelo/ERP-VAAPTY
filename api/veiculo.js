@@ -555,8 +555,10 @@ async function estoque(req, res, tok) {
      * todo o cadastro do carro… basta o cadastro do lojista, pois é uma simples
      * indicação"). Sem veículo, ela pende do atendimento, e o carro vai em texto. */
     if (!RX_ID.test(veiculoId) && c.natureza === "indicacao" && RX_ID.test(String(c.atendimento_id || ""))) {
-      const ja = await supa(`${base("estoque")}?select=id&atendimento_id=eq.${c.atendimento_id}&natureza=eq.indicacao&limit=1`, { headers: cab });
-      if ((ja || []).length) return res.status(409).json({ erro: "A indicação deste atendimento já foi registrada.", id: ja[0].id });
+      const ja = await supa(`${base("estoque")}?select=id,situacao&atendimento_id=eq.${c.atendimento_id}&natureza=eq.indicacao&limit=1`, { headers: cab });
+      // Indicação cuja venda foi desfeita (sem lojista e sem comissão) se lança de novo NA MESMA linha (23/11/2026).
+      if ((ja || []).length && ja[0].situacao === "vendido") return res.status(409).json({ erro: "A indicação deste atendimento já foi registrada.", id: ja[0].id });
+      if ((ja || []).length) c.__relancar = ja[0].id;
       veiculoId = null;
     } else if (!RX_ID.test(veiculoId)) return res.status(400).json({ erro: "veiculo_id inválido." });
 
@@ -571,11 +573,15 @@ async function estoque(req, res, tok) {
      * Se a linha é de compra, ainda no pátio e o cliente não foi pago, ela
      * VIRA a indicação: os custos só previstos saem, os títulos da compra em
      * aberto são cancelados pela sincronização. */
-    let converter = null;
-    if ((jaTem || []).length) {
+    let converter = c.__relancar || null;
+    if (!converter && (jaTem || []).length) {
       const j = jaTem[0];
       const pagoC = ((await supa(`${base("fin_lancamento")}?select=id&estoque_id=eq.${j.id}&item_contrato=like.compra:*&situacao=eq.efetivado&limit=1`, { headers: cab }).catch(() => [])) || []).length > 0;
       if (c.natureza === "indicacao" && j.natureza === "compra" && j.situacao === "em_estoque" && !pagoC) converter = j.id;
+      /* A INDICAÇÃO DESFEITA SE LANÇA DE NOVO (23/11/2026, a Amanda pelo suporte: tirou da rentabilidade por uma
+       * pendência — "a venda caiu — desfazer" — e o atendimento ficou com "Indicação registrada" sem lojista nem
+       * valor, sem como lançar a comissão de novo). Indicação que não está vendida volta a ser vendida na mesma linha. */
+      else if (c.natureza === "indicacao" && j.natureza === "indicacao" && j.situacao !== "vendido") converter = j.id;
       else if (c.natureza === "indicacao" && pagoC) return res.status(409).json({ erro: "Este carro já foi pago ao cliente — não dá para virar indicação.", id: j.id });
       else return res.status(409).json({ erro: "Este carro já está no estoque.", id: j.id });
     }

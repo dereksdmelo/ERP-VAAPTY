@@ -21,6 +21,15 @@
  *    outros que estão na fila estão atendendo. Enquanto houver alguém
  *    livre fora do transbordo, ele é passado sem perder a vez e sem
  *    ficar devendo — não é falta dele, é a regra da época.
+ *  - QUEM ACABOU DE FICAR LIVRE ESPERA (23/11/2026, o Derek: "quando alguém
+ *    marca que está livre, tem que passar pelo menos 10 minutos pra ser a vez
+ *    dele" — para ninguém deixar o atendimento aberto ou ficar fora da fila e
+ *    se liberar bem na hora em que chega o cliente que quer). Durante a espera
+ *    (`espera_livre_ms`, do gerente em `config_loja`) ele não pega cliente se
+ *    houver outro livre: quem saiu de um atendimento é pulado como ocupado
+ *    (fica devendo a vez, como antes); quem voltou de fora da fila ("Estou
+ *    livre") é pulado como ausente — a volta que ele estava fora não vira
+ *    crédito. Com todos ocupados, a roda segue e ele pega.
  *
  * O estado não é gravado: é a soma dos eventos do dia (`fila_evento`),
  * montada por `estadoDosEventos`. Quem lê isto: `api/atendimento.js`
@@ -93,14 +102,16 @@ function escolher(est, excluir) {
   const C = (est.circulo || []).filter((id) => est.pessoas[id]);
   if (!C.length) return null;
   const P = (id) => est.pessoas[id];
+  const espera = Number(est.espera_livre_ms) || 0;
+  const esperando = (id) => espera > 0 && !P(id).atendendo && P(id).liberou > 0 && est.agora - P(id).liberou < espera;
   const tb = est.transbordo || [];
   // Alguém fora do transbordo está livre? Então o transbordo espera.
-  const livreNormal = C.some((id) => fora.indexOf(id) < 0 && tb.indexOf(id) < 0 && P(id).presente && !P(id).atendendo);
+  const livreNormal = C.some((id) => fora.indexOf(id) < 0 && tb.indexOf(id) < 0 && P(id).presente && !P(id).atendendo && !esperando(id));
   const segura = livreNormal ? tb : [];
   const pode = (id) => fora.indexOf(id) < 0 && segura.indexOf(id) < 0;
   const presentes = C.filter((id) => pode(id) && P(id).presente);
   if (!presentes.length) return null;
-  const livres = presentes.filter((id) => !P(id).atendendo);
+  const livres = presentes.filter((id) => !P(id).atendendo && !esperando(id));
   const ponteiro = C.indexOf(est.ponteiro) >= 0 ? est.ponteiro : C[0];
 
   // 0. A vez que o gerente pôs: é dela, enquanto ela estiver na fila.
@@ -112,7 +123,7 @@ function escolher(est, excluir) {
   // 1. A vez devida: livre há pelo menos dez minutos, quem ficou devendo
   // primeiro. Não mexe na roda — a vez normal dele continua lá.
   const devidos = livres.filter((id) => (est.creditos[id] || []).length &&
-    est.agora - (P(id).fim_ultimo || 0) >= ESPERA_CREDITO_MS)
+    est.agora - (P(id).fim_ultimo || 0) >= Math.max(ESPERA_CREDITO_MS, espera))
     .sort((a, b) => est.creditos[a][0] - est.creditos[b][0]);
   if (devidos.length) return { quem: devidos[0], via: "credito", pulos: [], prox: ponteiro };
 
@@ -125,6 +136,10 @@ function escolher(est, excluir) {
     const p = P(id);
     if (!p.presente) { pulos.push({ perfil_id: id, motivo: est.aberto ? "ausente" : "fora_do_horario" }); continue; }
     if (p.atendendo && livres.length) { pulos.push({ perfil_id: id, motivo: "ocupado" }); continue; }
+    if (esperando(id) && livres.length) {
+      pulos.push({ perfil_id: id, motivo: p.liberou_por === "livre" ? (est.aberto ? "ausente" : "fora_do_horario") : "ocupado" });
+      continue;
+    }
     return { quem: id, via: livres.length ? "roda" : "todos_ocupados", pulos, prox: C[(i + k + 1) % C.length] };
   }
   return null;
