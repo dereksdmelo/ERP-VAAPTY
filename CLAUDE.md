@@ -7021,7 +7021,16 @@ contam dentro da franquia. O DUT vem do formulário público, que não tem login
 (`franquia_do_slug`); sem o `f`, Joinville — os links que já circulam —, e slug que não existe é recusado, nunca cai
 em Joinville. A consulta do protocolo procura dentro da franquia do link: DUT-2026-0001 existe em cada loja. **Os
 links que o ERP monta para o lojista (boas-vindas, Transferências) ainda não levam o `f`** — falta quando houver a
-segunda franquia. **Ainda falta:** os "uma linha só" (`config_loja`, `painel_tv`, `empresa`).
+segunda franquia.
+
+**Configuração da loja, tela da sala e cadastro da empresa: uma linha por franquia (0175, 23/11/2026).** As três eram
+"uma linha só" (`id = 1` com check). Agora a chave é `franquia_id` (único; o `id` ganhou sequência e Joinville segue 1):
+o servidor lê a linha que a RLS mostra (`limit=1`, nunca mais `id=eq.1`) e grava com `on_conflict=franquia_id`, sem
+`id` no corpo; PATCH vai com `id=gt.0`, e a RLS limita à franquia do login. Sem login, cada função lê a da franquia do
+registro: `ia_contexto` e `wa_lead_avanca` a da conversa, `tv_painel` e `tv_agenda` a do token do link, e
+`lojista_aviso_proximo` a do carro (o interruptor e o número do adm de cada franquia). Franquia nova nasce com a
+`config_loja` de fábrica (gatilho `franquia_nasce_config`); `empresa` e `painel_tv` nascem quando o gerente salva.
+**Quem escrever leitura nova dessas tabelas não usa `id=eq.1`** — com duas franquias, isso lê a de Joinville.
 
 **Lojista do Shinkai terá conta neste Auth**:
 nenhuma regra pode tratar "está logado" como "é da equipe" — `e_equipe()` (perfil ativo) é a régua.

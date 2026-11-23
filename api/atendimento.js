@@ -447,7 +447,7 @@ function textoDaChegada(at) {
 }
 async function avisoDeChegada(req, tok, at) {
   try {
-    const cfg = ((await banco(`${REST("config_loja")}?id=eq.1&select=aviso_canal,aviso_grupo`, { headers: cabecalhos(tok) })) || [])[0];
+    const cfg = ((await banco(`${REST("config_loja")}?limit=1&select=aviso_canal,aviso_grupo`, { headers: cabecalhos(tok) })) || [])[0];
     if (!cfg || !cfg.aviso_canal || !cfg.aviso_grupo) return { configurado: false };
     const segredo = process.env.PONTE_SEGREDO || "";
     const base = process.env.PONTE_URL || "";
@@ -568,7 +568,7 @@ async function flavia(req, res, tok) {
     const agora = FLAVIA.paredeDe(ponto.quando);
 
     const [cfgL, ocup, ex] = await Promise.all([
-      banco(`${REST("config_loja")}?id=eq.1&select=*`, { headers: cabecalhos(tok) }).catch(() => []),
+      banco(`${REST("config_loja")}?limit=1&select=*`, { headers: cabecalhos(tok) }).catch(() => []),
       // Os agendados de HOJE. Num replay de duas semanas atrás isso é
       // aproximado — a agenda daquele dia já mudou —, e só pesa no
       // horário que já tinha gente demais.
@@ -1339,7 +1339,7 @@ async function contaDoMes(tok, hoje) {
     banco(`${REST("desempenho")}?select=*&competencia=in.(${comp},${ant})`, cab),
     banco(`${REST("atendimento")}?select=negociador_id,negociador_nome,status,data` +
           `&data=gte.${ant}&data=lte.${hoje}&limit=5000`, cab),
-    banco(`${REST("config_loja")}?id=eq.1&select=*`, cab).catch(() => []),
+    banco(`${REST("config_loja")}?limit=1&select=*`, cab).catch(() => []),
   ]);
   const dados = { comp, ant, logins: logins || [], metas: metas || [], desemp: desemp || [], doMes: doMes || [], cfg: (cfg || [])[0] || null };
   MES_CACHE = { hoje, em: Date.now(), dados };
@@ -1372,8 +1372,8 @@ async function estadoDaFila(tok, ignorar) {
     banco(`${REST("fila_dia")}?select=*&dia=eq.${hoje}`, cab).catch(() => []),
     banco(`${REST("fila_transbordo")}?select=*`, cab).catch(() => []),
     // O gatilho do transbordo é lido sempre (a conta do mês fica 5 min guardada).
-    banco(`${REST("config_loja")}?id=eq.1&select=transbordo_auto,transbordo_abaixo,transbordo_minimo,transbordo_dia_de,transbordo_dia_ate,transbordo_base,fila_espera_livre_min`, cab)
-      .catch(() => banco(`${REST("config_loja")}?id=eq.1&select=transbordo_auto,transbordo_abaixo,transbordo_minimo,transbordo_dia_de,transbordo_dia_ate,transbordo_base`, cab))
+    banco(`${REST("config_loja")}?limit=1&select=transbordo_auto,transbordo_abaixo,transbordo_minimo,transbordo_dia_de,transbordo_dia_ate,transbordo_base,fila_espera_livre_min`, cab)
+      .catch(() => banco(`${REST("config_loja")}?limit=1&select=transbordo_auto,transbordo_abaixo,transbordo_minimo,transbordo_dia_de,transbordo_dia_ate,transbordo_base`, cab))
       .catch(() => []),
   ]);
   const tbCfg = (cfgTb || [])[0] || null;
@@ -1741,7 +1741,7 @@ async function vez(req, res, tok) {
     if (acao === "espera-config") {
       const m = Number(c.minutos);
       if (!(Number.isInteger(m) && m >= 0 && m <= 60)) return res.status(400).json({ erro: "A espera vai de 0 a 60 minutos." });
-      const r = await banco(`${REST("config_loja")}?id=eq.1`, { method: "PATCH", headers: json(tok, { Prefer: "return=representation" }),
+      const r = await banco(`${REST("config_loja")}?id=gt.0`, { method: "PATCH", headers: json(tok, { Prefer: "return=representation" }),
         body: JSON.stringify({ fila_espera_livre_min: m }) });
       if (!Array.isArray(r) || !r.length) return res.status(403).json({ erro: "O banco não gravou a configuração." });
       return res.status(200).json({ ok: true });
@@ -1765,7 +1765,7 @@ async function vez(req, res, tok) {
     if (abaixo == null || !(abaixo > 0 && abaixo < 1)) return res.status(400).json({ erro: "A conversão de corte vai de 1% a 99%." });
     if (minimo != null && !(minimo >= 0 && minimo <= 500)) return res.status(400).json({ erro: "Mínimo de atendimentos inválido." });
     for (const d of [de, ate]) if (d != null && !(Number.isInteger(d) && d >= 1 && d <= 31)) return res.status(400).json({ erro: "O dia do mês vai de 1 a 31." });
-    const r = await banco(`${REST("config_loja")}?id=eq.1`, {
+    const r = await banco(`${REST("config_loja")}?id=gt.0`, {
       method: "PATCH", headers: json(tok, { Prefer: "return=representation" }),
       body: JSON.stringify({ transbordo_base: c.base === "agora" ? "agora" : "ontem", transbordo_auto: !!c.ligado, transbordo_abaixo: abaixo, transbordo_minimo: minimo == null ? 0 : minimo, transbordo_dia_de: de, transbordo_dia_ate: ate }),
     });

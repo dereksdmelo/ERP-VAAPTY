@@ -574,7 +574,7 @@ async function telaDaSala(req, res, tok) {
   const cab = { apikey: ANON, Authorization: tok };
   const cabJson = { ...cab, "Content-Type": "application/json", Prefer: "return=representation" };
   if (req.method === "GET") {
-    const r = await fetch(`${base}?select=token,config,atualizado_em&id=eq.1`, { headers: cab });
+    const r = await fetch(`${base}?select=token,config,atualizado_em&limit=1`, { headers: cab });
     const l = await r.json().catch(() => []);
     return res.status(200).json({ tela: (Array.isArray(l) && l[0]) || null });
   }
@@ -582,17 +582,17 @@ async function telaDaSala(req, res, tok) {
   if (req.method === "POST" && String(req.query.acao || "") === "gerar") {
     const bytes = new Uint8Array(32); globalThis.crypto.getRandomValues(bytes);
     const token = Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
-    const atual = await fetch(`${base}?select=config&id=eq.1`, { headers: cab }).then((r) => r.json()).catch(() => []);
+    const atual = await fetch(`${base}?select=config&limit=1`, { headers: cab }).then((r) => r.json()).catch(() => []);
     const config = (Array.isArray(atual) && atual[0] && atual[0].config) || limparConfigTv({ podio: true, valores: true, comemorar: true, som: true, segundos: 8, tema: "escuro", ordem: "valor" });
-    const r = await fetch(`${base}?on_conflict=id`, { method: "POST", headers: { ...cabJson, Prefer: "resolution=merge-duplicates,return=representation" },
-      body: JSON.stringify({ id: 1, token, config, atualizado_em: new Date().toISOString() }) });
+    const r = await fetch(`${base}?on_conflict=franquia_id`, { method: "POST", headers: { ...cabJson, Prefer: "resolution=merge-duplicates,return=representation" },
+      body: JSON.stringify({ token, config, atualizado_em: new Date().toISOString() }) });
     const l = await r.json().catch(() => []);
     if (!r.ok || !(Array.isArray(l) && l[0])) return res.status(403).json({ erro: "Só o gerente gera o link da tela." });
     return res.status(200).json({ tela: { token: l[0].token, config: l[0].config } });
   }
   if (req.method === "PUT") {
     const config = limparConfigTv(c.config || {});
-    const r = await fetch(`${base}?id=eq.1`, { method: "PATCH", headers: cabJson, body: JSON.stringify({ config, atualizado_em: new Date().toISOString() }) });
+    const r = await fetch(`${base}?id=gt.0`, { method: "PATCH", headers: cabJson, body: JSON.stringify({ config, atualizado_em: new Date().toISOString() }) });
     const l = await r.json().catch(() => []);
     if (!r.ok || !(Array.isArray(l) && l[0])) return res.status(409).json({ erro: "Gere o link da tela primeiro (só o gerente)." });
     return res.status(200).json({ tela: { token: l[0].token, config: l[0].config } });
@@ -788,7 +788,7 @@ async function empresa(req, res, tok) {
   const base = `${URL_BASE}/rest/v1/empresa`;
   const cab = { apikey: ANON, Authorization: tok };
   if (req.method === "GET") {
-    const r = await fetch(`${base}?select=*&id=eq.1`, { headers: cab });
+    const r = await fetch(`${base}?select=*&limit=1`, { headers: cab });
     if (!r.ok) return res.status(200).json({ empresa: null, padrao: true });
     const d = await r.json().catch(() => []);
     return res.status(200).json({ empresa: (Array.isArray(d) ? d[0] : d) || null });
@@ -796,7 +796,7 @@ async function empresa(req, res, tok) {
   if (req.method === "PUT") {
     const c = await lerCorpo(req);
     if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
-    const linha = { id: 1, atualizado_em: new Date().toISOString(), atualizado_por: donoDoToken(tok) };
+    const linha = { atualizado_em: new Date().toISOString(), atualizado_por: donoDoToken(tok) };
     CAMPOS_EMPRESA.forEach((k) => { if (k in c) linha[k] = texto(c[k]) ? String(c[k]).trim().slice(0, 300) : null; });
     if ("logo" in c) {
       const lg = String(c.logo || "");
@@ -810,7 +810,7 @@ async function empresa(req, res, tok) {
     if ("aliquota_iss" in linha) linha.aliquota_iss = linha.aliquota_iss ? Number(String(linha.aliquota_iss).replace(",", ".")) || null : null;
     // Nenhum dos dois pode ficar vazio: a coluna é not null.
     ["nfse_serie_restrita", "nfse_serie_producao"].forEach((k) => { if (k in linha && !linha[k]) delete linha[k]; });
-    const r = await fetch(`${base}?on_conflict=id`, {
+    const r = await fetch(`${base}?on_conflict=franquia_id`, {
       method: "POST", headers: { ...cab, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=representation" },
       body: JSON.stringify(linha),
     });
@@ -829,7 +829,7 @@ async function configLoja(req, res, tok) {
   const cab = { apikey: ANON, Authorization: tok };
 
   if (req.method === "GET") {
-    const r = await fetch(`${base}?select=*&id=eq.1`, { headers: cab });
+    const r = await fetch(`${base}?select=*&limit=1`, { headers: cab });
     if (!r.ok) return res.status(r.status === 401 ? 401 : 502).json({ erro: "Não consegui ler a configuração da loja." });
     const d = await r.json().catch(() => []);
     const linha = (Array.isArray(d) ? d[0] : d) || null;
@@ -843,7 +843,7 @@ async function configLoja(req, res, tok) {
     if (!nome || nome.length > 40) return res.status(400).json({ erro: "O nome da IA precisa ter de 1 a 40 letras." });
     const intervalo = Math.trunc(numero(c.intervalo_min) || 0);
     if (intervalo < 10 || intervalo > 120) return res.status(400).json({ erro: "O intervalo vai de 10 a 120 minutos." });
-    const linha = { id: 1, ia_nome: nome, intervalo_min: intervalo,
+    const linha = { ia_nome: nome, intervalo_min: intervalo,
       atualizado_em: new Date().toISOString(), atualizado_por: donoDoToken(tok) };
     const ROT = { semana: "Segunda a sexta", sabado: "Sábado", domingo: "Domingo" };
     for (const g of GRUPOS_DIA) {
@@ -855,7 +855,7 @@ async function configLoja(req, res, tok) {
       if (preenchidos && v[1] > v[2]) return res.status(400).json({ erro: `${ROT[g]}: o primeiro horário vem depois do último.` });
       linha[`${g}_abre`] = v[0]; linha[`${g}_primeiro`] = v[1]; linha[`${g}_ultimo`] = v[2];
     }
-    const r = await fetch(`${base}?on_conflict=id`, {
+    const r = await fetch(`${base}?on_conflict=franquia_id`, {
       method: "POST",
       headers: { ...cab, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=representation" },
       body: JSON.stringify(linha),
@@ -890,7 +890,7 @@ async function configLoja(req, res, tok) {
       lista.push({ ...(dia ? { dia } : { regra }), primeiro, ultimo, motivo: (texto(h.motivo) || "Horário estendido").slice(0, 80) });
     }
     lista.sort((a, b) => String(a.dia || "0").localeCompare(String(b.dia || "0")));
-    const r = await fetch(`${base}?id=eq.1`, {
+    const r = await fetch(`${base}?id=gt.0`, {
       method: "PATCH", headers: { ...cab, "Content-Type": "application/json", Prefer: "return=representation" },
       body: JSON.stringify({ horarios_especiais: lista, atualizado_em: new Date().toISOString(), atualizado_por: donoDoToken(tok) }),
     });
@@ -916,7 +916,7 @@ async function configLoja(req, res, tok) {
       lista.push({ dia, motivo: (texto(b.motivo) || "Feriado").slice(0, 80), ...(das ? { das, ate } : {}) });
     }
     lista.sort((a, b) => a.dia.localeCompare(b.dia));
-    const r = await fetch(`${base}?id=eq.1`, {
+    const r = await fetch(`${base}?id=gt.0`, {
       method: "PATCH", headers: { ...cab, "Content-Type": "application/json", Prefer: "return=representation" },
       body: JSON.stringify({ bloqueios: lista, atualizado_em: new Date().toISOString(), atualizado_por: donoDoToken(tok) }),
     });
@@ -937,7 +937,7 @@ async function configLoja(req, res, tok) {
     if (!!canal !== !!grupo) return res.status(400).json({ erro: "Escolha o número e o grupo, ou desligue o aviso." });
     const linha = { aviso_canal: canal, aviso_grupo: grupo, aviso_grupo_nome: grupo ? (texto(c.aviso_grupo_nome) || "").slice(0, 120) || null : null,
       atualizado_em: new Date().toISOString(), atualizado_por: donoDoToken(tok) };
-    const r = await fetch(`${base}?id=eq.1`, {
+    const r = await fetch(`${base}?id=gt.0`, {
       method: "PATCH",
       headers: { ...cab, "Content-Type": "application/json", Prefer: "return=representation" },
       body: JSON.stringify(linha),

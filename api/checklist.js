@@ -873,7 +873,7 @@ async function transferencia(req, res, tok) {
       fetch(`${RE}?select=id,atendimento_id,vendido_em,entrou_em,semana_venda,transferido_em,transferido_obs,comunicado_em,comunicado_obs,natureza,prazo_transferencia_dias,` +
         `veiculo(placa,marca_modelo),comprador(id,nome,telefone,adm_nome,adm_telefone)&situacao=eq.vendido&natureza=eq.compra&order=vendido_em.desc.nullslast,entrou_em.desc&limit=1000`,
         { headers: cabecalhos(tok) }).then((r) => r.json()).catch(() => []),
-      fetch(`${URL_BASE}/rest/v1/config_loja?select=lojista_lembretes,lojista_boas_vindas,lojista_crlv&id=eq.1`, { headers: cabecalhos(tok) })
+      fetch(`${URL_BASE}/rest/v1/config_loja?select=lojista_lembretes,lojista_boas_vindas,lojista_crlv&limit=1`, { headers: cabecalhos(tok) })
         .then((r) => r.json()).then((x) => (Array.isArray(x) && x[0]) || {}).catch(() => ({})),
     ]);
     const lista = Array.isArray(carros) ? carros : [];
@@ -922,7 +922,7 @@ async function transferencia(req, res, tok) {
     const mud = {};
     ["lojista_lembretes", "lojista_boas_vindas", "lojista_crlv"].forEach((k) => { if (typeof c[k] === "boolean") mud[k] = c[k]; });
     if (!Object.keys(mud).length) return res.status(400).json({ erro: "Nada para mudar." });
-    const r = await fetch(`${URL_BASE}/rest/v1/config_loja?id=eq.1`, { method: "PATCH", headers: json(tok, { Prefer: "return=representation" }), body: JSON.stringify(mud) });
+    const r = await fetch(`${URL_BASE}/rest/v1/config_loja?id=gt.0`, { method: "PATCH", headers: json(tok, { Prefer: "return=representation" }), body: JSON.stringify(mud) });
     const x = await r.json().catch(() => []);
     if (!Array.isArray(x) || !x[0]) return res.status(403).json({ erro: "A regra do banco recusou." });
     return res.status(200).json({ config: x[0] });
@@ -999,7 +999,7 @@ async function transferencia(req, res, tok) {
     const car = ((await fetch(`${RE}?select=id,atendimento_id,vendido_em,prazo_transferencia_dias,veiculo(placa,marca_modelo),comprador(nome,telefone,adm_nome,adm_telefone)&id=eq.${eid}`,
       { headers: cabecalhos(tok) }).then((r) => r.json()).catch(() => [])) || [])[0];
     if (!car) return res.status(404).json({ erro: "Carro não encontrado no estoque." });
-    const cfg = c.auto ? ((await fetch(`${URL_BASE}/rest/v1/config_loja?select=lojista_boas_vindas,lojista_crlv&id=eq.1`, { headers: cabecalhos(tok) })
+    const cfg = c.auto ? ((await fetch(`${URL_BASE}/rest/v1/config_loja?select=lojista_boas_vindas,lojista_crlv&limit=1`, { headers: cabecalhos(tok) })
       .then((r) => r.json()).catch(() => [])) || [])[0] || {} : { lojista_boas_vindas: true, lojista_crlv: true };
     const jaFoi = c.auto ? ((await fetch(`${URL_BASE}/rest/v1/aviso_lojista?select=tipo&estoque_id=eq.${eid}&estado=eq.enviado`, { headers: cabecalhos(tok) })
       .then((r) => r.json()).catch(() => [])) || []).map((a) => a.tipo) : [];
@@ -1265,7 +1265,7 @@ module.exports = async function handler(req, res) {
  * `api/foto.js` ao anexar ou trocar o tipo de um anexo. */
 async function crlvPendente(req, tok, atendimentoId) {
   if (!RX_UUID.test(String(atendimentoId || ""))) return null;
-  const cfg = ((await fetch(`${URL_BASE}/rest/v1/config_loja?select=lojista_crlv&id=eq.1`, { headers: cabecalhos(tok) })
+  const cfg = ((await fetch(`${URL_BASE}/rest/v1/config_loja?select=lojista_crlv&limit=1`, { headers: cabecalhos(tok) })
     .then((r) => r.json()).catch(() => [])) || [])[0] || {};
   if (!cfg.lojista_crlv) return { pulado: "CRLV junto desligado" };
   const car = ((await fetch(`${URL_BASE}/rest/v1/estoque?select=id,atendimento_id,vendido_em,prazo_transferencia_dias,natureza,` +
