@@ -6975,5 +6975,17 @@ ler o login não custa nada; os 1,7 s a mais vêm de a regra existir (o plano da
 achar esse custo (EXPLAIN das consultas da `fin_pendencias` com e sem a regra; suspeita: o índice `<t>_franquia_idx`,
 que tem um valor só, atraindo o planejador) e medir as outras telas pesadas (DRE, Rentabilidade, funil). O ensaio
 precisa de `set local lock_timeout`/`statement_timeout` curtos: criar política trava a tabela, e o primeiro ensaio
-sem eles deu impasse de travas com o ERP em uso. **Lojista do Shinkai terá conta neste Auth**:
+sem eles deu impasse de travas com o ERP em uso.
+
+**A separação está ligada desde 23/11/2026 (0169), e a causa era o índice.** O ensaio seguinte isolou: regra nas 7
+tabelas do financeiro, 2.486 ms; a mesma regra sem os `<t>_franquia_idx`, 603 ms (sem regra, 592). Com um valor só na
+coluna, o índice não separa nada e a regra o oferecia ao planejador no lugar dos bons. A 0169 apaga os 82 índices e
+põe `franquia_isola` (restritiva, `authenticated`, franquia do login com o `perfil` de reserva) em todas as tabelas.
+Medido antes/depois, em ms, com a regra em tudo: Pendências 578→607, DRE 45→46, atendimentos 27→26, estoque 118→72,
+leads 87→73, mensagens de 30 dias 1.485→1.500. Conferido no ar: 82 políticas, 0 índices, o gerente vê os 822
+atendimentos, um login de outra franquia vê 0, e as telas abrem. **Quando houver a segunda franquia, o índice volta
+COMPOSTO onde a consulta pedir** — nunca a coluna sozinha. **À parte, e anterior à regra:** `fin_pendencias` leva
+0,6 s no editor e ~2,5 s pela API (`/rest/v1/rpc`), com ou sem a regra (medido tirando-a das 7 tabelas por um
+minuto); e as mensagens de 30 dias levam 1,5 s. São lentidões que já existiam. **Ainda falta:** as funções security
+definer filtrarem a franquia, os índices únicos e as numerações por franquia, e os "uma linha só". **Lojista do Shinkai terá conta neste Auth**:
 nenhuma regra pode tratar "está logado" como "é da equipe" — `e_equipe()` (perfil ativo) é a régua.
