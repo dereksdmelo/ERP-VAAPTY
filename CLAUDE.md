@@ -7025,3 +7025,37 @@ segunda franquia. **Ainda falta:** os "uma linha só" (`config_loja`, `painel_tv
 
 **Lojista do Shinkai terá conta neste Auth**:
 nenhuma regra pode tratar "está logado" como "é da equipe" — `e_equipe()` (perfil ativo) é a régua.
+
+### 80. RH: captar, organizar e reter talentos (0174)
+
+O Derek, em 23/11/2026: *"um módulo para RH. O objetivo é captar os talentos, currículos, responder teste DISC,
+procurar pessoas interessadas em trabalhar na Vaapty Joinville, organizar e reter esses talentos."* Área própria
+**RH** (gerente e quem tem a marca **RH** em Equipe, `perfil.rh`, `e_rh()`): Candidatos (quadro por etapa, arrastar),
+Vagas, Divulgar e buscar, Banco de talentos e Retenção (`TelaRH aba=`).
+
+- **A pessoa se candidata sozinha em `trabalhe.html`** (estática, sem login, como o DUT): vagas abertas e publicadas,
+  formulário com consentimento LGPD, currículo (PDF, Word ou foto — o bucket passou a aceitar .doc/.docx) e o teste
+  DISC em seguida. Tudo por funções estreitas da 0174 (`rh_candidatar`, `rh_disc_gravar`, `rh_anexar`, `rh_token`) e
+  token em hash de duas horas; o arquivo sobe pelo `api/foto.js?recurso=rh-curriculo` (decisão 9). O mesmo telefone
+  (DDD + oito últimos, `rh_chave_fone`) ou e-mail não vira outra pessoa: atualiza e volta para "novo".
+  `?vaga=`, `?o=<canal>`, `?ind=<nome>` e `?f=<loja>` no link; `#t=<token>` abre só o teste (link de 7 dias que o RH
+  manda pelo WhatsApp).
+- **O DISC é nosso** (`regras/disc.js`): 24 linhas de quatro palavras, escolha forçada (mais/menos), nota 0–100 por
+  fator, perfil = o maior (+ o segundo se estiver a até 8 pontos e acima de 55). O modelo de Marston é público; os
+  questionários comerciais não — **não copie nenhum**. As respostas ficam guardadas pelo índice da linha: acrescente
+  linha no fim, nunca troque a ordem. É indicador de estilo, não laudo — a tela diz isso. A vaga pode dizer o perfil
+  que costuma dar certo (`perfil_disc`) e o cartão mostra a aderência.
+- **Procurar gente** é link pronto, não raspagem (decisão 8): link por canal (a origem diz onde vale divulgar), link
+  de indicação com o nome de quem indica, busca ativa no LinkedIn/Google/Facebook/Instagram/Indeed, e a tabela "de
+  onde vem quem dá certo". O achado na busca entra por "+ Cadastrar pessoa" (origem busca ativa).
+- **"Não seguiu" e "desistiu" pedem o motivo** (o servidor recusa sem). Apagar a pessoa (LGPD) leva os arquivos do
+  bucket antes da linha (`DELETE /api/foto?recurso=rh-anexo&candidato_id=`).
+- **A retenção lê a ficha do colaborador (0079) pela `rh_equipe()`** — só nome, função, telefone e datas; CPF e conta
+  continuam do financeiro. Por pessoa: tempo de casa, experiência de 45/90 dias, marcos de 3/6/12 meses, conversas
+  1:1, pulso (humor), eNPS, risco de saída e próxima conversa (`rh_acompanhamento`), com alertas (30 dias sem
+  conversa, risco alto, humor baixo). O DISC de quem já está na casa vira uma linha do RH ligada à ficha (etapa
+  contratado, origem colaborador). No alto: eNPS da equipe, tempo médio de casa e saídas em 12 meses.
+- **O servidor mora em `rh/servidor.js`**, chamado pelo `api/perfil.js` (`?recurso=rh` e `?recurso=rh-publico`):
+  dentro de `api/` seria a 13ª função.
+- **O que não existe ainda:** contratar não cria o login nem a ficha (a tela manda para Equipe → "+ Adicionar
+  pessoa"); entrevista não vai para agenda nenhuma; o link do Trabalhe conosco não leva o `?f=` da franquia.

@@ -1247,6 +1247,166 @@ async function apagarDoc(caminho) {
   } catch (e) { /* já não existe é sucesso */ }
 }
 
+/* ===================== O CURRÍCULO (0174, decisão 80) =====================
+ *
+ * Dois caminhos, a mesma régua do DUT:
+ *  - a página pública (trabalhe.html) sobe com o token que a candidatura devolveu — `rh_token()` diz de quem é, e
+ *    `rh_anexar()` grava a linha; sem token válido nada sobe, e o arquivo que sobrou sai do bucket;
+ *  - a tela do RH sobe, lista e apaga com o token de quem está logado: a linha é lida pela RLS (`e_rh()`) ANTES de a
+ *    chave tocar o Storage (decisão 9).
+ * Currículo chega em Word muitas vezes, então aqui vale também .doc e .docx (o bucket passou a aceitar na 0174).
+ */
+const TIPOS_CV = {
+  ...TIPOS_DOC,
+  "application/msword": "doc",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+};
+const hashRh = (t) => require("crypto").createHash("sha256").update(String(t)).digest("hex");
+
+function bytesDoCorpo(c) {
+  let cru = String((c && (c.arquivo_base64 || c.dados)) || "").trim();
+  if (cru.slice(0, 5) === "data:") { const v = cru.indexOf(","); cru = v < 0 ? "" : cru.slice(v + 1); }
+  cru = cru.replace(/\s/g, "");
+  if (!cru || !/^[A-Za-z0-9+/]+={0,2}$/.test(cru)) return null;
+  const buf = Buffer.from(cru, "base64");
+  return buf.length ? buf : null;
+}
+async function lerJson(req) {
+  let c = req.body;
+  if (c && typeof Buffer !== "undefined" && Buffer.isBuffer(c)) c = c.toString("utf8");
+  if (typeof c === "string") { try { c = JSON.parse(c); } catch (e) { c = null; } }
+  return c && typeof c === "object" ? c : null;
+}
+async function rpcAnonFoto(nome, args) {
+  const r = await fetch(`${URL_BASE}/rest/v1/rpc/${nome}`, {
+    method: "POST",
+    headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, "Content-Type": "application/json" },
+    body: JSON.stringify(args),
+  });
+  return r.ok ? r.json().catch(() => null) : null;
+}
+
+async function rhCurriculoPublico(req, res) {
+  if (req.method !== "POST") { res.setHeader("Allow", "POST"); return res.status(405).json({ erro: "método" }); }
+  const token = String(req.query.token || "");
+  if (token.length < 20) return res.status(400).json({ erro: "Envio inválido." });
+  const info = await rpcAnonFoto("rh_token", { p_token_hash: hashRh(token) });
+  const quem = Array.isArray(info) ? info[0] : info;
+  if (!quem || !RX_UUID.test(String(quem.id || ""))) return res.status(403).json({ erro: "Este envio não está mais válido." });
+
+  const c = await lerJson(req);
+  const tipo = String((c && c.tipo) || "").split(";")[0].trim();
+  const ext = TIPOS_CV[tipo];
+  if (!ext) return res.status(415).json({ erro: "Mande em PDF, Word (.doc/.docx) ou foto (JPG/PNG)." });
+  const buf = bytesDoCorpo(c);
+  if (!buf) return res.status(400).json({ erro: "Arquivo vazio ou inválido." });
+  if (buf.length > MAX_DOC) return res.status(413).json({ erro: "O arquivo passa de 10 MB." });
+
+  const caminho = `rh/${quem.id}/${Date.now()}-${sufixo()}.${ext}`;
+  try {
+    await arquivos(`${STORAGE()}/object/${BUCKET_DOC}/${paraURL(caminho)}`, {
+      method: "POST", headers: hArquivo({ "Content-Type": tipo, "Cache-Control": "3600", "x-upsert": "false" }), body: buf,
+    });
+  } catch (e) { return res.status(502).json({ erro: "Não consegui guardar o arquivo." }); }
+  const ok = await rpcAnonFoto("rh_anexar", {
+    p_token_hash: hashRh(token), p_caminho: caminho, p_nome: String((c && c.nome) || `curriculo.${ext}`).slice(0, 200),
+    p_tipo: tipo, p_bytes: buf.length,
+  });
+  if (ok !== true) { await apagarDoc(caminho); return res.status(403).json({ erro: "Este envio não está mais válido." }); }
+  return res.status(200).json({ ok: true });
+}
+
+async function rhAnexos(req, res, tok) {
+  const assinarDoc = async (caminhos) => {
+    if (!caminhos.length) return {};
+    const r = await arquivos(`${STORAGE()}/object/sign/${BUCKET_DOC}`, {
+      method: "POST", headers: jsonArquivo(), body: JSON.stringify({ expiresIn: VALIDADE, paths: caminhos }),
+    });
+    const mapa = {};
+    (Array.isArray(r) ? r : []).forEach((x) => {
+      const a = x && (x.signedURL || x.signedUrl);
+      if (a) mapa[x.path] = a.charAt(0) === "/" ? `${STORAGE()}${a}` : a;
+    });
+    return mapa;
+  };
+  const doCandidato = async (cid) => {
+    const r = await banco(`${REST("rh_candidato")}?select=id&id=eq.${cid}&limit=1`, { headers: cabecalhos(tok) });
+    return Array.isArray(r) && r[0];
+  };
+
+  if (req.method === "GET") {
+    const cid = String(req.query.candidato_id || "");
+    if (!RX_UUID.test(cid)) return res.status(400).json({ erro: "candidato inválido." });
+    const linhas = await banco(`${REST("rh_anexo")}?select=*&candidato_id=eq.${cid}&order=criado_em.desc`, { headers: cabecalhos(tok) });
+    const lista = Array.isArray(linhas) ? linhas : [];
+    const urls = await assinarDoc(lista.map((x) => x.caminho));
+    return res.status(200).json({ anexos: lista.map((x) => ({ ...x, url: urls[x.caminho] || null })) });
+  }
+
+  if (req.method === "POST") {
+    const c = await lerJson(req);
+    if (!c) return res.status(400).json({ erro: "Corpo vazio ou fora do formato JSON." });
+    const cid = String(c.candidato_id || "");
+    if (!RX_UUID.test(cid)) return res.status(400).json({ erro: "candidato inválido." });
+    const tipo = String(c.tipo || "").split(";")[0].trim();
+    const ext = TIPOS_CV[tipo];
+    if (!ext) return res.status(415).json({ erro: "PDF, Word ou imagem." });
+    const buf = bytesDoCorpo(c);
+    if (!buf) return res.status(400).json({ erro: "Arquivo vazio." });
+    if (buf.length > MAX_DOC) return res.status(413).json({ erro: "Arquivo maior que 10 MB." });
+    if (!(await doCandidato(cid))) return res.status(404).json({ erro: "Candidato não encontrado — ou você não é do RH." });
+    const caminho = `rh/${cid}/${Date.now()}-${sufixo()}.${ext}`;
+    await arquivos(`${STORAGE()}/object/${BUCKET_DOC}/${paraURL(caminho)}`, {
+      method: "POST", headers: hArquivo({ "Content-Type": tipo, "Cache-Control": "3600", "x-upsert": "false" }), body: buf,
+    });
+    let linha;
+    try {
+      const r = await banco(REST("rh_anexo"), {
+        method: "POST", headers: json(tok, { Prefer: "return=representation" }),
+        body: JSON.stringify({ candidato_id: cid, caminho, tipo, bytes: buf.length,
+          nome: String(c.nome || "").slice(0, 200) || null,
+          rotulo: String(c.rotulo || "Currículo").slice(0, 60), enviado_por: donoDoTokenFoto(tok) }),
+      });
+      linha = Array.isArray(r) ? r[0] : r;
+      if (!linha) throw new Error("O banco recusou o anexo.");
+    } catch (e) { await apagarDoc(caminho); throw e; }
+    const urls = await assinarDoc([caminho]);
+    return res.status(201).json({ ok: true, anexo: { ...linha, url: urls[caminho] || null } });
+  }
+
+  if (req.method === "DELETE") {
+    /* APAGAR A PESSOA (LGPD): quem pede para sair do banco de talentos sai com os arquivos. A ordem é a da decisão 6 —
+     * arquivo primeiro, linha depois — para repetir a chamada convergir. */
+    const cid = String(req.query.candidato_id || "");
+    if (RX_UUID.test(cid)) {
+      if (!(await doCandidato(cid))) return res.status(404).json({ erro: "Candidato não encontrado." });
+      const linhas = await banco(`${REST("rh_anexo")}?select=caminho&candidato_id=eq.${cid}`, { headers: cabecalhos(tok) }) || [];
+      for (const l of linhas) await apagarDoc(l.caminho);
+      await banco(`${REST("rh_candidato")}?id=eq.${cid}`, { method: "DELETE", headers: cabecalhos(tok) });
+      return res.status(200).json({ ok: true });
+    }
+    const id = String(req.query.id || "");
+    if (!RX_UUID.test(id)) return res.status(400).json({ erro: "id inválido." });
+    const achado = await banco(`${REST("rh_anexo")}?select=caminho&id=eq.${id}&limit=1`, { headers: cabecalhos(tok) });
+    const alvo = Array.isArray(achado) && achado[0] ? achado[0].caminho : null;
+    if (!alvo) return res.status(404).json({ erro: "Anexo não encontrado." });
+    await apagarDoc(alvo);
+    await banco(`${REST("rh_anexo")}?id=eq.${id}`, { method: "DELETE", headers: cabecalhos(tok) });
+    return res.status(200).json({ ok: true });
+  }
+
+  res.setHeader("Allow", "GET, POST, DELETE");
+  return res.status(405).json({ erro: "Use GET, POST ou DELETE." });
+}
+
+function donoDoTokenFoto(tok) {
+  try {
+    const meio = String(tok).replace(/^Bearer\s+/, "").split(".")[1];
+    const sub = JSON.parse(Buffer.from(meio.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8")).sub;
+    return RX_UUID.test(String(sub || "")) ? sub : null;
+  } catch (e) { return null; }
+}
+
 /* O ANEXO DO LOJISTA, QUE CHEGA SEM LOGIN.
  *
  * CNH, comprovante de residência e a ATPV já preenchida. O lojista não
@@ -1678,6 +1838,12 @@ module.exports = async function handler(req, res) {
     catch (e) { return res.status(200).json({ ok: true, chave: "", erro: "falhou" }); }
   }
 
+  // O currículo do "Trabalhe conosco" chega sem login (0174), pelo token da candidatura.
+  if (String(req.query.recurso || "") === "rh-curriculo") {
+    try { return await rhCurriculoPublico(req, res); }
+    catch (e) { return res.status(500).json({ erro: "Não consegui guardar o arquivo." }); }
+  }
+
   // O lojista chega sem login: antes da checagem de sessão.
   if (String(req.query.recurso || "") === "dut-anexo") {
     try { return await dutAnexo(req, res); }
@@ -1762,6 +1928,10 @@ module.exports = async function handler(req, res) {
   if (String(req.query.recurso || "") === "empresa-anexo") {
     try { return await anexosEmpresa(req, res, tok); }
     catch (e) { return res.status(e.status || 500).json({ erro: limpar(e.message) || "Falha no documento." }); }
+  }
+  if (String(req.query.recurso || "") === "rh-anexo") {
+    try { return await rhAnexos(req, res, tok); }
+    catch (e) { return res.status(e.status || 500).json({ erro: limpar(e.message) || "Falha no anexo." }); }
   }
   if (String(req.query.recurso || "") === "colaborador-anexo") {
     try { return await anexosColaborador(req, res, tok); }

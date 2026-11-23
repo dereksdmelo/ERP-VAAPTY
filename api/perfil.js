@@ -474,7 +474,7 @@ async function acessos(req, res, tok) {
   const cab = { apikey: ANON, Authorization: tok };
 
   if (req.method === "GET") {
-    const r = await fetch(`${base}?select=id,nome,email,papel,ativo,administrativo,financeiro,senha_provisoria,criado_em&order=ativo.asc,nome.asc`, { headers: cab });
+    const r = await fetch(`${base}?select=id,nome,email,papel,ativo,administrativo,financeiro,rh,senha_provisoria,criado_em&order=ativo.asc,nome.asc`, { headers: cab });
     if (!r.ok) return res.status(r.status === 401 ? 401 : 502).json({ erro: "Não consegui ler os acessos." });
     const d = await r.json().catch(() => []);
     return res.status(200).json({ acessos: Array.isArray(d) ? d : [] });
@@ -491,6 +491,7 @@ async function acessos(req, res, tok) {
     if (c.ativo !== undefined) mud.ativo = !!c.ativo;
     if (c.administrativo !== undefined) mud.administrativo = !!c.administrativo;
     if (c.financeiro !== undefined) mud.financeiro = !!c.financeiro;
+    if (c.rh !== undefined) mud.rh = !!c.rh;
     if (c.papel !== undefined) {
       if (PAPEIS_PERFIL.indexOf(String(c.papel)) < 0) {
         return res.status(400).json({ erro: `Papel "${String(c.papel)}" não existe. Use: ${PAPEIS_PERFIL.join(", ")}.` });
@@ -1028,8 +1029,20 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({ url: URL_BASE, anon: ANON });
   }
 
+  // O "Trabalhe conosco" (0174): a pessoa interessada não tem login. Antes da checagem de sessão, como o DUT.
+  if (String(req.query.recurso || "") === "rh-publico") {
+    try { return await require("../rh/servidor.js").rhPublico(req, res); }
+    catch (e) { return res.status(e.status || 502).json({ erro: e.status ? e.message : "Não consegui registrar agora." }); }
+  }
+
   const tok = tokenDe(req);
   if (!tok) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
+
+  // O RH (0174, decisão 80): vagas, candidatos, DISC e retenção.
+  if (String(req.query.recurso || "") === "rh") {
+    try { return await require("../rh/servidor.js").rh(req, res, tok); }
+    catch (e) { return res.status(e.status || 502).json({ erro: e.status ? e.message : "Falhou." }); }
+  }
 
   if (String(req.query.recurso || "") === "senha") {
     try { return await senha(req, res, tok); }
@@ -1124,7 +1137,7 @@ module.exports = async function handler(req, res) {
   try {
     // `senha_provisoria` vem junto: é o App que decide, na abertura, se
     // a tela da senha vem antes de tudo.
-    r = await fetch(`${URL_BASE}/rest/v1/perfil?select=id,nome,papel,ativo,administrativo,financeiro,senha_provisoria&order=nome.asc`, {
+    r = await fetch(`${URL_BASE}/rest/v1/perfil?select=id,nome,papel,ativo,administrativo,financeiro,rh,senha_provisoria&order=nome.asc`, {
       headers: { apikey: ANON, Authorization: tok },
     });
     corpo = await r.text();

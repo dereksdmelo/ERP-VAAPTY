@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="referrer" content="no-referrer" />
+<title>Trabalhe na Vaapty Joinville</title>
+<meta name="description" content="Vagas abertas na Vaapty Joinville. Mande o seu currículo e faça o teste de perfil." />
+<!--
+  O "Trabalhe conosco" do RH (0174, decisão 80).
+
+  **Estática e sem login, como dut.html e assinar.html.** Quem se candidata não tem conta e nunca vai ter. Tudo entra
+  por funções estreitas do banco (`rh_candidatar`, `rh_disc_gravar`, `rh_anexar`), pela chave anônima, e o currículo
+  sobe pelo api/foto.js — o único lugar com a chave do Storage (decisão 9).
+
+  Links:
+    /trabalhe.html                      as vagas abertas + o formulário
+    /trabalhe.html?vaga=<id>            já com a vaga escolhida
+    /trabalhe.html?o=instagram          de onde a pessoa veio (instagram, facebook, linkedin, indeed, whatsapp…)
+    /trabalhe.html?ind=Fulano           indicado por alguém da equipe
+    /trabalhe.html?f=<loja>             a franquia (sem ele, Joinville — decisão 79)
+    /trabalhe.html#t=<token>            só o teste DISC, pelo link que o RH manda (o token vai no fragmento: não entra
+                                        em log nem no Referer, a régua da 0048)
+-->
+<style>
+  :root{ --roxo:#6D1B9E; --tinta:#1B1725; --mute:#6B6478; --linha:#E6E2EC; --papel:#fff; --fundo:#F7F5FA;
+         --verde:#1D7F58; --laranja:#EA5423; --claro:#F6EEFB; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--fundo);color:var(--tinta);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
+  .caixa{max-width:680px;margin:0 auto;padding:16px 16px 56px}
+  .marca{display:flex;align-items:center;gap:8px;padding:12px 0 6px;font-weight:700}
+  .logo{width:30px;height:30px;border-radius:8px;background:var(--roxo);color:#fff;display:grid;place-items:center;font-weight:800}
+  .heroi{padding:10px 0 14px}
+  h1{font-size:24px;line-height:1.2;margin:4px 0 6px}
+  h2{font-size:16px;margin:0 0 4px}
+  .sub{color:var(--mute);font-size:13.5px;margin:0}
+  .cartao{background:var(--papel);border:1px solid var(--linha);border-radius:14px;padding:16px;margin-bottom:14px}
+  label{display:block;margin-top:12px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute)}
+  input,textarea,select{width:100%;margin-top:3px;padding:11px 12px;border:1px solid var(--linha);border-radius:9px;font-size:16px;background:#fff;color:var(--tinta);font-family:inherit}
+  textarea{min-height:90px;resize:vertical}
+  input:focus,textarea:focus,select:focus{outline:2px solid var(--roxo);outline-offset:-1px}
+  .duas{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  @media (max-width:480px){ .duas{grid-template-columns:1fr} }
+  .vaga{display:block;width:100%;text-align:left;border:1px solid var(--linha);border-radius:12px;padding:12px 14px;background:#fff;margin:8px 0 0;cursor:pointer;color:var(--tinta);font:inherit}
+  .vaga.on{border-color:var(--roxo);background:var(--claro)}
+  .vaga b{font-size:15px}
+  .vaga .det{font-size:13px;color:var(--mute);margin-top:4px;white-space:pre-wrap}
+  .selo{display:inline-block;font-size:11px;font-weight:700;border-radius:99px;padding:2px 8px;background:var(--claro);color:var(--roxo);margin-left:6px}
+  button.prin{width:100%;padding:14px;border:0;border-radius:10px;background:var(--roxo);color:#fff;font-size:15px;font-weight:700;margin-top:16px;cursor:pointer}
+  button.prin:disabled{opacity:.4;cursor:default}
+  .erro{color:var(--laranja);font-size:13.5px;margin-top:10px}
+  .aviso{background:#FFF6E0;color:#8A6100;border-radius:9px;padding:10px 12px;font-size:12.5px;line-height:1.45;margin-top:10px}
+  .ok{background:#E8F5EE;color:var(--verde);border-radius:9px;padding:10px 12px;font-size:13px;margin-top:10px}
+  .check{display:flex;gap:10px;align-items:flex-start;margin-top:14px;font-size:13px;color:var(--tinta);text-transform:none;letter-spacing:0}
+  .check input{width:auto;margin-top:3px}
+  .arq{margin-top:10px;border:1px dashed var(--linha);border-radius:10px;padding:12px;background:#fff}
+  .arq input{border:0;padding:8px 0 0;font-size:13px}
+  /* o teste */
+  .barra{height:6px;background:var(--linha);border-radius:99px;overflow:hidden;margin:10px 0 2px}
+  .barra i{display:block;height:100%;background:var(--roxo);transition:width .2s}
+  .linha{border:1px solid var(--linha);border-radius:12px;padding:12px;margin-top:10px;background:#fff}
+  .linha.feita{border-color:#CDE9DA}
+  .linha .t{font-size:11px;color:var(--mute);letter-spacing:.06em;text-transform:uppercase}
+  .grade{display:grid;grid-template-columns:1fr 64px 64px;align-items:center;gap:4px 6px;margin-top:6px}
+  .grade .h{font-size:10.5px;color:var(--mute);text-align:center;font-weight:700;letter-spacing:.04em}
+  .grade .w{font-size:14.5px}
+  .bola{height:36px;border:1px solid var(--linha);border-radius:9px;background:#fff;cursor:pointer;font-size:16px;color:var(--mute)}
+  .bola.m{background:var(--verde);border-color:var(--verde);color:#fff}
+  .bola.n{background:var(--laranja);border-color:var(--laranja);color:#fff}
+  .res{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+  .res div{border:1px solid var(--linha);border-radius:10px;padding:10px;text-align:center}
+  .res b{display:block;font-size:22px;color:var(--roxo)}
+  .res span{font-size:11.5px;color:var(--mute)}
+  .rodape{color:var(--mute);font-size:12px;margin-top:20px;line-height:1.5}
+</style>
+</head>
+<body>
+<div class="caixa">
+  <div class="marca"><div class="logo">V</div> Vaapty Joinville</div>
+  <div id="app"><p class="sub">Carregando…</p></div>
+  <p class="rodape">Os seus dados ficam guardados pela Vaapty só para processos seletivos e não são repassados a ninguém.
+  Para sair do nosso banco de talentos, é só pedir pelo WhatsApp da loja.</p>
+</div>
+<script>
+const Q = new URLSearchParams(location.search);
+const FRANQUIA = (Q.get("f") || "").trim().toLowerCase();
+const API = "/api/perfil?recurso=rh-publico" + (FRANQUIA ? "&f=" + encodeURIComponent(FRANQUIA) : "");
+const el = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const SETOR = { negociacao: "Negociação", prevendas: "Pré-vendas", administrativo: "Administrativo", gestao: "Gestão", outro: "" };
+const ORIGENS = [["site", "Site da Vaapty"], ["instagram", "Instagram"], ["facebook", "Facebook"], ["linkedin", "LinkedIn"],
+  ["indeed", "Indeed / site de vagas"], ["whatsapp", "WhatsApp"], ["indicacao", "Indicação de alguém da Vaapty"], ["outro", "Outro"]];
+
+let token = "";
+let vagas = [];
+let vagaSel = Q.get("vaga") || "";
+let arquivo = null;
+
+async function pedir(url, op) {
+  const r = await fetch(url, op);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.erro || "Não consegui agora. Tente de novo em instantes.");
+  return d;
+}
+
+/* ----------------------------- o formulário ----------------------------- */
+async function inicio() {
+  try { vagas = (await pedir(API + "&acao=vagas")).vagas || []; } catch (e) { vagas = []; }
+  if (vagaSel && !vagas.some((v) => v.id === vagaSel)) vagaSel = "";
+  const orig = (Q.get("o") || "").toLowerCase();
+  const ind = (Q.get("ind") || "").slice(0, 80);
+  el("app").innerHTML = `
+    <div class="heroi">
+      <h1>Venha trabalhar na Vaapty Joinville</h1>
+      <p class="sub">A Vaapty compra carros de quem quer vender e repassa para uma rede de lojistas. A gente cresce
+      atendendo bem — e procura gente que gosta de gente, de resultado e de fazer direito.</p>
+    </div>
+    <div class="cartao">
+      <h2>${vagas.length ? "Vagas abertas" : "Banco de talentos"}</h2>
+      <p class="sub">${vagas.length ? "Escolha a vaga — ou entre no banco de talentos para as próximas." :
+        "Agora não há vaga aberta, mas o seu cadastro entra no nosso banco de talentos e a gente chama quando abrir."}</p>
+      ${vagas.map((v) => `
+        <button type="button" class="vaga ${vagaSel === v.id ? "on" : ""}" onclick="escolher('${v.id}')">
+          <b>${esc(v.titulo)}</b>${SETOR[v.setor] ? `<span class="selo">${SETOR[v.setor]}</span>` : ""}
+          ${v.modalidade ? `<div class="sub">${esc(v.modalidade)}</div>` : ""}
+          ${vagaSel === v.id ? `
+            ${v.descricao ? `<div class="det">${esc(v.descricao)}</div>` : ""}
+            ${v.requisitos ? `<div class="det"><b>O que procuramos:</b> ${esc(v.requisitos)}</div>` : ""}
+            ${v.oferecemos ? `<div class="det"><b>O que oferecemos:</b> ${esc(v.oferecemos)}</div>` : ""}` : ""}
+        </button>`).join("")}
+      ${vagas.length ? `<button type="button" class="vaga ${vagaSel === "" ? "on" : ""}" onclick="escolher('')">
+        <b>Banco de talentos</b><div class="sub">Não achei a minha vaga — quero ser lembrado nas próximas</div></button>` : ""}
+    </div>
+
+    <div class="cartao">
+      <h2>Seus dados</h2>
+      <label>Nome completo *</label><input id="nome" autocomplete="name" />
+      <div class="duas">
+        <div><label>WhatsApp *</label><input id="telefone" inputmode="tel" placeholder="47 99999-9999" autocomplete="tel" /></div>
+        <div><label>E-mail</label><input id="email" type="email" autocomplete="email" /></div>
+      </div>
+      <div class="duas">
+        <div><label>Cidade</label><input id="cidade" value="Joinville" /></div>
+        <div><label>Bairro</label><input id="bairro" /></div>
+      </div>
+      <div class="duas">
+        <div><label>Data de nascimento</label><input id="nascimento" type="date" /></div>
+        <div><label>LinkedIn ou Instagram</label><input id="linkedin" placeholder="link ou @" /></div>
+      </div>
+      <label>Sua experiência</label>
+      <textarea id="experiencia" placeholder="Onde trabalhou, o que fazia, quanto tempo. Vendas, atendimento, carros, escritório…"></textarea>
+      <label>Formação</label><input id="formacao" placeholder="Ensino médio, técnico, faculdade…" />
+      <div class="duas">
+        <div><label>Pretensão</label><input id="pretensao" placeholder="ex.: fixo + comissão" /></div>
+        <div><label>Disponibilidade</label><input id="disponibilidade" placeholder="ex.: imediata, a partir de…" /></div>
+      </div>
+      <label>Como ficou sabendo da vaga?</label>
+      <select id="origem" onchange="el('ind').style.display = this.value === 'indicacao' ? 'block' : 'none'">
+        ${ORIGENS.map(([v, r]) => `<option value="${v}" ${(orig === v || (ind && v === "indicacao")) ? "selected" : ""}>${r}</option>`).join("")}
+      </select>
+      <div id="ind" style="display:${ind || orig === "indicacao" ? "block" : "none"}">
+        <label>Quem indicou?</label><input id="indicado_por" value="${esc(ind)}" />
+      </div>
+      <label>Quer contar mais alguma coisa?</label><textarea id="mensagem" style="min-height:60px"></textarea>
+      <div class="arq">
+        <b style="font-size:13px">Currículo (opcional)</b>
+        <div class="sub" style="font-size:12px">PDF, Word ou foto, até 10 MB.</div>
+        <input type="file" accept=".pdf,.doc,.docx,image/jpeg,image/png,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onchange="pegar(this)" />
+        <div id="narq" class="sub" style="font-size:12px;color:var(--verde)"></div>
+      </div>
+      <label class="check"><input type="checkbox" id="lgpd" /> <span>Autorizo a Vaapty a guardar os meus dados e o
+      currículo para este e outros processos seletivos.</span></label>
+      <button class="prin" id="enviar" onclick="enviar()">Enviar candidatura</button>
+      <div id="erro" class="erro"></div>
+    </div>`;
+}
+function escolher(id) {
+  const vals = {};
+  document.querySelectorAll("#app input:not([type=file]):not([type=checkbox]), #app textarea, #app select").forEach((e) => { vals[e.id] = e.value; });
+  vagaSel = id; inicio().then(() => { Object.keys(vals).forEach((k) => { if (el(k)) el(k).value = vals[k]; }); if (arquivo) el("narq").textContent = arquivo.nome; });
+}
+function pegar(input) {
+  const f = input.files && input.files[0];
+  if (!f) { arquivo = null; el("narq").textContent = ""; return; }
+  if (f.size > 10 * 1024 * 1024) { el("narq").textContent = "Esse arquivo passa de 10 MB."; input.value = ""; arquivo = null; return; }
+  const tipo = f.type || (/\.docx$/i.test(f.name) ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : /\.doc$/i.test(f.name) ? "application/msword" : "application/pdf");
+  const r = new FileReader();
+  r.onload = () => { arquivo = { nome: f.name, tipo, base64: String(r.result).split(",")[1] }; el("narq").textContent = f.name; };
+  r.readAsDataURL(f);
+}
+async function enviar() {
+  const b = el("enviar"), erro = el("erro");
+  erro.textContent = "";
+  const v = (id) => (el(id) ? (el(id).value || "").trim() : "");
+  if (!v("nome")) { erro.textContent = "Informe o seu nome."; return; }
+  if (v("telefone").replace(/\D/g, "").length < 10 && !v("email")) { erro.textContent = "Informe o WhatsApp com DDD (ou o e-mail)."; return; }
+  if (!el("lgpd").checked) { erro.textContent = "Marque a autorização para guardarmos os seus dados."; return; }
+  b.disabled = true; b.textContent = "enviando…";
+  try {
+    const dados = {};
+    ["nome", "telefone", "email", "cidade", "bairro", "nascimento", "linkedin", "experiencia", "formacao", "pretensao",
+     "disponibilidade", "origem", "indicado_por", "mensagem"].forEach((k) => { dados[k] = v(k); });
+    if (dados.origem !== "indicacao") dados.indicado_por = "";
+    dados.vaga_id = vagaSel;
+    const d = await pedir(API + "&acao=candidatar", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dados, consentimento: true, franquia: FRANQUIA }) });
+    token = d.token;
+    let falhou = "";
+    if (arquivo) {
+      try {
+        await pedir(`/api/foto?recurso=rh-curriculo&token=${encodeURIComponent(token)}`, { method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ arquivo_base64: arquivo.base64, nome: arquivo.nome, tipo: arquivo.tipo }) });
+      } catch (e) { falhou = e.message; }
+    }
+    recebido(v("nome").split(" ")[0], falhou);
+  } catch (e) {
+    erro.textContent = e.message + " Seus dados continuam aqui — é só tentar de novo.";
+    b.disabled = false; b.textContent = "Enviar candidatura";
+  }
+}
+function recebido(nome, falhou) {
+  el("app").innerHTML = `
+    <div class="cartao">
+      <h1>Recebemos, ${esc(nome)}!</h1>
+      <p class="sub">A equipe da Vaapty vai olhar o seu cadastro e chamar pelo WhatsApp.</p>
+      ${falhou ? `<div class="aviso">O currículo não subiu (${esc(falhou)}). Pode mandar pelo WhatsApp quando a gente chamar.</div>` : ""}
+    </div>
+    <div class="cartao">
+      <h2>Falta um passo: o teste de perfil (5 minutos)</h2>
+      <p class="sub">São 24 linhas com quatro palavras. Em cada uma, marque a que MAIS parece com você e a que MENOS
+      parece. Não tem certo nem errado — responda como você é, não como acha que deveria ser.</p>
+      <button class="prin" onclick="teste()">Fazer o teste agora</button>
+      <p class="sub" style="margin-top:10px">Prefere depois? Este link vale por duas horas nesta página.</p>
+    </div>`;
+  window.scrollTo(0, 0);
+}
+
+/* ------------------------------- o DISC ------------------------------- */
+let perguntas = [];
+let resp = [];
+async function teste() {
+  el("app").innerHTML = '<p class="sub">Carregando o teste…</p>';
+  try { perguntas = (await pedir(API + "&acao=disc")).perguntas || []; }
+  catch (e) { el("app").innerHTML = `<div class="cartao"><div class="erro">${esc(e.message)}</div></div>`; return; }
+  resp = perguntas.map(() => ({ mais: null, menos: null }));
+  desenharTeste();
+}
+function marcar(i, lado, j) {
+  const r = resp[i];
+  r[lado] = r[lado] === j ? null : j;
+  if (lado === "mais" && r.menos === j) r.menos = null;
+  if (lado === "menos" && r.mais === j) r.mais = null;
+  desenharTeste(i);
+}
+function desenharTeste(foco) {
+  const feitas = resp.filter((r) => r.mais != null && r.menos != null).length;
+  el("app").innerHTML = `
+    <div class="cartao">
+      <h2>Teste de perfil</h2>
+      <p class="sub">Em cada linha: <b style="color:var(--verde)">+</b> a palavra que MAIS parece com você,
+      <b style="color:var(--laranja)">−</b> a que MENOS parece.</p>
+      <div class="barra"><i style="width:${Math.round((feitas / perguntas.length) * 100)}%"></i></div>
+      <div class="sub" style="font-size:12px">${feitas} de ${perguntas.length}</div>
+      ${perguntas.map((p, i) => `
+        <div class="linha ${resp[i].mais != null && resp[i].menos != null ? "feita" : ""}" id="l${i}">
+          <div class="t">Linha ${i + 1}</div>
+          <div class="grade">
+            <span></span><span class="h">MAIS</span><span class="h">MENOS</span>
+            ${p.palavras.map((w, j) => `
+              <span class="w">${esc(w)}</span>
+              <button type="button" class="bola ${resp[i].mais === j ? "m" : ""}" onclick="marcar(${i},'mais',${j})" aria-label="mais: ${esc(w)}">+</button>
+              <button type="button" class="bola ${resp[i].menos === j ? "n" : ""}" onclick="marcar(${i},'menos',${j})" aria-label="menos: ${esc(w)}">−</button>`).join("")}
+          </div>
+        </div>`).join("")}
+      <button class="prin" id="fim" ${feitas < perguntas.length ? "disabled" : ""} onclick="mandarTeste()">
+        ${feitas < perguntas.length ? `Faltam ${perguntas.length - feitas} linhas` : "Ver o meu resultado"}</button>
+      <div id="erro" class="erro"></div>
+    </div>`;
+  if (foco != null) {
+    const r = resp[foco];
+    const alvo = el("l" + (r.mais != null && r.menos != null ? Math.min(foco + 1, perguntas.length - 1) : foco));
+    const y0 = window.scrollY;
+    if (alvo && r.mais != null && r.menos != null && foco + 1 < perguntas.length) alvo.scrollIntoView({ behavior: "smooth", block: "center" });
+    else window.scrollTo(0, y0);
+  }
+}
+async function mandarTeste() {
+  const b = el("fim");
+  b.disabled = true; b.textContent = "calculando…";
+  try {
+    const d = await pedir(API + "&acao=disc", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, respostas: resp }) });
+    el("app").innerHTML = `
+      <div class="cartao">
+        <h1>Obrigado! Seu perfil: ${esc(d.perfil)}</h1>
+        <div class="res">
+          ${[["D", "Dominância"], ["I", "Influência"], ["S", "Estabilidade"], ["C", "Conformidade"]].map(([f, n]) =>
+            `<div><b>${d[f]}</b><span>${n}</span></div>`).join("")}
+        </div>
+        ${(d.fatores || []).map((x) => `<p style="margin:14px 0 0"><b>${esc(x.nome)} — ${esc(x.curto)}.</b> ${esc(x.texto)}</p>`).join("")}
+        <p class="sub" style="margin-top:14px">O teste mostra o seu jeito de trabalhar, não se você é bom ou ruim — todo
+        perfil tem lugar numa equipe. O resultado já foi para a Vaapty. Agora é esperar o nosso contato.</p>
+      </div>`;
+    window.scrollTo(0, 0);
+  } catch (e) {
+    el("erro").textContent = e.message;
+    b.disabled = false; b.textContent = "Ver o meu resultado";
+  }
+}
+
+/* O link do RH: só o teste, para quem já está cadastrado (#t=). */
+(async function () {
+  const m = /[#&]t=([A-Za-z0-9_-]{20,})/.exec(location.hash || "");
+  if (!m) return inicio();
+  token = m[1];
+  try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
+  try {
+    const d = await pedir(API + "&acao=token&t=" + encodeURIComponent(token));
+    el("app").innerHTML = `
+      <div class="cartao">
+        <h1>Olá, ${esc(d.primeiro_nome || "")}!</h1>
+        <p class="sub">${d.disc_feito ? "Você já respondeu o teste. Se quiser, pode responder de novo — vale o último." :
+          "A Vaapty pediu para você responder o teste de perfil. Leva uns 5 minutos."}</p>
+        <p class="sub" style="margin-top:8px">São 24 linhas com quatro palavras. Em cada uma, marque a que MAIS parece com
+        você e a que MENOS parece. Não tem certo nem errado.</p>
+        <button class="prin" onclick="teste()">Começar</button>
+      </div>`;
+  } catch (e) {
+    el("app").innerHTML = `<div class="cartao"><h2>Link vencido</h2><p class="sub">${esc(e.message)}</p></div>`;
+  }
+})();
+</script>
+</body>
+</html>

@@ -22,6 +22,8 @@
 !assinar.html
 !verificar.html
 !dut.html
+# O "Trabalhe conosco" do RH (0174): candidatura, currículo e teste DISC, sem login.
+!trabalhe.html
 # A tela da sala (0121): pública como assinar.html, pela chave no fragmento.
 !tv.html
 !testemunhais.json

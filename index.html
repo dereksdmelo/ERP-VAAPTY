@@ -30293,6 +30293,7 @@ const ICONE = {
   lojistas: "M4 9h16l-1 11H5zM4 9l2-5h12l2 5M9 13v4M15 13v4",
   leads: "M5 4h3l2 5-2 1a11 11 0 0 0 6 6l1-2 5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z",
   adm: "M9 12l2 2 4-4M5 5h14v14H5z",
+  rh: "M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 20a6 6 0 0 1 12 0M16 5a3 3 0 0 1 0 6M21 20a6 6 0 0 0-4-5.6",
   gestao: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm8 4l-2-1 .3-2.2-2-1.2-1.7 1.4L12.5 8l-.5-2h-2l-.5 2-2.1 1-1.7-1.4-2 1.2L4 11l-2 1 2 1-.3 2.2 2 1.2 1.7-1.4 2.1 1 .5 2h2l.5-2 2.1-1 1.7 1.4 2-1.2L18 13z",
 };
 
@@ -31016,6 +31017,7 @@ const AREAS = [
   ["gestao",     "Gestão",         "painel"],
   ["marketing",  "Marketing",      "marketing"],
   ["financeiro", "Financeiro",     "financeiro"],
+  ["rh",         "RH",             "rh"],
   ["adm",        "Administrativo", "adm"],
 ];
 
@@ -32615,6 +32617,15 @@ function destinosPara(perfil) {
       { id: "fin_centros",     rot: "Centros de custo",  curto: "Financ.", area: "financeiro", aba: "centros",     grupo: "cadastros",  icone: "financeiro" },
     ] : []),
 
+    // ---- as pessoas (0174, decisão 80): do gerente e de quem tem a marca RH ----
+    ...((perfil && (perfil.rh || gerente)) ? [
+      { id: "rh_quadro",   rot: "Candidatos",        curto: "RH",        area: "rh", icone: "rh", grupo: "captar" },
+      { id: "rh_vagas",    rot: "Vagas",             curto: "Vagas",     area: "rh", icone: "rh", grupo: "captar" },
+      { id: "rh_divulgar", rot: "Divulgar e buscar", curto: "Divulgar",  area: "rh", icone: "rh", grupo: "captar" },
+      { id: "rh_talentos", rot: "Banco de talentos", curto: "Talentos",  area: "rh", icone: "rh", grupo: "organizar" },
+      { id: "rh_retencao", rot: "Retenção",          curto: "Retenção",  area: "rh", icone: "rh", grupo: "reter" },
+    ] : []),
+
     // ---- o papel e a operação ----
     /* A ESTEIRA DO NEGÓCIO FECHADO (0089, 28/10/2026): o adm revisa, dois
      * gerentes aprovam, o financeiro paga. Um destino por etapa — eram
@@ -33351,6 +33362,7 @@ function Acessos({ perfil }) {
             {marca(a, "ativo", "entra")}
             {marca(a, "administrativo", "administrativo")}
             {marca(a, "financeiro", "financeiro")}
+            {marca(a, "rh", "RH")}
             {a.id !== (perfil && perfil.id) && (
               <button onClick={() => gerar(a)} disabled={gerando === a.id}
                 className="text-[12px] font-semibold" style={{ color: gerando === a.id ? C.mute : C.roxo }}>
@@ -35205,6 +35217,7 @@ function CartaoPessoa({ pe, eGerente, eu, mexerAcesso, mexerNeg, gerarSenha, ger
               {marca("ativo", "entra")}
               {marca("administrativo", "adm")}
               {marca("financeiro", "financeiro")}
+              {marca("rh", "RH")}
               {!eu && (
                 <button onClick={() => gerarSenha(a)} disabled={gerando === a.id} className="text-[11.5px] font-semibold" style={{ color: gerando === a.id ? C.mute : C.roxo }}>
                   {gerando === a.id ? "gerando…" : "gerar senha"}
@@ -36716,6 +36729,847 @@ function TelaSuporte() {
   );
 }
 
+/* ==================================================================
+ * O RH (0174, decisão 80) — captar, organizar e reter talentos.
+ *
+ * O Derek, em 23/11/2026: "um módulo para RH. O objetivo é captar os talentos, currículos, responder teste DISC,
+ * procurar pessoas interessadas em trabalhar na Vaapty Joinville, organizar e reter esses talentos."
+ *
+ * Cinco destinos, uma tela (`TelaRH aba=`):
+ *   quadro     os candidatos em andamento, por etapa (o que falta fazer, a régua do quadro da pré-venda)
+ *   talentos   todo mundo que já passou — o banco de talentos, com filtro por perfil DISC, cidade e origem
+ *   vagas      as vagas, o que aparece no "Trabalhe conosco" e o texto pronto para divulgar
+ *   divulgar   os links por canal, o link de indicação, a busca ativa e de onde vem quem dá certo
+ *   retencao   a equipe: tempo de casa, experiência de 45/90 dias, conversas, pulso, eNPS e risco de saída
+ *
+ * O candidato entra sozinho pela página pública (trabalhe.html), ou à mão (indicação, busca ativa). O DISC é a
+ * mesma régua para candidato e para quem já está na casa (regras/disc.js). Quem lê é o RH (`e_rh()`).
+ * ================================================================== */
+
+const RH_ETAPAS = [
+  ["novo", "Novo", "#6D1B9E"], ["triagem", "Triagem", "#7A5AF8"], ["entrevista", "Entrevista", "#0E7490"],
+  ["teste", "Teste prático", "#B45309"], ["proposta", "Proposta", "#C2410C"], ["contratado", "Contratado", "#1D7F58"],
+  ["banco", "Banco de talentos", "#6E6879"], ["reprovado", "Não seguiu", "#9F1239"], ["desistiu", "Desistiu", "#6E6879"],
+];
+const RH_ROT = Object.fromEntries(RH_ETAPAS.map(([k, r]) => [k, r]));
+const RH_COR = Object.fromEntries(RH_ETAPAS.map(([k, , c]) => [k, c]));
+const RH_QUADRO = ["novo", "triagem", "entrevista", "teste", "proposta", "contratado"];
+const RH_ORIGENS = [["site", "Site"], ["indicacao", "Indicação"], ["instagram", "Instagram"], ["facebook", "Facebook"],
+  ["linkedin", "LinkedIn"], ["indeed", "Indeed / vagas"], ["whatsapp", "WhatsApp"], ["busca_ativa", "Busca ativa"],
+  ["colaborador", "Colaborador"], ["outro", "Outro"]];
+const RH_ORIGEM = Object.fromEntries(RH_ORIGENS);
+const RH_SETORES = [["negociacao", "Negociação"], ["prevendas", "Pré-vendas"], ["administrativo", "Administrativo"], ["gestao", "Gestão"], ["outro", "Outro"]];
+const RH_DISC = { D: ["Dominância", "#C2410C"], I: ["Influência", "#B45309"], S: ["Estabilidade", "#1D7F58"], C: ["Conformidade", "#0E7490"] };
+
+const rhHoje = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+const rhDias = (de, ate) => {
+  if (!de) return null;
+  const a = Date.parse(String(de).slice(0, 10) + "T12:00:00Z"), b = Date.parse((ate || rhHoje()) + "T12:00:00Z");
+  return isNaN(a) || isNaN(b) ? null : Math.round((b - a) / 86400000);
+};
+const rhMaisDias = (d, n) => { const t = new Date(String(d).slice(0, 10) + "T12:00:00Z"); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
+const rhData = (v) => { const s = String(v || "").slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}` : "—"; };
+const rhQuando = (iso) => (iso ? new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "");
+const rhIdade = (n) => { const d = rhDias(n); return d == null ? null : Math.floor(d / 365.25); };
+const rhTempo = (dias) => (dias == null ? "—" : dias < 31 ? `${dias} d` : dias < 365 ? `${Math.floor(dias / 30.4)} meses` :
+  `${Math.floor(dias / 365.25)} a ${Math.floor((dias % 365.25) / 30.4)} m`);
+const rhLink = (q) => `${location.origin}/trabalhe.html${q ? `?${q}` : ""}`;
+async function rhCopiar(t) { try { await navigator.clipboard.writeText(t); return true; } catch (e) { window.prompt("Copie:", t); return false; } }
+
+async function rhApi(acao, { metodo, id, corpo, extra } = {}) {
+  const r = await fetchAut(`/api/perfil?recurso=rh&acao=${acao}${id ? `&id=${id}` : ""}${extra || ""}`, {
+    method: metodo || "GET", ...(corpo ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo) } : {}),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(d.erro || "Não consegui falar com o servidor."); e.status = r.status; e.dados = d; throw e; }
+  return d;
+}
+
+function RHSeloDisc({ c, vaga }) {
+  if (!c || !c.disc_perfil) return <span className="rounded px-1.5 py-0.5 text-[10.5px]" style={{ background: C.bg, color: C.mute }}>sem DISC</span>;
+  const f = c.disc_perfil[0];
+  const ader = vaga && vaga.perfil_disc ? Math.round(vaga.perfil_disc.split("").reduce((s, x) => s + (Number(c["disc_" + x.toLowerCase()]) || 0), 0) / vaga.perfil_disc.length) : null;
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className="rounded px-1.5 py-0.5 text-[10.5px] font-bold text-white" style={{ background: (RH_DISC[f] || [])[1] || C.roxo }}>{c.disc_perfil}</span>
+      {ader != null && <span className="text-[10.5px] font-semibold" style={{ color: ader >= 60 ? C.verde : ader >= 45 ? AMARELO.texto : C.laranja }} title={`Aderência ao perfil ${vaga.perfil_disc} da vaga`}>{ader}%</span>}
+    </span>
+  );
+}
+
+function RHBarrasDisc({ notas }) {
+  return (
+    <div className="space-y-1.5">
+      {["D", "I", "S", "C"].map((f) => (
+        <div key={f} className="flex items-center gap-2 text-[12px]">
+          <b className="w-4" style={{ color: RH_DISC[f][1] }}>{f}</b>
+          <span className="w-[86px]" style={{ color: C.mute }}>{RH_DISC[f][0]}</span>
+          <div className="h-2.5 flex-1 overflow-hidden rounded-full" style={{ background: C.bg }}>
+            <div className="h-full rounded-full" style={{ width: `${notas[f] || 0}%`, background: RH_DISC[f][1] }} />
+          </div>
+          <span className="w-7 text-right font-semibold">{notas[f]}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RHJanela({ titulo, onFechar, children, largura }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-3 sm:p-6" style={{ background: "rgba(27,21,35,.45)" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onFechar(); }}>
+      <div className="w-full rounded-2xl p-4 shadow-xl" style={{ background: C.paper, maxWidth: largura || 760 }}>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="text-[17px] font-extrabold">{titulo}</h2>
+          <button onClick={onFechar} className="rounded-lg px-2 py-1 text-[13px] font-semibold" style={{ color: C.mute }}>fechar ✕</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+const rhInput = "w-full rounded-lg border px-2.5 py-1.5 text-[13.5px] outline-none";
+const rhRot = "mb-0.5 mt-2 block text-[10.5px] font-semibold uppercase tracking-wider";
+
+/* O cadastro à mão: a pessoa que alguém indicou no corredor ou que o RH achou no LinkedIn. */
+function RHNovoCandidato({ vagas, inicial, onFechar, onCriado }) {
+  const [c, setC] = useState({ nome: "", telefone: "", email: "", cidade: "Joinville", vaga_id: "", origem: "busca_ativa", indicado_por: "", experiencia: "", linkedin: "", ...(inicial || {}) });
+  const [erro, setErro] = useState(""); const [salvando, setSalvando] = useState(false); const [ja, setJa] = useState(null);
+  const campo = (k, rot, tipo) => (
+    <div><label className={rhRot} style={{ color: C.mute }}>{rot}</label>
+      <input type={tipo || "text"} className={rhInput} style={inputSty} value={c[k] || ""} onChange={(e) => setC({ ...c, [k]: e.target.value })} /></div>
+  );
+  const salvar = async () => {
+    setErro(""); setJa(null); setSalvando(true);
+    try { const d = await rhApi("candidato", { metodo: "POST", corpo: { ...c, vaga_id: c.vaga_id || null, etapa: c.vaga_id ? "novo" : "banco" } }); onCriado(d.candidato); }
+    catch (e) { setErro(e.message); if (e.status === 409 && e.dados && e.dados.id) setJa(e.dados.id); }
+    setSalvando(false);
+  };
+  return (
+    <RHJanela titulo="Cadastrar pessoa" onFechar={onFechar} largura={560}>
+      <div className="grid gap-x-3 sm:grid-cols-2">
+        {campo("nome", "Nome *")}{campo("telefone", "WhatsApp")}{campo("email", "E-mail", "email")}{campo("cidade", "Cidade")}
+        <div><label className={rhRot} style={{ color: C.mute }}>Vaga</label>
+          <select className={rhInput} style={inputSty} value={c.vaga_id} onChange={(e) => setC({ ...c, vaga_id: e.target.value })}>
+            <option value="">— banco de talentos —</option>
+            {vagas.filter((v) => v.aberta).map((v) => <option key={v.id} value={v.id}>{v.titulo}</option>)}
+          </select></div>
+        <div><label className={rhRot} style={{ color: C.mute }}>Como chegou</label>
+          <select className={rhInput} style={inputSty} value={c.origem} onChange={(e) => setC({ ...c, origem: e.target.value })}>
+            {RH_ORIGENS.filter(([k]) => k !== "site").map(([k, r]) => <option key={k} value={k}>{r}</option>)}
+          </select></div>
+        {c.origem === "indicacao" && campo("indicado_por", "Quem indicou")}
+        {campo("linkedin", "LinkedIn / Instagram")}
+      </div>
+      <label className={rhRot} style={{ color: C.mute }}>O que se sabe dela</label>
+      <textarea rows={3} className={rhInput} style={inputSty} value={c.experiencia} onChange={(e) => setC({ ...c, experiencia: e.target.value })} />
+      {erro && <p className="mt-2 text-[13px]" style={{ color: C.laranja }}>{erro}{ja && <> — <button className="font-semibold underline" onClick={() => onCriado({ id: ja })}>abrir</button></>}</p>}
+      <div className="mt-3 flex justify-end gap-2">
+        <button onClick={salvar} disabled={salvando || !c.nome.trim()} className="rounded-lg px-4 py-2 text-[13.5px] font-bold text-white disabled:opacity-40" style={{ background: C.roxo }}>
+          {salvando ? "gravando…" : "Cadastrar"}</button>
+      </div>
+    </RHJanela>
+  );
+}
+
+/* A ficha do candidato: dados, etapa, DISC, currículo, histórico e os gestos (WhatsApp, link do DISC, anotar). */
+function RHCandidato({ id, vagas, onFechar, onMudou }) {
+  const [d, setD] = useState(null); const [erro, setErro] = useState(""); const [anexos, setAnexos] = useState([]);
+  const [nota, setNota] = useState(""); const [tipoNota, setTipoNota] = useState("nota");
+  const [motivo, setMotivo] = useState(null); const [aviso, setAviso] = useState(""); const [edit, setEdit] = useState(null);
+  const carregar = () => rhApi("candidato", { id }).then(setD).catch((e) => setErro(e.message));
+  const lerAnexos = () => fetchAut(`/api/foto?recurso=rh-anexo&candidato_id=${id}`).then((r) => r.json()).then((x) => setAnexos(x.anexos || [])).catch(() => {});
+  useEffect(() => { carregar(); lerAnexos(); }, [id]);
+  const c = d && d.candidato;
+  const vaga = c && vagas.find((v) => v.id === c.vaga_id);
+  const mudar = async (m) => {
+    setErro("");
+    try { const r = await rhApi("candidato", { metodo: "PATCH", id, corpo: m }); setD((x) => ({ ...x, candidato: { ...x.candidato, ...r.candidato } })); onMudou(r.candidato); carregar(); }
+    catch (e) { setErro(e.message); }
+  };
+  const anotar = async () => {
+    if (!nota.trim()) return;
+    try { await rhApi("evento", { metodo: "POST", corpo: { candidato_id: id, tipo: tipoNota, texto: nota } }); setNota(""); carregar(); }
+    catch (e) { setErro(e.message); }
+  };
+  const linkDisc = async (mandar) => {
+    setErro(""); setAviso("");
+    try {
+      const r = await rhApi("link-disc", { metodo: "POST", id });
+      const link = `${location.origin}/trabalhe.html#t=${r.token}`;
+      const msg = `Oi, ${String(c.nome).split(" ")[0]}! Aqui é da Vaapty Joinville. Para seguirmos com o seu processo, responda este teste rápido de perfil (uns 5 minutos): ${link}`;
+      if (mandar && c.telefone) window.open(zap(c.telefone, msg), "_blank");
+      else { await rhCopiar(msg); setAviso("Mensagem com o link copiada. O link vale 7 dias."); }
+      carregar();
+    } catch (e) { setErro(e.message); }
+  };
+  const subir = async (arq) => {
+    if (!arq) return;
+    if (arq.size > 10 * 1024 * 1024) { setErro("O arquivo passa de 10 MB."); return; }
+    const tipo = arq.type || (/\.docx$/i.test(arq.name) ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : "application/pdf");
+    const dados = await new Promise((ok) => { const f = new FileReader(); f.onload = () => ok(String(f.result)); f.readAsDataURL(arq); });
+    try {
+      const r = await fetchAut("/api/foto?recurso=rh-anexo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ candidato_id: id, dados, tipo, nome: arq.name }) });
+      const x = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(x.erro || "Não subiu.");
+      lerAnexos();
+    } catch (e) { setErro(e.message); }
+  };
+  const apagarAnexo = async (a) => {
+    if (!window.confirm(`Apagar "${a.nome || "arquivo"}"?`)) return;
+    await fetchAut(`/api/foto?recurso=rh-anexo&id=${a.id}`, { method: "DELETE" }); lerAnexos();
+  };
+  const apagarPessoa = async () => {
+    if (!window.confirm(`Apagar ${c.nome} do RH, com currículo e histórico? Isto não se desfaz. Use quando a pessoa pedir para sair do banco de talentos.`)) return;
+    const r = await fetchAut(`/api/foto?recurso=rh-anexo&candidato_id=${id}`, { method: "DELETE" });
+    if (r.ok) { onMudou({ id, _apagado: true }); onFechar(); } else setErro("Não consegui apagar.");
+  };
+
+  if (!d) return <RHJanela titulo="Candidato" onFechar={onFechar}>{erro ? <p style={{ color: C.laranja }}>{erro}</p> : <p style={{ color: C.mute }}>Carregando…</p>}</RHJanela>;
+  const idade = rhIdade(c.nascimento);
+  const linha = (rot, v) => v ? <div className="text-[13px]"><span style={{ color: C.mute }}>{rot}: </span>{v}</div> : null;
+  return (
+    <RHJanela titulo={c.nome} onFechar={onFechar} largura={860}>
+      <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
+        <select className="rounded-lg border px-2 py-1 font-semibold outline-none" style={{ ...inputSty, color: RH_COR[c.etapa] }} value={c.etapa}
+          onChange={(e) => (e.target.value === "reprovado" || e.target.value === "desistiu" ? setMotivo({ etapa: e.target.value, texto: "" }) : mudar({ etapa: e.target.value }))}>
+          {RH_ETAPAS.map(([k, r]) => <option key={k} value={k}>{r}</option>)}
+        </select>
+        <select className="rounded-lg border px-2 py-1 outline-none" style={inputSty} value={c.vaga_id || ""} onChange={(e) => mudar({ vaga_id: e.target.value || null })}>
+          <option value="">sem vaga (banco)</option>
+          {vagas.map((v) => <option key={v.id} value={v.id}>{v.titulo}{v.aberta ? "" : " (fechada)"}</option>)}
+        </select>
+        <span className="flex items-center gap-0.5" title="Sua nota para a pessoa">
+          {[1, 2, 3, 4, 5].map((n) => <button key={n} onClick={() => mudar({ nota: c.nota === n ? null : n })} className="text-[17px] leading-none" style={{ color: (c.nota || 0) >= n ? ESTRELA : C.line }}>★</button>)}
+        </span>
+        <span style={{ color: C.mute }}>{RH_ORIGEM[c.origem] || c.origem}{c.indicado_por ? ` · indicado por ${c.indicado_por}` : ""} · desde {rhData(c.criado_em)}</span>
+      </div>
+      {motivo && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg p-2" style={{ background: AMARELO.fundo }}>
+          <span className="text-[12.5px]" style={{ color: AMARELO.texto }}>Por que {motivo.etapa === "reprovado" ? "não seguiu" : "desistiu"}?</span>
+          <input autoFocus className="min-w-[200px] flex-1 rounded-lg border px-2 py-1 text-[13px] outline-none" style={inputSty} value={motivo.texto}
+            onChange={(e) => setMotivo({ ...motivo, texto: e.target.value })} placeholder="ex.: sem experiência em vendas, aceitou outra proposta…" />
+          <button disabled={!motivo.texto.trim()} onClick={() => { mudar({ etapa: motivo.etapa, motivo: motivo.texto }); setMotivo(null); }}
+            className="rounded-lg px-3 py-1 text-[12.5px] font-bold text-white disabled:opacity-40" style={{ background: C.roxo }}>Gravar</button>
+          <button onClick={() => setMotivo(null)} className="text-[12.5px]" style={{ color: C.mute }}>cancelar</button>
+        </div>
+      )}
+      {(c.etapa === "reprovado" || c.etapa === "desistiu") && c.motivo && <p className="mt-1 text-[12.5px]" style={{ color: C.mute }}>Motivo: {c.motivo}</p>}
+      {c.etapa === "contratado" && !c.colaborador_id && (
+        <p className="mt-2 rounded-lg px-3 py-2 text-[12.5px]" style={{ background: C.roxoFraco, color: C.roxo }}>
+          Contratado: crie o login e a ficha em <b>Gestão → Equipe</b> ("+ Adicionar pessoa"). A ficha do colaborador é o que aparece na retenção.
+        </p>
+      )}
+
+      <div className="mt-3 grid gap-4 md:grid-cols-[1fr_300px]">
+        <div className="min-w-0">
+          <div className="flex flex-wrap gap-2">
+            {c.telefone && <a href={zap(c.telefone, `Oi, ${String(c.nome).split(" ")[0]}! Aqui é da Vaapty Joinville, sobre a sua candidatura${vaga ? ` para ${vaga.titulo}` : ""}.`)} target="_blank" rel="noreferrer"
+              onClick={() => rhApi("evento", { metodo: "POST", corpo: { candidato_id: id, tipo: "whatsapp", texto: "Chamou no WhatsApp" } }).then(carregar).catch(() => {})}
+              className="rounded-lg px-3 py-1.5 text-[12.5px] font-bold text-white" style={{ background: C.verde }}>WhatsApp</a>}
+            {c.telefone && <a href={`tel:${soDigitos(c.telefone)}`} className="rounded-lg border px-3 py-1.5 text-[12.5px] font-semibold" style={{ borderColor: C.line }}>Ligar</a>}
+            <button onClick={() => linkDisc(true)} disabled={!c.telefone} className="rounded-lg border px-3 py-1.5 text-[12.5px] font-semibold disabled:opacity-40" style={{ borderColor: C.line, color: C.roxo }}>Mandar teste DISC</button>
+            <button onClick={() => linkDisc(false)} className="rounded-lg border px-3 py-1.5 text-[12.5px] font-semibold" style={{ borderColor: C.line }}>Copiar link do DISC</button>
+          </div>
+          {aviso && <p className="mt-1.5 text-[12.5px]" style={{ color: C.verde }}>{aviso}</p>}
+
+          <div className="mt-3 rounded-xl border p-3" style={{ borderColor: C.line }}>
+            <div className="mb-1 flex items-center justify-between">
+              <b className="text-[13px]">Dados</b>
+              <button onClick={() => setEdit(edit ? null : { ...c })} className="text-[12px] font-semibold" style={{ color: C.roxo }}>{edit ? "cancelar" : "editar"}</button>
+            </div>
+            {edit ? (
+              <div>
+                <div className="grid gap-x-3 sm:grid-cols-2">
+                  {[["nome", "Nome"], ["telefone", "WhatsApp"], ["email", "E-mail"], ["cidade", "Cidade"], ["bairro", "Bairro"], ["nascimento", "Nascimento", "date"],
+                    ["linkedin", "LinkedIn / Instagram"], ["formacao", "Formação"], ["pretensao", "Pretensão"], ["disponibilidade", "Disponibilidade"]].map(([k, r, t]) => (
+                    <div key={k}><label className={rhRot} style={{ color: C.mute }}>{r}</label>
+                      <input type={t || "text"} className={rhInput} style={inputSty} value={edit[k] || ""} onChange={(e) => setEdit({ ...edit, [k]: e.target.value })} /></div>
+                  ))}
+                </div>
+                <label className={rhRot} style={{ color: C.mute }}>Experiência</label>
+                <textarea rows={4} className={rhInput} style={inputSty} value={edit.experiencia || ""} onChange={(e) => setEdit({ ...edit, experiencia: e.target.value })} />
+                <label className={rhRot} style={{ color: C.mute }}>Etiquetas (separadas por vírgula)</label>
+                <input className={rhInput} style={inputSty} value={Array.isArray(edit.tags) ? edit.tags.join(", ") : edit.tags || ""} onChange={(e) => setEdit({ ...edit, tags: e.target.value })} />
+                <button onClick={() => { const m = {}; ["nome", "telefone", "email", "cidade", "bairro", "nascimento", "linkedin", "formacao", "pretensao", "disponibilidade", "experiencia", "tags"].forEach((k) => { m[k] = edit[k]; }); mudar(m); setEdit(null); }}
+                  className="mt-2 rounded-lg px-3 py-1.5 text-[12.5px] font-bold text-white" style={{ background: C.roxo }}>Gravar</button>
+              </div>
+            ) : (
+              <div className="space-y-0.5">
+                {linha("WhatsApp", c.telefone)}{linha("E-mail", c.email)}
+                {linha("Onde mora", [c.bairro, c.cidade].filter(Boolean).join(", "))}
+                {linha("Idade", idade != null ? `${idade} anos` : null)}
+                {linha("LinkedIn / Instagram", c.linkedin && (/^https?:/.test(c.linkedin) ? <a href={c.linkedin} target="_blank" rel="noreferrer" style={{ color: C.roxo }}>{c.linkedin}</a> : c.linkedin))}
+                {linha("Formação", c.formacao)}{linha("Pretensão", c.pretensao)}{linha("Disponibilidade", c.disponibilidade)}
+                {c.experiencia && <div className="mt-1.5 whitespace-pre-wrap text-[13px]"><span style={{ color: C.mute }}>Experiência: </span>{c.experiencia}</div>}
+                {c.mensagem && <div className="mt-1.5 whitespace-pre-wrap text-[13px]"><span style={{ color: C.mute }}>Mensagem: </span>{c.mensagem}</div>}
+                {!!(c.tags || []).length && <div className="mt-1.5 flex flex-wrap gap-1">{c.tags.map((t) => <span key={t} className="rounded-full px-2 py-0.5 text-[11px]" style={{ background: C.roxoFraco, color: C.roxo }}>{t}</span>)}</div>}
+              </div>
+            )}
+          </div>
+
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <div><label className={rhRot} style={{ color: C.mute }}>Entrevista</label>
+              <input type="datetime-local" className={rhInput} style={inputSty} value={c.entrevista_em ? new Date(c.entrevista_em).toLocaleString("sv-SE", { timeZone: "America/Sao_Paulo" }).slice(0, 16).replace(" ", "T") : ""}
+                onChange={(e) => mudar({ entrevista_em: e.target.value ? `${e.target.value}:00-03:00` : null, ...(e.target.value && ["novo", "triagem"].indexOf(c.etapa) >= 0 ? { etapa: "entrevista" } : {}) })} /></div>
+            <div><label className={rhRot} style={{ color: C.mute }}>Próximo contato</label>
+              <input type="date" className={rhInput} style={inputSty} value={c.proximo_contato || ""} onChange={(e) => mudar({ proximo_contato: e.target.value || null })} /></div>
+          </div>
+
+          <div className="mt-4">
+            <b className="text-[13px]">Histórico</b>
+            <div className="mt-1.5 flex gap-2">
+              <select className="rounded-lg border px-2 text-[12.5px] outline-none" style={inputSty} value={tipoNota} onChange={(e) => setTipoNota(e.target.value)}>
+                <option value="nota">Anotação</option><option value="ligacao">Ligação</option><option value="whatsapp">WhatsApp</option><option value="entrevista">Entrevista</option>
+              </select>
+              <input className="flex-1 rounded-lg border px-2.5 py-1.5 text-[13px] outline-none" style={inputSty} value={nota} placeholder="O que foi conversado, impressão da entrevista…"
+                onChange={(e) => setNota(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") anotar(); }} />
+              <button onClick={anotar} disabled={!nota.trim()} className="rounded-lg px-3 text-[12.5px] font-bold text-white disabled:opacity-40" style={{ background: C.roxo }}>Anotar</button>
+            </div>
+            <div className="mt-2 space-y-1.5">
+              {(d.eventos || []).map((e) => (
+                <div key={e.id} className="rounded-lg px-2.5 py-1.5 text-[12.5px]" style={{ background: C.bg }}>
+                  <span style={{ color: C.mute }}>{rhQuando(e.em)} · {e.por_nome || (e.tipo === "candidatura" || e.tipo === "disc" || e.tipo === "anexo" ? "a pessoa" : "—")} · {e.tipo}</span>
+                  <div className="whitespace-pre-wrap">{e.texto}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="min-w-0 space-y-3">
+          <div className="rounded-xl border p-3" style={{ borderColor: C.line }}>
+            <b className="text-[13px]">Perfil DISC {c.disc_perfil ? `· ${c.disc_perfil}` : ""}</b>
+            {d.disc ? (
+              <div className="mt-2">
+                <RHBarrasDisc notas={d.disc.notas} />
+                {vaga && vaga.perfil_disc && <p className="mt-2 text-[12px]" style={{ color: C.mute }}>A vaga pede {vaga.perfil_disc}: <RHSeloDisc c={c} vaga={vaga} /></p>}
+                {d.disc.fatores.map((f) => (
+                  <p key={f.f} className="mt-2 text-[12.5px]"><b>{f.nome} — {f.curto}.</b> {f.texto} <span style={{ color: C.mute }}>Na Vaapty: {f.na_vaapty}</span></p>
+                ))}
+                <p className="mt-2 text-[11px]" style={{ color: C.mute }}>Respondido em {rhData(c.disc_em)}. O DISC mostra o estilo, não a competência: use para a conversa da entrevista, nunca como motivo sozinho.</p>
+              </div>
+            ) : <p className="mt-1 text-[12.5px]" style={{ color: C.mute }}>Ainda não respondeu. {c.token_ate && Date.parse(c.token_ate) > Date.now() ? `Há um link valendo até ${rhData(c.token_ate)}.` : "Mande o teste pelo WhatsApp."}</p>}
+          </div>
+
+          <div className="rounded-xl border p-3" style={{ borderColor: C.line }}>
+            <div className="flex items-center justify-between">
+              <b className="text-[13px]">Currículo e arquivos</b>
+              <label className="cursor-pointer text-[12px] font-semibold" style={{ color: C.roxo }}>+ anexar
+                <input type="file" className="hidden" accept=".pdf,.doc,.docx,image/*" onChange={(e) => { subir(e.target.files && e.target.files[0]); e.target.value = ""; }} /></label>
+            </div>
+            {!anexos.length ? <p className="mt-1 text-[12.5px]" style={{ color: C.mute }}>Nenhum arquivo.</p> : (
+              <div className="mt-1.5 space-y-1">
+                {anexos.map((a) => (
+                  <div key={a.id} className="flex items-center gap-2 text-[12.5px]">
+                    <a href={a.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate font-semibold" style={{ color: C.roxo }}>{a.nome || a.rotulo}</a>
+                    <span style={{ color: C.mute }}>{rhData(a.criado_em)}</span>
+                    <button onClick={() => apagarAnexo(a)} className="text-[11.5px]" style={{ color: C.mute }}>apagar</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <button onClick={apagarPessoa} className="text-[12px]" style={{ color: C.laranja }}>Apagar do RH (a pessoa pediu para sair)</button>
+        </div>
+      </div>
+      {erro && <p className="mt-2 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+    </RHJanela>
+  );
+}
+
+function RHCartao({ c, vaga, onAbrir }) {
+  const dias = rhDias(c.atualizado_em || c.criado_em);
+  const atrasado = c.proximo_contato && c.proximo_contato <= rhHoje();
+  return (
+    <button draggable onDragStart={(e) => e.dataTransfer.setData("text/rh", c.id)} onClick={() => onAbrir(c.id)}
+      className="block w-full rounded-xl border p-2.5 text-left" style={{ background: C.paper, borderColor: atrasado ? C.laranja : C.line }}>
+      <div className="flex items-start justify-between gap-2">
+        <b className="min-w-0 text-[13.5px] leading-tight">{c.nome}</b>
+        <RHSeloDisc c={c} vaga={vaga} />
+      </div>
+      <div className="mt-0.5 truncate text-[11.5px]" style={{ color: C.mute }}>{vaga ? vaga.titulo : "banco de talentos"}{c.cidade ? ` · ${c.cidade}` : ""}</div>
+      <div className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px]" style={{ color: C.mute }}>
+        <span>{RH_ORIGEM[c.origem] || c.origem}</span>
+        {c.anexos > 0 && <span>📎 {c.anexos}</span>}
+        {c.nota && <span style={{ color: ESTRELA }}>{"★".repeat(c.nota)}</span>}
+        {c.entrevista_em && Date.parse(c.entrevista_em) > Date.now() - 86400000 && <span style={{ color: "#0E7490" }}>entrevista {rhQuando(c.entrevista_em)}</span>}
+        {atrasado && <span style={{ color: C.laranja }}>retornar {rhData(c.proximo_contato).slice(0, 5)}</span>}
+        <span className="ml-auto">{dias != null ? (dias === 0 ? "hoje" : `${dias} d`) : ""}</span>
+      </div>
+    </button>
+  );
+}
+
+function TelaRH({ perfil, aba }) {
+  const [dados, setDados] = useState(null); const [erro, setErro] = useState("");
+  const [aberto, setAberto] = useState(null); const [novo, setNovo] = useState(null);
+  const [filtroVaga, setFiltroVaga] = useState(""); const [busca, setBusca] = useState("");
+  const carregar = () => rhApi("painel").then((d) => { setDados(d); setErro(""); }).catch((e) => setErro(e.message));
+  useEffect(() => { if (aba !== "retencao") carregar(); }, [aba]);
+  const mudou = (c) => setDados((d) => d && ({ ...d, candidatos: c._apagado ? d.candidatos.filter((x) => x.id !== c.id) : d.candidatos.map((x) => (x.id === c.id ? { ...x, ...c } : x)) }));
+  const vagas = (dados && dados.vagas) || [];
+  const vagaDe = (id) => vagas.find((v) => v.id === id);
+  const cands = (dados && dados.candidatos) || [];
+  const casa = (c) => {
+    const q = busca.trim().toLowerCase();
+    if (!q) return true;
+    const dig = q.replace(/\D/g, "");
+    return [c.nome, c.cidade, c.bairro, c.email, c.disc_perfil, (c.tags || []).join(" ")].some((x) => String(x || "").toLowerCase().indexOf(q) >= 0)
+      || (dig.length >= 4 && soDigitos(c.telefone).indexOf(dig) >= 0);
+  };
+  const mover = async (id, etapa) => {
+    if (etapa === "reprovado" || etapa === "desistiu") { setAberto(id); return; }
+    setDados((d) => ({ ...d, candidatos: d.candidatos.map((x) => (x.id === id ? { ...x, etapa } : x)) }));
+    try { await rhApi("candidato", { metodo: "PATCH", id, corpo: { etapa } }); } catch (e) { setErro(e.message); carregar(); }
+  };
+
+  if (aba === "retencao") return <RHRetencao perfil={perfil} />;
+
+  const titulos = { quadro: ["Candidatos", "Quem está no processo, por etapa. Arraste o cartão ou abra para mudar."],
+    talentos: ["Banco de talentos", "Todo mundo que já passou pelo RH — para chamar quando abrir vaga."],
+    vagas: ["Vagas", "O que aparece no Trabalhe conosco e o texto pronto para divulgar."],
+    divulgar: ["Divulgar e buscar", "Onde pôr o link, quem indica e onde procurar gente."] };
+  const [t, s] = titulos[aba] || titulos.quadro;
+  const botaoNovo = <button onClick={() => setNovo({})} className="rounded-lg px-3 py-1.5 text-[13px] font-bold text-white" style={{ background: C.roxo }}>+ Cadastrar pessoa</button>;
+
+  return (
+    <div>
+      <Cabecalho titulo={t} sub={s} acao={aba !== "vagas" ? botaoNovo : null} />
+      {erro && <p className="mb-2 rounded-lg px-3 py-2 text-[13px]" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>{erro}</p>}
+      {!dados && !erro && <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>}
+
+      {dados && aba === "quadro" && (() => {
+        const ativos = cands.filter((c) => RH_QUADRO.indexOf(c.etapa) >= 0 && (!filtroVaga || c.vaga_id === filtroVaga) && casa(c));
+        const hoje = rhHoje();
+        const entrevistasHoje = cands.filter((c) => c.entrevista_em && new Date(c.entrevista_em).toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }) === hoje);
+        const semResposta = cands.filter((c) => c.etapa === "novo" && rhDias(c.criado_em) >= 2);
+        return (
+          <>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <select className="rounded-lg border px-2 py-1.5 text-[13px] outline-none" style={inputSty} value={filtroVaga} onChange={(e) => setFiltroVaga(e.target.value)}>
+                <option value="">Todas as vagas</option>
+                {vagas.map((v) => <option key={v.id} value={v.id}>{v.titulo}{v.aberta ? "" : " (fechada)"}</option>)}
+              </select>
+              <input className="min-w-[180px] flex-1 rounded-lg border px-2.5 py-1.5 text-[13px] outline-none sm:max-w-[280px]" style={inputSty} placeholder="Procurar nome, cidade, telefone, perfil…" value={busca} onChange={(e) => setBusca(e.target.value)} />
+              {!!entrevistasHoje.length && <span className="rounded-full px-2.5 py-1 text-[12px] font-semibold" style={{ background: "#E0F2F7", color: "#0E7490" }}>{entrevistasHoje.length} entrevista{entrevistasHoje.length > 1 ? "s" : ""} hoje</span>}
+              {!!semResposta.length && <span className="rounded-full px-2.5 py-1 text-[12px] font-semibold" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>{semResposta.length} novo{semResposta.length > 1 ? "s" : ""} há 2+ dias sem retorno</span>}
+            </div>
+            {!vagas.length && !cands.length && (
+              <p className="mb-3 rounded-lg px-3 py-2 text-[13px]" style={{ background: C.roxoFraco, color: C.roxo }}>
+                Comece em <b>Vagas</b>: crie a vaga, e o link do <b>Trabalhe conosco</b> está em <b>Divulgar e buscar</b>.
+              </p>
+            )}
+            <div className="flex gap-3 overflow-x-auto pb-2">
+              {RH_QUADRO.map((et) => {
+                const col = ativos.filter((c) => c.etapa === et);
+                return (
+                  <div key={et} className="w-[250px] shrink-0 rounded-xl p-2" style={{ background: C.bg }}
+                    onDragOver={(e) => e.preventDefault()} onDrop={(e) => { const id = e.dataTransfer.getData("text/rh"); if (id) mover(id, et); }}>
+                    <div className="mb-2 flex items-center justify-between px-1">
+                      <b className="text-[12.5px]" style={{ color: RH_COR[et] }}>{RH_ROT[et]}</b>
+                      <span className="text-[12px]" style={{ color: C.mute }}>{col.length}</span>
+                    </div>
+                    <div className="space-y-2">
+                      {col.map((c) => <RHCartao key={c.id} c={c} vaga={vagaDe(c.vaga_id)} onAbrir={setAberto} />)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        );
+      })()}
+
+      {dados && aba === "talentos" && <RHTalentos cands={cands} vagas={vagas} casa={casa} busca={busca} setBusca={setBusca} onAbrir={setAberto} />}
+      {dados && aba === "vagas" && <RHVagas vagas={vagas} cands={cands} onMudou={carregar} />}
+      {dados && aba === "divulgar" && <RHDivulgar perfil={perfil} vagas={vagas} cands={cands} />}
+
+      {aberto && <RHCandidato id={aberto} vagas={vagas} onFechar={() => setAberto(null)} onMudou={mudou} />}
+      {novo && <RHNovoCandidato vagas={vagas} inicial={novo} onFechar={() => setNovo(null)}
+        onCriado={(c) => { setNovo(null); carregar(); if (c && c.id) setAberto(c.id); }} />}
+    </div>
+  );
+}
+
+function RHTalentos({ cands, vagas, casa, busca, setBusca, onAbrir }) {
+  const [etapa, setEtapa] = useState("todos"); const [disc, setDisc] = useState(""); const [origem, setOrigem] = useState(""); const [cidade, setCidade] = useState("");
+  const GRUPOS = { todos: null, andamento: RH_QUADRO.slice(0, 5), banco: ["banco"], contratado: ["contratado"], fora: ["reprovado", "desistiu"] };
+  const lista = cands.filter((c) => (!GRUPOS[etapa] || GRUPOS[etapa].indexOf(c.etapa) >= 0) && (!disc || String(c.disc_perfil || "").indexOf(disc) >= 0)
+    && (!origem || c.origem === origem) && (!cidade || String(c.cidade || "").toLowerCase().indexOf(cidade.toLowerCase()) >= 0) && casa(c));
+  const sel = "rounded-lg border px-2 py-1.5 text-[13px] outline-none";
+  return (
+    <div>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        {[["todos", "Todos"], ["banco", "Banco"], ["andamento", "Em processo"], ["contratado", "Contratados"], ["fora", "Não seguiram"]].map(([k, r]) => (
+          <button key={k} onClick={() => setEtapa(k)} className="rounded-full border px-3 py-1 text-[12.5px] font-semibold"
+            style={etapa === k ? { background: C.roxo, borderColor: C.roxo, color: "#fff" } : { background: C.paper, borderColor: C.line }}>
+            {r} · {cands.filter((c) => !GRUPOS[k] || GRUPOS[k].indexOf(c.etapa) >= 0).length}</button>
+        ))}
+      </div>
+      <div className="mb-3 flex flex-wrap gap-2">
+        <input className="min-w-[180px] flex-1 rounded-lg border px-2.5 py-1.5 text-[13px] outline-none sm:max-w-[260px]" style={inputSty} placeholder="Procurar…" value={busca} onChange={(e) => setBusca(e.target.value)} />
+        <select className={sel} style={inputSty} value={disc} onChange={(e) => setDisc(e.target.value)}>
+          <option value="">Qualquer perfil</option>{["D", "I", "S", "C"].map((f) => <option key={f} value={f}>{f} · {RH_DISC[f][0]}</option>)}
+        </select>
+        <select className={sel} style={inputSty} value={origem} onChange={(e) => setOrigem(e.target.value)}>
+          <option value="">Qualquer origem</option>{RH_ORIGENS.map(([k, r]) => <option key={k} value={k}>{r}</option>)}
+        </select>
+        <input className={sel} style={{ ...inputSty, width: 140 }} placeholder="Cidade" value={cidade} onChange={(e) => setCidade(e.target.value)} />
+      </div>
+      {!lista.length ? <p className="text-[13px]" style={{ color: C.mute }}>Ninguém com esses filtros.</p> : (
+        <div className="overflow-x-auto rounded-xl border" style={{ borderColor: C.line, background: C.paper }}>
+          <table className="w-full text-[13px]">
+            <thead><tr className="text-left text-[11px] uppercase tracking-wider" style={{ color: C.mute }}>
+              {["Nome", "Etapa", "Vaga", "DISC", "Nota", "Cidade", "Idade", "Origem", "Entrou"].map((h) => <th key={h} className="px-2.5 py-2 font-semibold">{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {lista.map((c) => (
+                <tr key={c.id} onClick={() => onAbrir(c.id)} className="cursor-pointer border-t hover:bg-[#FAF8FC]" style={{ borderColor: C.line }}>
+                  <td className="px-2.5 py-2 font-semibold">{c.nome}{c.anexos > 0 ? " 📎" : ""}</td>
+                  <td className="px-2.5 py-2" style={{ color: RH_COR[c.etapa] }}>{RH_ROT[c.etapa]}</td>
+                  <td className="px-2.5 py-2">{(vagas.find((v) => v.id === c.vaga_id) || {}).titulo || "—"}</td>
+                  <td className="px-2.5 py-2"><RHSeloDisc c={c} vaga={vagas.find((v) => v.id === c.vaga_id)} /></td>
+                  <td className="px-2.5 py-2" style={{ color: ESTRELA }}>{c.nota ? "★".repeat(c.nota) : ""}</td>
+                  <td className="px-2.5 py-2">{c.cidade || "—"}</td>
+                  <td className="px-2.5 py-2">{rhIdade(c.nascimento) != null ? rhIdade(c.nascimento) : "—"}</td>
+                  <td className="px-2.5 py-2">{RH_ORIGEM[c.origem] || c.origem}</td>
+                  <td className="px-2.5 py-2" style={{ color: C.mute }}>{rhData(c.criado_em)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const rhTextoVaga = (v) => [
+  `A Vaapty Joinville está contratando: *${v.titulo}*`, v.modalidade, "",
+  v.descricao, v.requisitos ? `\nO que procuramos:\n${v.requisitos}` : "", v.oferecemos ? `\nO que oferecemos:\n${v.oferecemos}` : "",
+  `\nCandidate-se aqui: ${rhLink(`vaga=${v.id}&o=whatsapp`)}`,
+].filter((x) => x != null && x !== false).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+
+function RHVagas({ vagas, cands, onMudou }) {
+  const [ed, setEd] = useState(null); const [erro, setErro] = useState(""); const [copiado, setCopiado] = useState("");
+  const salvar = async () => {
+    setErro("");
+    try { await rhApi("vaga", { metodo: ed.id ? "PATCH" : "POST", id: ed.id, corpo: ed }); setEd(null); onMudou(); }
+    catch (e) { setErro(e.message); }
+  };
+  const alternar = async (v, k) => { try { await rhApi("vaga", { metodo: "PATCH", id: v.id, corpo: { [k]: !v[k] } }); onMudou(); } catch (e) { setErro(e.message); } };
+  const apagar = async (v) => {
+    if (!window.confirm(`Apagar a vaga "${v.titulo}"? Quem se candidatou continua no banco de talentos.`)) return;
+    try { await rhApi("vaga", { metodo: "DELETE", id: v.id }); onMudou(); } catch (e) { setErro(e.message); }
+  };
+  const copia = async (k, t) => { await rhCopiar(t); setCopiado(k); setTimeout(() => setCopiado(""), 1800); };
+  return (
+    <div>
+      <div className="mb-3"><button onClick={() => setEd({ titulo: "", setor: "negociacao", aberta: true, publica: true, modalidade: "Presencial em Joinville" })}
+        className="rounded-lg px-3 py-1.5 text-[13px] font-bold text-white" style={{ background: C.roxo }}>+ Nova vaga</button></div>
+      {erro && <p className="mb-2 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+      {!vagas.length ? <p className="text-[13px]" style={{ color: C.mute }}>Nenhuma vaga ainda. Sem vaga, o Trabalhe conosco recebe cadastros para o banco de talentos.</p> : (
+        <div className="grid gap-3 md:grid-cols-2">
+          {vagas.map((v) => {
+            const dela = cands.filter((c) => c.vaga_id === v.id);
+            const n = (et) => dela.filter((c) => et.indexOf(c.etapa) >= 0).length;
+            return (
+              <div key={v.id} className="rounded-xl border p-3" style={{ background: C.paper, borderColor: C.line, opacity: v.aberta ? 1 : 0.65 }}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0"><b className="text-[15px]">{v.titulo}</b>
+                    <div className="text-[12px]" style={{ color: C.mute }}>{(RH_SETORES.find(([k]) => k === v.setor) || [])[1]}{v.modalidade ? ` · ${v.modalidade}` : ""}{v.perfil_disc ? ` · perfil ${v.perfil_disc}` : ""}</div></div>
+                  <span className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold" style={v.aberta ? { background: "#E8F5EE", color: C.verde } : { background: C.bg, color: C.mute }}>{v.aberta ? (v.publica ? "aberta · no site" : "aberta · só interna") : "fechada"}</span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-x-3 text-[12px]" style={{ color: C.mute }}>
+                  <span><b style={{ color: C.ink }}>{dela.length}</b> candidatos</span>
+                  <span><b style={{ color: C.ink }}>{n(["entrevista", "teste", "proposta"])}</b> em entrevista/teste</span>
+                  <span><b style={{ color: C.verde }}>{n(["contratado"])}</b> contratados</span>
+                </div>
+                <div className="mt-2.5 flex flex-wrap gap-2 text-[12px] font-semibold">
+                  <button onClick={() => copia("l" + v.id, rhLink(`vaga=${v.id}`))} style={{ color: C.roxo }}>{copiado === "l" + v.id ? "copiado ✓" : "copiar link"}</button>
+                  <button onClick={() => copia("t" + v.id, rhTextoVaga(v))} style={{ color: C.roxo }}>{copiado === "t" + v.id ? "copiado ✓" : "copiar texto para divulgar"}</button>
+                  <button onClick={() => setEd({ ...v })} style={{ color: C.ink }}>editar</button>
+                  <button onClick={() => alternar(v, "aberta")} style={{ color: C.ink }}>{v.aberta ? "fechar" : "reabrir"}</button>
+                  {v.aberta && <button onClick={() => alternar(v, "publica")} style={{ color: C.ink }}>{v.publica ? "tirar do site" : "pôr no site"}</button>}
+                  <button onClick={() => apagar(v)} style={{ color: C.mute }}>apagar</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {ed && (
+        <RHJanela titulo={ed.id ? "Editar vaga" : "Nova vaga"} onFechar={() => setEd(null)} largura={620}>
+          <div className="grid gap-x-3 sm:grid-cols-2">
+            <div className="sm:col-span-2"><label className={rhRot} style={{ color: C.mute }}>Título *</label>
+              <input className={rhInput} style={inputSty} value={ed.titulo || ""} placeholder="ex.: Negociador(a) de veículos" onChange={(e) => setEd({ ...ed, titulo: e.target.value })} /></div>
+            <div><label className={rhRot} style={{ color: C.mute }}>Setor</label>
+              <select className={rhInput} style={inputSty} value={ed.setor} onChange={(e) => setEd({ ...ed, setor: e.target.value })}>{RH_SETORES.map(([k, r]) => <option key={k} value={k}>{r}</option>)}</select></div>
+            <div><label className={rhRot} style={{ color: C.mute }}>Modalidade</label>
+              <input className={rhInput} style={inputSty} value={ed.modalidade || ""} onChange={(e) => setEd({ ...ed, modalidade: e.target.value })} /></div>
+          </div>
+          {[["descricao", "O que a pessoa vai fazer"], ["requisitos", "O que procuramos"], ["oferecemos", "O que oferecemos (remuneração, horário, benefícios)"]].map(([k, r]) => (
+            <div key={k}><label className={rhRot} style={{ color: C.mute }}>{r}</label>
+              <textarea rows={3} className={rhInput} style={inputSty} value={ed[k] || ""} onChange={(e) => setEd({ ...ed, [k]: e.target.value })} /></div>
+          ))}
+          <label className={rhRot} style={{ color: C.mute }}>Perfil DISC que costuma dar certo nesta função</label>
+          <div className="flex flex-wrap gap-1.5">
+            {["", "D", "I", "S", "C", "DI", "ID", "IS", "SI", "SC", "CS", "DC"].map((p) => (
+              <button key={p || "nenhum"} onClick={() => setEd({ ...ed, perfil_disc: p || null })} className="rounded-full border px-2.5 py-1 text-[12px] font-semibold"
+                style={(ed.perfil_disc || "") === p ? { background: C.roxo, borderColor: C.roxo, color: "#fff" } : { borderColor: C.line }}>{p || "não comparar"}</button>
+            ))}
+          </div>
+          <p className="mt-1 text-[11.5px]" style={{ color: C.mute }}>Na loja: negociação costuma ser DI, pré-vendas IS, administrativo SC. É uma referência para a conversa, não um filtro.</p>
+          <label className="mt-3 flex items-center gap-2 text-[13px]"><input type="checkbox" checked={!!ed.publica} onChange={(e) => setEd({ ...ed, publica: e.target.checked })} /> Mostrar no Trabalhe conosco</label>
+          {erro && <p className="mt-2 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+          <div className="mt-3 flex justify-end"><button onClick={salvar} disabled={!String(ed.titulo || "").trim()} className="rounded-lg px-4 py-2 text-[13.5px] font-bold text-white disabled:opacity-40" style={{ background: C.roxo }}>Gravar</button></div>
+        </RHJanela>
+      )}
+    </div>
+  );
+}
+
+/* "PROCURAR PESSOAS INTERESSADAS": link por canal (a origem diz onde vale divulgar), link de indicação de cada um da
+ * equipe, e a busca ativa — links prontos, não raspagem (a régua dos canais de preço, decisão 8). */
+function RHDivulgar({ perfil, vagas, cands }) {
+  const [copiado, setCopiado] = useState(""); const [quem, setQuem] = useState((perfil && perfil.nome) || ""); const [termo, setTermo] = useState("vendedor");
+  const copia = async (k, t) => { await rhCopiar(t); setCopiado(k); setTimeout(() => setCopiado(""), 1800); };
+  const abertas = vagas.filter((v) => v.aberta && v.publica);
+  const enc = encodeURIComponent;
+  const canais = [["instagram", "Instagram (bio ou story)"], ["facebook", "Facebook / grupos"], ["whatsapp", "WhatsApp / status"], ["linkedin", "LinkedIn"], ["indeed", "Indeed e sites de vaga"]];
+  const busca = [
+    ["LinkedIn — pessoas", `https://www.linkedin.com/search/results/people/?keywords=${enc(`${termo} Joinville`)}`],
+    ["Google — perfis do LinkedIn", `https://www.google.com/search?q=${enc(`site:linkedin.com/in ${termo} Joinville`)}`],
+    ["Facebook — grupos de vagas", `https://www.facebook.com/search/groups/?q=${enc("vagas Joinville")}`],
+    ["Instagram — #vagasjoinville", "https://www.instagram.com/explore/tags/vagasjoinville/"],
+    ["Indeed — vagas parecidas (salário da concorrência)", `https://br.indeed.com/jobs?q=${enc(termo)}&l=${enc("Joinville, SC")}`],
+  ];
+  // De onde vem quem chega longe: candidatos por origem, e quantos passaram da triagem e foram contratados.
+  const porOrigem = RH_ORIGENS.map(([k, r]) => {
+    const da = cands.filter((c) => c.origem === k);
+    return { k, r, n: da.length, entrevista: da.filter((c) => ["entrevista", "teste", "proposta", "contratado"].indexOf(c.etapa) >= 0).length, contratado: da.filter((c) => c.etapa === "contratado").length };
+  }).filter((x) => x.n);
+  const Linha = ({ k, rot, url }) => (
+    <div className="flex flex-wrap items-center gap-2 border-t py-2 text-[13px]" style={{ borderColor: C.line }}>
+      <span className="w-[200px] font-semibold">{rot}</span>
+      <span className="min-w-0 flex-1 truncate text-[12px]" style={{ color: C.mute, fontFamily: F.mono }}>{url}</span>
+      <button onClick={() => copia(k, url)} className="text-[12px] font-semibold" style={{ color: C.roxo }}>{copiado === k ? "copiado ✓" : "copiar"}</button>
+    </div>
+  );
+  return (
+    <div className="grid gap-4 lg:grid-cols-2">
+      <div className="rounded-xl border p-3" style={{ background: C.paper, borderColor: C.line }}>
+        <b className="text-[14px]">O link do Trabalhe conosco</b>
+        <p className="text-[12.5px]" style={{ color: C.mute }}>{abertas.length ? `${abertas.length} vaga${abertas.length > 1 ? "s" : ""} no site.` : "Sem vaga no site: quem entrar vai para o banco de talentos."} Cada canal tem o seu link, para saber de onde vem quem dá certo.</p>
+        <div className="mt-2">
+          <Linha k="geral" rot="Link geral" url={rhLink("")} />
+          {canais.map(([k, r]) => <Linha key={k} k={k} rot={r} url={rhLink(`o=${k}`)} />)}
+        </div>
+        <a href={rhLink("")} target="_blank" rel="noreferrer" className="mt-2 inline-block text-[12.5px] font-semibold" style={{ color: C.roxo }}>ver a página como o candidato vê →</a>
+      </div>
+
+      <div className="rounded-xl border p-3" style={{ background: C.paper, borderColor: C.line }}>
+        <b className="text-[14px]">Indicação da equipe</b>
+        <p className="text-[12.5px]" style={{ color: C.mute }}>Quem trabalha aqui conhece gente boa. O link já leva o nome de quem indicou, e a indicação aparece no candidato.</p>
+        <div className="mt-2 flex gap-2">
+          <input className="flex-1 rounded-lg border px-2.5 py-1.5 text-[13px] outline-none" style={inputSty} value={quem} onChange={(e) => setQuem(e.target.value)} placeholder="Nome de quem indica" />
+          <button onClick={() => copia("ind", `Estamos contratando na Vaapty Joinville! Conhece alguém bom? Manda este link: ${rhLink(`o=indicacao&ind=${enc(quem.trim())}`)}`)} disabled={!quem.trim()}
+            className="rounded-lg px-3 text-[12.5px] font-bold text-white disabled:opacity-40" style={{ background: C.roxo }}>{copiado === "ind" ? "copiado ✓" : "copiar mensagem"}</button>
+        </div>
+      </div>
+
+      <div className="rounded-xl border p-3" style={{ background: C.paper, borderColor: C.line }}>
+        <b className="text-[14px]">Busca ativa</b>
+        <p className="text-[12.5px]" style={{ color: C.mute }}>Abra, ache a pessoa e cadastre com "+ Cadastrar pessoa" (origem: busca ativa). Depois mande o link do DISC pelo WhatsApp.</p>
+        <div className="mt-2 flex items-center gap-2">
+          <span className="text-[12px]" style={{ color: C.mute }}>Procurar por</span>
+          <input className="flex-1 rounded-lg border px-2.5 py-1.5 text-[13px] outline-none" style={inputSty} value={termo} onChange={(e) => setTermo(e.target.value)} />
+        </div>
+        <div className="mt-1.5 flex flex-wrap gap-2">
+          {vagas.filter((v) => v.aberta).slice(0, 4).map((v) => <button key={v.id} onClick={() => setTermo(v.titulo.replace(/\(.*?\)/g, "").trim())} className="rounded-full border px-2 py-0.5 text-[11.5px]" style={{ borderColor: C.line }}>{v.titulo}</button>)}
+        </div>
+        <div className="mt-2 space-y-1.5">
+          {busca.map(([r, u]) => <a key={r} href={u} target="_blank" rel="noreferrer" className="block rounded-lg border px-3 py-2 text-[13px] font-semibold" style={{ borderColor: C.line, color: C.roxo }}>{r} →</a>)}
+        </div>
+      </div>
+
+      <div className="rounded-xl border p-3" style={{ background: C.paper, borderColor: C.line }}>
+        <b className="text-[14px]">De onde vem quem dá certo</b>
+        {!porOrigem.length ? <p className="mt-1 text-[12.5px]" style={{ color: C.mute }}>Ainda não há candidatos.</p> : (
+          <table className="mt-2 w-full text-[13px]">
+            <thead><tr className="text-left text-[11px] uppercase tracking-wider" style={{ color: C.mute }}><th className="py-1">Origem</th><th>Candidatos</th><th>Entrevista+</th><th>Contratados</th></tr></thead>
+            <tbody>{porOrigem.map((x) => (
+              <tr key={x.k} className="border-t" style={{ borderColor: C.line }}><td className="py-1.5 font-semibold">{x.r}</td><td>{x.n}</td>
+                <td>{x.entrevista} <span style={{ color: C.mute }}>({Math.round((x.entrevista / x.n) * 100)}%)</span></td>
+                <td style={{ color: C.verde }}>{x.contratado}</td></tr>
+            ))}</tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* A RETENÇÃO. Reter é perceber antes: quem está há muito tempo sem uma conversa, quem está no fim da experiência, o
+ * humor que caiu, o risco que alguém anotou. A lista é a ficha do colaborador (0079), lida pela `rh_equipe()` — só
+ * nome, função e datas; CPF e conta continuam do financeiro. */
+const RH_TIPOS_ACOMP = [["conversa", "Conversa 1:1"], ["feedback", "Feedback"], ["pulso", "Pulso (como está)"], ["elogio", "Elogio / reconhecimento"], ["alerta", "Alerta"], ["desligamento", "Entrevista de desligamento"]];
+const RH_HUMOR = ["", "😞", "🙁", "😐", "🙂", "😄"];
+
+function RHRetencao({ perfil }) {
+  const [d, setD] = useState(null); const [erro, setErro] = useState(""); const [reg, setReg] = useState(null); const [ver, setVer] = useState(null); const [aviso, setAviso] = useState("");
+  const carregar = () => rhApi("equipe").then(setD).catch((e) => setErro(e.message));
+  useEffect(() => { carregar(); }, []);
+  const hoje = rhHoje();
+  const pessoas = ((d && d.pessoas) || []).map((p) => {
+    const ac = ((d && d.acompanhamentos) || []).filter((a) => a.colaborador_id === p.id);
+    const ult = ac[0];
+    const humor = (ac.find((a) => a.humor != null) || {}).humor;
+    const enps = (ac.find((a) => a.enps != null) || {}).enps;
+    const risco = (ac.find((a) => a.risco) || {}).risco;
+    const proximo = (ac.find((a) => a.proximo_em) || {}).proximo_em;
+    const disc = ((d && d.discs) || []).find((x) => x.colaborador_id === p.id);
+    const casa = rhDias(p.inicio_em);
+    const alertas = [];
+    if (!p.desligado_em) {
+      const semConversa = ult ? rhDias(ult.em) : null;
+      if (!ult) alertas.push(["nunca teve uma conversa registrada", C.laranja]);
+      else if (semConversa > 30) alertas.push([`${semConversa} dias sem conversa`, C.laranja]);
+      if (proximo && proximo <= hoje) alertas.push([`conversa marcada para ${rhData(proximo).slice(0, 5)}`, C.laranja]);
+      if (risco === "alto") alertas.push(["risco de saída alto", "#9F1239"]);
+      else if (risco === "medio") alertas.push(["risco de saída médio", AMARELO.texto]);
+      if (humor != null && humor <= 2) alertas.push(["humor baixo no último pulso", "#9F1239"]);
+      if (casa != null && casa < 90) {
+        const e45 = rhMaisDias(p.inicio_em, 45), e90 = rhMaisDias(p.inicio_em, 90);
+        alertas.push([`experiência: ${casa < 45 ? `45 dias em ${rhData(e45).slice(0, 5)}` : `90 dias em ${rhData(e90).slice(0, 5)}`}`, "#0E7490"]);
+      }
+      [3, 6, 12, 24, 36, 48, 60].forEach((m) => { const dd = casa != null ? casa - Math.round(m * 30.44) : null; if (dd != null && dd >= -7 && dd <= 0) alertas.push([`${m < 12 ? `${m} meses` : `${m / 12} ano${m > 12 ? "s" : ""}`} de casa em ${-dd} d`, C.verde]); });
+    }
+    return { ...p, ac, ult, humor, enps, risco, proximo, disc, casa, alertas };
+  });
+  const ativos = pessoas.filter((p) => !p.desligado_em).sort((a, b) => b.alertas.length - a.alertas.length);
+  const saiu = pessoas.filter((p) => p.desligado_em).sort((a, b) => String(b.desligado_em).localeCompare(String(a.desligado_em)));
+  const comEnps = ativos.filter((p) => p.enps != null);
+  const enps = comEnps.length ? Math.round(((comEnps.filter((p) => p.enps >= 9).length - comEnps.filter((p) => p.enps <= 6).length) / comEnps.length) * 100) : null;
+  const umAno = rhMaisDias(hoje, -365);
+  const saidas12 = saiu.filter((p) => String(p.desligado_em) >= umAno).length;
+  const turnover = ativos.length ? Math.round((saidas12 / (ativos.length + saidas12 / 2)) * 100) : null;
+  const casaMedia = ativos.filter((p) => p.casa != null).length ? Math.round(ativos.filter((p) => p.casa != null).reduce((s, p) => s + p.casa, 0) / ativos.filter((p) => p.casa != null).length) : null;
+
+  const mandarDisc = async (p) => {
+    setErro(""); setAviso("");
+    try {
+      const r = await rhApi("disc-colaborador", { metodo: "POST", corpo: { colaborador_id: p.id } });
+      const msg = `Oi, ${String(p.nome || "").split(" ")[0]}! Queremos te conhecer melhor para liderar do jeito que funciona para você. Responde este teste rápido de perfil (5 min)? ${location.origin}/trabalhe.html#t=${r.token}`;
+      if (p.telefone) window.open(zap(p.telefone, msg), "_blank"); else { await rhCopiar(msg); setAviso(`Mensagem para ${p.nome} copiada (a ficha não tem telefone).`); }
+      carregar();
+    } catch (e) { setErro(e.message); }
+  };
+  const gravar = async () => {
+    setErro("");
+    try { await rhApi("acompanhamento", { metodo: "POST", corpo: reg }); setReg(null); carregar(); } catch (e) { setErro(e.message); }
+  };
+  const apagarAc = async (a) => { if (!window.confirm("Apagar este registro?")) return; await rhApi("acompanhamento", { metodo: "DELETE", id: a.id }).catch(() => {}); carregar(); };
+
+  const Kpi = ({ rot, v, sub }) => (
+    <div className="rounded-xl border px-3 py-2" style={{ background: C.paper, borderColor: C.line }}>
+      <div className="text-[11px] uppercase tracking-wider" style={{ color: C.mute }}>{rot}</div>
+      <div className="text-[20px] font-extrabold">{v}</div>{sub && <div className="text-[11.5px]" style={{ color: C.mute }}>{sub}</div>}
+    </div>
+  );
+  return (
+    <div>
+      <Cabecalho titulo="Retenção" sub="A equipe: quem precisa de uma conversa agora, a experiência, o pulso e o risco de saída." />
+      {erro && <p className="mb-2 rounded-lg px-3 py-2 text-[13px]" style={{ background: AMARELO.fundo, color: AMARELO.texto }}>{erro}</p>}
+      {aviso && <p className="mb-2 text-[13px]" style={{ color: C.verde }}>{aviso}</p>}
+      {!d ? (!erro && <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p>) : (
+        <>
+          <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <Kpi rot="Na equipe" v={ativos.length} sub={`${ativos.filter((p) => p.alertas.some((a) => a[1] === C.laranja || a[1] === "#9F1239")).length} pedindo atenção`} />
+            <Kpi rot="Tempo médio de casa" v={rhTempo(casaMedia)} />
+            <Kpi rot="eNPS da equipe" v={enps == null ? "—" : enps} sub={comEnps.length ? `${comEnps.length} responderam` : "pergunte no pulso"} />
+            <Kpi rot="Saídas em 12 meses" v={saidas12} sub={turnover != null ? `rotatividade ≈ ${turnover}%` : ""} />
+          </div>
+          {!pessoas.length && (
+            <p className="rounded-lg px-3 py-2 text-[13px]" style={{ background: C.roxoFraco, color: C.roxo }}>
+              A retenção lê a ficha do colaborador (Gestão → Equipe, clicando na pessoa). Sem ficha com a data de início, não há o que acompanhar.
+            </p>
+          )}
+          <div className="space-y-2">
+            {ativos.map((p) => (
+              <div key={p.id} className="rounded-xl border p-3" style={{ background: C.paper, borderColor: C.line }}>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <b className="text-[14px]">{p.nome || "—"}</b>
+                  <span className="text-[12px]" style={{ color: C.mute }}>{p.funcao || "sem função"}{p.tipo_contrato ? ` · ${p.tipo_contrato.toUpperCase()}` : ""} · {p.inicio_em ? `${rhTempo(p.casa)} de casa (desde ${rhData(p.inicio_em)})` : "sem data de início"}</span>
+                  {p.disc && p.disc.disc_perfil ? <RHSeloDisc c={p.disc} /> : null}
+                  {p.humor != null && <span title="último pulso">{RH_HUMOR[p.humor]}</span>}
+                  {p.enps != null && <span className="text-[11.5px]" style={{ color: C.mute }}>eNPS {p.enps}</span>}
+                  <span className="ml-auto flex gap-2 text-[12px] font-semibold">
+                    <button onClick={() => setReg({ colaborador_id: p.id, nome: p.nome, tipo: "conversa", humor: "", enps: "", risco: p.risco || "", texto: "", proximo_em: rhMaisDias(hoje, 30) })} style={{ color: C.roxo }}>+ registrar conversa</button>
+                    {!(p.disc && p.disc.disc_perfil) && <button onClick={() => mandarDisc(p)} style={{ color: C.ink }}>mandar DISC</button>}
+                    {!!p.ac.length && <button onClick={() => setVer(ver === p.id ? null : p.id)} style={{ color: C.mute }}>{ver === p.id ? "esconder" : `histórico (${p.ac.length})`}</button>}
+                  </span>
+                </div>
+                {!!p.alertas.length && <div className="mt-1.5 flex flex-wrap gap-1.5">{p.alertas.map(([t, cor]) => <span key={t} className="rounded-full px-2 py-0.5 text-[11.5px] font-semibold" style={{ background: C.bg, color: cor }}>{t}</span>)}</div>}
+                {p.ult && <p className="mt-1 text-[12px]" style={{ color: C.mute }}>Última: {RH_TIPOS_ACOMP.find(([k]) => k === p.ult.tipo)[1]} em {rhData(p.ult.em)}{p.ult.por_nome ? ` com ${p.ult.por_nome}` : ""}{p.ult.texto ? ` — ${p.ult.texto.slice(0, 140)}${p.ult.texto.length > 140 ? "…" : ""}` : ""}</p>}
+                {ver === p.id && (
+                  <div className="mt-2 space-y-1.5">
+                    {p.ac.map((a) => (
+                      <div key={a.id} className="rounded-lg px-2.5 py-1.5 text-[12.5px]" style={{ background: C.bg }}>
+                        <span style={{ color: C.mute }}>{rhData(a.em)} · {RH_TIPOS_ACOMP.find(([k]) => k === a.tipo)[1]}{a.por_nome ? ` · ${a.por_nome}` : ""}
+                          {a.humor != null ? ` · ${RH_HUMOR[a.humor]}` : ""}{a.enps != null ? ` · eNPS ${a.enps}` : ""}{a.risco ? ` · risco ${a.risco}` : ""}</span>
+                        <button onClick={() => apagarAc(a)} className="float-right text-[11px]" style={{ color: C.mute }}>apagar</button>
+                        {a.texto && <div className="whitespace-pre-wrap">{a.texto}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          {!!saiu.length && (
+            <details className="mt-4">
+              <summary className="cursor-pointer text-[13px] font-semibold" style={{ color: C.mute }}>Quem saiu ({saiu.length}) — por quê</summary>
+              <div className="mt-2 space-y-1">
+                {saiu.map((p) => <div key={p.id} className="text-[12.5px]"><b>{p.nome}</b> <span style={{ color: C.mute }}>· {p.funcao || "—"} · {rhData(p.inicio_em)} a {rhData(p.desligado_em)} ({rhTempo(rhDias(p.inicio_em, p.desligado_em))})</span>{p.motivo_desligamento ? ` — ${p.motivo_desligamento}` : ""}</div>)}
+              </div>
+            </details>
+          )}
+        </>
+      )}
+      {reg && (
+        <RHJanela titulo={`Registrar · ${reg.nome || ""}`} onFechar={() => setReg(null)} largura={560}>
+          <label className={rhRot} style={{ color: C.mute }}>Tipo</label>
+          <div className="flex flex-wrap gap-1.5">{RH_TIPOS_ACOMP.map(([k, r]) => (
+            <button key={k} onClick={() => setReg({ ...reg, tipo: k })} className="rounded-full border px-2.5 py-1 text-[12px] font-semibold"
+              style={reg.tipo === k ? { background: C.roxo, borderColor: C.roxo, color: "#fff" } : { borderColor: C.line }}>{r}</button>))}</div>
+          <label className={rhRot} style={{ color: C.mute }}>Como a pessoa está</label>
+          <div className="flex gap-1">{[1, 2, 3, 4, 5].map((n) => (
+            <button key={n} onClick={() => setReg({ ...reg, humor: reg.humor === n ? "" : n })} className="rounded-lg border px-2 py-1 text-[20px]"
+              style={{ borderColor: reg.humor === n ? C.roxo : C.line, background: reg.humor === n ? C.roxoFraco : "#fff" }}>{RH_HUMOR[n]}</button>))}</div>
+          <label className={rhRot} style={{ color: C.mute }}>De 0 a 10, indicaria a Vaapty para um amigo trabalhar?</label>
+          <div className="flex flex-wrap gap-1">{Array.from({ length: 11 }, (_, n) => (
+            <button key={n} onClick={() => setReg({ ...reg, enps: reg.enps === n ? "" : n })} className="h-8 w-8 rounded-lg border text-[12.5px] font-semibold"
+              style={reg.enps === n ? { background: n >= 9 ? C.verde : n <= 6 ? C.laranja : ESTRELA, color: "#fff", borderColor: "transparent" } : { borderColor: C.line }}>{n}</button>))}</div>
+          <label className={rhRot} style={{ color: C.mute }}>Risco de saída (a sua leitura)</label>
+          <div className="flex gap-1.5">{[["", "não sei"], ["baixo", "baixo"], ["medio", "médio"], ["alto", "alto"]].map(([k, r]) => (
+            <button key={k || "x"} onClick={() => setReg({ ...reg, risco: k })} className="rounded-full border px-2.5 py-1 text-[12px] font-semibold"
+              style={reg.risco === k ? { background: C.roxo, borderColor: C.roxo, color: "#fff" } : { borderColor: C.line }}>{r}</button>))}</div>
+          <label className={rhRot} style={{ color: C.mute }}>O que foi conversado</label>
+          <textarea rows={4} className={rhInput} style={inputSty} value={reg.texto} onChange={(e) => setReg({ ...reg, texto: e.target.value })} placeholder="O que está indo bem, o que incomoda, o que combinamos…" />
+          <label className={rhRot} style={{ color: C.mute }}>Próxima conversa</label>
+          <input type="date" className={rhInput} style={{ ...inputSty, maxWidth: 180 }} value={reg.proximo_em || ""} onChange={(e) => setReg({ ...reg, proximo_em: e.target.value })} />
+          {erro && <p className="mt-2 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
+          <div className="mt-3 flex justify-end"><button onClick={gravar} className="rounded-lg px-4 py-2 text-[13.5px] font-bold text-white" style={{ background: C.roxo }}>Gravar</button></div>
+        </RHJanela>
+      )}
+    </div>
+  );
+}
+
+
 function App() {
   const [estado, setEstado] = useState("carregando");   // carregando | fora | esperando | dentro | erro
   const [perfil, setPerfil] = useState(null);
@@ -36947,6 +37801,8 @@ function App() {
       {tela === "remuneracao" && <TelaPerfisRemuneracao />}
       {tela === "empresa" && <TelaEmpresa perfil={perfil} />}
       {tela === "suporte" && <TelaSuporte />}
+      {/^rh_/.test(tela) && perfil && (perfil.rh || perfil.papel === "gerente") &&
+        <TelaRH key={tela} perfil={perfil} aba={tela.slice(3)} />}
       {tela === "adm_whats" && <TelaConversas key="adm" operacao />}
       {tela === "whats_neg" && <TelaConversas key="neg" negociacao aoAbrir={abrir} alvo={conversaAlvoNeg} aoConsumirAlvo={() => setConversaAlvoNeg(null)} />}
       {tela === "adm_transf" && <TelaTransferencias />}
