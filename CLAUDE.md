@@ -6963,5 +6963,17 @@ de cada papel (como na auditoria da decisão 9), antes de publicar. **A 0167 (um
 `franquia_isola` por tabela) passou no ensaio e foi desfeita no ar em 23/11/2026**: as Pendências do financeiro
 estouraram o tempo, porque `minha_franquia()` consulta `perfil` e, dentro das subconsultas correlacionadas da
 `fin_pendencias`, roda por linha. Volta só com a franquia lida barata (no JWT, por Custom Access Token Hook, ou
-guardada na transação) e com a `fin_pendencias` medida como gerente antes. **Lojista do Shinkai terá conta neste Auth**:
+guardada na transação) e com a `fin_pendencias` medida como gerente antes.
+
+**A franquia vai no login desde 23/11/2026 (0168).** `custom_access_token_hook` põe `franquia_id` nas claims de todo
+login emitido ou renovado (ligado em Authentication → Auth Hooks → Customize Access Token); quem não tem perfil sai
+sem a claim. `minha_franquia()` lê o login primeiro e só cai no `perfil` para token antigo. O gancho nunca derruba o
+login (erro vira login sem a claim). Conferido: o login renovado traz a franquia e o ERP abre normal. **A separação
+ainda NÃO está ligada.** Ensaio da 0169 (política restritiva lendo `auth.jwt()`), desfeito no fim, como gerente:
+`fin_pendencias` 0,8 s sem a regra e 2,5 s com ela — e os MESMOS 2,5 s com a franquia escrita fixa na regra. Ou seja,
+ler o login não custa nada; os 1,7 s a mais vêm de a regra existir (o plano das subconsultas muda). Antes de ligar:
+achar esse custo (EXPLAIN das consultas da `fin_pendencias` com e sem a regra; suspeita: o índice `<t>_franquia_idx`,
+que tem um valor só, atraindo o planejador) e medir as outras telas pesadas (DRE, Rentabilidade, funil). O ensaio
+precisa de `set local lock_timeout`/`statement_timeout` curtos: criar política trava a tabela, e o primeiro ensaio
+sem eles deu impasse de travas com o ERP em uso. **Lojista do Shinkai terá conta neste Auth**:
 nenhuma regra pode tratar "está logado" como "é da equipe" — `e_equipe()` (perfil ativo) é a régua.
