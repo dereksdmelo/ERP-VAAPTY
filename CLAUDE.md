@@ -6955,5 +6955,9 @@ não vale para tabela criada depois da 0166.
 minha_franquia()`), as funções security definer (que passam por cima da RLS e precisam filtrar sozinhas), os índices
 únicos e numerações por ano por franquia, os "uma linha só" (`config_loja`, `painel_tv`, cadastro da empresa), e o
 padrão da coluna virar `minha_franquia()`. Cada etapa se testa com uma SEGUNDA franquia fictícia, simulando o login
-de cada papel (como na auditoria da decisão 9), antes de publicar. **Lojista do Shinkai terá conta neste Auth**:
+de cada papel (como na auditoria da decisão 9), antes de publicar. **A 0167 (uma política RESTRITIVA
+`franquia_isola` por tabela) passou no ensaio e foi desfeita no ar em 23/11/2026**: as Pendências do financeiro
+estouraram o tempo, porque `minha_franquia()` consulta `perfil` e, dentro das subconsultas correlacionadas da
+`fin_pendencias`, roda por linha. Volta só com a franquia lida barata (no JWT, por Custom Access Token Hook, ou
+guardada na transação) e com a `fin_pendencias` medida como gerente antes. **Lojista do Shinkai terá conta neste Auth**:
 nenhuma regra pode tratar "está logado" como "é da equipe" — `e_equipe()` (perfil ativo) é a régua.
