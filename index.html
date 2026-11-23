@@ -17599,10 +17599,25 @@ const minutosDe = (h) => {
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
 };
 /** Os horários oferecidos naquele dia. Dia fechado devolve lista vazia. */
+/* O HORÁRIO ESPECIAL DE UM DIA (0171, 23/11/2026, o Derek: "último sábado do mês normalmente temos um
+ * horário estendido… a IA precisa agendar pra esses horários"). A data cadastrada ganha da regra (último
+ * sábado do mês); sem nenhum, null — vale o horário de sempre. É a mesma conta do `especialDoDia()` de
+ * ia/flavia.js: quem mexer num mexe no outro. */
+function especialDoDia(cfg, iso) {
+  const lista = (cfg && Array.isArray(cfg.horarios_especiais)) ? cfg.horarios_especiais : [];
+  const dia = String(iso).slice(0, 10);
+  const porData = lista.find((h) => h && h.dia === dia);
+  if (porData) return porData;
+  const d = new Date(`${dia}T12:00:00Z`);
+  const semana = new Date(d.getTime() + 7 * 86400000);
+  const ultimoSabado = d.getUTCDay() === 6 && semana.getUTCMonth() !== d.getUTCMonth();
+  return (ultimoSabado && lista.find((h) => h && h.regra === "ultimo_sabado")) || null;
+}
 function horariosDoDia(cfg, iso) {
   const c = cfg || CONFIG_LOJA_PADRAO;
   const g = grupoDoDia(iso);
-  const de = minutosDe(c[`${g}_primeiro`]), ate = minutosDe(c[`${g}_ultimo`]);
+  const esp = especialDoDia(c, iso);
+  const de = minutosDe(esp ? esp.primeiro : c[`${g}_primeiro`]), ate = minutosDe(esp ? esp.ultimo : c[`${g}_ultimo`]);
   const passo = Number(c.intervalo_min) || 30;
   const h = [];
   if (de == null || ate == null) return h;
@@ -17680,6 +17695,82 @@ function DiasBloqueados({ aoMudar }) {
           {indo ? "Gravando…" : "Bloquear"}
         </BotaoPrimario>
         <p className="w-full text-[11.5px]" style={{ color: C.mute }}>Sem "das" e "até", bloqueia o dia inteiro.</p>
+      </div>
+      {erro && <p className="text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
+      {ok && <p className="text-[12.5px]" style={{ color: C.verde }}>{ok}</p>}
+    </div>
+  );
+}
+
+/* OS HORÁRIOS ESPECIAIS (0171): o último sábado do mês com atendimento estendido, ou uma data com horário
+ * próprio. Trocam o primeiro e o último agendamento do dia, no agendador da equipe e na Flávia. A data ganha
+ * da regra; o dia bloqueado ganha dos dois. Só o gerente grava. */
+function HorariosEspeciais({ aoMudar }) {
+  const [lista, setLista] = useState(null);
+  const VAZIO = { tipo: "regra", dia: "", primeiro: "09:00", ultimo: "17:00", motivo: "Sábado estendido" };
+  const [novo, setNovo] = useState(VAZIO);
+  const [indo, setIndo] = useState(false); const [erro, setErro] = useState(""); const [ok, setOk] = useState("");
+  useEffect(() => { lerConfigLoja().then((d) => setLista(((d.config || {}).horarios_especiais) || [])).catch((e) => setErro(e.message)); }, []);
+  const hoje = hojeEmSP();
+  const gravar = async (nova) => {
+    setIndo(true); setErro(""); setOk("");
+    try {
+      const r = await fetchAut("/api/perfil?recurso=config-loja", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ horarios_especiais: nova }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.erro || "Não consegui gravar.");
+      setLista((d.config || {}).horarios_especiais || []);
+      configLojaAtual = { ...CONFIG_LOJA_PADRAO, ...(d.config || {}) }; configLojaPromessa = Promise.resolve(configLojaAtual);
+      setOk("Gravado — o agendador e a Flávia já oferecem esses horários.");
+      if (aoMudar) aoMudar(configLojaAtual);
+    } catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+  if (!lista) return <p className="text-[12.5px]" style={{ color: erro ? C.laranja : C.mute }}>{erro || "Carregando…"}</p>;
+  const visiveis = lista.filter((h) => h.regra || h.dia >= hoje);
+  // Os próximos dois últimos sábados, para a regra dizer em que dias cai.
+  const proximosUltimos = [];
+  for (let i = 0; i < 70 && proximosUltimos.length < 2; i++) {
+    const x = new Date(`${hoje}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + i);
+    const iso = x.toISOString().slice(0, 10);
+    const sem = new Date(x.getTime() + 7 * 86400000);
+    if (x.getUTCDay() === 6 && sem.getUTCMonth() !== x.getUTCMonth()) proximosUltimos.push(diaBR(iso));
+  }
+  const campo = { borderColor: C.line };
+  return (
+    <div className="space-y-2.5">
+      {visiveis.length ? visiveis.map((h, i) => (
+        <div key={`${h.dia || h.regra}-${i}`} className="flex flex-wrap items-baseline justify-between gap-2 rounded-lg px-2.5 py-2 text-[13px]" style={{ background: "#EAF1FB" }}>
+          <span>
+            <b>{h.regra === "ultimo_sabado" ? "Último sábado de todo mês" : `${diaDaSemana(h.dia)}, ${diaBR(h.dia)}`}</b> · {h.motivo} · das {h.primeiro} às {h.ultimo}
+            {h.regra === "ultimo_sabado" && proximosUltimos.length > 0 && (
+              <span className="block text-[12px]" style={{ color: C.mute }}>Próximos: {proximosUltimos.join(" e ")}. Uma data cadastrada abaixo vale por cima da regra.</span>
+            )}
+          </span>
+          <button disabled={indo} onClick={() => gravar(lista.filter((x) => x !== h))} className="text-[12px] underline" style={{ color: C.mute }}>tirar</button>
+        </div>
+      )) : <p className="text-[12.5px]" style={{ color: C.mute }}>Nenhum horário especial: vale o horário de sempre.</p>}
+      <div className="flex flex-wrap items-end gap-2 rounded-lg p-2.5" style={{ background: C.bg }}>
+        <label className="text-[12px]">Quando<br />
+          <select className="rounded border px-2 py-1" style={campo} value={novo.tipo} onChange={(e) => setNovo({ ...novo, tipo: e.target.value })}>
+            <option value="regra">Último sábado do mês</option>
+            <option value="dia">Uma data</option>
+          </select>
+        </label>
+        {novo.tipo === "dia" && (
+          <label className="text-[12px]">Dia<br /><input type="date" min={hoje} className="rounded border px-2 py-1" style={campo} value={novo.dia} onChange={(e) => setNovo({ ...novo, dia: e.target.value })} /></label>
+        )}
+        <label className="text-[12px]">Primeiro agend.<br /><input type="time" className="rounded border px-2 py-1" style={campo} value={novo.primeiro} onChange={(e) => setNovo({ ...novo, primeiro: e.target.value })} /></label>
+        <label className="text-[12px]">Último agend.<br /><input type="time" className="rounded border px-2 py-1" style={campo} value={novo.ultimo} onChange={(e) => setNovo({ ...novo, ultimo: e.target.value })} /></label>
+        <label className="text-[12px]">Motivo<br /><input className="w-36 rounded border px-2 py-1" style={campo} value={novo.motivo} onChange={(e) => setNovo({ ...novo, motivo: e.target.value })} /></label>
+        <BotaoPrimario disabled={indo || (novo.tipo === "dia" && !novo.dia) || !novo.primeiro || !novo.ultimo} onClick={() => {
+          const item = { ...(novo.tipo === "dia" ? { dia: novo.dia } : { regra: "ultimo_sabado" }), primeiro: novo.primeiro, ultimo: novo.ultimo, motivo: novo.motivo || "Horário estendido" };
+          // A mesma data (ou a regra) cadastrada de novo troca a anterior, em vez de ficar duas.
+          gravar(lista.filter((x) => (item.dia ? x.dia !== item.dia : x.regra !== item.regra)).concat([item]));
+          setNovo(VAZIO);
+        }}>
+          {indo ? "Gravando…" : "Gravar"}
+        </BotaoPrimario>
+        <p className="w-full text-[11.5px]" style={{ color: C.mute }}>O horário especial troca o do dia. Dia bloqueado continua bloqueado.</p>
       </div>
       {erro && <p className="text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
       {ok && <p className="text-[12.5px]" style={{ color: C.verde }}>{ok}</p>}
@@ -20295,7 +20386,7 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento, aoVerConversa }) {
           style={{ background: COR_FLUXO.borda, color: "#fff" }}>+ Cliente de fluxo</button>
         {perfil && perfil.papel === "gerente" && (
           <button onClick={() => setVerBloqueios(!verBloqueios)} className="rounded-lg border px-3 py-1.5 text-[12.5px] font-semibold" style={{ borderColor: C.laranja, color: C.laranja }}>
-            {verBloqueios ? "fechar" : "Bloquear dias (feriado)"}
+            {verBloqueios ? "fechar" : "Bloquear dias · horários especiais"}
           </button>
         )}
         <button onClick={() => setNovoAg(true)} className="rounded-lg px-3.5 py-2 text-[13.5px] font-semibold text-white"
@@ -20305,6 +20396,8 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento, aoVerConversa }) {
         <div className="rounded-xl p-3" style={{ background: C.paper, border: `1px solid ${C.laranja}` }}>
           <div className="mb-2 text-[14px] font-bold">Dias bloqueados na agenda</div>
           <DiasBloqueados aoMudar={setCfgVivo} />
+          <div className="mb-2 mt-4 text-[14px] font-bold">Horários especiais (sábado estendido)</div>
+          <HorariosEspeciais aoMudar={setCfgVivo} />
         </div>
       )}
       {lista && (
@@ -20361,6 +20454,11 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento, aoVerConversa }) {
                           {b.motivo || "bloqueado"}{b.das ? ` ${b.das}–${b.ate}` : ""}
                         </div>
                       ))}
+                      {(() => { const esp = especialDoDia(cfgVivo || cfgAg, d); return esp && (
+                        <div className="mt-0.5 rounded px-1 text-[10.5px] font-semibold" style={{ background: "#EAF1FB", color: "#2F5E9E" }}>
+                          {esp.motivo || "horário especial"} {esp.primeiro}–{esp.ultimo}
+                        </div>
+                      ); })()}
                       <ContaDoDia c={c} futuro={d > hoje} />
                     </div>
                     <div className="space-y-1.5">
@@ -36049,6 +36147,9 @@ function TelaGestao({ perfil, comp }) {
           </Bloco>
           <Bloco titulo="Dias bloqueados na agenda" sub="Feriado, evento, loja fechada: o agendador e a Flávia não oferecem horário nesses dias.">
             <DiasBloqueados />
+          </Bloco>
+          <Bloco titulo="Horários especiais" sub="O último sábado do mês com atendimento estendido, ou uma data com horário próprio: o agendador e a Flávia oferecem esses horários.">
+            <HorariosEspeciais />
           </Bloco>
           <Bloco titulo="Planilha do CRM" sub="Cole o que copiou do Google Sheets. Cada linha vira um atendimento.">
             {importando

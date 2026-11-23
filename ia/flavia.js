@@ -80,9 +80,22 @@ const dataBR = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
 /** Os horários do dia pela configuração (0068) — a mesma conta do
  *  `horariosDoDia()` da tela, para a Flávia e o agendador oferecerem
  *  os mesmos. */
+/** O horário especial de um dia (0171): a data cadastrada ganha da regra
+ *  (último sábado do mês). Sem nenhum, null — vale o horário de sempre.
+ *  É a mesma conta do `especialDoDia()` da tela. */
+function especialDoDia(cfg, iso) {
+  const lista = Array.isArray(cfg && cfg.horarios_especiais) ? cfg.horarios_especiais : [];
+  const dia = String(iso).slice(0, 10);
+  const porData = lista.find((h) => h && h.dia === dia);
+  if (porData) return porData;
+  const ultimoSabado = diaDaSemana(dia) === 6 && somaDias(dia, 7).slice(5, 7) !== dia.slice(5, 7);
+  return (ultimoSabado && lista.find((h) => h && h.regra === "ultimo_sabado")) || null;
+}
+
 function horariosDoDia(cfg, iso) {
   const g = grupoDe(iso);
-  const de = minutosDe(cfg[`${g}_primeiro`]), ate = minutosDe(cfg[`${g}_ultimo`]);
+  const esp = especialDoDia(cfg, iso);
+  const de = minutosDe(esp ? esp.primeiro : cfg[`${g}_primeiro`]), ate = minutosDe(esp ? esp.ultimo : cfg[`${g}_ultimo`]);
   const passo = Number(cfg.intervalo_min) || 30;
   const h = [];
   if (de == null || ate == null) return h;
@@ -200,13 +213,18 @@ function pontosDe(msgs) {
 
 /* ------------------------- a instrução ------------------------- */
 
-function horarioDaLoja(cfg) {
+function horarioDaLoja(cfg, agora) {
   // Ao cliente se diz o horário de ATENDIMENTO — do primeiro ao último
   // agendamento. O gerente respondeu assim no treino ("das 9 às 18 em
   // dias de semana, sábado das 9 às 13"); a abertura da porta (8h30) é
   // da equipe, e dita ao cliente traria gente às 8h30 sem ninguém.
   const g = (nome, k) => (cfg[`${k}_primeiro`] ? `${nome}: atendimento das ${cfg[`${k}_primeiro`]} às ${cfg[`${k}_ultimo`]}` : `${nome}: fechado`);
-  return [g("Segunda a sexta", "semana"), g("Sábado", "sabado"), g("Domingo", "domingo")].join("\n");
+  const linhas = [g("Segunda a sexta", "semana"), g("Sábado", "sabado"), g("Domingo", "domingo")];
+  // Os horários especiais (0171): o último sábado do mês costuma ter atendimento estendido.
+  const esp = Array.isArray(cfg.horarios_especiais) ? cfg.horarios_especiais : [];
+  esp.filter((h) => h && h.regra === "ultimo_sabado").forEach((h) => linhas.push(`Último sábado do mês: atendimento estendido, das ${h.primeiro} às ${h.ultimo}`));
+  esp.filter((h) => h && h.dia && (!agora || h.dia >= String(agora).slice(0, 10))).forEach((h) => linhas.push(`${DIAS[diaDaSemana(h.dia)]} ${dataBR(h.dia)}: atendimento das ${h.primeiro} às ${h.ultimo}${h.motivo ? ` (${h.motivo})` : ""}`));
+  return linhas.join("\n");
 }
 
 function livresEmTexto(dias) {
@@ -344,7 +362,7 @@ WhatsApp: mensagens curtas, português do Brasil, tom simpático e direto, sem f
 
 ## A loja
 Endereço: ${ENDERECO}.
-${horarioDaLoja(cfg)}
+${horarioDaLoja(cfg, agora)}
 
 ${retomada ? `## Esta conversa é uma RETOMADA
 A primeira mensagem foi NOSSA: o cliente tinha avaliação marcada ${quandoFoi(retomada.horario, agora) || "recentemente"}${retomada.carro ? ` para o ${retomada.carro}` : ""} e não veio. Você já se apresentou e perguntou se aconteceu alguma coisa — não se apresente de novo nem repita a pergunta.
@@ -414,5 +432,5 @@ function lerSaida(texto, livres) {
 
 module.exports = {
   CONFIG_PADRAO, ENDERECO, POR_HORARIO, paredeDe, horariosDoDia, horariosLivres,
-  conversaEmTexto, historicoEmTexto, pontosDe, instrucao, lerSaida, semNumeros, aberturaRetomada, nomeParaChamar,
+  conversaEmTexto, historicoEmTexto, pontosDe, instrucao, especialDoDia, lerSaida, semNumeros, aberturaRetomada, nomeParaChamar,
 };

@@ -767,6 +767,8 @@ function configDaLinha(l) {
   c.aviso_grupo_nome = texto(l.aviso_grupo_nome) || null;
   // Os dias bloqueados (0155): feriado, evento, loja fechada — [{ dia, motivo, das?, ate? }].
   c.bloqueios = Array.isArray(l.bloqueios) ? l.bloqueios : [];
+  // Os horários especiais (0171): sábado estendido e afins — [{ dia | regra, primeiro, ultimo, motivo }].
+  c.horarios_especiais = Array.isArray(l.horarios_especiais) ? l.horarios_especiais : [];
   c.atualizado_em = l.atualizado_em || null;
   return c;
 }
@@ -867,6 +869,35 @@ async function configLoja(req, res, tok) {
      blocos da tela, e salvar um não pode apagar o outro. PATCH na linha
      que já existe — sem ela, não há loja configurada para avisar. */
   const corpoPatch = req.method === "PATCH" ? (await lerCorpo(req)) : null;
+  if (req.method === "PATCH" && corpoPatch && Array.isArray(corpoPatch.horarios_especiais)) {
+    /* OS HORÁRIOS ESPECIAIS (0171, 23/11/2026, o Derek: "último sábado do mês normalmente temos um horário
+     * estendido… a IA precisa agendar pra esses horários"). Uma data, ou a regra do último sábado do mês;
+     * troca o primeiro e o último agendamento daquele dia. Vale para o agendador e para a Flávia. */
+    const REGRAS = ["ultimo_sabado"];
+    const lista = [];
+    for (const h of corpoPatch.horarios_especiais.slice(0, 200)) {
+      const dia = h && h.dia ? String(h.dia) : "";
+      const regra = h && h.regra ? String(h.regra) : "";
+      if (dia && !/^\d{4}-\d{2}-\d{2}$/.test(dia)) return res.status(400).json({ erro: "Dia inválido." });
+      if (!dia && REGRAS.indexOf(regra) < 0) return res.status(400).json({ erro: "Diga a data ou a regra (último sábado do mês)." });
+      const primeiro = horaCurta(h.primeiro), ultimo = horaCurta(h.ultimo);
+      const qual = dia ? dia.split("-").reverse().join("/") : "Último sábado do mês";
+      if (!primeiro || !ultimo) return res.status(400).json({ erro: `${qual}: diga o primeiro e o último agendamento.` });
+      if (primeiro > ultimo) return res.status(400).json({ erro: `${qual}: o primeiro agendamento vem antes do último.` });
+      lista.push({ ...(dia ? { dia } : { regra }), primeiro, ultimo, motivo: (texto(h.motivo) || "Horário estendido").slice(0, 80) });
+    }
+    lista.sort((a, b) => String(a.dia || "0").localeCompare(String(b.dia || "0")));
+    const r = await fetch(`${base}?id=eq.1`, {
+      method: "PATCH", headers: { ...cab, "Content-Type": "application/json", Prefer: "return=representation" },
+      body: JSON.stringify({ horarios_especiais: lista, atualizado_em: new Date().toISOString(), atualizado_por: donoDoToken(tok) }),
+    });
+    if (!r.ok) return res.status(r.status === 401 ? 401 : 502).json({ erro: "O banco recusou a gravação." });
+    const d = await r.json().catch(() => []);
+    const salvo = Array.isArray(d) ? d[0] : d;
+    if (!salvo) return res.status(403).json({ erro: "Só o gerente muda os horários — e os horários da loja precisam ter sido gravados antes." });
+    return res.status(200).json({ ok: true, config: configDaLinha(salvo), padrao: false });
+  }
+
   if (req.method === "PATCH" && corpoPatch && Array.isArray(corpoPatch.bloqueios)) {
     /* OS DIAS BLOQUEADOS (0155, 13/11/2026, o Derek: "bloquear a agenda em
      * dia x… porque às vezes tem feriado"). O dia inteiro, ou só um trecho

@@ -3432,6 +3432,13 @@ trecho; o chip do agendador diz o motivo, a grade da agenda marca o dia, e a
 lista avisa quem já estava marcado ali para remarcar. O gerente edita em Equipe
 (junto dos horários) ou na Agenda ("Bloquear dias (feriado)").
 
+**Horários especiais (0171, 23/11/2026, o Derek: *"último sábado do mês normalmente temos um horário estendido…
+a IA precisa agendar pra esses horários"*).** `config_loja.horarios_especiais`: [{dia | regra: 'ultimo_sabado',
+primeiro, ultimo, motivo}]. Troca o primeiro e o último agendamento do dia; a data ganha da regra, e o dia bloqueado
+ganha dos dois. A conta é `especialDoDia()`, igual na tela e em `ia/flavia.js` — `ferramentas-flavia.js` confere que
+as duas concordam em 400 dias. A Flávia recebe o último sábado e as datas futuras em "A loja", e a grade da agenda marca
+o dia. O gerente edita em Equipe (bloco "Horários especiais") ou na Agenda ("Bloquear dias · horários especiais").
+
 **O agendador da tela lê a MESMA linha**, e isso é a metade da
 decisão que importa hoje. O `HORARIOS` fixo oferecia 9h–18h todos os
 dias — **sábado às 16h com a loja fechada**. Se a IA e a tela lerem

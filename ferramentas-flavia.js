@@ -131,5 +131,34 @@ confere("intermediação, não compra", ins.includes("Nunca diga que \"a loja co
 const ret = F.instrucao(cfg, "2026-10-28T13:50", livres, [], { horario: "2026-10-26T14:30:00", carro: "Logan" });
 confere("retomada: ouvir antes de remarcar, uma etapa por resposta", ret.includes("OUVIR, ENTENDER, EXPLICAR") && ret.includes("Não ofereça remarcar nem horário na mesma resposta"), true);
 
+
+console.log("horários especiais (0171)");
+const esp = { ...cfg, horarios_especiais: [
+  { regra: "ultimo_sabado", primeiro: "09:00", ultimo: "17:00", motivo: "Sábado estendido" },
+  { dia: "2026-12-26", primeiro: "10:00", ultimo: "12:00", motivo: "Pós-Natal" },
+] };
+confere("último sábado de novembro vai até 17h", F.horariosDoDia(esp, "2026-11-28").slice(-1)[0], "17:00");
+confere("sábado comum continua até 13h", F.horariosDoDia(esp, "2026-11-21").slice(-1)[0], "13:00");
+confere("último sábado de outubro (31) também", F.horariosDoDia(esp, "2026-10-31").slice(-1)[0], "17:00");
+confere("a data ganha da regra", F.horariosDoDia(esp, "2026-12-26"), ["10:00", "10:30", "11:00", "11:30", "12:00"]);
+confere("sexta antes do último sábado não muda", F.horariosDoDia(esp, "2026-11-27").slice(-1)[0], "18:00");
+confere("domingo com data especial abre", F.horariosDoDia({ ...cfg, horarios_especiais: [{ dia: "2026-11-29", primeiro: "09:00", ultimo: "10:00" }] }, "2026-11-29"), ["09:00", "09:30", "10:00"]);
+confere("dia bloqueado ganha do especial", F.horariosDoDia({ ...esp, bloqueios: [{ dia: "2026-11-28", motivo: "Feriado" }] }, "2026-11-28"), []);
+confere("a Flávia oferece o sábado estendido", F.horariosLivres(esp, "2026-11-27T18:00", []).find((d) => d.iso === "2026-11-28").horarios.slice(-1)[0], "17:00");
+const insEsp = F.instrucao(esp, "2026-11-27T18:00", F.horariosLivres(esp, "2026-11-27T18:00", []), []);
+confere("ela sabe do sábado estendido", insEsp.includes("Último sábado do mês: atendimento estendido, das 09:00 às 17:00") && insEsp.includes("26/12: atendimento das 10:00 às 12:00"), true);
+
+// A tela tem a mesma conta (index.html): lida de lá, não copiada.
+{
+  const fs = require("fs");
+  const html = fs.readFileSync(__dirname + "/index.html", "utf8");
+  const ini = html.indexOf("function especialDoDia(");
+  const fim = html.indexOf("\nfunction horariosDoDia(", ini);
+  const tela = new Function(`${html.slice(ini, fim)}; return especialDoDia;`)();
+  const dias = []; for (let i = 0; i < 400; i++) { const d = new Date(Date.UTC(2026, 0, 1 + i)); dias.push(d.toISOString().slice(0, 10)); }
+  const difere = dias.filter((d) => JSON.stringify(tela(esp, d)) !== JSON.stringify(F.especialDoDia(esp, d)));
+  confere("a tela e a Flávia concordam em 400 dias", difere, []);
+}
+
 console.log(falhas ? `\n${falhas} falha(s)` : "\ntudo certo");
 process.exit(falhas ? 1 : 0);
