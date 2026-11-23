@@ -4453,7 +4453,11 @@ pôr na venda levaria o número ao contrato. É o tipo "Receita extra (cobrada d
 com valor NEGATIVO (`sinalDo`, no `api/veiculo.js`): toda soma de custo — rentabilidade, custo de hoje, margem, funil —
 já a desconta sem saber que ela existe; a tela mostra e recebe o número positivo ("Recebido" no lugar de "Pago").
 Vira o título a RECEBER `receita:<id>` do comprador, em Negociação, fora do DRE como o resto do carro. Não entra em
-contrato nenhum. No Balanço ela não abate o custo do carro no pátio: já está no ativo como título a receber.
+contrato nenhum. No Balanço ela não abate o custo do carro no pátio: já está no ativo como título a receber. Tem botão próprio, "+ lançar uma receita (cobrada do
+lojista)", ao lado do de custo, e a linha lançada como custo vira receita (e volta) por "é receita" / "é custo" — a
+Amanda não achou o tipo dentro do menu e já tinha lançado as etiquetas como custo. Na mesma leva: a indicação ou multa
+DESFEITA fica baixada, não volta ao pátio; e a indicação sem ficha pega a ficha do carro do atendimento (o Freemont
+FMO5E53 saía sem placa na Rentabilidade, e foi ligado à mão).
 
 **A margem aparece antes de confirmar a venda**, e é de propósito: é a
 última chance de ver que o carro está saindo no prejuízo.

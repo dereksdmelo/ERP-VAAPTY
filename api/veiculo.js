@@ -563,6 +563,11 @@ async function estoque(req, res, tok) {
       if ((ja || []).length && ja[0].situacao === "vendido") return res.status(409).json({ erro: "A indicação deste atendimento já foi registrada.", id: ja[0].id });
       if ((ja || []).length) c.__relancar = ja[0].id;
       veiculoId = null;
+      // A ficha do carro, se o atendimento tem uma, vai junto (23/11/2026, a Amanda: o Freemont saía sem placa na
+      // Rentabilidade porque a indicação foi gravada só com o texto do carro).
+      const vs = await supa(`${base("veiculo")}?select=id,estoque(id)&atendimento_id=eq.${c.atendimento_id}&order=criado_em.desc&limit=3`, { headers: cab }).catch(() => []);
+      const livre = (vs || []).find((v) => !(v.estoque || []).length);
+      if (livre) veiculoId = livre.id;
     } else if (!RX_ID.test(veiculoId)) return res.status(400).json({ erro: "veiculo_id inválido." });
 
     // Um carro entra uma vez. O índice único da 0019 garante isso no

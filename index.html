@@ -17075,8 +17075,12 @@ function FichaEstoque({ id, perfil, aoVoltar, aoAbrir }) {
     if (motivo === null) return;
     setMandando(true); setErro(""); setRecado(null);
     try {
-      await atualizarEstoque(e.id, { situacao: "em_estoque", comprador_id: null, valor_venda: null, vendido_em: null });
-      let rec = { recado: "Venda desfeita aqui. O carro voltou para o pátio." };
+      /* Indicação e multa não são carro do pátio (23/11/2026, a Amanda: "o Freemont não é para estar em estoque, foi
+       * para o Adam assumir"): desfeitas, ficam BAIXADAS — fora do pátio e da rentabilidade — e o atendimento
+       * oferece lançar de novo. */
+      const semPatio = naoEhCarro(e);
+      await atualizarEstoque(e.id, { situacao: semPatio ? "baixado" : "em_estoque", comprador_id: null, valor_venda: null, vendido_em: null });
+      let rec = { recado: semPatio ? "Desfeita aqui. Ela saiu da rentabilidade e não vai para o pátio — no atendimento, \"Lançar a comissão de novo\" a refaz." : "Venda desfeita aqui. O carro voltou para o pátio." };
       if (!naoEhCarro(e) && e.shinkai_venda_acao && e.shinkai_venda_acao !== "fora_do_shinkai") {
         try { const r = await vendaNoShinkai(e.id, { acao: "cancelado", motivo: motivo || "venda desfeita no ERP" }); rec = { recado: `${rec.recado} ${recadoShinkai(r)}` }; }
         catch (ex) { rec = { recado: `${rec.recado} Mas o Shinkai não desfez: ${ex.message}`, alerta: true }; }
@@ -17237,11 +17241,19 @@ function FichaEstoque({ id, perfil, aoVoltar, aoAbrir }) {
             </div>
           </div>
         ) : (
-          <button onClick={() => setNovo({ tipo: "reparo", descricao: "", previsto: "", realizado: "" })}
-            className="mt-3 w-full rounded-md border py-2 text-[13px] font-semibold"
-            style={{ borderColor: C.line, color: C.roxo }}>
-            + lançar um custo
-          </button>
+          <div className="mt-3 flex gap-2">
+            <button onClick={() => setNovo({ tipo: "reparo", descricao: "", previsto: "", realizado: "" })}
+              className="flex-1 rounded-md border py-2 text-[13px] font-semibold"
+              style={{ borderColor: C.line, color: C.roxo }}>
+              + lançar um custo
+            </button>
+            {/* A receita extra (0165) tem botão próprio (23/11/2026, a Amanda não achou o tipo dentro do custo). */}
+            <button onClick={() => setNovo({ tipo: "receita_extra", descricao: "", previsto: "", realizado: "" })}
+              className="flex-1 rounded-md border py-2 text-[13px] font-semibold"
+              style={{ borderColor: C.verde, color: C.verde }}>
+              + lançar uma receita (cobrada do lojista)
+            </button>
+          </div>
         )}
       </div>
 
@@ -17365,6 +17377,12 @@ function LinhaCusto({ l, eGerente, aoSalvar, aoAnexar, aoApagar }) {
             {rotuloCusto(l.tipo)}{l.do_fechamento ? " · do fechamento" : ""}
           </span>
         </span>
+        {/* Lançou como custo o que era receita (as etiquetas da Amanda, 23/11/2026): vira sem apagar. */}
+        {!l.do_fechamento && (
+          <button onClick={() => aoSalvar({ tipo: receita ? "outro" : "receita_extra" })} className="text-[11px]" style={{ color: receita ? C.mute : C.verde }}>
+            {receita ? "é custo" : "é receita"}
+          </button>
+        )}
         {eGerente && !l.do_fechamento && (
           <button onClick={aoApagar} className="text-[11px]" style={{ color: C.mute }}>apagar</button>
         )}
@@ -27082,9 +27100,14 @@ function CustosDoNegocio({ atendimentoId, perfil }) {
               </div>
             </div>
           ) : (
-            <button onClick={() => setNovo({ tipo: "documentacao", descricao: "", previsto: "", realizado: "" })}
-              className="mt-3 w-full rounded-md border py-2 text-[13px] font-semibold"
-              style={{ borderColor: C.roxo, color: C.roxo }}>+ lançar um custo</button>
+            <div className="mt-3 flex gap-2">
+              <button onClick={() => setNovo({ tipo: "documentacao", descricao: "", previsto: "", realizado: "" })}
+                className="flex-1 rounded-md border py-2 text-[13px] font-semibold"
+                style={{ borderColor: C.roxo, color: C.roxo }}>+ lançar um custo</button>
+              <button onClick={() => setNovo({ tipo: "receita_extra", descricao: "", previsto: "", realizado: "" })}
+                className="flex-1 rounded-md border py-2 text-[13px] font-semibold"
+                style={{ borderColor: C.verde, color: C.verde }}>+ lançar uma receita (cobrada do lojista)</button>
+            </div>
           )}
         </div>
       )}
