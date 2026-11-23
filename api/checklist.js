@@ -671,6 +671,13 @@ const rpcPub = async (nome, corpo) => {
   try { return t ? JSON.parse(t) : null; } catch (x) { return null; }
 };
 
+/* A franquia do pedido vem do link do formulário (`dut.html?f=<slug>`, 0173). Sem ela, é Joinville: são os links que
+ * já circulam. Slug que não existe é recusado no banco, nunca cai em Joinville. */
+const franquiaDoLink = (v) => {
+  const s = String(v || "").trim().toLowerCase();
+  return /^[a-z0-9-]{2,60}$/.test(s) ? s : null;
+};
+
 async function dutPublico(req, res) {
   const acao = String(req.query.acao || "");
 
@@ -678,7 +685,7 @@ async function dutPublico(req, res) {
   if (acao === "estado" && req.method === "GET") {
     const prot = String(req.query.protocolo || "").trim();
     if (!prot) return res.status(400).json({ erro: "Informe o protocolo." });
-    const r = await rpcPub("dut_estado", { p_protocolo: prot });
+    const r = await rpcPub("dut_estado", { p_protocolo: prot, p_franquia: franquiaDoLink(req.query.f) });
     const linha = Array.isArray(r) ? r[0] : r;
     if (!linha) return res.status(404).json({ erro: "Não achei esse protocolo." });
     return res.status(200).json({ pedido: linha });
@@ -706,6 +713,7 @@ async function dutPublico(req, res) {
     p_data: /^\d{4}-\d{2}-\d{2}$/.test(String(c.data_venda || "")) ? c.data_venda : null,
     p_entrega: c.entrega === "envio" ? "envio" : "retirada",
     p_envio: texto(c.endereco_envio), p_lojista: texto(c.lojista_nome), p_whats: texto(c.lojista_whats),
+    p_franquia: franquiaDoLink(c.franquia),
   });
   const linha = Array.isArray(r) ? r[0] : r;
   if (!linha || !linha.id) return res.status(502).json({ erro: "Não consegui registrar o pedido." });

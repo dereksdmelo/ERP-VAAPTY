@@ -102,7 +102,9 @@
 </div>
 
 <script>
-const API = "/api/checklist?recurso=dut-publico";
+// A loja do pedido vem do link (?f=<slug>, 0173); sem ela, Joinville.
+const FRANQUIA = (() => { try { return (new URLSearchParams(location.search).get("f") || "").trim().toLowerCase(); } catch (e) { return ""; } })();
+const API = "/api/checklist?recurso=dut-publico" + (FRANQUIA ? "&f=" + encodeURIComponent(FRANQUIA) : "");
 const el = (id) => document.getElementById(id);
 let tipo = "preencher";
 const arquivos = {};
@@ -277,7 +279,7 @@ async function enviar() {
         comprador_rg: v("comprador_rg"), comprador_endereco: v("comprador_endereco"),
         valor_venda: v("valor_venda"), km: v("km"), data_venda: v("data_venda"),
         entrega, endereco_envio: v("endereco_envio"),
-        lojista_nome: v("lojista_nome"), lojista_whats: v("lojista_whats"),
+        lojista_nome: v("lojista_nome"), lojista_whats: v("lojista_whats"), franquia: FRANQUIA,
       }),
     });
     const d = await r.json().catch(() => ({}));
