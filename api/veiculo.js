@@ -228,7 +228,10 @@ async function supa(url, opcoes) {
 const RX_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const TIPOS_CUSTO = ["quitacao", "debitos", "cautelar", "transporte",
-                     "reparo", "juros", "documentacao", "deducao", "comissao_externa", "outro"];
+                     "reparo", "juros", "documentacao", "deducao", "comissao_externa", "outro", "receita_extra"];
+// A receita extra (0165) é guardada NEGATIVA: toda soma de custo do carro (rentabilidade, custo de hoje, margem) já a
+// desconta sem saber que ela existe. A tela manda e mostra o número positivo.
+const sinalDo = (tipo, v) => (v == null ? v : tipo === "receita_extra" ? -Math.abs(v) : Math.abs(v));
 // "baixado" (0110): saiu do pátio antes de o sistema registrar a venda —
 // não conta em rentabilidade nem em recebimento, que só olham "vendido".
 const SITUACOES = ["em_estoque", "vendido", "devolvido", "baixado"];
@@ -818,6 +821,8 @@ async function custo(req, res, tok) {
       anexo_id: RX_ID.test(String(c.anexo_id || "")) ? c.anexo_id : null,
       do_fechamento: false,
     };
+    linha.previsto = sinalDo(linha.tipo, linha.previsto) || 0;
+    linha.realizado = sinalDo(linha.tipo, linha.realizado);
     const criado = await supa(base("estoque_custo"), {
       method: "POST", headers: cabecalhos(tok, { Prefer: "return=representation" }),
       body: JSON.stringify(linha),
@@ -846,6 +851,16 @@ async function custo(req, res, tok) {
       mud.anexo_id = RX_ID.test(String(c.anexo_id || "")) ? c.anexo_id : null;
     }
     if (!Object.keys(mud).length) return res.status(400).json({ erro: "Nada para atualizar." });
+    // O sinal segue o tipo (0165): mexeu no valor ou trocou de/para receita extra, os dois valores acompanham.
+    if (mud.tipo !== undefined || mud.previsto !== undefined || mud.realizado !== undefined) {
+      const atual = ((await supa(`${base("estoque_custo")}?select=tipo,previsto,realizado&id=eq.${id}`, { headers: cab })) || [])[0];
+      if (atual) {
+        const tipo = mud.tipo !== undefined ? mud.tipo : atual.tipo;
+        mud.previsto = sinalDo(tipo, mud.previsto !== undefined ? mud.previsto : Number(atual.previsto) || 0) || 0;
+        const r0 = mud.realizado !== undefined ? mud.realizado : (atual.realizado == null ? null : Number(atual.realizado));
+        mud.realizado = sinalDo(tipo, r0);
+      }
+    }
 
     const salvo = await supa(`${base("estoque_custo")}?id=eq.${id}`, {
       method: "PATCH", headers: cabecalhos(tok, { Prefer: "return=representation" }),
@@ -853,7 +868,7 @@ async function custo(req, res, tok) {
     });
     const linha = Array.isArray(salvo) ? salvo[0] : salvo;
     if (!linha) return res.status(403).json({ erro: "A regra do banco recusou a alteração." });
-    if (mud.previsto !== undefined || mud.realizado !== undefined || mud.descricao !== undefined) await titulosDoCarro(tok, linha.estoque_id);
+    if (mud.tipo !== undefined || mud.previsto !== undefined || mud.realizado !== undefined || mud.descricao !== undefined) await titulosDoCarro(tok, linha.estoque_id);
     return res.status(200).json({ ok: true, custo: linha });
   }
 

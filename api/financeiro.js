@@ -1247,6 +1247,17 @@ async function sincronizarTitulosDoCarro(tok, estoqueId, forcar) {
         descricao: `${c.descricao || c.tipo} · ${carro}`, data: entrou });
     });
   }
+  /* A RECEITA EXTRA (0165, 23/11/2026, a Amanda e o Derek): o que se cobra do lojista além do carro (as etiquetas).
+   * Ela mora entre os custos com valor NEGATIVO — é o que faz toda soma de custo já descontá-la — e vira um título a
+   * RECEBER do comprador, fora do DRE como o resto do carro. Vale para carro de compra, indicação ou multa. */
+  if (!baixado && (doCorteCompra || doCorteVenda)) {
+    (e.estoque_custo || []).filter((c) => c.tipo === "receita_extra").forEach((c) => {
+      const val = Math.abs(c.realizado != null ? Number(c.realizado) || 0 : Number(c.previsto) || 0);
+      const quem = (e.comprador && e.comprador.nome) || null;
+      if (val > 0) quer.push({ item: `receita:${c.id}`, credito: val, tipo: "outro",
+        descricao: `Receber${quem ? ` de ${quem}` : ""}: ${c.descricao || "receita extra"} · ${carro}`, favorecido: quem, data: vendeu || entrou || hojeAqui() });
+    });
+  }
   if (doCorteVenda && e.situacao === "vendido" && Number(e.valor_venda) > 0) {
     quer.push({ item: "venda:lojista", credito: Number(e.valor_venda), tipo: "pagto_lojista",
       descricao: e.natureza === "multa" ? `Multa contratual de ${cliente || "cliente"} · ${carro}`
@@ -1304,7 +1315,7 @@ async function sincronizarTitulosDoCarro(tok, estoqueId, forcar) {
   for (const x of existentes) {
     if (String(x.item_contrato).indexOf("#") >= 0) continue;
     if (querPor[x.item_contrato] || x.situacao !== "aberto") continue;
-    if (!baixado && !doCorteCompra && x.item_contrato !== "venda:lojista") continue;
+    if (!baixado && !doCorteCompra && x.item_contrato !== "venda:lojista" && !String(x.item_contrato).startsWith("receita:")) continue;
     await supa(`${base("fin_lancamento")}?id=eq.${x.id}&situacao=eq.aberto`, { method: "PATCH", headers: cab(tok), body: JSON.stringify({ situacao: "cancelado" }) });
     feito.cancelados += 1;
   }
@@ -3479,7 +3490,8 @@ async function balanco(req, res, tok) {
   // Carros no pátio, pelo custo de hoje.
   const val = (x) => (x.realizado == null ? Number(x.previsto) || 0 : Number(x.realizado) || 0);
   const carros = (estoque || []).filter((e) => (e.natureza || "compra") === "compra").map((e) => {
-    const custos = (e.estoque_custo || []).reduce((t, x) => t + val(x), 0);
+    // A receita extra (0165) não abate o custo do carro aqui: ela já está no ativo como título a receber.
+    const custos = (e.estoque_custo || []).filter((x) => x.tipo !== "receita_extra").reduce((t, x) => t + val(x), 0);
     const compra = Number(e.valor_compra) || 0;
     return { id: e.id, placa: e.veiculo && e.veiculo.placa, carro: e.veiculo && e.veiculo.marca_modelo, entrou_em: e.entrou_em,
       compra: r2(compra), custos: r2(custos), total: r2(compra + custos), provisoria: !!e.compra_provisoria };

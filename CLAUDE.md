@@ -4447,6 +4447,14 @@ dezenas de carros; sem cadastro, "AUTO CENTER SUL" e "Auto Center Sul"
 viram dois compradores e o histórico se parte no meio. `shinkai_id`
 está lá para quando o cadastro vier de lá — hoje não vem.
 
+**A receita extra do carro (0165, 23/11/2026, a Amanda pelo suporte, aprovado pelo Derek).** O que se cobra do lojista
+além do carro — as etiquetas que o comprador do cliente vai pagar — não tinha onde entrar: o carro só tinha custos, e
+pôr na venda levaria o número ao contrato. É o tipo "Receita extra (cobrada do lojista)" na lista de custos, guardado
+com valor NEGATIVO (`sinalDo`, no `api/veiculo.js`): toda soma de custo — rentabilidade, custo de hoje, margem, funil —
+já a desconta sem saber que ela existe; a tela mostra e recebe o número positivo ("Recebido" no lugar de "Pago").
+Vira o título a RECEBER `receita:<id>` do comprador, em Negociação, fora do DRE como o resto do carro. Não entra em
+contrato nenhum. No Balanço ela não abate o custo do carro no pátio: já está no ativo como título a receber.
+
 **A margem aparece antes de confirmar a venda**, e é de propósito: é a
 última chance de ver que o carro está saindo no prejuízo.
 

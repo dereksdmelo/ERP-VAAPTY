@@ -15269,6 +15269,9 @@ const TIPOS_CUSTO = [
   ["quitacao", "Quitação"], ["debitos", "Débitos"], ["cautelar", "Cautelar"],
   ["transporte", "Transporte"], ["reparo", "Reparo"], ["juros", "Juros"],
   ["documentacao", "Documentação"], ["deducao", "Dedução"], ["comissao_externa", "Comissão externa"], ["outro", "Outro"],
+  // 0165 (23/11/2026, a Amanda e o Derek): o que se cobra do lojista além do carro (as etiquetas). Soma na
+  // rentabilidade, vira título a receber, e não entra em contrato nenhum. O banco guarda negativo; a tela mostra positivo.
+  ["receita_extra", "Receita extra (cobrada do lojista)"],
 ];
 const rotuloCusto = (t) => (TIPOS_CUSTO.filter((x) => x[0] === t)[0] || ["", "Outro"])[1];
 
@@ -17348,7 +17351,10 @@ function FichaEstoque({ id, perfil, aoVoltar, aoAbrir }) {
 function LinhaCusto({ l, eGerente, aoSalvar, aoAnexar, aoApagar }) {
   const [subindo, setSubindo] = useState(false);
   const pago = l.realizado != null;
-  const dif = pago ? (Number(l.realizado) || 0) - (Number(l.previsto) || 0) : 0;
+  const receita = l.tipo === "receita_extra";
+  const prevAbs = Math.abs(Number(l.previsto) || 0), realAbs = Math.abs(Number(l.realizado) || 0);
+  // Na receita, receber mais que o previsto é bom (verde); no custo, pagar mais é ruim (laranja).
+  const dif = pago ? (receita ? prevAbs - realAbs : realAbs - prevAbs) : 0;
 
   return (
     <div className="border-b py-2" style={{ borderColor: C.line }}>
@@ -17369,20 +17375,20 @@ function LinhaCusto({ l, eGerente, aoSalvar, aoAnexar, aoApagar }) {
           <span className="block text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Previsto</span>
           <input className="mt-[2px] w-full rounded-md border px-2 py-1 text-right text-[13px] outline-none"
             style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal"
-            defaultValue={Number(l.previsto) ? centavosBR(l.previsto) : ""}
+            defaultValue={prevAbs ? centavosBR(prevAbs) : ""}
             onBlur={(ev) => {
               const n = numeroBR(ev.target.value);
-              if (n !== (Number(l.previsto) || 0)) aoSalvar({ previsto: ev.target.value });
+              if (n !== prevAbs) aoSalvar({ previsto: ev.target.value });
             }} />
         </label>
         <label style={{ width: 92, flex: "0 0 92px" }}>
-          <span className="block text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>Pago</span>
+          <span className="block text-[9px] uppercase tracking-[0.1em]" style={{ color: C.mute }}>{receita ? "Recebido" : "Pago"}</span>
           <input className="mt-[2px] w-full rounded-md border px-2 py-1 text-right text-[13px] outline-none"
             style={{ ...inputSty, fontFamily: F.mono, background: pago ? "#fff" : "#FBFAFC" }} inputMode="decimal"
-            placeholder="—" defaultValue={pago ? centavosBR(l.realizado) : ""}
+            placeholder="—" defaultValue={pago ? centavosBR(realAbs) : ""}
             onBlur={(ev) => {
               const bruto = String(ev.target.value).trim();
-              const antes = pago ? Number(l.realizado) || 0 : null;
+              const antes = pago ? realAbs : null;
               const agora = bruto === "" ? null : numeroBR(bruto);
               if (agora !== antes) {
                 // Quem informa o valor pago sem data ganha a data de
@@ -17392,6 +17398,7 @@ function LinhaCusto({ l, eGerente, aoSalvar, aoAnexar, aoApagar }) {
             }} />
         </label>
         <span className="flex-1 pb-1 text-right text-[11px]">
+          {receita && <span className="mr-2 font-semibold" style={{ color: C.verde }}>+{brl(pago ? realAbs : prevAbs)} na rentabilidade</span>}
           {pago
             ? (dif === 0
                 ? <span style={{ color: C.mute }}>igual ao previsto</span>
@@ -17403,7 +17410,7 @@ function LinhaCusto({ l, eGerente, aoSalvar, aoAnexar, aoApagar }) {
       </div>
 
       <div className="mt-1 flex items-center gap-3 text-[11px]">
-        {pago && l.pago_em && <span style={{ color: C.mute }}>pago {diaBR(l.pago_em)}</span>}
+        {pago && l.pago_em && <span style={{ color: C.mute }}>{receita ? "recebido" : "pago"} {diaBR(l.pago_em)}</span>}
         {l.anexo_id ? (
           <span style={{ color: C.verde }}>comprovante anexado</span>
         ) : (
