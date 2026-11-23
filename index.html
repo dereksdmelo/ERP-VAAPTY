@@ -31677,8 +31677,10 @@ function TelaRecuperacao({ perfil, aoAbrir, aoConversar }) {
   const [periodo, setPeriodo] = useState("90");
   const [deP, setDeP] = useState(""); const [ateP, setAteP] = useState("");
   const [contato, setContato] = useState({}); // atendimento → { acaoId, titulo }
-  const [verHoje, setVerHoje] = useState(false);
-  const [verDepois, setVerDepois] = useState(false);
+  // AS ABAS (23/11/2026, o Derek: "pouco prática… divisão sobre o que já foi contatado, o que não foi, o que já
+  // foi reagendado ou não"): uma situação por vez, cada uma com a contagem, em vez de seções empilhadas.
+  const [aba, setAba] = useState("");
+  const [busca, setBusca] = useState("");
   // Com número de NEGOCIAÇÃO ligado (0122), o WhatsApp abre a conversa do
   // sistema — registrada, com quem mandou — e não o WhatsApp do celular.
   const [temNumeroNeg, setTemNumeroNeg] = useState(false);
@@ -31728,6 +31730,19 @@ function TelaRecuperacao({ perfil, aoAbrir, aoConversar }) {
     && (a.ultimo_contato == null || diasDesde(a.ultimo_contato) >= prazo))
     .sort((a, b) => (a.ultimo_contato == null) !== (b.ultimo_contato == null) ? (a.ultimo_contato == null ? -1 : 1)
       : String(a.ultimo_contato || "").localeCompare(String(b.ultimo_contato || "")) || String(b.data).localeCompare(String(a.data)));
+  const paraHoje = agendHoje.concat(voltam);
+  const nunca = recuperar.filter((a) => a.ultimo_contato == null);
+  const jaProcurados = recuperar.filter((a) => a.ultimo_contato != null);
+  const reagendados = agendDepois.concat(lista.filter((a) => !idsAgend.has(a.id) && !idsHoje.has(a.id) && a.volta_em && a.volta_em > hoje)
+    .sort((a, b) => (a.volta_em < b.volta_em ? -1 : 1)));
+  const ABAS_REC = [
+    ["hoje", "Para hoje", paraHoje, "agendados para hoje, atrasados e quem prometeu voltar hoje", C.laranja],
+    ["nunca", "Nunca procurados", nunca, "ninguém ligou nem mandou mensagem ainda", C.roxo],
+    ["procurados", "Já procurados", jaProcurados, "", C.roxo],
+    ["reagendados", "Reagendados", reagendados, "com dia marcado para voltar a falar — aparecem em \"Para hoje\" no dia", C.roxo],
+    ["feitos", "Feitos hoje", deHoje, "quem você procurou hoje", C.verde],
+  ];
+  const abaAtiva = aba || (ABAS_REC.find((x) => x[2].length && x[0] !== "feitos") || ABAS_REC[0])[0];
   const carroDe = (a) => { const v = a.veiculo || {}; return [v.marca_modelo || a.carro_descricao, v.ano_modelo].filter(Boolean).join(" ") || "carro"; };
   const primeiro = (n) => String(n || "").trim().split(/\s+/)[0] || "";
   const registrar = async (a, modo) => {
@@ -31898,15 +31913,6 @@ function TelaRecuperacao({ perfil, aoAbrir, aoConversar }) {
       </div>
     );
   };
-  const secao = (titulo, sub, itens, cor) => (
-    <section className="space-y-2">
-      <div className="flex flex-wrap items-baseline gap-2">
-        <span className="text-[12px] font-bold uppercase tracking-[0.08em]" style={{ color: cor || ROTULO_COR }}>{titulo} ({itens.length})</span>
-        <span className="text-[12px]" style={{ color: C.mute }}>{sub}</span>
-      </div>
-      {itens.length ? itens.map(cartao) : <p className="text-[12.5px]" style={{ color: C.mute }}>Ninguém aqui agora.</p>}
-    </section>
-  );
   return (
     <div className="space-y-4">
       <Cabecalho titulo="Recuperação" sub="Os seus clientes que não fecharam. Ligar ou mandar WhatsApp já registra no Meu dia." />
@@ -31933,8 +31939,35 @@ function TelaRecuperacao({ perfil, aoAbrir, aoConversar }) {
             até <input type="date" value={ateP} onChange={(e) => setAteP(e.target.value)} className="rounded border px-1 py-0.5 outline-none" style={inputSty} />
           </span>
         )}
+        <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="procurar cliente, carro ou telefone"
+          className="ml-auto w-[240px] rounded-md border px-2 py-1 outline-none" style={inputSty} />
+      </div>
+      {erro && <p className="text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
+      {!d ? <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p> : (
+        <>
+          <div className="flex flex-wrap gap-1.5 border-b pb-2" style={{ borderColor: C.line }}>
+            {ABAS_REC.map(([k, r, itens, , cor]) => {
+              const sel = abaAtiva === k;
+              return (
+                <button key={k} onClick={() => setAba(k)} className="rounded-full px-3.5 py-1.5 text-[13px] font-semibold"
+                  style={{ background: sel ? cor : "#fff", color: sel ? "#fff" : C.ink, border: `1px solid ${sel ? cor : C.line}` }}>
+                  {r} <span style={{ opacity: sel ? 0.9 : 0.6 }}>{itens.length}</span>
+                </button>
+              );
+            })}
+          </div>
+          {(() => {
+            const [k, , itens, sub] = ABAS_REC.find((x) => x[0] === abaAtiva);
+            const q = soDigitos(busca).length >= 4 ? soDigitos(busca) : "";
+            const t = busca.trim().toLowerCase();
+            const vis = !t ? itens : itens.filter((a) => (q && soDigitos(a.cliente_telefone).includes(q))
+              || `${a.cliente_nome || ""} ${carroDe(a)} ${(a.veiculo && a.veiculo.placa) || ""}`.toLowerCase().includes(t));
+            return (
+              <section className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2 text-[12.5px]" style={{ color: C.mute }}>
+                  {k === "procurados" ? (
         <label className="flex items-center gap-1.5" style={{ color: C.mute }}>
-          e estão sem contato há pelo menos
+          sem contato há pelo menos
           <input type="number" min={0} max={365} value={prazo} onChange={(e) => setPrazo(Math.max(0, Math.min(365, Number(e.target.value) || 0)))}
             className="w-[56px] rounded border px-1 py-0.5 text-center outline-none" style={inputSty} />
           dia{prazo === 1 ? "" : "s"}
@@ -31945,27 +31978,13 @@ function TelaRecuperacao({ perfil, aoAbrir, aoConversar }) {
             </button>
           ))}
         </label>
-      </div>
-      {erro && <p className="text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
-      {!d ? <p className="text-[13px]" style={{ color: C.mute }}>Carregando…</p> : (
-        <>
-          {secao("Recuperação agendada para hoje", "o que foi marcado para hoje (e o que ficou para trás) — o horário manda", agendHoje, C.roxo)}
-          {!!voltam.length && secao("Prometeu voltar — o dia chegou", "ligue hoje: foi o combinado", voltam, C.laranja)}
-          {secao("Para recuperar", `${prazo ? `sem contato há ${prazo} dia${prazo > 1 ? "s" : ""} ou mais` : "todos"} — quem nunca foi procurado vem primeiro`, recuperar)}
-          {!!agendDepois.length && (
-            <section>
-              <button onClick={() => setVerDepois(!verDepois)} className="text-[12px] font-bold uppercase tracking-[0.08em]" style={{ color: C.roxo }}>
-                {verDepois ? "▾" : "▸"} Agendadas para os próximos dias ({agendDepois.length})
-              </button>
-              {verDepois && <div className="mt-2 space-y-2">{agendDepois.map(cartao)}</div>}
-            </section>
-          )}
-          <section>
-            <button onClick={() => setVerHoje(!verHoje)} className="text-[12px] font-bold uppercase tracking-[0.08em]" style={{ color: C.verde }}>
-              {verHoje ? "▾" : "▸"} Procurados hoje ({deHoje.length})
-            </button>
-            {verHoje && <div className="mt-2 space-y-2">{deHoje.map(cartao)}</div>}
-          </section>
+                  ) : <span>{sub}</span>}
+                  {t && <span>· {vis.length} de {itens.length} com "{busca.trim()}"</span>}
+                </div>
+                {vis.length ? vis.map(cartao) : <p className="py-4 text-[13px]" style={{ color: C.mute }}>{t ? "Ninguém com essa busca nesta aba." : "Ninguém aqui agora."}</p>}
+              </section>
+            );
+          })()}
         </>
       )}
     </div>

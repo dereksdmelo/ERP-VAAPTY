@@ -6420,6 +6420,13 @@ hora, ligada ao atendimento; um toque diz como foi (não atendeu, volta em
 tal dia — status vai voltar e `volta_em` —, vendeu fora) e completa a
 linha. O gerente escolhe de quem ver.
 
+**A Recuperação virou abas (23/11/2026, o Derek: *"pouco prática… divisão sobre o que já foi contatado, o que não
+foi, o que já foi reagendado"*).** Uma situação por vez, cada aba com a contagem: **Para hoje** (recuperação agendada
+para hoje ou atrasada, e quem prometeu voltar hoje), **Nunca procurados**, **Já procurados** (é só ali que vale o "sem
+contato há N dias"), **Reagendados** (recuperação ou volta marcada para depois — antes, quem tinha `volta_em` futura sem
+recuperação agendada não aparecia em lista nenhuma) e **Feitos hoje**. Abre na primeira com gente; a busca procura
+nome, carro, placa e telefone dentro da aba.
+
 **Recuperar leads (0153, 12/11/2026, o Derek: *"uma ferramenta para os
 negociadores fazerem recuperação de leads antigos que não foram trazidos à loja
 … o gestor designe tais leads de tal período em tal fase para tal negociador…
