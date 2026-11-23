@@ -17709,6 +17709,7 @@ function HorariosEspeciais({ aoMudar }) {
   const [lista, setLista] = useState(null);
   const VAZIO = { tipo: "regra", dia: "", primeiro: "09:00", ultimo: "17:00", motivo: "Sábado estendido" };
   const [novo, setNovo] = useState(VAZIO);
+  const [editando, setEditando] = useState(false);
   const [indo, setIndo] = useState(false); const [erro, setErro] = useState(""); const [ok, setOk] = useState("");
   useEffect(() => { lerConfigLoja().then((d) => setLista(((d.config || {}).horarios_especiais) || [])).catch((e) => setErro(e.message)); }, []);
   const hoje = hojeEmSP();
@@ -17746,9 +17747,15 @@ function HorariosEspeciais({ aoMudar }) {
               <span className="block text-[12px]" style={{ color: C.mute }}>Próximos: {proximosUltimos.join(" e ")}. Uma data cadastrada abaixo vale por cima da regra.</span>
             )}
           </span>
-          <button disabled={indo} onClick={() => gravar(lista.filter((x) => x !== h))} className="text-[12px] underline" style={{ color: C.mute }}>tirar</button>
+          <span className="flex gap-3">
+            {/* Editar põe os valores no formulário abaixo; gravar troca o que estava (a mesma data ou a regra). */}
+            <button disabled={indo} onClick={() => { setNovo({ tipo: h.dia ? "dia" : "regra", dia: h.dia || "", primeiro: h.primeiro, ultimo: h.ultimo, motivo: h.motivo || "" }); setEditando(true); setOk(""); }}
+              className="text-[12px] font-semibold underline" style={{ color: C.roxo }}>editar</button>
+            <button disabled={indo} onClick={() => gravar(lista.filter((x) => x !== h))} className="text-[12px] underline" style={{ color: C.mute }}>tirar</button>
+          </span>
         </div>
       )) : <p className="text-[12.5px]" style={{ color: C.mute }}>Nenhum horário especial: vale o horário de sempre.</p>}
+      {editando && <p className="text-[12px] font-semibold" style={{ color: C.roxo }}>Editando: mude os horários abaixo e grave — o que estava é trocado.</p>}
       <div className="flex flex-wrap items-end gap-2 rounded-lg p-2.5" style={{ background: C.bg }}>
         <label className="text-[12px]">Quando<br />
           <select className="rounded border px-2 py-1" style={campo} value={novo.tipo} onChange={(e) => setNovo({ ...novo, tipo: e.target.value })}>
@@ -17766,10 +17773,11 @@ function HorariosEspeciais({ aoMudar }) {
           const item = { ...(novo.tipo === "dia" ? { dia: novo.dia } : { regra: "ultimo_sabado" }), primeiro: novo.primeiro, ultimo: novo.ultimo, motivo: novo.motivo || "Horário estendido" };
           // A mesma data (ou a regra) cadastrada de novo troca a anterior, em vez de ficar duas.
           gravar(lista.filter((x) => (item.dia ? x.dia !== item.dia : x.regra !== item.regra)).concat([item]));
-          setNovo(VAZIO);
+          setNovo(VAZIO); setEditando(false);
         }}>
-          {indo ? "Gravando…" : "Gravar"}
+          {indo ? "Gravando…" : editando ? "Gravar a mudança" : "Gravar"}
         </BotaoPrimario>
+        {editando && <button onClick={() => { setNovo(VAZIO); setEditando(false); }} className="text-[12px] underline" style={{ color: C.mute }}>cancelar</button>}
         <p className="w-full text-[11.5px]" style={{ color: C.mute }}>O horário especial troca o do dia. Dia bloqueado continua bloqueado.</p>
       </div>
       {erro && <p className="text-[12.5px]" style={{ color: C.laranja }}>{erro}</p>}
