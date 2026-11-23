@@ -103,6 +103,10 @@ async function rhPublico(req, res) {
     const token = crypto.randomBytes(32).toString("base64url");
     const id = await rpcAnon("rh_candidatar", { p_token_hash: hashDe(token), p_franquia: franquiaDoLink(c.franquia), p_dados: d });
     if (!id) return res.status(502).json({ erro: "Não consegui registrar agora." });
+    // As respostas do formulário (0175): a pergunta como a pessoa leu e o que respondeu, textos curtos.
+    const resp = (Array.isArray(d.respostas) ? d.respostas : []).slice(0, 80)
+      .map((x) => ({ p: texto(x && x.p, 300), r: texto(x && x.r, 2000) })).filter((x) => x.p && x.r);
+    if (resp.length) await rpcAnon("rh_candidatar_respostas", { p_token_hash: hashDe(token), p_respostas: resp }).catch(() => {});
     // O token volta UMA vez, para o currículo e o DISC subirem em seguida. O banco guarda só o hash.
     return res.status(200).json({ ok: true, token });
   }
@@ -127,7 +131,7 @@ async function rhPublico(req, res) {
 
 /* ================================ a tela do ERP ================================ */
 
-const CAMPOS_VAGA = ["titulo", "setor", "descricao", "requisitos", "oferecemos", "modalidade", "perfil_disc", "aberta", "publica"];
+const CAMPOS_VAGA = ["titulo", "setor", "descricao", "requisitos", "oferecemos", "modalidade", "perfil_disc", "aberta", "publica", "perguntas"];
 const SETORES = ["negociacao", "prevendas", "administrativo", "gestao", "outro"];
 const CAMPOS_CAND = ["vaga_id", "nome", "telefone", "email", "cidade", "bairro", "nascimento", "linkedin", "experiencia",
   "formacao", "pretensao", "disponibilidade", "origem", "indicado_por", "etapa", "motivo", "nota", "tags",
@@ -150,6 +154,12 @@ function limparVaga(c) {
   if (m.perfil_disc !== undefined) m.perfil_disc = String(m.perfil_disc || "").toUpperCase().replace(/[^DISC]/g, "").slice(0, 2) || null;
   if (m.aberta !== undefined) m.aberta = !!m.aberta;
   if (m.publica !== undefined) m.publica = !!m.publica;
+  // As perguntas próprias da vaga (0175): texto, tipo (texto | sim_nao) e se é obrigatória.
+  if (m.perguntas !== undefined) {
+    m.perguntas = (Array.isArray(m.perguntas) ? m.perguntas : []).slice(0, 15)
+      .map((q) => ({ texto: texto(q && q.texto, 300), tipo: q && q.tipo === "sim_nao" ? "sim_nao" : "texto", obrigatoria: !!(q && q.obrigatoria) }))
+      .filter((q) => q.texto);
+  }
   return m;
 }
 

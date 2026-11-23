@@ -7068,3 +7068,13 @@ Vagas, Divulgar e buscar, Banco de talentos e Retenção (`TelaRH aba=`).
   dentro de `api/` seria a 13ª função.
 - **O que não existe ainda:** contratar não cria o login nem a ficha (a tela manda para Equipe → "+ Adicionar
   pessoa"); entrevista não vai para agenda nenhuma; o link do Trabalhe conosco não leva o `?f=` da franquia.
+- **O formulário completo (0175, 23/11/2026, o Derek: *"precisa ter o formulário para os candidatos preencherem
+  certinho, pra poder divulgar nas vagas"*).** Quatro blocos (dados, perfil, experiência, para terminar), com
+  perguntas fechadas em botões — escolaridade, CNH, carro próprio, experiência em vendas e com carros, se trabalha
+  hoje, quando começa, sábado — e as obrigatórias barram o envio dizendo o que falta. Cada vaga pode ter perguntas
+  próprias (`rh_vaga.perguntas`: texto, escrita ou sim/não, obrigatória). As respostas ficam em
+  `rh_candidato.respostas` como {p, r} — a pergunta como a pessoa leu — e aparecem na ficha do candidato. O link de
+  uma vaga (`/trabalhe?vaga=`) abre com a vaga em destaque. O rascunho fica no aparelho até enviar.
+- **O "Divulgar e buscar" é por vaga** (o Derek: *"não parece estar funcionando bem"* — eram seis links cortados e
+  iguais na tela). Escolhe-se a vaga; o link aparece inteiro; cada canal (WhatsApp, Instagram, Facebook, LinkedIn,
+  sites de vagas) tem o texto pronto com o link próprio e o botão que abre onde publicar.

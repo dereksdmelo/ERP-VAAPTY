@@ -6,6 +6,9 @@
 <meta name="referrer" content="no-referrer" />
 <title>Trabalhe na Vaapty Joinville</title>
 <meta name="description" content="Vagas abertas na Vaapty Joinville. Mande o seu currículo e faça o teste de perfil." />
+<meta property="og:title" content="Trabalhe na Vaapty Joinville" />
+<meta property="og:description" content="Vagas abertas. Candidate-se em poucos minutos pelo celular." />
+<meta property="og:type" content="website" />
 <!--
   O "Trabalhe conosco" do RH (0174, decisão 80).
 
@@ -71,6 +74,11 @@
   .res div{border:1px solid var(--linha);border-radius:10px;padding:10px;text-align:center}
   .res b{display:block;font-size:22px;color:var(--roxo)}
   .res span{font-size:11.5px;color:var(--mute)}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px}
+  .chip{border:1px solid var(--linha);background:#fff;border-radius:99px;padding:8px 12px;font-size:14px;color:var(--tinta);cursor:pointer;font-family:inherit}
+  .chip.on{background:var(--roxo);border-color:var(--roxo);color:#fff}
+  .passo-n{font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--roxo)}
+  .det{white-space:pre-wrap;font-size:14px;margin:6px 0 0}
   .rodape{color:var(--mute);font-size:12px;margin-top:20px;line-height:1.5}
 </style>
 </head>
@@ -103,60 +111,108 @@ async function pedir(url, op) {
   return d;
 }
 
-/* ----------------------------- o formulário ----------------------------- */
+/* ----------------------------- o formulário -----------------------------
+ * "Preencher certinho" (o Derek, 23/11/2026): o que a loja precisa saber para decidir quem chamar, em perguntas
+ * fechadas quando dá — escolaridade, CNH, carro, experiência, quando começa, sábado — e as perguntas próprias da vaga
+ * (`rh_vaga.perguntas`). As obrigatórias têm *, e a página não envia sem elas. As respostas vão como {p, r}: a
+ * pergunta como a pessoa leu e o que respondeu (0175). */
+const FIXAS = [
+  ["escolaridade", "Escolaridade", ["Fundamental", "Médio incompleto", "Médio completo", "Técnico", "Superior incompleto / cursando", "Superior completo", "Pós-graduação"], true],
+  ["cnh", "Tem CNH?", ["Não tenho", "Categoria A", "Categoria B", "Categoria AB", "Outra (C, D, E)"], true],
+  ["carro", "Tem carro ou moto própria?", ["Sim", "Não"], false],
+  ["exp_vendas", "Experiência com vendas ou atendimento ao cliente", ["Nenhuma", "Menos de 1 ano", "De 1 a 3 anos", "Mais de 3 anos"], true],
+  ["exp_veiculos", "Já trabalhou com carros (loja, concessionária, repasse, oficina)?", ["Não", "Sim"], true],
+  ["trabalhando", "Está trabalhando hoje?", ["Sim", "Não"], true],
+  ["inicio", "Quando pode começar?", ["Imediatamente", "Em até 15 dias", "Em até 30 dias", "Mais de 30 dias"], true],
+  ["sabado", "Pode trabalhar aos sábados pela manhã?", ["Sim", "Não"], true],
+];
+const CHAVES_R = ["nome", "telefone", "email", "nascimento", "cidade", "bairro", "linkedin", "ultimas", "porque",
+  "pretensao", "origem", "indicado_por", "mensagem"].concat(FIXAS.map((f) => f[0]));
+const RASCUNHO = "vaapty:trabalhe";
+
 async function inicio() {
   try { vagas = (await pedir(API + "&acao=vagas")).vagas || []; } catch (e) { vagas = []; }
   if (vagaSel && !vagas.some((v) => v.id === vagaSel)) vagaSel = "";
+  desenhar();
+}
+function opcoes(id, lista, obrig) {
+  return `<div class="chips" id="${id}" data-obrig="${obrig ? 1 : ""}">${lista.map((o) =>
+    `<button type="button" class="chip" data-v="${esc(o)}" onclick="marcarChip('${id}', this)">${esc(o)}</button>`).join("")}</div>`;
+}
+function marcarChip(id, b) {
+  el(id).querySelectorAll(".chip").forEach((x) => x.classList.toggle("on", x === b && !x.classList.contains("on")));
+  guardar();
+}
+const valorChip = (id) => { const b = el(id) && el(id).querySelector(".chip.on"); return b ? b.getAttribute("data-v") : ""; };
+function desenhar() {
   const orig = (Q.get("o") || "").toLowerCase();
   const ind = (Q.get("ind") || "").slice(0, 80);
+  const v = vagas.find((x) => x.id === vagaSel);
+  const outras = vagas.filter((x) => x.id !== vagaSel);
+  const perguntas = (v && Array.isArray(v.perguntas)) ? v.perguntas : [];
   el("app").innerHTML = `
+    ${v ? `
+    <div class="cartao" style="border-color:var(--roxo)">
+      <div class="sub" style="font-weight:700;color:var(--roxo)">VAGA ABERTA${SETOR[v.setor] ? " · " + SETOR[v.setor].toUpperCase() : ""}</div>
+      <h1>${esc(v.titulo)}</h1>
+      ${v.modalidade ? `<p class="sub">${esc(v.modalidade)}</p>` : ""}
+      ${v.descricao ? `<p class="det">${esc(v.descricao)}</p>` : ""}
+      ${v.requisitos ? `<h2 style="margin-top:12px">O que procuramos</h2><p class="det">${esc(v.requisitos)}</p>` : ""}
+      ${v.oferecemos ? `<h2 style="margin-top:12px">O que oferecemos</h2><p class="det">${esc(v.oferecemos)}</p>` : ""}
+      <p class="sub" style="margin-top:12px">A Vaapty compra carros de quem quer vender e repassa para uma rede de lojistas.</p>
+    </div>` : `
     <div class="heroi">
       <h1>Venha trabalhar na Vaapty Joinville</h1>
       <p class="sub">A Vaapty compra carros de quem quer vender e repassa para uma rede de lojistas. A gente cresce
       atendendo bem — e procura gente que gosta de gente, de resultado e de fazer direito.</p>
-    </div>
+    </div>`}
+    ${(!v || outras.length) ? `
     <div class="cartao">
-      <h2>${vagas.length ? "Vagas abertas" : "Banco de talentos"}</h2>
-      <p class="sub">${vagas.length ? "Escolha a vaga — ou entre no banco de talentos para as próximas." :
+      <h2>${v ? "Outras vagas" : vagas.length ? "Escolha a vaga" : "Banco de talentos"}</h2>
+      <p class="sub">${vagas.length ? (v ? "Se combinar mais com você, troque aqui." : "Toque na vaga para ver os detalhes — ou entre no banco de talentos.") :
         "Agora não há vaga aberta, mas o seu cadastro entra no nosso banco de talentos e a gente chama quando abrir."}</p>
-      ${vagas.map((v) => `
-        <button type="button" class="vaga ${vagaSel === v.id ? "on" : ""}" onclick="escolher('${v.id}')">
-          <b>${esc(v.titulo)}</b>${SETOR[v.setor] ? `<span class="selo">${SETOR[v.setor]}</span>` : ""}
-          ${v.modalidade ? `<div class="sub">${esc(v.modalidade)}</div>` : ""}
-          ${vagaSel === v.id ? `
-            ${v.descricao ? `<div class="det">${esc(v.descricao)}</div>` : ""}
-            ${v.requisitos ? `<div class="det"><b>O que procuramos:</b> ${esc(v.requisitos)}</div>` : ""}
-            ${v.oferecemos ? `<div class="det"><b>O que oferecemos:</b> ${esc(v.oferecemos)}</div>` : ""}` : ""}
-        </button>`).join("")}
-      ${vagas.length ? `<button type="button" class="vaga ${vagaSel === "" ? "on" : ""}" onclick="escolher('')">
-        <b>Banco de talentos</b><div class="sub">Não achei a minha vaga — quero ser lembrado nas próximas</div></button>` : ""}
-    </div>
+      ${outras.map((x) => `<button type="button" class="vaga" onclick="escolher('${x.id}')"><b>${esc(x.titulo)}</b>${SETOR[x.setor] ? `<span class="selo">${SETOR[x.setor]}</span>` : ""}${x.modalidade ? `<div class="sub">${esc(x.modalidade)}</div>` : ""}</button>`).join("")}
+      ${vagas.length ? `<button type="button" class="vaga ${vagaSel === "" ? "on" : ""}" onclick="escolher('')"><b>Banco de talentos</b><div class="sub">Quero ser lembrado nas próximas vagas</div></button>` : ""}
+    </div>` : ""}
 
     <div class="cartao">
-      <h2>Seus dados</h2>
+      <div class="passo-n">1 · Seus dados</div>
       <label>Nome completo *</label><input id="nome" autocomplete="name" />
       <div class="duas">
-        <div><label>WhatsApp *</label><input id="telefone" inputmode="tel" placeholder="47 99999-9999" autocomplete="tel" /></div>
+        <div><label>WhatsApp com DDD *</label><input id="telefone" inputmode="tel" placeholder="47 99999-9999" autocomplete="tel" /></div>
         <div><label>E-mail</label><input id="email" type="email" autocomplete="email" /></div>
       </div>
       <div class="duas">
-        <div><label>Cidade</label><input id="cidade" value="Joinville" /></div>
-        <div><label>Bairro</label><input id="bairro" /></div>
-      </div>
-      <div class="duas">
-        <div><label>Data de nascimento</label><input id="nascimento" type="date" /></div>
+        <div><label>Data de nascimento *</label><input id="nascimento" type="date" /></div>
         <div><label>LinkedIn ou Instagram</label><input id="linkedin" placeholder="link ou @" /></div>
       </div>
-      <label>Sua experiência</label>
-      <textarea id="experiencia" placeholder="Onde trabalhou, o que fazia, quanto tempo. Vendas, atendimento, carros, escritório…"></textarea>
-      <label>Formação</label><input id="formacao" placeholder="Ensino médio, técnico, faculdade…" />
       <div class="duas">
-        <div><label>Pretensão</label><input id="pretensao" placeholder="ex.: fixo + comissão" /></div>
-        <div><label>Disponibilidade</label><input id="disponibilidade" placeholder="ex.: imediata, a partir de…" /></div>
+        <div><label>Cidade *</label><input id="cidade" value="Joinville" /></div>
+        <div><label>Bairro *</label><input id="bairro" /></div>
       </div>
+    </div>
+
+    <div class="cartao">
+      <div class="passo-n">2 · Seu perfil</div>
+      ${FIXAS.map(([id, rot, lista, ob]) => `<label>${rot}${ob ? " *" : ""}</label>${opcoes(id, lista, ob)}`).join("")}
+    </div>
+
+    <div class="cartao">
+      <div class="passo-n">3 · Sua experiência</div>
+      <label>Últimos trabalhos *</label>
+      <textarea id="ultimas" placeholder="Empresa, o que fazia e por quanto tempo. Ex.: Loja X — vendedor — 2022 a 2024"></textarea>
+      <label>Por que quer trabalhar na Vaapty? *</label>
+      <textarea id="porque" style="min-height:70px"></textarea>
+      <label>Pretensão salarial</label><input id="pretensao" placeholder="ex.: fixo + comissão, ou um valor" />
+      ${perguntas.map((q, k) => `<label>${esc(q.texto)}${q.obrigatoria ? " *" : ""}</label>
+        ${q.tipo === "sim_nao" ? opcoes("vq" + k, ["Sim", "Não"], q.obrigatoria) : `<textarea id="vq${k}" data-obrig="${q.obrigatoria ? 1 : ""}" style="min-height:64px"></textarea>`}`).join("")}
+    </div>
+
+    <div class="cartao">
+      <div class="passo-n">4 · Para terminar</div>
       <label>Como ficou sabendo da vaga?</label>
       <select id="origem" onchange="el('ind').style.display = this.value === 'indicacao' ? 'block' : 'none'">
-        ${ORIGENS.map(([v, r]) => `<option value="${v}" ${(orig === v || (ind && v === "indicacao")) ? "selected" : ""}>${r}</option>`).join("")}
+        ${ORIGENS.map(([x, r]) => `<option value="${x}" ${(orig === x || (ind && x === "indicacao")) ? "selected" : ""}>${r}</option>`).join("")}
       </select>
       <div id="ind" style="display:${ind || orig === "indicacao" ? "block" : "none"}">
         <label>Quem indicou?</label><input id="indicado_por" value="${esc(ind)}" />
@@ -173,12 +229,30 @@ async function inicio() {
       <button class="prin" id="enviar" onclick="enviar()">Enviar candidatura</button>
       <div id="erro" class="erro"></div>
     </div>`;
+  voltar();
+  if (arquivo) el("narq").textContent = arquivo.nome;
 }
-function escolher(id) {
-  const vals = {};
-  document.querySelectorAll("#app input:not([type=file]):not([type=checkbox]), #app textarea, #app select").forEach((e) => { vals[e.id] = e.value; });
-  vagaSel = id; inicio().then(() => { Object.keys(vals).forEach((k) => { if (el(k)) el(k).value = vals[k]; }); if (arquivo) el("narq").textContent = arquivo.nome; });
+
+/* O RASCUNHO NÃO SE PERDE (a lição do DUT, 03/11/2026): cada toque fica guardado neste aparelho, e volta depois de
+ * um erro, de trocar de vaga ou de fechar a página sem querer. Enviado, sai. */
+function guardar() {
+  try {
+    const r = {};
+    CHAVES_R.forEach((k) => { r[k] = FIXAS.some((f) => f[0] === k) ? valorChip(k) : (el(k) ? el(k).value : ""); });
+    localStorage.setItem(RASCUNHO, JSON.stringify(r));
+  } catch (e) {}
 }
+function voltar() {
+  let r = {};
+  try { r = JSON.parse(localStorage.getItem(RASCUNHO) || "{}") || {}; } catch (e) {}
+  CHAVES_R.forEach((k) => {
+    if (!r[k]) return;
+    if (FIXAS.some((f) => f[0] === k)) { const b = el(k) && Array.from(el(k).querySelectorAll(".chip")).find((x) => x.getAttribute("data-v") === r[k]); if (b) b.classList.add("on"); }
+    else if (el(k) && (!el(k).value || (k === "cidade" && el(k).value === "Joinville"))) el(k).value = r[k];
+  });
+}
+document.addEventListener("input", () => guardar());
+function escolher(id) { guardar(); vagaSel = id; desenhar(); window.scrollTo(0, 0); }
 function pegar(input) {
   const f = input.files && input.files[0];
   if (!f) { arquivo = null; el("narq").textContent = ""; return; }
@@ -192,16 +266,34 @@ async function enviar() {
   const b = el("enviar"), erro = el("erro");
   erro.textContent = "";
   const v = (id) => (el(id) ? (el(id).value || "").trim() : "");
-  if (!v("nome")) { erro.textContent = "Informe o seu nome."; return; }
-  if (v("telefone").replace(/\D/g, "").length < 10 && !v("email")) { erro.textContent = "Informe o WhatsApp com DDD (ou o e-mail)."; return; }
+  const falta = [];
+  if (!v("nome")) falta.push("nome");
+  if (v("telefone").replace(/\D/g, "").length < 10) falta.push("WhatsApp com DDD");
+  if (!v("nascimento")) falta.push("data de nascimento");
+  if (!v("cidade")) falta.push("cidade");
+  if (!v("bairro")) falta.push("bairro");
+  FIXAS.forEach(([id, rot, , ob]) => { if (ob && !valorChip(id)) falta.push(rot.replace(/\?$/, "").toLowerCase()); });
+  if (!v("ultimas")) falta.push("últimos trabalhos");
+  if (!v("porque")) falta.push("por que quer trabalhar na Vaapty");
+  const vg = vagas.find((x) => x.id === vagaSel);
+  const pergs = (vg && Array.isArray(vg.perguntas)) ? vg.perguntas : [];
+  pergs.forEach((q, k) => { const r = q.tipo === "sim_nao" ? valorChip("vq" + k) : v("vq" + k); if (q.obrigatoria && !r) falta.push(q.texto.replace(/\?$/, "").toLowerCase()); });
+  if (falta.length) { erro.textContent = "Falta responder: " + falta.join(", ") + "."; return; }
   if (!el("lgpd").checked) { erro.textContent = "Marque a autorização para guardarmos os seus dados."; return; }
+
+  const resp = FIXAS.map(([id, rot]) => ({ p: rot, r: valorChip(id) }))
+    .concat([{ p: "Últimos trabalhos", r: v("ultimas") }, { p: "Por que quer trabalhar na Vaapty", r: v("porque") }])
+    .concat(pergs.map((q, k) => ({ p: q.texto, r: q.tipo === "sim_nao" ? valorChip("vq" + k) : v("vq" + k) })))
+    .filter((x) => x.r);
   b.disabled = true; b.textContent = "enviando…";
   try {
-    const dados = {};
-    ["nome", "telefone", "email", "cidade", "bairro", "nascimento", "linkedin", "experiencia", "formacao", "pretensao",
-     "disponibilidade", "origem", "indicado_por", "mensagem"].forEach((k) => { dados[k] = v(k); });
-    if (dados.origem !== "indicacao") dados.indicado_por = "";
-    dados.vaga_id = vagaSel;
+    const dados = {
+      nome: v("nome"), telefone: v("telefone"), email: v("email"), cidade: v("cidade"), bairro: v("bairro"),
+      nascimento: v("nascimento"), linkedin: v("linkedin"), pretensao: v("pretensao"), origem: v("origem"),
+      indicado_por: v("origem") === "indicacao" ? v("indicado_por") : "", mensagem: v("mensagem"),
+      formacao: valorChip("escolaridade"), experiencia: v("ultimas"), disponibilidade: valorChip("inicio"),
+      vaga_id: vagaSel, respostas: resp,
+    };
     const d = await pedir(API + "&acao=candidatar", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ dados, consentimento: true, franquia: FRANQUIA }) });
     token = d.token;
@@ -213,6 +305,7 @@ async function enviar() {
           body: JSON.stringify({ arquivo_base64: arquivo.base64, nome: arquivo.nome, tipo: arquivo.tipo }) });
       } catch (e) { falhou = e.message; }
     }
+    try { localStorage.removeItem(RASCUNHO); } catch (e) {}
     recebido(v("nome").split(" ")[0], falhou);
   } catch (e) {
     erro.textContent = e.message + " Seus dados continuam aqui — é só tentar de novo.";

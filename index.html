@@ -36773,7 +36773,7 @@ const rhQuando = (iso) => (iso ? new Date(iso).toLocaleString("pt-BR", { timeZon
 const rhIdade = (n) => { const d = rhDias(n); return d == null ? null : Math.floor(d / 365.25); };
 const rhTempo = (dias) => (dias == null ? "—" : dias < 31 ? `${dias} d` : dias < 365 ? `${Math.floor(dias / 30.4)} meses` :
   `${Math.floor(dias / 365.25)} a ${Math.floor((dias % 365.25) / 30.4)} m`);
-const rhLink = (q) => `${location.origin}/trabalhe.html${q ? `?${q}` : ""}`;
+const rhLink = (q) => `${location.origin}/trabalhe${q ? `?${q}` : ""}`;
 async function rhCopiar(t) { try { await navigator.clipboard.writeText(t); return true; } catch (e) { window.prompt("Copie:", t); return false; } }
 
 async function rhApi(acao, { metodo, id, corpo, extra } = {}) {
@@ -36897,7 +36897,7 @@ function RHCandidato({ id, vagas, onFechar, onMudou }) {
     setErro(""); setAviso("");
     try {
       const r = await rhApi("link-disc", { metodo: "POST", id });
-      const link = `${location.origin}/trabalhe.html#t=${r.token}`;
+      const link = `${location.origin}/trabalhe#t=${r.token}`;
       const msg = `Oi, ${String(c.nome).split(" ")[0]}! Aqui é da Vaapty Joinville. Para seguirmos com o seu processo, responda este teste rápido de perfil (uns 5 minutos): ${link}`;
       if (mandar && c.telefone) window.open(zap(c.telefone, msg), "_blank");
       else { await rhCopiar(msg); setAviso("Mensagem com o link copiada. O link vale 7 dias."); }
@@ -37004,6 +37004,14 @@ function RHCandidato({ id, vagas, onFechar, onMudou }) {
                 {linha("Formação", c.formacao)}{linha("Pretensão", c.pretensao)}{linha("Disponibilidade", c.disponibilidade)}
                 {c.experiencia && <div className="mt-1.5 whitespace-pre-wrap text-[13px]"><span style={{ color: C.mute }}>Experiência: </span>{c.experiencia}</div>}
                 {c.mensagem && <div className="mt-1.5 whitespace-pre-wrap text-[13px]"><span style={{ color: C.mute }}>Mensagem: </span>{c.mensagem}</div>}
+                {Array.isArray(c.respostas) && !!c.respostas.length && (
+                  <div className="mt-2 rounded-lg p-2" style={{ background: C.bg }}>
+                    <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider" style={{ color: C.mute }}>Respostas do formulário</div>
+                    {c.respostas.map((x, k) => (
+                      <div key={k} className="py-0.5 text-[13px]"><span style={{ color: C.mute }}>{x.p}: </span><span className="whitespace-pre-wrap">{x.r}</span></div>
+                    ))}
+                  </div>
+                )}
                 {!!(c.tags || []).length && <div className="mt-1.5 flex flex-wrap gap-1">{c.tags.map((t) => <span key={t} className="rounded-full px-2 py-0.5 text-[11px]" style={{ background: C.roxoFraco, color: C.roxo }}>{t}</span>)}</div>}
               </div>
             )}
@@ -37322,6 +37330,22 @@ function RHVagas({ vagas, cands, onMudou }) {
             ))}
           </div>
           <p className="mt-1 text-[11.5px]" style={{ color: C.mute }}>Na loja: negociação costuma ser DI, pré-vendas IS, administrativo SC. É uma referência para a conversa, não um filtro.</p>
+          <label className={rhRot} style={{ color: C.mute }}>Perguntas próprias desta vaga</label>
+          <p className="text-[11.5px]" style={{ color: C.mute }}>O formulário já pergunta escolaridade, CNH, carro, experiência em vendas e com carros, se trabalha hoje, quando começa, sábado, últimos trabalhos e por que a Vaapty. Acrescente aqui o que for só desta vaga.</p>
+          {(ed.perguntas || []).map((q, k) => {
+            const mexe = (m) => setEd({ ...ed, perguntas: ed.perguntas.map((x, j) => (j === k ? { ...x, ...m } : x)) });
+            return (
+              <div key={k} className="mt-1.5 flex flex-wrap items-center gap-2">
+                <input className="min-w-[200px] flex-1 rounded-lg border px-2 py-1 text-[13px] outline-none" style={inputSty} value={q.texto} onChange={(e) => mexe({ texto: e.target.value })} placeholder="ex.: Já vendeu carros? Onde?" />
+                <select className="rounded-lg border px-1.5 py-1 text-[12.5px] outline-none" style={inputSty} value={q.tipo} onChange={(e) => mexe({ tipo: e.target.value })}>
+                  <option value="texto">resposta escrita</option><option value="sim_nao">sim ou não</option>
+                </select>
+                <label className="flex items-center gap-1 text-[12px]"><input type="checkbox" checked={!!q.obrigatoria} onChange={(e) => mexe({ obrigatoria: e.target.checked })} /> obrigatória</label>
+                <button onClick={() => setEd({ ...ed, perguntas: ed.perguntas.filter((_, j) => j !== k) })} className="text-[12px]" style={{ color: C.mute }}>tirar</button>
+              </div>
+            );
+          })}
+          <button onClick={() => setEd({ ...ed, perguntas: (ed.perguntas || []).concat([{ texto: "", tipo: "texto", obrigatoria: true }]) })} className="mt-1.5 text-[12.5px] font-semibold" style={{ color: C.roxo }}>+ pergunta</button>
           <label className="mt-3 flex items-center gap-2 text-[13px]"><input type="checkbox" checked={!!ed.publica} onChange={(e) => setEd({ ...ed, publica: e.target.checked })} /> Mostrar no Trabalhe conosco</label>
           {erro && <p className="mt-2 text-[13px]" style={{ color: C.laranja }}>{erro}</p>}
           <div className="mt-3 flex justify-end"><button onClick={salvar} disabled={!String(ed.titulo || "").trim()} className="rounded-lg px-4 py-2 text-[13.5px] font-bold text-white disabled:opacity-40" style={{ background: C.roxo }}>Gravar</button></div>
@@ -37331,73 +37355,113 @@ function RHVagas({ vagas, cands, onMudou }) {
   );
 }
 
-/* "PROCURAR PESSOAS INTERESSADAS": link por canal (a origem diz onde vale divulgar), link de indicação de cada um da
- * equipe, e a busca ativa — links prontos, não raspagem (a régua dos canais de preço, decisão 8). */
+/* "PROCURAR PESSOAS INTERESSADAS" — por vaga (23/11/2026, o Derek: "divulgar e buscar não parece estar funcionando
+ * bem"). A primeira versão listava seis links genéricos que apareciam cortados e iguais na tela, sem dizer o que fazer
+ * com cada um. Agora: escolhe-se a vaga, o link dela aparece inteiro (abre direto na vaga, com o formulário), e cada
+ * canal tem o texto pronto com o link daquele canal — a origem diz depois de onde veio quem deu certo — e o botão que
+ * abre o lugar de publicar. A busca ativa continua sendo link pronto, não raspagem (decisão 8). */
 function RHDivulgar({ perfil, vagas, cands }) {
-  const [copiado, setCopiado] = useState(""); const [quem, setQuem] = useState((perfil && perfil.nome) || ""); const [termo, setTermo] = useState("vendedor");
+  const abertas = vagas.filter((v) => v.aberta);
+  const [vid, setVid] = useState(() => (abertas[0] && abertas[0].id) || "");
+  const [copiado, setCopiado] = useState(""); const [quem, setQuem] = useState((perfil && perfil.nome) || "");
+  const v = vagas.find((x) => x.id === vid);
+  const [termo, setTermo] = useState("");
+  useEffect(() => { setTermo(v ? v.titulo.replace(/\(.*?\)/g, "").trim() : "vendedor"); }, [vid]);
   const copia = async (k, t) => { await rhCopiar(t); setCopiado(k); setTimeout(() => setCopiado(""), 1800); };
-  const abertas = vagas.filter((v) => v.aberta && v.publica);
   const enc = encodeURIComponent;
-  const canais = [["instagram", "Instagram (bio ou story)"], ["facebook", "Facebook / grupos"], ["whatsapp", "WhatsApp / status"], ["linkedin", "LinkedIn"], ["indeed", "Indeed e sites de vaga"]];
+  const link = (o) => rhLink([v ? `vaga=${v.id}` : "", o ? `o=${o}` : ""].filter(Boolean).join("&"));
+  const texto = (o, curto) => {
+    if (!v) return `A Vaapty Joinville está montando o banco de talentos. Quer trabalhar com a gente? Cadastre-se: ${link(o)}`;
+    if (curto) return `🚗 Vaga aberta na Vaapty Joinville: ${v.titulo}${v.modalidade ? ` (${v.modalidade})` : ""}. Candidate-se em poucos minutos: ${link(o)}`;
+    return [`🚗 *A Vaapty Joinville está contratando: ${v.titulo}*`, v.modalidade || "", "", v.descricao || "",
+      v.requisitos ? `\n*O que procuramos:*\n${v.requisitos}` : "", v.oferecemos ? `\n*O que oferecemos:*\n${v.oferecemos}` : "",
+      `\n👉 Candidate-se (leva 5 minutos, pelo celular): ${link(o)}`].join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  };
+  const canais = [
+    ["whatsapp", "WhatsApp", "Status, grupos e contatos. Abre o WhatsApp com o texto pronto para escolher para quem mandar.", `https://wa.me/?text=${enc(texto("whatsapp"))}`, "abrir o WhatsApp"],
+    ["instagram", "Instagram", "Cole na legenda do post ou no story (use o adesivo de link). No story, o texto curto.", "https://www.instagram.com/", "abrir o Instagram"],
+    ["facebook", "Facebook e grupos de vagas", "Publique na página da loja e nos grupos de vagas de Joinville.", `https://www.facebook.com/sharer/sharer.php?u=${enc(link("facebook"))}`, "compartilhar no Facebook"],
+    ["linkedin", "LinkedIn", "Publique no seu perfil e no da empresa.", `https://www.linkedin.com/sharing/share-offsite/?url=${enc(link("linkedin"))}`, "compartilhar no LinkedIn"],
+    ["indeed", "Indeed e sites de vagas (Indeed, InfoJobs, Catho, Sine)", "Ao cadastrar a vaga no site, use o texto completo e ponha este link como forma de candidatura.", "https://employers.indeed.com/", "abrir o Indeed para empresas"],
+  ];
   const busca = [
     ["LinkedIn — pessoas", `https://www.linkedin.com/search/results/people/?keywords=${enc(`${termo} Joinville`)}`],
     ["Google — perfis do LinkedIn", `https://www.google.com/search?q=${enc(`site:linkedin.com/in ${termo} Joinville`)}`],
-    ["Facebook — grupos de vagas", `https://www.facebook.com/search/groups/?q=${enc("vagas Joinville")}`],
+    ["Facebook — grupos de vagas de Joinville", `https://www.facebook.com/search/groups/?q=${enc("vagas Joinville")}`],
     ["Instagram — #vagasjoinville", "https://www.instagram.com/explore/tags/vagasjoinville/"],
-    ["Indeed — vagas parecidas (salário da concorrência)", `https://br.indeed.com/jobs?q=${enc(termo)}&l=${enc("Joinville, SC")}`],
+    ["Indeed — vagas parecidas (ver salário da concorrência)", `https://br.indeed.com/jobs?q=${enc(termo)}&l=${enc("Joinville, SC")}`],
   ];
-  // De onde vem quem chega longe: candidatos por origem, e quantos passaram da triagem e foram contratados.
   const porOrigem = RH_ORIGENS.map(([k, r]) => {
-    const da = cands.filter((c) => c.origem === k);
+    const da = cands.filter((c) => c.origem === k && (!v || c.vaga_id === v.id));
     return { k, r, n: da.length, entrevista: da.filter((c) => ["entrevista", "teste", "proposta", "contratado"].indexOf(c.etapa) >= 0).length, contratado: da.filter((c) => c.etapa === "contratado").length };
   }).filter((x) => x.n);
-  const Linha = ({ k, rot, url }) => (
-    <div className="flex flex-wrap items-center gap-2 border-t py-2 text-[13px]" style={{ borderColor: C.line }}>
-      <span className="w-[200px] font-semibold">{rot}</span>
-      <span className="min-w-0 flex-1 truncate text-[12px]" style={{ color: C.mute, fontFamily: F.mono }}>{url}</span>
-      <button onClick={() => copia(k, url)} className="text-[12px] font-semibold" style={{ color: C.roxo }}>{copiado === k ? "copiado ✓" : "copiar"}</button>
-    </div>
+  const Btn = ({ k, t, rot, cheio }) => (
+    <button onClick={() => copia(k, t)} className="rounded-lg px-3 py-1.5 text-[12.5px] font-bold" style={cheio ? { background: C.roxo, color: "#fff" } : { border: `1px solid ${C.line}`, color: C.roxo }}>
+      {copiado === k ? "copiado ✓" : rot}</button>
   );
+  const caixa = { background: C.paper, borderColor: C.line };
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <div className="rounded-xl border p-3" style={{ background: C.paper, borderColor: C.line }}>
-        <b className="text-[14px]">O link do Trabalhe conosco</b>
-        <p className="text-[12.5px]" style={{ color: C.mute }}>{abertas.length ? `${abertas.length} vaga${abertas.length > 1 ? "s" : ""} no site.` : "Sem vaga no site: quem entrar vai para o banco de talentos."} Cada canal tem o seu link, para saber de onde vem quem dá certo.</p>
-        <div className="mt-2">
-          <Linha k="geral" rot="Link geral" url={rhLink("")} />
-          {canais.map(([k, r]) => <Linha key={k} k={k} rot={r} url={rhLink(`o=${k}`)} />)}
+    <div className="space-y-4">
+      <div className="rounded-xl border p-3" style={caixa}>
+        <div className="flex flex-wrap items-center gap-2">
+          <b className="text-[14px]">Divulgar</b>
+          <select className="rounded-lg border px-2 py-1.5 text-[13.5px] font-semibold outline-none" style={inputSty} value={vid} onChange={(e) => setVid(e.target.value)}>
+            {abertas.map((x) => <option key={x.id} value={x.id}>{x.titulo}{x.publica ? "" : " (fora do site)"}</option>)}
+            <option value="">Banco de talentos (sem vaga)</option>
+          </select>
         </div>
-        <a href={rhLink("")} target="_blank" rel="noreferrer" className="mt-2 inline-block text-[12.5px] font-semibold" style={{ color: C.roxo }}>ver a página como o candidato vê →</a>
-      </div>
-
-      <div className="rounded-xl border p-3" style={{ background: C.paper, borderColor: C.line }}>
-        <b className="text-[14px]">Indicação da equipe</b>
-        <p className="text-[12.5px]" style={{ color: C.mute }}>Quem trabalha aqui conhece gente boa. O link já leva o nome de quem indicou, e a indicação aparece no candidato.</p>
-        <div className="mt-2 flex gap-2">
-          <input className="flex-1 rounded-lg border px-2.5 py-1.5 text-[13px] outline-none" style={inputSty} value={quem} onChange={(e) => setQuem(e.target.value)} placeholder="Nome de quem indica" />
-          <button onClick={() => copia("ind", `Estamos contratando na Vaapty Joinville! Conhece alguém bom? Manda este link: ${rhLink(`o=indicacao&ind=${enc(quem.trim())}`)}`)} disabled={!quem.trim()}
-            className="rounded-lg px-3 text-[12.5px] font-bold text-white disabled:opacity-40" style={{ background: C.roxo }}>{copiado === "ind" ? "copiado ✓" : "copiar mensagem"}</button>
+        {!abertas.length && <p className="mt-2 text-[12.5px]" style={{ color: AMARELO.texto }}>Nenhuma vaga aberta: crie em RH → Vagas. Por enquanto o link leva ao banco de talentos.</p>}
+        {v && !v.publica && <p className="mt-2 text-[12.5px]" style={{ color: AMARELO.texto }}>Esta vaga está fora do site: quem abrir o link não vai vê-la. Ponha no site em RH → Vagas.</p>}
+        <div className="mt-2 rounded-lg px-3 py-2 text-[13px]" style={{ background: C.bg, fontFamily: F.mono, wordBreak: "break-all" }}>{link("")}</div>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <Btn k="link" t={link("")} rot="Copiar o link" cheio />
+          <Btn k="texto" t={texto("")} rot="Copiar o texto completo" />
+          <a href={link("")} target="_blank" rel="noreferrer" className="rounded-lg border px-3 py-1.5 text-[12.5px] font-bold" style={{ borderColor: C.line, color: C.ink }}>Ver como o candidato vê →</a>
         </div>
       </div>
 
-      <div className="rounded-xl border p-3" style={{ background: C.paper, borderColor: C.line }}>
-        <b className="text-[14px]">Busca ativa</b>
-        <p className="text-[12.5px]" style={{ color: C.mute }}>Abra, ache a pessoa e cadastre com "+ Cadastrar pessoa" (origem: busca ativa). Depois mande o link do DISC pelo WhatsApp.</p>
-        <div className="mt-2 flex items-center gap-2">
-          <span className="text-[12px]" style={{ color: C.mute }}>Procurar por</span>
-          <input className="flex-1 rounded-lg border px-2.5 py-1.5 text-[13px] outline-none" style={inputSty} value={termo} onChange={(e) => setTermo(e.target.value)} />
+      <div className="rounded-xl border p-3" style={caixa}>
+        <b className="text-[14px]">Onde publicar</b>
+        <p className="text-[12.5px]" style={{ color: C.mute }}>Cada canal leva um link próprio, para sabermos de onde veio cada candidato.</p>
+        {canais.map(([k, rot, dica, url, abrir]) => (
+          <div key={k} className="mt-2 border-t pt-2" style={{ borderColor: C.line }}>
+            <div className="flex flex-wrap items-center gap-2">
+              <b className="min-w-[150px] flex-1 text-[13.5px]">{rot}</b>
+              <Btn k={"t" + k} t={texto(k)} rot="copiar texto" cheio />
+              {k === "instagram" && <Btn k={"c" + k} t={texto(k, true)} rot="texto curto (story)" />}
+              <a href={url} target="_blank" rel="noreferrer" className="rounded-lg border px-3 py-1.5 text-[12.5px] font-bold" style={{ borderColor: C.line, color: C.ink }}>{abrir} →</a>
+            </div>
+            <p className="mt-0.5 text-[12px]" style={{ color: C.mute }}>{dica}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="rounded-xl border p-3" style={caixa}>
+          <b className="text-[14px]">Indicação da equipe</b>
+          <p className="text-[12.5px]" style={{ color: C.mute }}>Quem trabalha aqui conhece gente boa. O link já leva o nome de quem indicou.</p>
+          <div className="mt-2 flex gap-2">
+            <input className="flex-1 rounded-lg border px-2.5 py-1.5 text-[13px] outline-none" style={inputSty} value={quem} onChange={(e) => setQuem(e.target.value)} placeholder="Nome de quem indica" />
+            <Btn k="ind" t={`${v ? `Estamos contratando ${v.titulo} na Vaapty Joinville!` : "A Vaapty Joinville está contratando!"} Conhece alguém bom? Manda este link: ${rhLink([v ? `vaga=${v.id}` : "", "o=indicacao", `ind=${enc(quem.trim())}`].filter(Boolean).join("&"))}`} rot="copiar mensagem" cheio />
+          </div>
         </div>
-        <div className="mt-1.5 flex flex-wrap gap-2">
-          {vagas.filter((v) => v.aberta).slice(0, 4).map((v) => <button key={v.id} onClick={() => setTermo(v.titulo.replace(/\(.*?\)/g, "").trim())} className="rounded-full border px-2 py-0.5 text-[11.5px]" style={{ borderColor: C.line }}>{v.titulo}</button>)}
-        </div>
-        <div className="mt-2 space-y-1.5">
-          {busca.map(([r, u]) => <a key={r} href={u} target="_blank" rel="noreferrer" className="block rounded-lg border px-3 py-2 text-[13px] font-semibold" style={{ borderColor: C.line, color: C.roxo }}>{r} →</a>)}
+
+        <div className="rounded-xl border p-3" style={caixa}>
+          <b className="text-[14px]">Busca ativa</b>
+          <p className="text-[12.5px]" style={{ color: C.mute }}>Ache a pessoa, cadastre com "+ Cadastrar pessoa" (origem busca ativa) e mande o teste DISC pelo WhatsApp.</p>
+          <div className="mt-2 flex items-center gap-2">
+            <span className="text-[12px]" style={{ color: C.mute }}>Procurar por</span>
+            <input className="flex-1 rounded-lg border px-2.5 py-1.5 text-[13px] outline-none" style={inputSty} value={termo} onChange={(e) => setTermo(e.target.value)} />
+          </div>
+          <div className="mt-2 space-y-1.5">
+            {busca.map(([r, u]) => <a key={r} href={u} target="_blank" rel="noreferrer" className="block rounded-lg border px-3 py-2 text-[13px] font-semibold" style={{ borderColor: C.line, color: C.roxo }}>{r} →</a>)}
+          </div>
         </div>
       </div>
 
-      <div className="rounded-xl border p-3" style={{ background: C.paper, borderColor: C.line }}>
-        <b className="text-[14px]">De onde vem quem dá certo</b>
-        {!porOrigem.length ? <p className="mt-1 text-[12.5px]" style={{ color: C.mute }}>Ainda não há candidatos.</p> : (
+      <div className="rounded-xl border p-3" style={caixa}>
+        <b className="text-[14px]">De onde vem quem dá certo{v ? ` — ${v.titulo}` : ""}</b>
+        {!porOrigem.length ? <p className="mt-1 text-[12.5px]" style={{ color: C.mute }}>Ainda não há candidatos{v ? " nesta vaga" : ""}.</p> : (
           <table className="mt-2 w-full text-[13px]">
             <thead><tr className="text-left text-[11px] uppercase tracking-wider" style={{ color: C.mute }}><th className="py-1">Origem</th><th>Candidatos</th><th>Entrevista+</th><th>Contratados</th></tr></thead>
             <tbody>{porOrigem.map((x) => (
@@ -37462,7 +37526,7 @@ function RHRetencao({ perfil }) {
     setErro(""); setAviso("");
     try {
       const r = await rhApi("disc-colaborador", { metodo: "POST", corpo: { colaborador_id: p.id } });
-      const msg = `Oi, ${String(p.nome || "").split(" ")[0]}! Queremos te conhecer melhor para liderar do jeito que funciona para você. Responde este teste rápido de perfil (5 min)? ${location.origin}/trabalhe.html#t=${r.token}`;
+      const msg = `Oi, ${String(p.nome || "").split(" ")[0]}! Queremos te conhecer melhor para liderar do jeito que funciona para você. Responde este teste rápido de perfil (5 min)? ${location.origin}/trabalhe#t=${r.token}`;
       if (p.telefone) window.open(zap(p.telefone, msg), "_blank"); else { await rhCopiar(msg); setAviso(`Mensagem para ${p.nome} copiada (a ficha não tem telefone).`); }
       carregar();
     } catch (e) { setErro(e.message); }
