@@ -6931,3 +6931,29 @@ as melhorias que forem bugs ou coisas que precisa resolver, e me consulta quando
   responde em Gestão → **Suporte e melhorias** (`TelaSuporte`).
 - **O agente**: bug e mudança pequena ele resolve e marca "resolvido" com o commit (`commit_feito`) e uma resposta;
   mudança grande vai para "esperando o Derek" com a proposta escrita na resposta, e só anda com o ok dele.
+
+### 79. Shinkai ERP: um banco só para a rede, e a franquia em toda tabela (0166)
+
+O Derek, em 23/11/2026: o ERP vira o produto do Shinkai, em **erp.shinkai.com.br**, e o banco é **um só** — o
+Supabase deste ERP. O banco do Shinkai (do Mateus) migra para cá e a plataforma dele passa a usar este banco; o
+Shinkai continua no ar. Eu recomendei um banco por franquia (o sistema foi escrito para uma loja só); ele escolheu o
+banco único sabendo do custo.
+
+**A marca** (fase 1): título, entrada, logotipo e recado de acesso dizem "Shinkai ERP". Contratos, recibos, DUT e
+mensagens a clientes continuam da Vaapty — são da franquia, e o texto jurídico não muda (decisão 7). **O domínio**
+está na conta Cloudflare do Mateus: um Worker de repasse lá (`workers/repasse-shinkai/index.js`, não publicado
+daqui) chama o nosso, e manda o IP e a cidade de quem acessa em `x-erp-ip`/`x-erp-geo` — evidência da assinatura
+(decisão 42). O `worker/index.js` só acredita neles com `ERP_PROXY_SEGREDO`; sem o segredo, apaga os dois.
+
+**A franquia (0166), primeiro passo, só aditivo:** tabela `franquia` com a Vaapty Joinville de id fixo
+`00000000-0000-0000-0000-000000000001`; TODA tabela do public tem `franquia_id` NOT NULL com padrão Joinville
+(insert que não diz a franquia cai lá, que é a verdade hoje) e índice; `minha_franquia()` lê do perfil. Rodada em
+23/11/2026: 82 tabelas, todas em Joinville, o ERP abriu igual. **Tabela nova nasce com `franquia_id`** — o padrão
+não vale para tabela criada depois da 0166.
+
+**O que falta, e é onde mora o risco:** as regras de acesso por franquia (cada política com `franquia_id =
+minha_franquia()`), as funções security definer (que passam por cima da RLS e precisam filtrar sozinhas), os índices
+únicos e numerações por ano por franquia, os "uma linha só" (`config_loja`, `painel_tv`, cadastro da empresa), e o
+padrão da coluna virar `minha_franquia()`. Cada etapa se testa com uma SEGUNDA franquia fictícia, simulando o login
+de cada papel (como na auditoria da decisão 9), antes de publicar. **Lojista do Shinkai terá conta neste Auth**:
+nenhuma regra pode tratar "está logado" como "é da equipe" — `e_equipe()` (perfil ativo) é a régua.

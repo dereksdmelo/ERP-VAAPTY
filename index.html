@@ -32949,7 +32949,7 @@ function Shell({ perfil, tela, setTela, children, cheia }) {
           style={{ borderColor: C.line }}>
           <button onClick={() => ir(soltos.length ? soltos[0].id : "atendimentos")}
             className="mb-2 grid h-9 w-9 place-items-center rounded-lg text-[14px]"
-            style={{ background: C.roxo, color: "#fff", fontFamily: F.disp, fontWeight: 800 }}>V</button>
+            style={{ background: C.roxo, color: "#fff", fontFamily: F.disp, fontWeight: 800 }}>S</button>
 
           {soltos.map((d) => (
             <button key={d.id} onClick={() => ir(d.id)} title={d.rot}
