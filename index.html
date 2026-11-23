@@ -31241,11 +31241,13 @@ function AvisosDaFila({ perfil, aoAbrir, aoIrParaFila }) {
       </div>
     );
   }
+  // A faixa fica EMBAIXO, acima da barra do celular (23/11/2026, o André Bruno pelo suporte: no alto ela cobria o
+  // cabeçalho do atendimento e o botão de voltar — não dava para sair dele e ir à Recuperação).
   return (
-    <button onClick={aoIrParaFila} className="fixed inset-x-0 top-0 z-40 px-4 py-3 text-center shadow-lg"
-      style={{ background: souVez ? C.roxo : C.paper, color: souVez ? "#fff" : C.ink, borderBottom: souVez ? "none" : `3px solid ${C.roxo}` }}>
-      <span className="text-[19px] font-extrabold">{souVez ? "Você é a vez" : "Você é o próximo depois da vez"}</span>
-      <span className="ml-3 text-[15px]" style={{ opacity: 0.9 }}>
+    <button onClick={aoIrParaFila} className="fixed inset-x-0 bottom-[58px] z-40 px-4 py-2 text-center lg:bottom-0"
+      style={{ background: souVez ? C.roxo : C.paper, color: souVez ? "#fff" : C.ink, borderTop: souVez ? "none" : `3px solid ${C.roxo}`, boxShadow: "0 -6px 18px rgba(24,20,32,0.18)" }}>
+      <span className="text-[16px] font-extrabold sm:text-[18px]">{souVez ? "Você é a vez" : "Você é o próximo depois da vez"}</span>
+      <span className="ml-3 text-[13px] sm:text-[15px]" style={{ opacity: 0.9 }}>
         {chamandoOutro && souSegundo ? `${chamandoOutro.nome} está sendo chamado — se passar, é você.` : "Fique perto: o próximo cliente é seu."}
       </span>
     </button>

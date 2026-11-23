@@ -4060,7 +4060,8 @@ vencerem, leva o cliente ao próximo (`fila_repassar`, estreita: só para
 chamada que terminou mal) e soma um "perdeu atendimento" na
 confiabilidade (`fila_penalizar`), no horário da loja. Quem nota que a
 chamada venceu é a primeira tela da equipe que ler a fila — não há
-rotina. O da vez e o seguinte veem uma faixa; **quem passou pela loja e
+rotina. O da vez e o seguinte veem uma faixa (embaixo, acima da barra do celular, desde 23/11/2026 — no alto ela cobria
+o cabeçalho do atendimento e o botão de voltar, o André Bruno pelo suporte); **quem passou pela loja e
 está fora da fila é perguntado o que está fazendo** ("VOCÊ NÃO ESTÁ NA
 FILA DE ATENDIMENTO", de três em três minutos; o da vez pela roda, de
 minuto em minuto, com "vai perder a vez"): livre, atendendo (qual
