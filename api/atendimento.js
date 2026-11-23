@@ -957,12 +957,14 @@ async function recuperacao(req, res, tok) {
     `&atendimento_id=not.is.null&dia=lte.${ateSemana}&order=dia.asc,hora.asc.nullslast&limit=1000`, { headers: cabecalhos(tok) }).catch(() => []);
   (ag || []).forEach((x) => { if (!agendadas[x.atendimento_id]) agendadas[x.atendimento_id] = x; });
   // Atendimento agendado que saiu do recorte (veio antes do período, ou
-  // está num status de fim) entra assim mesmo: o agendamento é o que manda.
+  // está num status de fim) entra assim mesmo: o agendamento é o que manda —
+  // menos quem já vendeu fora ou fechou (23/11/2026, o Derek): ali não há o
+  // que recuperar, e a recuperação esquecida ficava "atrasada" para sempre.
   const faltam = Object.keys(agendadas).filter((id) => !meus.some((a) => a.id === id));
   if (faltam.length) {
     const extra = await banco(`${URL_BASE}/rest/v1/atendimento?select=id,cliente_nome,cliente_telefone,carro_descricao,status,data,volta_em,` +
       `negociador_nome,negociador_id,veiculo(placa,marca_modelo,ano_modelo,fipe_valor)&id=in.(${faltam.slice(0, 150).join(",")})`, { headers: cabecalhos(tok) }).catch(() => []);
-    (extra || []).filter((a) => todos || (gerente && pedido ? chaves.has(semAc(a.negociador_nome)) : dele(a))).forEach((a) => meus.push(a));
+    (extra || []).filter((a) => !["vendeu_fora", "fechado"].includes(a.status)).filter((a) => todos || (gerente && pedido ? chaves.has(semAc(a.negociador_nome)) : dele(a))).forEach((a) => meus.push(a));
   }
   /* O QUE A NEGOCIAÇÃO DEIXOU (08/11/2026, o Derek: "as anotações que a
    * negociação tem e que fazemos devem aparecer aqui para as próximas

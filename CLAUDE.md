@@ -6425,7 +6425,8 @@ foi, o que já foi reagendado"*).** Uma situação por vez, cada aba com a conta
 para hoje ou atrasada, e quem prometeu voltar hoje), **Nunca procurados**, **Já procurados** (é só ali que vale o "sem
 contato há N dias"), **Reagendados** (recuperação ou volta marcada para depois — antes, quem tinha `volta_em` futura sem
 recuperação agendada não aparecia em lista nenhuma) e **Feitos hoje**. Abre na primeira com gente; a busca procura
-nome, carro, placa e telefone dentro da aba.
+nome, carro, placa e telefone dentro da aba. Quem está em Vendeu fora ou Fechado não aparece mais, nem com recuperação agendada
+(antes ficava "atrasada" para sempre).
 
 **Recuperar leads (0153, 12/11/2026, o Derek: *"uma ferramenta para os
 negociadores fazerem recuperação de leads antigos que não foram trazidos à loja
