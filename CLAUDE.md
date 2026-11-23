@@ -6986,6 +6986,19 @@ leads 87→73, mensagens de 30 dias 1.485→1.500. Conferido no ar: 82 política
 atendimentos, um login de outra franquia vê 0, e as telas abrem. **Quando houver a segunda franquia, o índice volta
 COMPOSTO onde a consulta pedir** — nunca a coluna sozinha. **À parte, e anterior à regra:** `fin_pendencias` leva
 0,6 s no editor e ~2,5 s pela API (`/rest/v1/rpc`), com ou sem a regra (medido tirando-a das 7 tabelas por um
-minuto); e as mensagens de 30 dias levam 1,5 s. São lentidões que já existiam. **Ainda falta:** as funções security
-definer filtrarem a franquia, os índices únicos e as numerações por franquia, e os "uma linha só". **Lojista do Shinkai terá conta neste Auth**:
+minuto); e as mensagens de 30 dias levam 1,5 s. São lentidões que já existiam.
+
+**As funções que um usuário logado chama separam a franquia (0170, 23/11/2026).** São 81 `security definer` no
+banco; 20 eram chamadas por quem está logado e liam ou mexiam em dado de qualquer franquia. As listas filtram pela
+franquia de quem chama (`agenda_ultimo_sinal`, `negociadores_com_login`, `wa_procurar`, `fin_investidores_mes`,
+`mkt_estado`, `mkt_token`); as que agem por id recusam registro de outra franquia (`ia_estado_conversa`,
+`gravar_resumo_ia`, `marcar_feedback_lido`, `fila_estornar`, `fila_penalizar`, `fila_repassar`,
+`nfse_reservar_numero`, `renomear_pessoa`, `unificar_atendimentos`); a tela da sala (`tv_painel`, `tv_agenda`) lê só
+a franquia do painel; e `mkt_conexao` passou a ter chave (franquia, plataforma). **Sete delas estavam no banco mais
+novas que o repositório**: a 0170 partiu do corpo do banco (`pg_get_functiondef`), não do arquivo — quem reescrever
+função lê o banco antes. Ensaiado e conferido no ar: Joinville vê o mesmo de antes, outra franquia vê zero e não
+junta atendimentos de Joinville. **Mensagem com acento no SQL colado vai em `U&''`** (e no `raise`, como
+`raise exception '%', U&'...'`): o editor do painel estraga acento colado. **Ainda falta:** as funções do servidor
+(ponte, IA, cron, links de assinatura e DUT) herdarem a franquia do canal ou do registro ao gravar, as numerações por
+ano (recibo, DUT, NFS-e) e os "uma linha só" (`config_loja`, `painel_tv`, `empresa`). **Lojista do Shinkai terá conta neste Auth**:
 nenhuma regra pode tratar "está logado" como "é da equipe" — `e_equipe()` (perfil ativo) é a régua.
