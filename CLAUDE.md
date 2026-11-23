@@ -7005,7 +7005,15 @@ a franquia do painel; e `mkt_conexao` passou a ter chave (franquia, plataforma).
 novas que o repositório**: a 0170 partiu do corpo do banco (`pg_get_functiondef`), não do arquivo — quem reescrever
 função lê o banco antes. Ensaiado e conferido no ar: Joinville vê o mesmo de antes, outra franquia vê zero e não
 junta atendimentos de Joinville. **Mensagem com acento no SQL colado vai em `U&''`** (e no `raise`, como
-`raise exception '%', U&'...'`): o editor do painel estraga acento colado. **Ainda falta:** as funções do servidor
-(ponte, IA, cron, links de assinatura e DUT) herdarem a franquia do canal ou do registro ao gravar, as numerações por
+`raise exception '%', U&'...'`): o editor do painel estraga acento colado. **O que se grava sem login herda a franquia do registro pai (0172, 23/11/2026).** A ponte, a IA, o cron e as
+páginas públicas não têm login, e o padrão da coluna caía sempre em Joinville. O gatilho `herdar_franquia` (61 tabelas,
+montado das chaves estrangeiras do catálogo) dá à linha nova a franquia do primeiro pai preenchido — `perfil` por
+último — e a guarda na transação (`app.franquia`): o lead que a `wa_receber` cria depois da mensagem nasce na franquia
+do número. Com login, ele não faz nada, e `minha_franquia()` só lê `app.franquia` sem login, para ninguém logado trocar
+de franquia por ela. A pessoa do "+ Adicionar pessoa" nasce na franquia do gerente (`app_metadata.franquia_id`, que o
+`ao_criar_usuario` lê e só a chave de serviço grava). **Tabela nova com chave para outra tabela de franquia roda o
+laço da 0172 de novo**, senão o que o servidor gravar nela cai em Joinville. Ensaiado com uma franquia de teste:
+conversa, mensagem e lead sem login nasceram nela; logado, Joinville. **Ainda falta:** o que nasce sem pai nenhum
+(o pedido de DUT do formulário público, que vai precisar dizer de qual franquia é), as numerações por
 ano (recibo, DUT, NFS-e) e os "uma linha só" (`config_loja`, `painel_tv`, `empresa`). **Lojista do Shinkai terá conta neste Auth**:
 nenhuma regra pode tratar "está logado" como "é da equipe" — `e_equipe()` (perfil ativo) é a régua.

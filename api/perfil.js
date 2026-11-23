@@ -423,7 +423,7 @@ async function novaPessoa(req, res, tok) {
   // ficaria desativada, um lixo a mais na lista.
   const meuId = donoDoToken(tok);
   if (!meuId) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
-  const r0 = await fetch(`${URL_BASE}/rest/v1/perfil?select=papel&id=eq.${meuId}`,
+  const r0 = await fetch(`${URL_BASE}/rest/v1/perfil?select=papel,franquia_id&id=eq.${meuId}`,
     { headers: { apikey: ANON, Authorization: tok } });
   const meu = r0.ok ? (await r0.json().catch(() => []))[0] : null;
   if (!meu || meu.papel !== "gerente") return res.status(403).json({ erro: "Só o gerente cria login para outra pessoa." });
@@ -437,7 +437,9 @@ async function novaPessoa(req, res, tok) {
   const r = await fetch(`${URL_BASE}/auth/v1/admin/users`, {
     method: "POST",
     headers: { apikey: CHAVE, Authorization: `Bearer ${CHAVE}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password: senhaNova, email_confirm: true, user_metadata: { nome } }),
+    body: JSON.stringify({ email, password: senhaNova, email_confirm: true, user_metadata: { nome },
+      // A pessoa nasce na franquia do gerente (0172): o `ao_criar_usuario` lê daqui, e só a chave de serviço grava.
+      app_metadata: meu.franquia_id ? { franquia_id: meu.franquia_id } : undefined }),
   });
   const t = await r.text();
   let d = null; try { d = t ? JSON.parse(t) : null; } catch (e) {}
