@@ -49,6 +49,19 @@ function donoDoToken(tok) {
   } catch (e) { return null; }
 }
 
+/** A loja (slug da franquia) de quem está logado, para os links públicos levarem `?f=` (0173). Sem ela, vazio:
+ *  o link sai sem o `f` e o formulário entende Joinville. */
+async function lojaDoToken(tok) {
+  try {
+    const meio = String(tok).replace(/^Bearer\s+/, "").split(".")[1];
+    const fr = JSON.parse(Buffer.from(meio.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8")).franquia_id;
+    if (!RX_UUID.test(String(fr || ""))) return "";
+    const r = await fetch(`${URL_BASE}/rest/v1/franquia?select=slug&id=eq.${fr}`, { headers: cabecalhos(tok) });
+    const l = await r.json().catch(() => []);
+    return (Array.isArray(l) && l[0] && l[0].slug) || "";
+  } catch (e) { return ""; }
+}
+
 // O PUT dos vistos chamava `lerCorpo` e ela não existia aqui: era o
 // segundo motivo de nenhum visto ter gravado (28/10/2026).
 async function lerCorpo(req) {
@@ -735,7 +748,7 @@ async function dutPublico(req, res) {
  * continua ali para mandar à mão (a régua do aviso de chegada, decisão
  * 63). O texto é fixo e curto, e o "falta" é o que a pessoa escreveu —
  * o mesmo que o lojista lê na consulta do protocolo. */
-function textoAoLojista(p, tipo, site) {
+function textoAoLojista(p, tipo, site, loja) {
   const ola = p.lojista_nome ? `Olá, ${String(p.lojista_nome).trim()}!` : "Olá!";
   const qual = `o DUT da placa ${p.placa} (protocolo ${p.protocolo})`;
   const corpo = tipo === "pronto"
@@ -745,7 +758,7 @@ function textoAoLojista(p, tipo, site) {
       ? `${ola} ${qual[0].toUpperCase()}${qual.slice(1)} já foi reconhecido em cartório. Vamos te mandar por aqui, pelo WhatsApp.`
       : `${ola} ${qual[0].toUpperCase()}${qual.slice(1)} já foi reconhecido em cartório e está pronto para retirada aqui na Vaapty.`)
     : `${ola} Sobre ${qual}, está faltando:\n\n${String(p.pendencia || "").trim()}\n\nAssim que estiver resolvido, a gente segue com o pedido.`;
-  return site ? `${corpo}\n\nVocê acompanha pelo protocolo em ${site}/dut.html` : corpo;
+  return site ? `${corpo}\n\nVocê acompanha pelo protocolo em ${site}/dut.html${loja ? `?f=${encodeURIComponent(loja)}` : ""}` : corpo;
 }
 /* O DUT ASSINADO DIGITAL VAI NO WHATSAPP DO LOJISTA (13/11/2026, o Derek:
  * "quando fazemos a assinatura de forma digital e anexamos o DUT assinado
@@ -788,7 +801,7 @@ async function avisarLojista(req, tok, p, tipo) {
     const canal = canais.find((x) => /adm/i.test(`${x.slug} ${x.nome}`)) || canais[0];
     if (!canal) return { enviado: false, erro: "nenhum número do administrativo ligado" };
     const host = String((req.headers && (req.headers["x-forwarded-host"] || req.headers.host)) || "");
-    const texto = textoAoLojista(p, tipo, host ? `https://${host}` : "");
+    const texto = textoAoLojista(p, tipo, host ? `https://${host}` : "", await lojaDoToken(tok));
     const alvo = `${base || "https://ponte"}/enviar?canal=${encodeURIComponent(canal.slug)}`;
     const pedido = {
       method: "POST", signal: AbortSignal.timeout(30000),
@@ -982,7 +995,7 @@ async function transferencia(req, res, tok) {
       .then((r) => r.json()).catch(() => [])) || []);
     if (ja.some((a) => a.tipo === "imediata" || (a.tipo === "boas_vindas" && /IMEDIATA/.test(a.texto || "")))) return res.status(200).json({ ja: true });
     if (!ja.some((a) => a.tipo === "boas_vindas")) return res.status(200).json({ espera_boas_vindas: true });
-    const x = { nome: nomeDoc(car.comprador), carro: car.veiculo && car.veiculo.marca_modelo, placa: car.veiculo && car.veiculo.placa, vendido_em: car.vendido_em, dias: 0 };
+    const x = { nome: nomeDoc(car.comprador), carro: car.veiculo && car.veiculo.marca_modelo, placa: car.veiculo && car.veiculo.placa, vendido_em: car.vendido_em, dias: 0, loja: await lojaDoToken(tok) };
     const txt = LOJ.textoLojista("imediata", x, site);
     const r = await mandarPeloAdm(req, tok, foneDoc(car.comprador), { type: "text", text: { body: txt } }, txt);
     await fetch(`${URL_BASE}/rest/v1/aviso_lojista?on_conflict=estoque_id,tipo`, {
@@ -1004,7 +1017,7 @@ async function transferencia(req, res, tok) {
     const jaFoi = c.auto ? ((await fetch(`${URL_BASE}/rest/v1/aviso_lojista?select=tipo&estoque_id=eq.${eid}&estado=eq.enviado`, { headers: cabecalhos(tok) })
       .then((r) => r.json()).catch(() => [])) || []).map((a) => a.tipo) : [];
     const x = { nome: nomeDoc(car.comprador), carro: car.veiculo && car.veiculo.marca_modelo, placa: car.veiculo && car.veiculo.placa,
-      vendido_em: car.vendido_em, dias: car.prazo_transferencia_dias };
+      vendido_em: car.vendido_em, dias: car.prazo_transferencia_dias, loja: await lojaDoToken(tok) };
     const fone = foneDoc(car.comprador);
     const gravar = (tipo, r, txt) => fetch(`${URL_BASE}/rest/v1/aviso_lojista?on_conflict=estoque_id,tipo`, {
       method: "POST", headers: json(tok, { Prefer: "resolution=merge-duplicates,return=minimal" }),

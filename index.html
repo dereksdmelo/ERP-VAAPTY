@@ -489,10 +489,14 @@ async function fetchAut(url, opcoes) {
   return r;
 }
 
+/* A loja (slug da franquia) de quem está logado: os links públicos que a tela monta — o do DUT e o do Trabalhe
+ * conosco — levam `?f=`, senão o formulário, que não tem login, entende Joinville (0173). */
+const LOJA = { slug: "" };
 async function consultarPerfil() {
   const r = await fetchAut("/api/perfil");
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.erro || "Não consegui ler seu perfil.");
+  if (d && typeof d.loja === "string") LOJA.slug = d.loja;
   return d;
 }
 
@@ -29646,7 +29650,7 @@ function TelaTransferencias() {
     const Nome = nome ? nome.charAt(0).toUpperCase() + nome.slice(1).toLowerCase() : "";
     const carro = String((c.veiculo && c.veiculo.marca_modelo) || "").trim();
     const placa = (c.veiculo && c.veiculo.placa) || "";
-    const qs = new URLSearchParams({ ...(placa ? { placa } : {}), ...(carro ? { veiculo: carro } : {}) }).toString();
+    const qs = new URLSearchParams({ ...(placa ? { placa } : {}), ...(carro ? { veiculo: carro } : {}), ...(LOJA.slug ? { f: LOJA.slug } : {}) }).toString();
     const link = `${location.origin}/dut.html${qs ? `?${qs}` : ""}`;
     const prazo = c.prazo ? `${c.prazo < hoje ? "O prazo era" : "O prazo é"} dia ${diaBR(c.prazo)}.` : "";
     return [`Opa${Nome ? ` ${Nome}` : ""}, segue o link pra preencher os dados da transferência do ${carro || "carro"}${placa ? ` placa ${placa}` : ""}:`, link, prazo].filter(Boolean).join("\n\n");
@@ -36773,7 +36777,7 @@ const rhQuando = (iso) => (iso ? new Date(iso).toLocaleString("pt-BR", { timeZon
 const rhIdade = (n) => { const d = rhDias(n); return d == null ? null : Math.floor(d / 365.25); };
 const rhTempo = (dias) => (dias == null ? "—" : dias < 31 ? `${dias} d` : dias < 365 ? `${Math.floor(dias / 30.4)} meses` :
   `${Math.floor(dias / 365.25)} a ${Math.floor((dias % 365.25) / 30.4)} m`);
-const rhLink = (q) => `${location.origin}/trabalhe${q ? `?${q}` : ""}`;
+const rhLink = (q) => { const p = [q, LOJA.slug ? `f=${encodeURIComponent(LOJA.slug)}` : ""].filter(Boolean).join("&"); return `${location.origin}/trabalhe${p ? `?${p}` : ""}`; };
 async function rhCopiar(t) { try { await navigator.clipboard.writeText(t); return true; } catch (e) { window.prompt("Copie:", t); return false; } }
 
 async function rhApi(acao, { metodo, id, corpo, extra } = {}) {

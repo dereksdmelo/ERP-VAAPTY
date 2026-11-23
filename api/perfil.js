@@ -1137,7 +1137,7 @@ module.exports = async function handler(req, res) {
   try {
     // `senha_provisoria` vem junto: é o App que decide, na abertura, se
     // a tela da senha vem antes de tudo.
-    r = await fetch(`${URL_BASE}/rest/v1/perfil?select=id,nome,papel,ativo,administrativo,financeiro,rh,senha_provisoria&order=nome.asc`, {
+    r = await fetch(`${URL_BASE}/rest/v1/perfil?select=id,nome,papel,ativo,administrativo,financeiro,rh,senha_provisoria,franquia_id&order=nome.asc`, {
       headers: { apikey: ANON, Authorization: tok },
     });
     corpo = await r.text();
@@ -1159,6 +1159,16 @@ module.exports = async function handler(req, res) {
   const meuId = donoDoToken(tok);
   const eu = linhas.filter((l) => l.id === meuId)[0] || (linhas.length === 1 ? linhas[0] : null);
 
+  // A loja (slug da franquia) vai junto: os links públicos que a tela monta (DUT, Trabalhe conosco) levam `?f=` (0173).
+  let loja = "";
+  try {
+    if (eu && eu.franquia_id) {
+      const rf = await fetch(`${URL_BASE}/rest/v1/franquia?select=slug&id=eq.${eu.franquia_id}`, { headers: { apikey: ANON, Authorization: tok } });
+      const lf = await rf.json().catch(() => []);
+      loja = (Array.isArray(lf) && lf[0] && lf[0].slug) || "";
+    }
+  } catch (e) {}
+
   // O gerente recebe a lista inteira; os outros, só a própria linha.
-  return res.status(200).json({ eu, equipe: linhas, liberado: true });
+  return res.status(200).json({ eu, equipe: linhas, liberado: true, loja });
 };

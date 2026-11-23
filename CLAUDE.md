@@ -7020,8 +7020,10 @@ pedido de DUT e nota fiscal (o contador do cadastro da empresa DA franquia; sem 
 contam dentro da franquia. O DUT vem do formulário público, que não tem login: a franquia vai no link, `dut.html?f=<slug>`
 (`franquia_do_slug`); sem o `f`, Joinville — os links que já circulam —, e slug que não existe é recusado, nunca cai
 em Joinville. A consulta do protocolo procura dentro da franquia do link: DUT-2026-0001 existe em cada loja. **Os
-links que o ERP monta para o lojista (boas-vindas, Transferências) ainda não levam o `f`** — falta quando houver a
-segunda franquia.
+links que o ERP monta levam o `f` (0176, 23/11/2026)**: o do DUT nas boas-vindas, na transferência imediata, no
+aviso de pronto ou de falta (`lojaDoToken`, pela franquia do login), no lembrete do cron (`lojista_aviso_proximo`
+devolve `loja`, a do carro) e no botão WhatsApp de Transferências; e o do Trabalhe conosco (`rhLink`). A tela sabe a
+loja pelo `/api/perfil` (`loja`, guardada em `LOJA.slug`). **Link público novo leva o `f` do mesmo jeito.**
 
 **Configuração da loja, tela da sala e cadastro da empresa: uma linha por franquia (0175, 23/11/2026).** As três eram
 "uma linha só" (`id = 1` com check). Agora a chave é `franquia_id` (único; o `id` ganhou sequência e Joinville segue 1):

@@ -48,7 +48,9 @@ function textoLojista(tipo, x, site) {
   const venda = dataBR(x.vendido_em);
   // O link já leva a placa e o carro (05/11/2026): o lojista só confere
   // e preenche o resto — a mesma URL do botão "WhatsApp" da tela.
-  const qs = [x.placa ? `placa=${encodeURIComponent(x.placa)}` : "", x.carro ? `veiculo=${encodeURIComponent(String(x.carro).trim())}` : ""].filter(Boolean).join("&");
+  const qs = [x.placa ? `placa=${encodeURIComponent(x.placa)}` : "", x.carro ? `veiculo=${encodeURIComponent(String(x.carro).trim())}` : "",
+    // A loja do pedido (0173): o formulário público não tem login, e é o `f` que diz de qual franquia é.
+    x.loja ? `f=${encodeURIComponent(x.loja)}` : ""].filter(Boolean).join("&");
   const link = site ? `${site}/dut.html${qs ? `?${qs}` : ""}` : "";
   /* TRANSFERÊNCIA IMEDIATA: a mesma apresentação, mas já pedindo os
    * dados — "nesses casos já manda a mensagem pedindo os dados pra
