@@ -22238,10 +22238,11 @@ function FinLancamentos({ comp, aoIrTitulos }) {
   /**
    * Emitir o recibo do lançamento.
    *
-   * **A janela abre antes do `await`**, e isso não é estilo: pop-up
-   * disparado depois de uma espera é bloqueado pelo navegador, e a
-   * impressão quebraria em silêncio (decisão 15). Quem inverter a
-   * ordem descobre na frente de quem está esperando o papel.
+   * **A janela abre depois do `await`, por `abrirDocumento`** (aba
+   * própria, blob + noopener): escrever numa janela aberta daqui e
+   * imprimir nela congelava esta aba (decisão 15). Se o navegador
+   * bloquear por causa da espera, o aviso "O documento não abriu?"
+   * aparece com o link.
    *
    * A direção — recebemos ou pagamos — não é perguntada: ela sai do
    * lado em que o valor está no lançamento. Recibo assinado pelo lado
@@ -22249,7 +22250,6 @@ function FinLancamentos({ comp, aoIrTitulos }) {
    */
   const emitirRecibo = async (l) => {
     setReciboIndo(l.id); setReciboErro("");
-    const j = window.open("", "_blank");
     try {
       const r = await fetchAut("/api/financeiro?recurso=recibo", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -22257,12 +22257,12 @@ function FinLancamentos({ comp, aoIrTitulos }) {
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.erro || "Não consegui emitir o recibo.");
-      if (!j) { setReciboErro("Recibo emitido, mas o navegador bloqueou a janela. Libere pop-ups e emita a segunda via."); return; }
-      j.document.write(reciboDoc(d.recibo));
-      j.document.close();
-      setTimeout(() => j.print(), 400);
+      // Aba própria por blob + noopener (decisão 15, 17/11/2026): escrever numa janela aberta daqui e chamar
+      // print() nela congelava esta aba enquanto a caixa de impressão ficava aberta. Bloqueada, o aviso
+      // "O documento não abriu?" dá o link.
+      const ab = abrirDocumento(reciboDoc(d.recibo));
+      if (!ab.ok) setReciboErro(ab.erro);
     } catch (e) {
-      if (j) j.close();
       setReciboErro(e.message || "Não consegui emitir o recibo.");
     } finally { setReciboIndo(""); }
   };
@@ -24209,8 +24209,7 @@ ${bloco("Valor Total da NFS-e",
 ${bloco("Informações Complementares", campo("", [totTxt, serv ? um(serv, "infoCompl/xInfComp") : ""].filter(Boolean).join("\n"), "d4 desc"))}
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><\/script>
-<script>try{new QRCode(document.getElementById("qr"),{text:${JSON.stringify(qr)},width:96,height:96,correctLevel:QRCode.CorrectLevel.M});}catch(e){}
-setTimeout(function(){window.print()},700);<\/script>
+<script>try{new QRCode(document.getElementById("qr"),{text:${JSON.stringify(qr)},width:96,height:96,correctLevel:QRCode.CorrectLevel.M});}catch(e){}<\/script>
 </body></html>`;
 }
 
@@ -24270,15 +24269,14 @@ function FinNotas() {
   /* O PDF (DANFSe): montado aqui a partir do XML da nota (a API da Receita foi suspensa — NT 008). A janela
      abre NO CLIQUE (decisão 15) e recebe o documento depois de ler o XML. */
   const verPdf = async (n) => {
-    const j = window.open("", "_blank");
     setErro(""); setIndo(`pdf${n.id}`);
     try {
       const x = await fin("nfse", { acao: "xml", id: n.id });
       const html = x.nfse_xml && danfseHtml(x.nfse_xml, n.situacao === "cancelada");
       if (!html) throw new Error("Esta nota não tem o XML da Receita guardado.");
-      if (!j) throw new Error("O navegador bloqueou a janela. Permita pop-ups para este site.");
-      j.document.open(); j.document.write(html); j.document.close();
-    } catch (e) { if (j) j.close(); setErro(e.message); }
+      const ab = abrirDocumento(html); // aba própria, não congela esta ao imprimir (decisão 15)
+      if (!ab.ok) throw new Error(ab.erro);
+    } catch (e) { setErro(e.message); }
     setIndo("");
   };
   const [cancelando, setCancelando] = useState(null);

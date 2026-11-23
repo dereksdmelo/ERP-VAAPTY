@@ -567,9 +567,9 @@ impressão sai de lá. Sem a janela de volta (decisão 8), o bloqueio de
 pop-up é deduzido: se a aba continua à vista e com foco 1,5 s depois,
 aparece "O documento não abriu? Abrir o documento". **Quem voltar a
 escrever o documento numa janela aberta daqui e chamar `print()` nela
-reabre isto.** O recibo e o DANFSe do financeiro ainda abrem assim (a
-janela precisa nascer antes do `await`, e com `noopener` não há como
-escrever nela depois).
+reabre isto.** Desde 22/11/2026 o recibo e o DANFSe do financeiro também
+saem por `abrirDocumento`, depois do `await`; quando a espera faz o
+navegador bloquear, o aviso "O documento não abriu?" dá o link.
 
 **O protocolo liga papel e banco.** Ele é gerado dentro do HTML, no
 rodapé, e `extrairProtocolo()` o tira de lá por regex — assim as funções
