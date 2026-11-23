@@ -7013,11 +7013,15 @@ do número. Com login, ele não faz nada, e `minha_franquia()` só lê `app.fran
 de franquia por ela. A pessoa do "+ Adicionar pessoa" nasce na franquia do gerente (`app_metadata.franquia_id`, que o
 `ao_criar_usuario` lê e só a chave de serviço grava). **Tabela nova com chave para outra tabela de franquia roda o
 laço da 0172 de novo**, senão o que o servidor gravar nela cai em Joinville. Ensaiado com uma franquia de teste:
-conversa, mensagem e lead sem login nasceram nela; logado, Joinville. **Ainda falta:** os "uma linha só" (`config_loja`, `painel_tv`, `empresa`). **Cada franquia numera o seu (0173, 23/11/2026).** Recibo (`proximo_recibo` e o único em franquia, ano e número),
+conversa, mensagem e lead sem login nasceram nela; logado, Joinville.
+
+**Cada franquia numera o seu (0173, 23/11/2026).** Recibo (`proximo_recibo` e o único em franquia, ano e número),
 pedido de DUT e nota fiscal (o contador do cadastro da empresa DA franquia; sem cadastro, o recado em vez do número)
 contam dentro da franquia. O DUT vem do formulário público, que não tem login: a franquia vai no link, `dut.html?f=<slug>`
 (`franquia_do_slug`); sem o `f`, Joinville — os links que já circulam —, e slug que não existe é recusado, nunca cai
 em Joinville. A consulta do protocolo procura dentro da franquia do link: DUT-2026-0001 existe em cada loja. **Os
 links que o ERP monta para o lojista (boas-vindas, Transferências) ainda não levam o `f`** — falta quando houver a
-segunda franquia. **Lojista do Shinkai terá conta neste Auth**:
+segunda franquia. **Ainda falta:** os "uma linha só" (`config_loja`, `painel_tv`, `empresa`).
+
+**Lojista do Shinkai terá conta neste Auth**:
 nenhuma regra pode tratar "está logado" como "é da equipe" — `e_equipe()` (perfil ativo) é a régua.
