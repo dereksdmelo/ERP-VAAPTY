@@ -3307,7 +3307,9 @@ os títulos da compra em aberto são cancelados e nasce o "Multa contratual de
 <cliente>" a receber. O atendimento vai para Rescisão. `naoEhCarro()` na tela
 é o lugar único de "não é carro que passou pelo pátio"; no servidor, as
 checagens de `indicacao` ganharam `multa`, e Transferências lê só
-`natureza = 'compra'`. *A indicação não pede mais a ficha do carro*: basta o
+`natureza = 'compra'`. *A indicação desfeita se lança de novo* (23/11/2026, a Amanda pelo suporte): o "a venda caiu — desfazer" deixa a linha
+de indicação no pátio sem lojista nem valor; o atendimento mostra "A indicação foi desfeita" com "Lançar a comissão de
+novo", que vende a MESMA linha. *A indicação não pede mais a ficha do carro*: basta o
 lojista e a comissão; sem veículo, a linha pende do atendimento
 (`estoque.veiculo_id` virou opcional só para indicação e multa) e o carro vai
 em `descricao_carro`. *Cadastro de lojistas* (Gestão): todos os
@@ -4091,6 +4093,14 @@ dia. `noTransbordo` e a regra moram em `regras/fila.js`. Na mesma leva:
 **"pôr a vez aqui" ganha da vez devida** (o Dimas devia uma e furava a
 correção para o André Ricardo) e **"tirar uma vez devida"** desfaz um
 "devolver" a mais.
+
+**Quem acabou de ficar livre espera (0164, 23/11/2026, o Derek: *"quando alguém marca que está livre, tem que passar
+pelo menos 10 minutos pra ser a vez dele… configurável pelo gestor"*).** É contra quem deixa o atendimento aberto, ou
+fica fora da fila, e se libera bem na hora em que chega o cliente que quer. Por `espera_livre_ms` (`config_loja.
+fila_espera_livre_min`, padrão 10, 0 desliga; o gerente muda na Fila da vez), contados do fim do último atendimento ou
+do "Estou livre" do aviso de fora da fila (`presenca.livre_em`), o que vier depois. Na espera, com outro livre, ele é
+pulado: quem saiu de atendimento como ocupado (fica devendo a vez), quem voltou de fora como ausente (a volta não vira
+crédito). Com todos ocupados, pega. A vez devida também espera os minutos. A fila mostra "entra na vez às hh:mm".
 
 **O cliente que volta (0154, 12/11/2026):** o cliente já atendido no mês
 voltou, o Carlos o atendia no atendimento antigo e a fila o dava como livre
@@ -6425,7 +6435,9 @@ foi, o que já foi reagendado"*).** Uma situação por vez, cada aba com a conta
 para hoje ou atrasada, e quem prometeu voltar hoje), **Nunca procurados**, **Já procurados** (é só ali que vale o "sem
 contato há N dias"), **Reagendados** (recuperação ou volta marcada para depois — antes, quem tinha `volta_em` futura sem
 recuperação agendada não aparecia em lista nenhuma) e **Feitos hoje**. Abre na primeira com gente; a busca procura
-nome, carro, placa e telefone dentro da aba. Quem está em Vendeu fora ou Fechado não aparece mais, nem com recuperação agendada
+nome, carro, placa e telefone dentro da aba. A anotação conta como contato (o André Bruno, no mesmo dia): o "Anotar" escreve nas observações, não na agenda, e
+quem tinha sido anotado seguia em "Nunca procurados"; agora a linha "[dd/mm hh:mm · Nome]" de depois do dia do
+atendimento entra na conta. Quem está em Vendeu fora ou Fechado não aparece mais, nem com recuperação agendada
 (antes ficava "atrasada" para sempre).
 
 **Recuperar leads (0153, 12/11/2026, o Derek: *"uma ferramenta para os
