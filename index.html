@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#6D1B9E">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>Vaapty — Ficha e Negociacao</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2310B981'/%3E%3Cpath d='M16 17h9.6l6.4 21.4L38.4 17H48L36.8 49h-9.6z' fill='%23fff'/%3E%3C/svg%3E">
+<title>Shinkai ERP</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%236D1B9E'/%3E%3Ctext x='32' y='45' font-family='Arial,sans-serif' font-size='38' font-weight='800' fill='white' text-anchor='middle'%3ES%3C/text%3E%3C/svg%3E">
 <script src="https://cdn.tailwindcss.com"></script>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -15067,7 +15067,7 @@ function TrocarSenha({ obrigatoria, aoPronto, aoCancelar }) {
   return (
     <div className="flex min-h-screen flex-col justify-center px-6" style={{ background: C.bg, fontFamily: F.body, color: C.ink }}>
       <div className="mx-auto w-full" style={{ maxWidth: 380 }}>
-        <div className="text-[11px] uppercase tracking-[0.22em]" style={{ color: C.mute }}>Vaapty Joinville</div>
+        <div className="text-[11px] uppercase tracking-[0.22em]" style={{ color: C.mute }}>Shinkai ERP</div>
         <h1 className="mt-1 text-[24px] leading-tight" style={{ fontFamily: F.disp, fontWeight: 800, color: C.roxo }}>
           {obrigatoria ? "Escolha a sua senha" : "Trocar a senha"}
         </h1>
@@ -15165,9 +15165,9 @@ function Login({ aoEntrar }) {
   return (
     <div className="flex min-h-screen flex-col justify-center px-6" style={{ background: C.bg, fontFamily: F.body, color: C.ink }}>
       <div className="mx-auto w-full" style={{ maxWidth: 380 }}>
-        <div className="text-[11px] uppercase tracking-[0.22em]" style={{ color: C.mute }}>Vaapty Joinville</div>
+        <div className="text-[11px] uppercase tracking-[0.22em]" style={{ color: C.mute }}>Shinkai ERP</div>
         <h1 className="mt-1 text-[24px] leading-tight" style={{ fontFamily: F.disp, fontWeight: 800, color: C.roxo }}>
-          {esquecido ? "Esqueci minha senha" : "Ficha e negociação"}
+          {esquecido ? "Esqueci minha senha" : "Entrar"}
         </h1>
         {esquecido && (
           <p className="mt-2 text-[13px] leading-relaxed" style={{ color: C.mute }}>
@@ -32500,8 +32500,8 @@ function destinosPara(perfil) {
 const Logotipo = () => (
   <span className="flex items-center gap-2">
     <span className="grid h-8 w-8 place-items-center rounded-lg text-[13px]"
-      style={{ background: C.roxo, color: "#fff", fontFamily: F.disp, fontWeight: 800 }}>V</span>
-    <span className="text-[15px] tracking-tight" style={{ fontFamily: F.disp, fontWeight: 800 }}>Vaapty</span>
+      style={{ background: C.roxo, color: "#fff", fontFamily: F.disp, fontWeight: 800 }}>S</span>
+    <span className="text-[15px] tracking-tight" style={{ fontFamily: F.disp, fontWeight: 800 }}>Shinkai <span style={{ fontWeight: 500, color: C.mute }}>ERP</span></span>
   </span>
 );
 
@@ -35190,7 +35190,7 @@ function NovaPessoa({ inicial, aoFechar, aoCriar }) {
     setIndo(false);
   };
 
-  const recado = feito ? `Seu acesso ao sistema da Vaapty:\n${location.origin}\nE-mail: ${feito.email}\nSenha provisória: ${feito.senha}\nNo primeiro acesso o sistema pede para você criar a sua senha.` : "";
+  const recado = feito ? `Seu acesso ao Shinkai ERP:\n${location.origin}\nE-mail: ${feito.email}\nSenha provisória: ${feito.senha}\nNo primeiro acesso o sistema pede para você criar a sua senha.` : "";
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(20,10,30,0.45)" }}
       onClick={(e) => { if (e.target === e.currentTarget) aoFechar(); }}>

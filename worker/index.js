@@ -120,13 +120,26 @@ export default {
     const headers = {};
     for (const [k, v] of request.headers) headers[k.toLowerCase()] = v;
 
+    /* erp.shinkai.com.br (23/11/2026): o domínio está na conta do Mateus, e um Worker de repasse lá chama este.
+       Num repasse o `cf-connecting-ip` e o `request.cf` são do Worker de lá, não de quem acessa — e o IP e o
+       local são evidência da assinatura eletrônica (decisão 42). O repasse manda os de verdade em `x-erp-ip` e
+       `x-erp-geo`, e eles SÓ valem com o segredo combinado (`ERP_PROXY_SEGREDO`, o mesmo valor dos dois lados).
+       Sem o segredo, os dois cabeçalhos são apagados: quem chama de fora não forja IP nenhum. */
+    let geoDoRepasse = null;
+    const segredoRepasse = env.ERP_PROXY_SEGREDO || "";
+    if (segredoRepasse && headers["x-erp-proxy"] === segredoRepasse) {
+      if (headers["x-erp-ip"]) headers["cf-connecting-ip"] = headers["x-erp-ip"];
+      try { geoDoRepasse = JSON.parse(decodeURIComponent(headers["x-erp-geo"] || "")) || null; } catch { geoDoRepasse = null; }
+    }
+    delete headers["x-erp-proxy"]; delete headers["x-erp-ip"]; delete headers["x-erp-geo"];
+
     const req = {
       method: request.method, url: u.pathname + u.search, query, headers,
       body: await corpoDe(request), cookies: {},
       /* A geolocalização da borda, que no Cloudflare NÃO vem em
          cabeçalho. É evidência da assinatura eletrônica (decisão 42),
          e o `localDe` do api/documento.js a lê daqui. */
-      cf: request.cf || null,
+      cf: geoDoRepasse || request.cf || null,
       /* A PONTE DO WHATSAPP VIAJA COMO BINDING, NÃO COMO ENDEREÇO.
          Worker chamando outro Worker pelo `*.workers.dev` **não sai da
          borda**: o Cloudflare resolve internamente e devolve 404 sem
