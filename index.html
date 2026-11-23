@@ -31155,6 +31155,10 @@ function AvisosDaFila({ perfil, aoAbrir, aoIrParaFila }) {
   // roda — de novo só depois que ele receber um cliente.
   const [vistoVez, setVistoVez] = useState(() => { try { return localStorage.getItem("vaapty:vez-visto") || ""; } catch (e) { return ""; } });
   useEffect(() => { try { if (vistoVez) localStorage.setItem("vaapty:vez-visto", vistoVez); } catch (e) {} }, [vistoVez]);
+  // O "x" da faixa (23/11/2026, o Derek): fecha só esta faixa — ela volta quando muda de "próximo" para "a vez"
+  // ou numa volta nova da roda. Fica no aparelho, como o visto da janela grande.
+  const [faixaFechada, setFaixaFechada] = useState(() => { try { return localStorage.getItem("vaapty:vez-faixa") || ""; } catch (e) { return ""; } });
+  useEffect(() => { try { if (faixaFechada) localStorage.setItem("vaapty:vez-faixa", faixaFechada); } catch (e) {} }, [faixaFechada]);
   // Re-renderiza de 30 em 30 s: é o que faz o "agora não" vencer sozinho.
   const [tique, setTique] = useState(0);
   const ler = () => lerVez().then(setD).catch(() => {});
@@ -31243,14 +31247,20 @@ function AvisosDaFila({ perfil, aoAbrir, aoIrParaFila }) {
   }
   // A faixa fica EMBAIXO, acima da barra do celular (23/11/2026, o André Bruno pelo suporte: no alto ela cobria o
   // cabeçalho do atendimento e o botão de voltar — não dava para sair dele e ir à Recuperação).
+  const chaveFaixa = `${chave}:${souVez ? "vez" : "proximo"}`;
+  if (faixaFechada === chaveFaixa) return null;
   return (
-    <button onClick={aoIrParaFila} className="fixed inset-x-0 bottom-[58px] z-40 px-4 py-2 text-center lg:bottom-0"
+    <div className="fixed inset-x-0 bottom-[58px] z-40 flex items-stretch lg:bottom-0"
       style={{ background: souVez ? C.roxo : C.paper, color: souVez ? "#fff" : C.ink, borderTop: souVez ? "none" : `3px solid ${C.roxo}`, boxShadow: "0 -6px 18px rgba(24,20,32,0.18)" }}>
-      <span className="text-[16px] font-extrabold sm:text-[18px]">{souVez ? "Você é a vez" : "Você é o próximo depois da vez"}</span>
-      <span className="ml-3 text-[13px] sm:text-[15px]" style={{ opacity: 0.9 }}>
-        {chamandoOutro && souSegundo ? `${chamandoOutro.nome} está sendo chamado — se passar, é você.` : "Fique perto: o próximo cliente é seu."}
-      </span>
-    </button>
+      <button onClick={aoIrParaFila} className="flex-1 px-4 py-2 text-center">
+        <span className="text-[16px] font-extrabold sm:text-[18px]">{souVez ? "Você é a vez" : "Você é o próximo depois da vez"}</span>
+        <span className="ml-3 text-[13px] sm:text-[15px]" style={{ opacity: 0.9 }}>
+          {chamandoOutro && souSegundo ? `${chamandoOutro.nome} está sendo chamado — se passar, é você.` : "Fique perto: o próximo cliente é seu."}
+        </span>
+      </button>
+      <button onClick={() => setFaixaFechada(chaveFaixa)} aria-label="Fechar o aviso" title="Fechar o aviso"
+        className="px-4 text-[22px] font-bold leading-none" style={{ opacity: 0.85 }}>×</button>
+    </div>
   );
 }
 
