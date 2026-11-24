@@ -17459,7 +17459,10 @@ function LinhaCusto({ l, eGerente, aoSalvar, aoAnexar, aoApagar }) {
           </button>
         )}
         {eGerente && !l.do_fechamento && (
-          <button onClick={aoApagar} className="text-[11px]" style={{ color: C.mute }}>apagar</button>
+          // Era um "apagar" cinza de 11 px, e a Amanda (gerente) pediu pelo suporte um jeito de excluir o custo (24/11/2026).
+          <button onClick={() => { if (window.confirm(`Excluir a linha "${l.descricao || rotuloCusto(l.tipo)}" do custo deste carro?`)) aoApagar(); }}
+            className="rounded-md px-2 py-0.5 text-[11px] font-semibold"
+            style={{ color: C.laranja, border: `1px solid ${C.laranja}` }}>excluir</button>
         )}
       </div>
 
