@@ -4003,7 +4003,7 @@ async function nfse(req, res, tok) {
         carro: [v.marca_modelo, v.ano_modelo].filter(Boolean).join(" "), placa: v.placa || "",
         notas: jaTem[e.id] || [],
         cliente: at ? { nome: at.cliente_nome || "", doc: String(at.cliente_cpf || "").replace(/\D/g, ""), email: at.cliente_email || "",
-          cep: at.cliente_cep || "", logradouro: ec.rua, numero: ec.numero, bairro: at.cliente_bairro || "", cidade: at.cliente_cidade || "",
+          cep: at.cliente_cep || "", logradouro: ec.rua, numero: ec.numero, bairro: at.cliente_bairro || "", cidade: at.cliente_cidade || "", uf: at.cliente_uf || "",
           valor: cl && cl.modo_conta !== "limpo" ? Number(cl.comissao_vaapty) || 0 : 0 } : null,
         lojista: cp && e.situacao === "vendido" ? { nome: cp.nome || "", doc: String(cp.documento || "").replace(/\D/g, ""), email: cp.email || "",
           cep: cp.cep || "", logradouro: el.rua, numero: el.numero, bairro: cp.bairro || "", cidade: cp.cidade || "",
@@ -4016,37 +4016,65 @@ async function nfse(req, res, tok) {
     // Pela COMPETÊNCIA da nota (o mês do serviço), não pelo dia em que foi criada.
     const filtro = comp ? `&competencia=eq.${comp}` : "";
     const [lista, e] = await Promise.all([
-      supa(`${base("nfse")}?select=id,ambiente,serie,numero_dps,estoque_id,tomador_tipo,tomador_doc,tomador_nome,descricao,valor,competencia,situacao,chave_acesso,numero_nfse,erros,emitida_em,cancelada_em,criado_em,` +
+      supa(`${base("nfse")}?select=id,ambiente,serie,numero_dps,estoque_id,tomador_tipo,tomador_doc,tomador_nome,tomador_email,tomador_cep,tomador_logradouro,tomador_numero,tomador_bairro,tomador_cmun,descricao,valor,competencia,situacao,chave_acesso,numero_nfse,erros,emitida_em,cancelada_em,criado_em,` +
         `estoque(veiculo(placa,marca_modelo))&order=criado_em.desc&limit=500${filtro}`, { headers: cab(tok) }),
       emp(),
     ]);
     return res.status(200).json({ notas: lista || [], ambiente: (e && e.nfse_ambiente) || "restrita", certificado: certificado(),
       configurada: !!(e && e.cnpj && e.ibge_municipio && e.servico_ctribnac && e.opcao_simples) });
   }
-  if (req.method === "POST" && !acao) {
-    const c = await corpoDe(req) || {};
-    const e = await emp();
-    if (!e) return res.status(409).json({ erro: "Preencha o cadastro da empresa antes." });
+  /* O rascunho, do POST e do PATCH. O endereço do tomador é conferido aqui (23/11/2026, o Derek: uma nota foi
+     recusada pelo endereço do cadastro). Para CPF ele é opcional, mas vai inteiro ou não vai: CEP de 8, rua,
+     bairro e o código IBGE do município — a tela tira o código do próprio CEP. Sem o código, a nota caía em
+     Joinville com o CEP de outra cidade, e a Receita recusava. */
+  const rascunhoDe = (c, e) => {
     const doc = String(c.tomador_doc || "").replace(/\D/g, "");
     const tipo = doc.length === 14 ? "cnpj" : doc.length === 11 ? "cpf" : null;
-    if (!tipo) return res.status(400).json({ erro: "CPF ou CNPJ do tomador inválido." });
+    if (!tipo) return { erro: "CPF ou CNPJ do tomador inválido." };
     const valor = Math.abs(decimal(c.valor) || 0);
-    if (!(valor > 0)) return res.status(400).json({ erro: "Digite o valor do serviço." });
-    if (!texto(c.tomador_nome)) return res.status(400).json({ erro: "Digite o nome do tomador." });
-    const linha = { ambiente: e.nfse_ambiente || "restrita", tomador_tipo: tipo, tomador_doc: doc, tomador_nome: texto(c.tomador_nome),
+    if (!(valor > 0)) return { erro: "Digite o valor do serviço." };
+    if (!texto(c.tomador_nome)) return { erro: "Digite o nome do tomador." };
+    const linha = { tomador_tipo: tipo, tomador_doc: doc, tomador_nome: texto(c.tomador_nome),
       tomador_email: texto(c.tomador_email), descricao: texto(c.descricao) || e.servico_descricao || "Intermediação de venda de veículo",
       valor, competencia: competenciaDe(c.competencia) || competenciaDe(hojeAqui()), estoque_id: idOuNulo(c.estoque_id),
       tomador_cep: String(c.tomador_cep || "").replace(/\D/g, "") || null, tomador_logradouro: texto(c.tomador_logradouro),
       tomador_numero: texto(c.tomador_numero), tomador_bairro: texto(c.tomador_bairro),
       tomador_cmun: String(c.tomador_cmun || "").replace(/\D/g, "") || null };
-    // Tomador CNPJ precisa de endereço completo (E0235): cMun de 7 dígitos, CEP de 8, rua e bairro.
-    if (tipo === "cnpj" && !(linha.tomador_cep && linha.tomador_cep.length === 8 && linha.tomador_logradouro && linha.tomador_bairro
-      && (!linha.tomador_cmun || linha.tomador_cmun.length === 7))) {
-      return res.status(400).json({ erro: "Tomador com CNPJ precisa do endereço: CEP, rua, bairro (e o código IBGE do município, se não for Joinville)." });
+    const algum = linha.tomador_cep || linha.tomador_logradouro || linha.tomador_bairro || linha.tomador_numero;
+    if (tipo === "cnpj" || algum) {
+      const falta = [];
+      if (!(linha.tomador_cep && linha.tomador_cep.length === 8)) falta.push("CEP");
+      if (!linha.tomador_logradouro) falta.push("rua");
+      if (!linha.tomador_bairro) falta.push("bairro");
+      if (!(linha.tomador_cmun && linha.tomador_cmun.length === 7)) falta.push("município (busque pelo CEP)");
+      if (falta.length) return { erro: `${tipo === "cnpj" ? "Tomador com CNPJ precisa do endereço completo" : "O endereço vai inteiro ou não vai"} — falta: ${falta.join(", ")}.` };
     }
+    return { linha };
+  };
+  if (req.method === "POST" && !acao) {
+    const c = await corpoDe(req) || {};
+    const e = await emp();
+    if (!e) return res.status(409).json({ erro: "Preencha o cadastro da empresa antes." });
+    const { erro, linha } = rascunhoDe(c, e);
+    if (erro) return res.status(400).json({ erro });
+    linha.ambiente = e.nfse_ambiente || "restrita";
     const r = um(await supa(base("nfse"), { method: "POST", headers: cab(tok, REP), body: JSON.stringify(linha) }));
     if (!r) return recusado(res);
     return res.status(201).json({ ok: true, nota: r });
+  }
+  // Corrigir o rascunho ou a rejeitada (o endereço, quase sempre). O número da DPS reservado continua o mesmo.
+  if (req.method === "PATCH" && !acao) {
+    const id = idOuNulo(req.query.id);
+    const n = id && um(await supa(`${base("nfse")}?select=situacao&id=eq.${id}`, { headers: cab(tok) }));
+    if (!n) return res.status(404).json({ erro: "Nota não encontrada." });
+    if (n.situacao !== "rascunho" && n.situacao !== "rejeitada") return res.status(409).json({ erro: "Só se corrige nota em rascunho ou recusada." });
+    const e = await emp();
+    if (!e) return res.status(409).json({ erro: "Preencha o cadastro da empresa antes." });
+    const { erro, linha } = rascunhoDe(await corpoDe(req) || {}, e);
+    if (erro) return res.status(400).json({ erro });
+    const r = um(await supa(`${base("nfse")}?id=eq.${id}`, { method: "PATCH", headers: cab(tok, REP), body: JSON.stringify(linha) }));
+    if (!r) return recusado(res);
+    return res.status(200).json({ ok: true, nota: r });
   }
   if (req.method === "POST" && acao === "emitir") {
     const id = idOuNulo(req.query.id);
@@ -4094,8 +4122,8 @@ async function nfse(req, res, tok) {
     await supa(`${base("nfse")}?id=eq.${id}`, { method: "DELETE", headers: cab(tok) });
     return res.status(200).json({ ok: true });
   }
-  res.setHeader("Allow", "GET, POST, DELETE");
-  return res.status(405).json({ erro: "Use GET, POST ou DELETE." });
+  res.setHeader("Allow", "GET, POST, PATCH, DELETE");
+  return res.status(405).json({ erro: "Use GET, POST, PATCH ou DELETE." });
 }
 
 /* INVESTIDORES E SÓCIOS (0158, 16/11/2026). O saldo de cada um não é digitado: é o saldo inicial mais as

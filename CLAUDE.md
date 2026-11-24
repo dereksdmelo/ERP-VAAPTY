@@ -4435,6 +4435,9 @@ assinatura** (`SituacaoContratoLojista`): enviado e aguardando, assinado
 link foi usado ou venceu. O Derek: *"depois que sair já não consigo mais
 acompanhar se ele assinou"*.
 
+**A FIPE se digita na ficha do carro do Estoque** (24/11/2026, a Bruna pelo suporte): o carro da planilha tinha a
+linha do `veiculo` só com placa e modelo. `fipe_valor` no PATCH de `?recurso=estoque` grava no `veiculo` do carro.
+
 **O Estoque filtra por negociador** (19/11/2026, a Schell pelo botão de suporte): a lista ao lado da busca, pela
 chave sem acento (`chaveNeg`), como a Rentabilidade; vale junto com o filtro de situação e com a busca.
 
@@ -4569,6 +4572,8 @@ daquele menu"*.
 itens empilhados obrigam a percorrer a lista inteira para chegar ao
 fim — com a trilha, escolhe-se a área e o painel mostra só aquelas
 quatro ou cinco linhas.
+
+**Equipe mora no RH desde 24/11/2026** (o Derek pelo suporte), o mesmo destino `gestao`, só gerente.
 
 **Clicar na trilha NÃO navega.** Trocar de tela ao escolher uma área
 levaria para um destino que ninguém pediu: quem está ali ainda está
@@ -6456,7 +6461,9 @@ contato há N dias"), **Reagendados** (recuperação ou volta marcada para depoi
 recuperação agendada não aparecia em lista nenhuma) e **Feitos hoje**. Abre na primeira com gente; a busca procura
 nome, carro, placa e telefone dentro da aba. A anotação conta como contato (o André Bruno, no mesmo dia): o "Anotar" escreve nas observações, não na agenda, e
 quem tinha sido anotado seguia em "Nunca procurados"; agora a linha "[dd/mm hh:mm · Nome]" de depois do dia do
-atendimento entra na conta. Quem está em Vendeu fora ou Fechado não aparece mais, nem com recuperação agendada
+atendimento entra na conta. **A busca procura em todas as abas** (24/11/2026, o André Bruno: buscou o Rafael em "Nunca procurados", ele estava
+em "Feitos hoje" e a tela dizia "ninguém ligou nem mandou mensagem"), e cada cartão diz em que aba está. **E o ⋯ de
+cada linha de Atendimentos tem "Agendar recuperação"** (`AgendarRecuperacaoDoAtendimento`, o mesmo gesto da conversa). Quem está em Vendeu fora ou Fechado não aparece mais, nem com recuperação agendada
 (antes ficava "atrasada" para sempre).
 
 **Recuperar leads (0153, 12/11/2026, o Derek: *"uma ferramenta para os
@@ -6809,6 +6816,14 @@ depois de três descobertas que valem para quem mexer aqui:
 - **Cancelar** é o evento 101101 (`montarCancelamento`, Id `PRE` + chave + `101101`), assinado sobre o
   `infPedReg` e enviado a `/nfse/{chave}/eventos` pela mesma ponte. Recusado, a nota continua emitida e o
   motivo fica nos erros dela.
+
+**O endereço do tomador se confere antes de emitir (23/11/2026, o Derek: uma nota foi recusada pelo endereço).**
+Para CPF a tela escondia o endereço e ele ia assim mesmo, puxado do cadastro, com o município em Joinville quando
+ninguém digitava o código IBGE — CEP de outra cidade com Joinville é recusa. Agora o bloco aparece sempre: o CEP
+busca a cidade e o código IBGE (ViaCEP, `buscarCep`), a tela avisa quando a cidade do cadastro não é a do CEP ou a
+rua difere, e salvar pede "Conferi o endereço com o cliente". O servidor (`rascunhoDe`) aceita o endereço inteiro
+ou nenhum (CPF), nunca pela metade e nunca sem o código do município. Rascunho e recusada têm "corrigir" (PATCH,
+mesmo número de DPS), e o "emitir" mostra o endereço com a cidade do CEP e barra o código que não bate.
 
 **A publicação de 87efa60 subiu com a Action em verde e não foi servida** (09/11/2026): o `versao.txt`
 ficou no commit anterior por mais de 15 minutos. Um commit vazio republicou e resolveu. Mais uma razão

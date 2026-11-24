@@ -773,6 +773,23 @@ async function estoque(req, res, tok) {
       const n = Number(c.semana_venda);
       mud.semana_venda = n >= 1 && n <= 5 ? Math.trunc(n) : null;
     }
+    /* O VALOR FIPE DIGITADO NO ESTOQUE (24/11/2026, a Bruna pelo suporte: "colocar aba para o valor da FIPE"). O carro
+     * que veio da planilha tem a linha do veículo só com placa e modelo, e a FIPE não tinha onde entrar. Grava no
+     * `veiculo` do carro (é de lá que a Venda para lojistas, o pacote e a ficha leem), pelo token de quem digitou. */
+    if (c.fipe_valor !== undefined) {
+      const linha = ((await supa(`${base("estoque")}?select=veiculo_id&id=eq.${id}`, { headers: cab })) || [])[0];
+      if (!linha || !linha.veiculo_id) return res.status(409).json({ erro: "Este carro não tem ficha de veículo para guardar a FIPE." });
+      const fipe = c.fipe_valor === null || c.fipe_valor === "" ? null : decimal(c.fipe_valor);
+      const v = await supa(`${base("veiculo")}?id=eq.${linha.veiculo_id}`, {
+        method: "PATCH", headers: cabecalhos(tok, { Prefer: "return=representation" }),
+        body: JSON.stringify({ fipe_valor: fipe, fipe_consultada_em: fipe == null ? null : new Date().toISOString() }),
+      });
+      if (!(Array.isArray(v) && v.length)) return res.status(403).json({ erro: "A regra do banco recusou a FIPE." });
+      if (!Object.keys(mud).length) {
+        const completo = await supa(`${base("estoque")}?select=${CAMPOS_ESTOQUE}&id=eq.${id}`, { headers: cab });
+        return res.status(200).json({ ok: true, estoque: (completo || [])[0] || null });
+      }
+    }
     if (!Object.keys(mud).length) return res.status(400).json({ erro: "Nada para atualizar." });
 
     const salvo = await supa(`${base("estoque")}?id=eq.${id}`, {

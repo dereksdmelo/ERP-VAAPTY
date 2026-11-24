@@ -14471,6 +14471,54 @@ function LigarAoAgendamento({ atendimento, aoFeito, aoVoltar }) {
   );
 }
 
+/* AGENDAR A RECUPERAÇÃO DIRETO DA LISTA (24/11/2026, o André Bruno: "quero colocar esse cliente na recuperação, mas
+ * não tem a opção de agendar"). O mesmo gesto do "Agendar recuperação" da conversa (AtendimentoDaConversa): ação
+ * planejada no Meu dia, volta_em e "vai voltar", e a visita em Agendamentos. */
+function AgendarRecuperacaoDoAtendimento({ a, aoVoltar, aoFeito }) {
+  const hoje = hojeSP();
+  const somar = (n) => new Date(Date.parse(hoje) + n * 86400000).toISOString().slice(0, 10);
+  const [quando, setQuando] = useState({ dia: "", hora: "10:00" });
+  const [indo, setIndo] = useState(false); const [erro, setErro] = useState(""); const [ok, setOk] = useState("");
+  const carro = [(a.veiculo && a.veiculo.marca_modelo) || a.carro_descricao, a.veiculo && a.veiculo.ano_modelo].filter(Boolean).join(" ");
+  const agendar = async () => {
+    if (!quando.dia) { setErro("Escolha o dia."); return; }
+    setIndo(true); setErro("");
+    try {
+      await criarAcao({ dia: quando.dia, hora: quando.hora || null, tipo: "recuperacao", atendimento_id: a.id, feito: false,
+        titulo: `Recuperação: retomar com ${a.cliente_nome || "cliente"}${carro ? ` · ${carro}` : ""}${a.cliente_telefone ? ` · ${a.cliente_telefone}` : ""}` });
+      await atualizarAtendimento(a.id, { volta_em: quando.dia, ...(a.status === "fechado" ? {} : { status: "vai_voltar" }) }).catch(() => {});
+      let aviso = "";
+      await agendarVisitaDeRecuperacao(a, quando.dia, quando.hora || "10:00", carro).catch((e) => { aviso = ` Ficou no Meu dia, mas não entrou em Agendamentos: ${e.message}`; });
+      setOk(`Recuperação agendada para ${diaBR(quando.dia)} às ${quando.hora || "10:00"} — está na Recuperação (Reagendados) e no Meu dia.${aviso}`);
+    } catch (e) { setErro(e.message); }
+    setIndo(false);
+  };
+  if (ok) return (
+    <div className="mt-3 space-y-2 text-[13px]">
+      <p style={{ color: C.verde, fontWeight: 600 }}>✓ {ok}</p>
+      <button onClick={aoFeito} className="rounded-md px-3 py-1.5 font-semibold text-white" style={{ background: C.roxo }}>Fechar</button>
+    </div>
+  );
+  return (
+    <div className="mt-3 space-y-2 text-[13px]">
+      <p style={{ color: C.mute }}>Quando voltar a falar com {a.cliente_nome || "o cliente"}?</p>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {[["amanhã", 1], ["em 2 dias", 2], ["em 3 dias", 3], ["em 1 semana", 7], ["em 15 dias", 15]].map(([r, n]) => (
+          <button key={r} onClick={() => setQuando((q) => ({ ...q, dia: somar(n) }))} className="rounded border px-2 py-1"
+            style={{ borderColor: quando.dia === somar(n) ? C.roxo : C.line, background: quando.dia === somar(n) ? "#F1ECF8" : "#fff" }}>{r}</button>
+        ))}
+        <input type="date" min={hoje} value={quando.dia} onChange={(e) => setQuando((q) => ({ ...q, dia: e.target.value }))} className="rounded border px-1.5 py-1 outline-none" style={inputSty} />
+        <input type="time" value={quando.hora} onChange={(e) => setQuando((q) => ({ ...q, hora: e.target.value }))} className="rounded border px-1.5 py-1 outline-none" style={inputSty} />
+      </div>
+      {erro && <p style={{ color: C.laranja }}>{erro}</p>}
+      <div className="flex gap-2">
+        <button disabled={indo} onClick={agendar} className="rounded-md px-3 py-1.5 font-semibold text-white" style={{ background: C.roxo, opacity: indo ? 0.6 : 1 }}>{indo ? "Agendando…" : "Agendar"}</button>
+        <button onClick={aoVoltar} className="rounded-md px-3 py-1.5" style={{ color: C.mute }}>voltar</button>
+      </div>
+    </div>
+  );
+}
+
 function AcoesAtendimento({ a, lista, gerente, aoFechar, aoJuntar, aoExcluido }) {
   const [modo, setModo] = useState("");
   const [naoVeio, setNaoVeio] = useState(false);
@@ -14497,6 +14545,12 @@ function AcoesAtendimento({ a, lista, gerente, aoFechar, aoJuntar, aoExcluido })
 
         {!modo && (
           <div className="mt-3 grid gap-2">
+            {!["fechado", "vendeu_fora"].includes(a.status) && (
+              <button onClick={() => setModo("recuperacao")} className="rounded-lg border px-3 py-2.5 text-left text-[14px] font-semibold" style={{ borderColor: C.roxo, color: C.roxo }}>
+                Agendar recuperação
+                <span className="block text-[12px] font-normal" style={{ color: C.mute }}>Marca o dia de voltar a falar com o cliente; entra na Recuperação e no Meu dia.</span>
+              </button>
+            )}
             <button onClick={() => setModo("juntar")} className="rounded-lg border px-3 py-2.5 text-left text-[14px] font-semibold" style={{ borderColor: C.line }}>
               Juntar com outro atendimento do mesmo cliente
               <span className="block text-[12px] font-normal" style={{ color: C.mute }}>Quando a pré-venda e o negociador abriram dois para a mesma pessoa.</span>
@@ -14527,6 +14581,7 @@ function AcoesAtendimento({ a, lista, gerente, aoFechar, aoJuntar, aoExcluido })
           </div>
         )}
 
+        {modo === "recuperacao" && <AgendarRecuperacaoDoAtendimento a={a} aoVoltar={() => setModo("")} aoFeito={() => aoExcluido()} />}
         {modo === "agendamento" && <LigarAoAgendamento atendimento={a} aoVoltar={() => setModo("")} aoFeito={() => aoExcluido()} />}
 
         {modo === "juntar" && (
@@ -17165,9 +17220,25 @@ function FichaEstoque({ id, perfil, aoVoltar, aoAbrir }) {
       <div className="rounded-lg p-3.5" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
         <div className="text-[15px] font-semibold">{v.marca_modelo || "—"}{v.ano_modelo ? ` ${v.ano_modelo}` : ""}</div>
         <div className="mt-0.5 text-[12px]" style={{ color: C.mute }}>
-          {[v.cor, v.km_atual ? `${Number(v.km_atual).toLocaleString("pt-BR")} km` : null,
-            v.fipe_valor ? `FIPE ${brl(v.fipe_valor)}` : null].filter(Boolean).join(" · ") || "sem ficha"}
+          {[v.cor, v.km_atual ? `${Number(v.km_atual).toLocaleString("pt-BR")} km` : null].filter(Boolean).join(" · ")}
         </div>
+        {/* A FIPE se digita aqui (24/11/2026, a Bruna pelo suporte): o carro da planilha não tinha onde pô-la. */}
+        {e.veiculo_id && (
+          <label className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[12.5px]" style={{ color: C.mute }}>
+            Valor FIPE
+            <input key={`fipe-${v.fipe_valor || ""}`} defaultValue={v.fipe_valor ? brl(v.fipe_valor) : ""} placeholder="R$ 0,00" inputMode="decimal"
+              onBlur={async (ev) => {
+                const novo = numeroBR(ev.target.value);
+                if ((novo || null) === (Number(v.fipe_valor) || null)) return;
+                setErro("");
+                try { await atualizarEstoque(e.id, { fipe_valor: novo || null }); await carregar(); }
+                catch (ex) { setErro(`Não guardou a FIPE: ${ex.message}`); }
+              }}
+              onKeyDown={(ev) => { if (ev.key === "Enter") ev.target.blur(); }}
+              className="w-[130px] rounded border px-2 py-0.5 text-right outline-none" style={{ ...inputSty, fontVariantNumeric: "tabular-nums" }} />
+            {!v.fipe_valor && <span>— digite e saia do campo para guardar</span>}
+          </label>
+        )}
         <div className="mt-1 text-[11px]" style={{ color: C.mute }}>
           Entrou {diaBR(e.entrou_em)}{dias != null ? ` · ${dias} dia${dias === 1 ? "" : "s"} ${e.situacao === "vendido" ? "até vender" : "no pátio"}` : ""}
         </div>
@@ -24380,16 +24451,43 @@ function FinNotas() {
   /* A NOTA JÁ PREENCHIDA a partir do carro (09/11/2026): o cliente que
      vendeu (comissão) ou o lojista que comprou (margem). Tudo editável
      antes de salvar — o valor e o tomador são de quem emite. */
-  const JOINVILLE = /joinville/i;
   const montar = (c, quem) => {
     const t = c[quem];
+    setCepEstado(null);
     setNova({ estoque_id: c.id, tomador_doc: t.doc, tomador_nome: t.nome, tomador_email: t.email,
       valor: t.valor ? String(t.valor).replace(".", ",") : "",
       descricao: `${EMPRESA.servico_descricao || "Intermediação de venda de veículo automotor"} — ${[c.carro, c.placa].filter(Boolean).join(" · ")}`,
       competencia: c.entrou_em ? `${String(c.entrou_em).slice(0, 7)}-01` : (comp ? `${comp}-01` : undefined),
       tomador_cep: t.cep, tomador_logradouro: t.logradouro, tomador_numero: t.numero, tomador_bairro: t.bairro,
-      tomador_cmun: "", _cidade: t.cidade && !JOINVILLE.test(t.cidade) ? `${t.cidade}${""}` : "" });
+      tomador_cmun: "", _cidade: [t.cidade, t.uf].filter(Boolean).join("/"), _conferido: false });
     window.scrollTo({ top: 0, behavior: "smooth" });
+    if (String(t.cep || "").replace(/\D/g, "").length === 8) porCep(t.cep, true);
+  };
+  /* O ENDEREÇO SE CONFERE ANTES DE EMITIR (23/11/2026, o Derek: uma nota foi recusada pelo endereço do
+     cadastro). O CEP traz a cidade e o código IBGE (ViaCEP); sem isso, o código ficava vazio e a nota saía
+     com Joinville e o CEP de outra cidade. A rua e o bairro do CEP só entram onde está vazio (ou se pedir),
+     porque o cadastro pode ter o número e o complemento certos. */
+  const [cepEstado, setCepEstado] = useState(null); // { cidade, uf, ibge, endereco, bairro } | { erro }
+  const porCep = async (cep, soVazio) => {
+    setCepEstado({ lendo: true });
+    try {
+      const r = await buscarCep(cep);
+      setCepEstado(r);
+      setNova((n) => n && ({ ...n, tomador_cmun: r.ibge || n.tomador_cmun,
+        tomador_logradouro: soVazio && String(n.tomador_logradouro || "").trim() ? n.tomador_logradouro : (r.endereco || n.tomador_logradouro),
+        tomador_bairro: soVazio && String(n.tomador_bairro || "").trim() ? n.tomador_bairro : (r.bairro || n.tomador_bairro) }));
+    } catch (e) { setCepEstado({ erro: e.message }); }
+  };
+  const semAcento = (x) => String(x || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  const temEndereco = (n) => !!(n && (String(n.tomador_cep || "").trim() || String(n.tomador_logradouro || "").trim() || String(n.tomador_bairro || "").trim()));
+  const corrigir = (n) => {
+    setNova({ _id: n.id, estoque_id: n.estoque_id, tomador_doc: n.tomador_doc, tomador_nome: n.tomador_nome, tomador_email: n.tomador_email || "",
+      valor: String(n.valor).replace(".", ","), descricao: n.descricao, competencia: n.competencia,
+      tomador_cep: n.tomador_cep || "", tomador_logradouro: n.tomador_logradouro || "", tomador_numero: n.tomador_numero || "",
+      tomador_bairro: n.tomador_bairro || "", tomador_cmun: n.tomador_cmun || "", _cidade: "", _conferido: false });
+    setCepEstado(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    if (String(n.tomador_cep || "").replace(/\D/g, "").length === 8) porCep(n.tomador_cep, true);
   };
   const comCarro = (id) => {
     const c = carros.find((x) => x.id === id);
@@ -24398,13 +24496,33 @@ function FinNotas() {
   };
   const criar = async () => {
     setErro(""); setIndo("criar");
-    try { await fin("nfse", null, finJson("POST", nova)); setNova(null); carregar(); } catch (e) { setErro(e.message); }
+    if (temEndereco(nova) && !nova._conferido) { setErro("Confira o endereço com o cliente e marque “Conferi o endereço” antes de salvar."); setIndo(""); return; }
+    try {
+      if (nova._id) await fin("nfse", { id: nova._id }, finJson("PATCH", nova));
+      else await fin("nfse", null, finJson("POST", nova));
+      setNova(null); setCepEstado(null); carregar();
+    } catch (e) { setErro(e.message); }
     setIndo("");
   };
   const emitir = async (n) => {
-    if (!window.confirm(n.ambiente === "producao"
+    // O endereço aparece na confirmação, com a cidade que o CEP diz — é a última chance de ver o errado.
+    let endTxt = "Sem endereço do tomador (vale para CPF).";
+    if (n.tomador_cep) {
+      let cid = "";
+      try {
+        const r = await buscarCep(n.tomador_cep);
+        cid = `${r.cidade}/${r.uf}`;
+        if (r.ibge && n.tomador_cmun && r.ibge !== n.tomador_cmun) {
+          window.alert(`O município da nota (código ${n.tomador_cmun}) não é o do CEP ${n.tomador_cep} (${cid}, código ${r.ibge}). A Receita recusa. Aperte "corrigir" e busque pelo CEP.`);
+          return;
+        }
+      } catch { cid = "cidade do CEP não conferida"; }
+      endTxt = `${n.tomador_logradouro || "?"}, ${n.tomador_numero || "S/N"} — ${n.tomador_bairro || "?"} — ${cid} — CEP ${n.tomador_cep}`;
+    }
+    if (!window.confirm((n.ambiente === "producao"
       ? `Emitir a NOTA FISCAL de ${rs2(n.valor)} para ${n.tomador_nome}? Ela vale como nota e só sai de circulação cancelando.`
-      : `Emitir a nota de ${rs2(n.valor)} para ${n.tomador_nome}? (ambiente de TESTES da Receita — não vale como nota)`)) return;
+      : `Emitir a nota de ${rs2(n.valor)} para ${n.tomador_nome}? (ambiente de TESTES da Receita — não vale como nota)`)
+      + `\n\nEndereço: ${endTxt}\n\nEstá certo? Se não, cancele e aperte "corrigir".`)) return;
     setErro(""); setIndo(n.id);
     try { await fin("nfse", { acao: "emitir", id: n.id }, finJson("POST", {})); }
     catch (e) { setErro(e.message); }
@@ -24465,21 +24583,52 @@ function FinNotas() {
             <label className="block"><Rotulo>Valor do serviço</Rotulo><input className={inputCls} style={{ ...inputSty, fontFamily: F.mono }} inputMode="decimal" value={nova.valor} onChange={(e) => setNova({ ...nova, valor: e.target.value })} /></label>
             <label className="block lg:col-span-2"><Rotulo>Nome do tomador</Rotulo><input className={inputCls} style={inputSty} value={nova.tomador_nome} onChange={(e) => setNova({ ...nova, tomador_nome: e.target.value })} /></label>
             <label className="block lg:col-span-2"><Rotulo>E-mail do tomador (opcional)</Rotulo><input className={inputCls} style={inputSty} value={nova.tomador_email} onChange={(e) => setNova({ ...nova, tomador_email: e.target.value })} /></label>
-            {String(nova.tomador_doc || "").replace(/\D/g, "").length === 14 && (<>
-              <label className="block"><Rotulo>CEP</Rotulo><input className={inputCls} style={inputSty} value={nova.tomador_cep || ""} onChange={(e) => setNova({ ...nova, tomador_cep: e.target.value })} /></label>
-              <label className="block lg:col-span-2"><Rotulo>Rua</Rotulo><input className={inputCls} style={inputSty} value={nova.tomador_logradouro || ""} onChange={(e) => setNova({ ...nova, tomador_logradouro: e.target.value })} /></label>
-              <label className="block"><Rotulo>Número</Rotulo><input className={inputCls} style={inputSty} value={nova.tomador_numero || ""} onChange={(e) => setNova({ ...nova, tomador_numero: e.target.value })} /></label>
-              <label className="block lg:col-span-2"><Rotulo>Bairro</Rotulo><input className={inputCls} style={inputSty} value={nova.tomador_bairro || ""} onChange={(e) => setNova({ ...nova, tomador_bairro: e.target.value })} /></label>
-              <label className="block lg:col-span-2"><Rotulo>Município (código IBGE — vazio é Joinville)</Rotulo><input className={inputCls} style={inputSty} value={nova.tomador_cmun || ""} onChange={(e) => setNova({ ...nova, tomador_cmun: e.target.value })} />
-                {nova._cidade && !nova.tomador_cmun && <span className="mt-0.5 block text-[11px]" style={{ color: C.laranja }}>O cadastro diz {nova._cidade}: digite o código IBGE dessa cidade (vazio vira Joinville).</span>}</label>
-            </>)}
+            <div className="rounded-lg p-2 lg:col-span-4" style={{ background: C.bg }}>
+              <div className="mb-1.5 flex flex-wrap items-baseline gap-2">
+                <b className="text-[12.5px]">Endereço do tomador</b>
+                <span className="text-[11.5px]" style={{ color: C.mute }}>
+                  {String(nova.tomador_doc || "").replace(/\D/g, "").length === 14 ? "obrigatório para CNPJ" : "opcional para CPF — mas, se for, vai inteiro e certo"} · veio do cadastro: confira com o cliente
+                </span>
+              </div>
+              <div className="grid gap-2 lg:grid-cols-4">
+                <label className="block"><Rotulo>CEP</Rotulo>
+                  <div className="flex gap-1">
+                    <input className={inputCls} style={inputSty} value={nova.tomador_cep || ""}
+                      onChange={(e) => { setNova({ ...nova, tomador_cep: e.target.value, tomador_cmun: "", _conferido: false }); setCepEstado(null); }}
+                      onBlur={(e) => { if (e.target.value.replace(/\D/g, "").length === 8 && !nova.tomador_cmun) porCep(e.target.value, true); }} />
+                    <button type="button" onClick={() => porCep(nova.tomador_cep, false)} className="shrink-0 rounded-md border px-2 text-[11.5px] font-semibold" style={{ borderColor: C.line, color: C.roxo }}>buscar</button>
+                  </div></label>
+                <label className="block lg:col-span-2"><Rotulo>Rua</Rotulo><input className={inputCls} style={inputSty} value={nova.tomador_logradouro || ""} onChange={(e) => setNova({ ...nova, tomador_logradouro: e.target.value, _conferido: false })} /></label>
+                <label className="block"><Rotulo>Número</Rotulo><input className={inputCls} style={inputSty} value={nova.tomador_numero || ""} onChange={(e) => setNova({ ...nova, tomador_numero: e.target.value, _conferido: false })} /></label>
+                <label className="block lg:col-span-2"><Rotulo>Bairro</Rotulo><input className={inputCls} style={inputSty} value={nova.tomador_bairro || ""} onChange={(e) => setNova({ ...nova, tomador_bairro: e.target.value, _conferido: false })} /></label>
+                <div className="lg:col-span-2"><Rotulo>Cidade (pelo CEP)</Rotulo>
+                  <div className="text-[12.5px]" style={{ paddingTop: 6 }}>
+                    {cepEstado && cepEstado.lendo ? <span style={{ color: C.mute }}>buscando o CEP…</span>
+                      : cepEstado && cepEstado.erro ? <span style={{ color: C.laranja }}>{cepEstado.erro} Confira o CEP com o cliente.</span>
+                      : cepEstado && cepEstado.cidade ? <><b>{cepEstado.cidade}/{cepEstado.uf}</b> <span className="text-[11px]" style={{ color: C.mute, fontFamily: F.mono }}>IBGE {nova.tomador_cmun}</span></>
+                      : nova.tomador_cmun ? <span className="text-[11px]" style={{ color: C.mute, fontFamily: F.mono }}>IBGE {nova.tomador_cmun} — aperte “buscar” para ver a cidade</span>
+                      : <span style={{ color: C.mute }}>digite o CEP e aperte “buscar”</span>}
+                  </div>
+                  {cepEstado && cepEstado.cidade && nova._cidade && semAcento(nova._cidade.split("/")[0]) !== semAcento(cepEstado.cidade) && (
+                    <span className="mt-0.5 block text-[11.5px] font-semibold" style={{ color: C.laranja }}>O cadastro diz {nova._cidade}, mas o CEP é de {cepEstado.cidade}/{cepEstado.uf}. Pergunte ao cliente qual está certo.</span>)}
+                  {cepEstado && cepEstado.endereco && nova.tomador_logradouro && semAcento(cepEstado.endereco) !== semAcento(nova.tomador_logradouro) && (
+                    <span className="mt-0.5 block text-[11.5px]" style={{ color: C.laranja }}>Pelo CEP a rua é “{cepEstado.endereco}”{cepEstado.bairro ? `, bairro ${cepEstado.bairro}` : ""}.{" "}
+                      <button type="button" className="underline" onClick={() => setNova({ ...nova, tomador_logradouro: cepEstado.endereco, tomador_bairro: cepEstado.bairro || nova.tomador_bairro, _conferido: false })}>usar a do CEP</button></span>)}
+                </div>
+              </div>
+              {temEndereco(nova) && (
+                <label className="mt-2 flex items-center gap-2 text-[12.5px] font-semibold">
+                  <input type="checkbox" checked={!!nova._conferido} onChange={(e) => setNova({ ...nova, _conferido: e.target.checked })} />
+                  Conferi o endereço com o cliente
+                </label>)}
+            </div>
             <label className="block"><Rotulo>Competência (mês do serviço)</Rotulo><input type="month" className={inputCls} style={inputSty}
               value={String(nova.competencia || "").slice(0, 7)} onChange={(e) => setNova({ ...nova, competencia: e.target.value ? `${e.target.value}-01` : undefined })} /></label>
             <label className="block lg:col-span-3"><Rotulo>Descrição do serviço</Rotulo><input className={inputCls} style={inputSty} value={nova.descricao} onChange={(e) => setNova({ ...nova, descricao: e.target.value })} /></label>
           </div>
           <div className="mt-2 flex items-center gap-3">
-            <BotaoPrimario onClick={criar} disabled={indo === "criar"}>{indo === "criar" ? "Salvando…" : "Salvar rascunho"}</BotaoPrimario>
-            <button onClick={() => setNova(null)} className="text-[12.5px]" style={{ color: C.mute }}>cancelar</button>
+            <BotaoPrimario onClick={criar} disabled={indo === "criar"}>{indo === "criar" ? "Salvando…" : nova._id ? "Salvar a correção" : "Salvar rascunho"}</BotaoPrimario>
+            <button onClick={() => { setNova(null); setCepEstado(null); }} className="text-[12.5px]" style={{ color: C.mute }}>cancelar</button>
           </div>
         </div>
       )}
@@ -24545,6 +24694,7 @@ function FinNotas() {
                 <td className="px-2 py-1.5"><span className="rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ background: COR[n.situacao][0], color: COR[n.situacao][1] }}>{n.situacao}</span></td>
                 <td className="whitespace-nowrap px-2 py-1.5 text-right text-[12px]">
                   {(n.situacao === "rascunho" || n.situacao === "rejeitada") && <button disabled={!!indo} onClick={() => emitir(n)} className="mr-2 font-semibold" style={{ color: C.roxo }}>{indo === n.id ? "enviando…" : n.situacao === "rejeitada" ? "tentar de novo" : "emitir"}</button>}
+                  {(n.situacao === "rascunho" || n.situacao === "rejeitada") && <button disabled={!!indo} onClick={() => corrigir(n)} className="mr-2" style={{ color: C.roxo }}>corrigir</button>}
                   {n.chave_acesso && <button disabled={!!indo} onClick={() => verPdf(n)} className="mr-2 font-semibold" style={{ color: C.roxo }}>{indo === `pdf${n.id}` ? "baixando…" : "PDF"}</button>}
                   <button onClick={() => verXml(n)} className="mr-2" style={{ color: C.mute }}>XML</button>
                   {n.situacao === "emitida" && <button disabled={!!indo} onClick={() => setCancelando({ n, codigo: "1", motivo: "" })} className="mr-2" style={{ color: C.laranja }}>{indo === `c${n.id}` ? "cancelando…" : "cancelar"}</button>}
@@ -28342,7 +28492,7 @@ async function buscarCep(cep) {
   const r = await fetch(`https://viacep.com.br/ws/${d}/json/`);
   const j = await r.json().catch(() => ({}));
   if (!r.ok || j.erro) throw new Error("CEP não encontrado.");
-  return { endereco: j.logradouro || "", bairro: j.bairro || "", cidade: j.localidade || "", uf: j.uf || "" };
+  return { endereco: j.logradouro || "", bairro: j.bairro || "", cidade: j.localidade || "", uf: j.uf || "", ibge: j.ibge || "" };
 }
 // O que o contrato do lojista pede para não sair com linha em branco.
 const OBRIG_LOJISTA = [["documento", "CPF/CNPJ"], ["endereco", "endereço"], ["bairro", "bairro"], ["cidade", "cidade"], ["uf", "estado"], ["cep", "CEP"], ["telefone", "contato"]];
@@ -32143,12 +32293,16 @@ function TelaRecuperacao({ perfil, aoAbrir, aoConversar }) {
             const [k, , itens, sub] = ABAS_REC.find((x) => x[0] === abaAtiva);
             const q = soDigitos(busca).length >= 4 ? soDigitos(busca) : "";
             const t = busca.trim().toLowerCase();
-            const vis = !t ? itens : itens.filter((a) => (q && soDigitos(a.cliente_telefone).includes(q))
-              || `${a.cliente_nome || ""} ${carroDe(a)} ${(a.veiculo && a.veiculo.placa) || ""}`.toLowerCase().includes(t));
+            // A BUSCA PROCURA EM TODAS AS ABAS (24/11/2026, o André Bruno: buscou o Rafael em "Nunca procurados", ele estava
+            // em "Feitos hoje", e a tela respondia "ninguém ligou nem mandou mensagem"). Cada cartão diz em que aba está.
+            const casa = (a) => (q && soDigitos(a.cliente_telefone).includes(q))
+              || `${a.cliente_nome || ""} ${carroDe(a)} ${(a.veiculo && a.veiculo.placa) || ""}`.toLowerCase().includes(t);
+            const abaDe = (a) => (ABAS_REC.find((x) => x[2].some((y) => y.id === a.id)) || [null, "fora das abas (contato recente)"])[1];
+            const vis = !t ? itens : lista.filter(casa);
             return (
               <section className="space-y-2">
                 <div className="flex flex-wrap items-center gap-2 text-[12.5px]" style={{ color: C.mute }}>
-                  {k === "procurados" ? (
+                  {t ? <span>procurando em todas as abas</span> : k === "procurados" ? (
         <label className="flex items-center gap-1.5" style={{ color: C.mute }}>
           sem contato há pelo menos
           <input type="number" min={0} max={365} value={prazo} onChange={(e) => setPrazo(Math.max(0, Math.min(365, Number(e.target.value) || 0)))}
@@ -32162,9 +32316,16 @@ function TelaRecuperacao({ perfil, aoAbrir, aoConversar }) {
           ))}
         </label>
                   ) : <span>{sub}</span>}
-                  {t && <span>· {vis.length} de {itens.length} com "{busca.trim()}"</span>}
+                  {t && <span>· {vis.length} com "{busca.trim()}"</span>}
                 </div>
-                {vis.length ? vis.map(cartao) : <p className="py-4 text-[13px]" style={{ color: C.mute }}>{t ? "Ninguém com essa busca nesta aba." : "Ninguém aqui agora."}</p>}
+                {vis.length ? vis.map((a) => t ? (
+                  <div key={a.id}>
+                    <p className="mb-0.5 text-[11.5px] font-semibold" style={{ color: C.roxo }}>em {abaDe(a)}</p>
+                    {cartao(a)}
+                  </div>
+                ) : cartao(a)) : <p className="py-4 text-[13px]" style={{ color: C.mute }}>{t
+                  ? "Ninguém com essa busca entre os seus clientes deste período. Quem fechou ou vendeu fora não aparece aqui; para outro período, troque o recorte no alto."
+                  : "Ninguém aqui agora."}</p>}
               </section>
             );
           })()}
@@ -32570,7 +32731,8 @@ function destinosPara(perfil) {
     { id: "estoque", rot: "Estoque", curto: "Estoque", area: "gestao" },
     gestao ? { id: "lojistas", rot: "Venda para lojistas", curto: "Lojistas", area: "gestao" } : null,
     gestao ? { id: "cad_lojistas", rot: "Cadastro de lojistas", curto: "Cadastro", area: "gestao" } : null,
-    gerente ? { id: "gestao", rot: "Equipe", curto: "Equipe", area: "gestao" } : null,
+    // Equipe mora no RH desde 24/11/2026 (o Derek pelo suporte: "mudar essa aba de equipe para o RH").
+    gerente ? { id: "gestao", rot: "Equipe", curto: "Equipe", area: "rh", icone: "rh" } : null,
     // O combinado pronto para mais de uma pessoa (0082). A RLS é do
     // financeiro e do gerente, como a ficha.
     (gerente || (perfil && perfil.financeiro)) ? { id: "remuneracao", rot: "Perfis de remuneração", curto: "Remuner.", area: "gestao" } : null,
