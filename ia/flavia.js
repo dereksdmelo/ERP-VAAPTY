@@ -314,6 +314,13 @@ function textoLembrete(lead, agora, iaNome) {
       ENDERECO,
     ];
   }
+  // Passou 20 minutos da hora e ele não chegou (0179): ainda dá para vir hoje.
+  if (lead.tipo === "atrasou") {
+    return [
+      `Oi${nome ? `, ${nome}` : ""}! Estamos te esperando aqui na loja, seu horário era às ${hora} 😊`,
+      "Aconteceu alguma coisa? Ainda consegue vir hoje?",
+    ];
+  }
   if (lead.tipo === "antes") {
     return [
       `${ola}, passando pra lembrar do nosso horário daqui a pouquinho, às ${hora}. A equipe já está preparada pra receber você${carro ? ` e o seu ${carro}` : ""}. Venha pronto pra fechar negócio 🚗`,
@@ -366,6 +373,7 @@ Se a última mensagem da LOJA foi um lembrete do horário ("Aguardo sua confirma
 - Avisou que vai atrasar: o passo 7. Está a caminho ou chegou: o passo 8.
 - Perguntou onde fica: só o endereço.
 - Mandou só "bom dia" ou "oi": cumprimente e pergunte se está tudo certo para o horário.
+- A última mensagem da loja foi "Estamos te esperando… ainda consegue vir hoje?" (ele passou da hora): se está a caminho ou vem hoje, diga que a equipe está aguardando e pare; se não consegue mais hoje, ofereça DOIS horários da lista (hoje mais tarde, se houver, ou os próximos) e feche com "Em qual horário posso contar com você?". Sem bronca pelo atraso.
 
 ## Dúvidas de sempre — responda curto, tranquilize e volte para o horário
 - "Como funciona?": as três frases do "O que a Vaapty faz", e pergunte se fica melhor de manhã ou à tarde.
@@ -417,6 +425,7 @@ A ordem é OUVIR, ENTENDER, EXPLICAR e só então REMARCAR — uma etapa por res
 3. EXPLICAR: só depois, explique em poucas frases como a avaliação funciona (uns 20 a 40 minutos, a proposta sai na hora da rede de lojistas, ele só fecha se gostar) e o que vai ser diferente desta vez (ex.: "vou deixar o pessoal avisado do seu nome e do horário").
 4. REMARCAR: só quando ele estiver mais receptivo, convide para voltar, oferecendo DOIS horários da lista, do jeito do roteiro.
 - Imprevisto simples (saúde, trabalho, esqueceu) e tudo bem: acolha numa frase e já pode convidar para remarcar.
+- Se o horário perdido foi HOJE e a lista ainda tem horário livre hoje, ofereça primeiro vir hoje mesmo, mais tarde.
 - Se ele disser que já vendeu, que desistiu ou pedir para não mandar mais: agradeça numa frase e encerre.
 - Se ele recusar remarcar depois de tudo, respeite: agradeça e deixe a porta aberta, sem insistir.
 - Se ele está a caminho agora: diga que vai avisar a equipe, e pare.

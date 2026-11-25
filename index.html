@@ -20309,6 +20309,11 @@ const ESTADO_AGENDA = {
   naoVeio:    { rot: "não veio",        fundo: "#FBE1E1", borda: "#D64545", hora: "#B42318" },
   remarcou:   { rot: "remarcou",        fundo: C.bg,      borda: C.line,    hora: C.mute },
 };
+// REAGENDADO (25/11/2026, o Derek: "se reagendarem deve marcar na agenda como reagendado, não só deixar como não veio").
+// O horário perdido já aparecia riscado como "remarcou"; o horário NOVO saía como um agendado qualquer. Agora leva a
+// marca, com o dia em que faltou — é o cliente que a loja já esperou uma vez.
+const faltaAntes = (l) => (Array.isArray(l && l.remarcacoes) ? l.remarcacoes : []).filter((r) => r && r.nao_veio && r.de).slice(-1)[0] || null;
+const COR_REAGENDADO = "#C2410C";
 
 /* A CONVERSA ABRE NO WHATSAPP DO SISTEMA (03/11/2026, o Derek: "ao
  * invés de abrir o link do whats, abrir a conversa direto dentro do
@@ -20520,6 +20525,9 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento, aoVerConversa }) {
               </span>
             ))}
             <span className="flex items-center gap-1">
+              <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: COR_REAGENDADO }} />reagendado (faltou antes)
+            </span>
+            <span className="flex items-center gap-1">
               <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: COR_FLUXO.fundo, border: `1.5px solid ${COR_FLUXO.borda}` }} />cliente de fluxo
             </span>
           </div>
@@ -20615,8 +20623,11 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento, aoVerConversa }) {
                               <div className="flex items-center gap-1.5 text-[11.5px] font-bold" style={{ fontFamily: F.mono, color: e.hora }}>
                                 {horaBR(l.agendado_para)}{conf && passou ? " ✓" : ""}
                                 {e.rot && <span className="rounded px-1 text-[9.5px] uppercase tracking-[0.06em]" style={{ fontFamily: F.body, background: e.borda, color: "#fff" }}>{e.rot}</span>}
+                                {faltaAntes(l) && <span className="rounded px-1 text-[9.5px] uppercase tracking-[0.06em]" style={{ fontFamily: F.body, background: COR_REAGENDADO, color: "#fff" }}
+                                  title={`Faltou em ${diaBR(String(faltaAntes(l).de).slice(0, 10)).slice(0, 5)} às ${horaBR(faltaAntes(l).de)} e reagendou`}>reagendado</span>}
                               </div>
                               <div className="truncate text-[12px]">{l.nome}</div>
+                              {faltaAntes(l) && <div className="truncate text-[10.5px]" style={{ color: COR_REAGENDADO }}>faltou em {diaBR(String(faltaAntes(l).de).slice(0, 10)).slice(0, 5)} às {horaBR(faltaAntes(l).de)}</div>}
                               {/* O CARRO NO CARTÃO (o Diego, 07/10/2026: *"mostrar
                                   nome do veículo"*). Quem confere a agenda quer saber
                                   QUE carro vem — é o que a negociação prepara. Hoje

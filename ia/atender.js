@@ -243,7 +243,7 @@ async function retomar(env) {
   // Grava quando a falha é do lead: a trava é "cada lead uma vez", e um
   // número que não existe no WhatsApp não pode ser tentado a cada volta.
   await rpc("ia_retomada_gravar", { p_segredo: SEG, p_lead: lead.lead_id, p_canal: canal, p_telefone: para,
-    p_mensagens: enviados, p_wa_ids: wa_ids, p_estado: enviados.length ? "enviada" : "falhou", p_erro: erro || null });
+    p_mensagens: enviados, p_wa_ids: wa_ids, p_estado: enviados.length ? "enviada" : "falhou", p_erro: erro || null, p_horario: lead.horario || null });
   for (let i = 0; i < enviados.length; i++) {
     try {
       await rpc("wa_receber", { p_canal: canal, p_telefone: para, p_nome: "", p_wa_id: wa_ids[i], p_eco: true,
