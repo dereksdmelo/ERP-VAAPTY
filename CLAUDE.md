@@ -3885,6 +3885,17 @@ Um por lead, tipo e horário (`ia_lembrete`; remarcou, vale o novo). Os ids vão
 assumindo a conversa e a Flávia não responderia o "confirmo". O "confirmo" vira ✓ pela leitura do agendado (decisão
 65). Interruptor: `config_loja.ia_lembrete` (ligado; sem tela ainda). Os textos: `textoLembrete` em `ia/flavia.js`.
 
+**No ritmo da Ana (0178, no mesmo dia, o Derek: *"observe os padrões que estavam tendo nas conversas com a Ana e
+aplique"*).** Lido de 3.147 mensagens dela em novembro: "Aguardo confirmação… amanhã" 24 h antes do horário (ou 2 h
+depois de marcar), "Aguardo confirmação… hoje" 2 h antes (horário até 11h30) ou 3 h antes, e "passando pra lembrar…
+daqui a pouquinho" uns 50 min antes. Os agendados dela vieram 50% das vezes (98 de 196); os da Camila, 41%; os da
+Flávia, 48% (14 de 29). Agora são três lembretes (`vespera`, `dia`, `antes`), das 7h às 20h45; não sai lembrete se a
+última mensagem do cliente nas últimas 24 h diz que não vem ou quer remarcar, e "a loja falando ali" (30 min) não conta
+os próprios lembretes. O que o Derek vetou no treino continua fora mesmo sendo da Ana: o "avise com 2 horas de
+antecedência" e o PIX na hora. Na instrução: horário oferecido com dia da semana e data e "Em qual horário posso contar
+com você?", o que fazer quando o cliente responde a um lembrete (confirma → frase curta; não pode → dois horários já),
+e a troca direta (não fazemos, ajudamos a vender).
+
 ### 66. A Flávia procura quem não veio (0084)
 
 O Derek, em 28/10/2026, depois de ver 67 "não veio" e só dois

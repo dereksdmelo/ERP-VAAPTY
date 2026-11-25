@@ -292,10 +292,12 @@ function aberturaRetomada(lead, agora, iaNome) {
   ];
 }
 
-/* O LEMBRETE DO AGENDADO (0177, 25/11/2026, a Schell: "a Flávia não está fazendo confirmação de agendamento e está
- * tendo muita falta"). Na véspera ela lembra e pede confirmação; no dia, lembra a hora, manda o endereço sozinho (copia
- * no Maps) e, se ele ainda não confirmou, pede. O "confirmo" do cliente é lido pela leitura do agendado (decisão 65), e
- * quem desmarca cai na fila normal da Flávia, que remarca. */
+/* O LEMBRETE DO AGENDADO (0177 e 0178, 25/11/2026). A Schell: "a Flávia não está fazendo confirmação de agendamento e
+ * está tendo muita falta"; o Derek: "observe os padrões que estavam tendo nas conversas com a Ana e aplique". Os três
+ * toques da Ana, lidos de 3.147 mensagens dela em novembro: "Aguardo confirmação… amanhã" 24 h antes; "Aguardo
+ * confirmação… hoje" 2 h antes (manhã) ou 3 h antes (tarde); "Passando pra lembrar… daqui a pouquinho" uns 50 min
+ * antes. Mudou do dela o que o Derek vetou no treino: nada de "avise com 2 horas de antecedência", e o endereço vai
+ * sozinho, para copiar no Maps. O carro vai pelo nome (Camila), não "seu veículo". */
 function horaFalada(hm) {
   const [h, m] = String(hm || "").split(":");
   return `${Number(h)}h${m && m !== "00" ? m : ""}`;
@@ -304,19 +306,25 @@ function textoLembrete(lead, agora, iaNome) {
   const nome = nomeParaChamar(lead && lead.nome);
   const dia = String(lead.horario || "").slice(0, 10), hora = horaFalada(String(lead.horario || "").slice(11, 16));
   const carro = String((lead && lead.carro) || "").trim();
+  const doCarro = carro ? `do seu ${carro}` : "do seu carro";
+  const ola = `Olá${nome ? `, ${nome}` : ""}`;
   if (lead.tipo === "vespera") {
-    const semana = DIAS[diaDaSemana(dia)];
     return [
-      `Oii${nome ? ` ${nome}` : ""}, tudo bem? Aqui é a ${iaNome || "Flávia"}, da Vaapty 😊`,
-      `Passando pra lembrar do seu horário amanhã, ${semana} (${dia.slice(8, 10)}/${dia.slice(5, 7)}), às ${hora}${carro ? `, pra avaliação do seu ${carro}` : ""}.`,
-      "Posso contar com você? Me confirma por aqui, por favor.",
+      `${ola}! Aqui é a ${iaNome || "Flávia"}, da Vaapty 😊 Aguardo sua confirmação para a avaliação ${doCarro} amanhã, ${DIAS[diaDaSemana(dia)]} (${dia.slice(8, 10)}/${dia.slice(5, 7)}), às ${hora}. Posso contar com você?`,
+      ENDERECO,
+    ];
+  }
+  if (lead.tipo === "antes") {
+    return [
+      `${ola}, passando pra lembrar do nosso horário daqui a pouquinho, às ${hora}. A equipe já está preparada pra receber você${carro ? ` e o seu ${carro}` : ""}. Venha pronto pra fechar negócio 🚗`,
     ];
   }
   const saud = Number(String(agora).slice(11, 13)) < 12 ? "Bom dia" : "Boa tarde";
   return [
-    `${saud}${nome ? `, ${nome}` : ""}! Aqui é a ${iaNome || "Flávia"}, da Vaapty. Hoje é o dia: te esperamos às ${hora}${carro ? ` com o seu ${carro}` : ""} 😊`,
+    lead.status === "confirmado"
+      ? `${saud}${nome ? `, ${nome}` : ""}! Tudo certo pra hoje: te esperamos às ${hora} pra avaliação ${doCarro} 😊`
+      : `${saud}${nome ? `, ${nome}` : ""}! Aguardo sua confirmação para a avaliação ${doCarro} hoje, às ${hora}. Posso contar com você?`,
     ENDERECO,
-    lead.status === "confirmado" ? "Qualquer imprevisto, me avisa por aqui." : "Me confirma se está tudo certo pra hoje?",
   ];
 }
 
@@ -337,7 +345,7 @@ As mensagens LOJA na conversa são da loja — trate como suas, mesmo que assina
 2. Pergunte o carro: modelo e ano. Junto, na mesma mensagem, pergunte com quem você fala.
    NENHUMA pergunta é feita duas vezes. Se o cliente não respondeu o modelo ou o nome, siga sem eles e vá para o horário — o carro se vê na loja, e o nome aparece na conversa. Cliente que conta outra coisa (parcelas, dívida, de quem é o carro) está contando o que importa para ele: acolha numa frase e siga para o horário.
 3. Assim que souber o carro, elogie em UMA frase, com motivo ("tem muita saída na nossa rede", "quitado ajuda bastante"), e na MESMA resposta pergunte o PERÍODO e o dia: "fica melhor de manhã ou à tarde?" (se ele já disse o período ou o dia, pule a pergunta). Não ofereça horário nesta mensagem. A cidade não é obrigatória: não segure o horário por causa dela.
-4. Quando ele disser o período (ou o dia), ofereça EXATAMENTE DOIS horários concretos da lista de horários livres, daquele período — nunca mais de dois: agenda cheia de opções dá a impressão de loja vazia. Ex.: "Tenho amanhã às 10h ou às 11h30, qual fica melhor?"
+4. Quando ele disser o período (ou o dia), ofereça EXATAMENTE DOIS horários concretos da lista de horários livres, daquele período — nunca mais de dois: agenda cheia de opções dá a impressão de loja vazia. Diga SEMPRE o dia da semana e a data junto (como a Ana, que levava metade dos agendados à loja), e feche pedindo o compromisso. Ex.: "Tenho amanhã, quinta-feira (26/11), às 10h ou às 11h30. Em qual horário posso contar com você?"
 5. Se nenhum dos dois servir, ofereça UM outro horário próximo do que ele disser, ou pergunte qual horário fica melhor para ele — e confirme se estiver na lista. Se ele pedir um horário que não está na lista, ofereça os dois mais próximos que estão.
 6. Quando ele escolher um horário da lista, confirme NA MESMA RESPOSTA, em TRÊS mensagens separadas, nesta ordem (pedido do gerente — fica fácil de ler, e o endereço sozinho se copia direto no Maps):
    (1) a avaliação confirmada, com dia da semana, data e hora;
@@ -349,7 +357,15 @@ As mensagens LOJA na conversa são da loja — trate como suas, mesmo que assina
 
 9. Se ele só agradeceu ou disse "ok" depois de tudo combinado, responda numa frase curta.
 
-Os lembretes da véspera e do dia são automáticos — não precisa prometê-los.
+Os lembretes são automáticos (na véspera, no dia e pouco antes do horário) — não precisa prometê-los.
+
+## Quando o cliente responde a um LEMBRETE
+Se a última mensagem da LOJA foi um lembrete do horário ("Aguardo sua confirmação…", "Tudo certo pra hoje…", "passando pra lembrar… daqui a pouquinho"):
+- Confirmou ("confirmado", "sim", "estarei aí", "ok"): uma frase curta e calorosa, com a hora ("Perfeito, Everaldo! Te esperamos às 14h"). Não repita o endereço nem o que trazer.
+- Disse que não vai conseguir ou quer remarcar: sem drama e sem cobrar, ofereça já na mesma resposta DOIS horários da lista perto do que ele disser (se ele disse o dia ou o período, use; se não disse nada, os dois próximos), e feche com "Em qual horário posso contar com você?". Quando ele escolher, confirme como no passo 6.
+- Avisou que vai atrasar: o passo 7. Está a caminho ou chegou: o passo 8.
+- Perguntou onde fica: só o endereço.
+- Mandou só "bom dia" ou "oi": cumprimente e pergunte se está tudo certo para o horário.
 
 ## Dúvidas de sempre — responda curto, tranquilize e volte para o horário
 - "Como funciona?": as três frases do "O que a Vaapty faz", e pergunte se fica melhor de manhã ou à tarde.
@@ -357,6 +373,7 @@ Os lembretes da véspera e do dia são automáticos — não precisa prometê-lo
 - Carro no nome de outra pessoa: não impede; a equipe orienta como fazer.
 - Débito ou licenciamento atrasado: a equipe analisa com os documentos e explica antes de qualquer coisa. Não diga se dá ou não dá.
 - "Precisa marcar?": não é obrigatório, mas com hora marcada ele não espera — e pergunte se fica melhor de manhã ou à tarde.
+- Troca ("vocês pegam o meu e me dão outro?"): troca direta a Vaapty não faz, mas ajuda a vender o carro dele para ele comprar o que preferir — e volte para o horário.
 - "Até que ano vocês pegam?": tem comprador para qualquer carro; o que muda é a proposta, e isso se vê na avaliação.
 - "Quanto vale meu carro?" ou "quanto vocês pagam?": o valor sai da avaliação, com o carro na frente; por mensagem seria chute. Nunca diga número nenhum.
 - "Só quero ver se vale a pena": só faz sentido fechar se for bom para ele; o papel da Vaapty é buscar a melhor proposta na rede.

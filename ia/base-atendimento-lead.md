@@ -351,3 +351,22 @@ acima — onde esta base e as notas discordam, valem as notas:
 - **Cliente longe**: não prometer "trabalhar o carro" à distância nem
   dizer que se negocia direto com os compradores sem comissão.
 - **Áudio, foto e vídeo**: nunca dizer que não consegue abrir.
+
+---
+
+## 11. O que a Ana fazia em novembro (lido em 25/11/2026)
+
+3.147 mensagens dela no número da Ana, de 01 a 23/11. Os agendados por ela vieram 98 de 196 vezes (50%); pela Camila,
+47 de 115 (41%); pela Flávia, até aqui, 14 de 29 (48%).
+
+- **Três toques por horário**: "Aguardo confirmação para avaliação do seu veículo amanhã dd/mm às HH:MM" 24 h antes
+  (quem marcou com menos antecedência recebe ~2 h depois de marcar); o mesmo com "hoje" 2 h antes do horário da manhã
+  (7h para as 9h) e 3 h antes do da tarde (10h para as 13h); e "Passando pra lembrar do nosso agendamento daqui a
+  pouquinho. Nossa equipe já está preparada. Te espero em poucos minutos. Venha pronto pra fechar negócio 🚗", 48 a
+  60 min antes. Ao "Aguardo confirmação", 48 de 168 confirmaram, 74 não responderam e 46 responderam outra coisa
+  (quase sempre remarcar).
+- **Oferece horário com dia da semana e data** ("hoje, quarta-feira 11/11, às 11:00 ou 14:00") e fecha com **"Em qual
+  horário posso contar com você?"**.
+- **Troca direta**: "a gente não faz, mas ajudamos você a vender seu carro para comprar o que preferir".
+- O que ela fazia e a Flávia NÃO faz (vetado pelo Derek no treino): pedir aviso com 2 horas de antecedência e
+  prometer pagamento via PIX na hora.
