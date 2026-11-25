@@ -709,6 +709,10 @@ async function dutPublico(req, res) {
   const c = (req.body && typeof req.body === "object") ? req.body : {};
   const placa = String(c.placa || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
   if (placa.length < 7) return res.status(400).json({ erro: "Confira a placa." });
+  // Nome e WhatsApp de quem pede são obrigatórios (24/11/2026, a Meiriane pelo suporte): é por eles que o adm avisa
+  // que o documento ficou pronto ou que falta algo.
+  if (String(c.lojista_nome || "").trim().length < 2) return res.status(400).json({ erro: "Escreva o seu nome ou o da loja." });
+  if (String(c.lojista_whats || "").replace(/\D/g, "").length < 10) return res.status(400).json({ erro: "Escreva o WhatsApp com DDD." });
 
   /* O TIPO SAI DO QUE FOI PEDIDO, não de um botão a mais. Quem manda a
    * ATPV já preenchida quer só o reconhecimento — e esse pedido pula a

@@ -32107,6 +32107,9 @@ function TelaRecuperacao({ perfil, aoAbrir, aoConversar }) {
       const d = await r.json(); if (!r.ok) throw new Error(d.erro || "Não consegui anotar.");
       setNota((m) => ({ ...m, [a.id]: "" })); setPainel((m) => ({ ...m, [a.id]: "" })); setAviso((m) => ({ ...m, [a.id]: "Anotado no atendimento." }));
       if (d.observacoes != null) setAnot((m) => ({ ...m, [a.id]: d.observacoes }));
+      // Anotar também pergunta como ficou (25/11/2026, o André Ricardo: "atualizei esses contatos e não saiu da tela") —
+      // sem um "vendeu fora" ou um "volta tal dia", o cliente anotado volta para "Já procurados" depois de alguns dias.
+      setContato((m) => (m[a.id] && !m[a.id].feito ? m : { ...m, [a.id]: { hora: agoraSP(), anotou: true } }));
       carregar(true);
     } catch (e) { setErro(e.message); }
   };
@@ -32203,8 +32206,8 @@ function TelaRecuperacao({ perfil, aoAbrir, aoConversar }) {
           ) : <span style={{ color: AMARELO.texto }}>sem telefone no atendimento</span>}
           {c && !c.feito && (
             <span className="flex flex-wrap items-center gap-1.5 rounded-md px-2 py-1" style={{ background: "#F1ECF8" }}>
-              <span style={{ color: C.roxo, fontWeight: 600 }}>Registrado às {c.hora} — como foi?</span>
-              <button onClick={() => resultado(a, "não atendeu")} className="rounded border bg-white px-2 py-0.5" style={{ borderColor: C.line }}>não atendeu</button>
+              <span style={{ color: C.roxo, fontWeight: 600 }}>{c.titulo ? `Registrado às ${c.hora} — como foi?` : "Como ficou este cliente?"}</span>
+              {!c.anotou && <button onClick={() => resultado(a, "não atendeu")} className="rounded border bg-white px-2 py-0.5" style={{ borderColor: C.line }}>não atendeu</button>}
               {[["amanhã", 1], ["em 2 dias", 2], ["em 1 semana", 7]].map(([r, n]) => (
                 <button key={r} onClick={() => resultado(a, `volta ${diaBR(somaDiasSP(n))}`, { status: "vai_voltar", volta_em: somaDiasSP(n) })}
                   className="rounded border bg-white px-2 py-0.5" style={{ borderColor: C.line }}>volta {r}</button>
@@ -32214,13 +32217,16 @@ function TelaRecuperacao({ perfil, aoAbrir, aoConversar }) {
               <button onClick={() => resultado(a, "vendeu fora", { status: "vendeu_fora", volta_em: null })} className="rounded border bg-white px-2 py-0.5" style={{ borderColor: C.line, color: C.mute }}>vendeu fora</button>
             </span>
           )}
-          {c && c.feito && <span className="font-semibold" style={{ color: C.verde }}>✓ {c.feito} — está no seu Meu dia</span>}
+          {c && c.feito && <span className="font-semibold" style={{ color: C.verde }}>✓ {c.feito}{c.acaoId ? " — está no seu Meu dia" : ""}</span>}
+          {c && !c.feito && c.anotou && <button onClick={() => setContato((m) => { const n = { ...m }; delete n[a.id]; return n; })} style={{ color: C.mute }}>fechar</button>}
           {/* ANOTAR E AGENDAR, em todo cliente (08/11/2026). */}
           <span className="ml-auto flex flex-wrap gap-1.5">
             {[["nota", "Anotar"], ["agenda", a.agendada ? "Reagendar recuperação" : "Agendar recuperação"]].map(([k, r]) => (
               <button key={k} onClick={() => setPainel((m) => ({ ...m, [a.id]: m[a.id] === k ? "" : k }))} className="rounded-full px-3 py-1 font-semibold"
                 style={{ background: painel[a.id] === k ? C.roxo : "#fff", color: painel[a.id] === k ? "#fff" : C.roxo, border: `1px solid ${C.roxo}` }}>{r}</button>
             ))}
+            {!c && <button onClick={() => setContato((m) => ({ ...m, [a.id]: { hora: agoraSP(), anotou: true } }))} className="rounded-full px-3 py-1 font-semibold"
+              style={{ color: C.roxo, border: `1px solid ${C.roxo}`, background: "#fff" }} title="Já falou com ele: diga como ficou (volta tal dia, vendeu fora)">Marcar resultado</button>}
             {aoAbrir && <button onClick={() => aoAbrir(a.id)} className="rounded-full px-3 py-1 font-semibold" style={{ color: C.mute }}>abrir atendimento</button>}
           </span>
         </div>

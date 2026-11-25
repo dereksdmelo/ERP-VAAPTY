@@ -182,9 +182,9 @@ function desenhar() {
 
     <div class="cartao">
       <h2>Quem está pedindo</h2>
-      <label>Seu nome ou o da loja</label>
+      <label>Seu nome ou o da loja *</label>
       <input id="lojista_nome" />
-      <label>WhatsApp</label>
+      <label>WhatsApp com DDD *</label>
       <input id="lojista_whats" inputmode="tel" placeholder="47 99999-9999" />
       <p class="aviso">É por aqui que avisamos quando o documento ficar pronto.</p>
     </div>
@@ -267,6 +267,9 @@ async function enviar() {
   const placa = (el("placa").value || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
   if (placa.length < 7) { erro.textContent = "Confira a placa."; return; }
   if (tipo === "reconhecer" && !arquivos.atpv) { erro.textContent = "Anexe a ATPV preenchida."; return; }
+  // Nome e WhatsApp são obrigatórios (24/11/2026): é por eles que avisamos quando fica pronto ou falta algo.
+  if ((el("lojista_nome").value || "").trim().length < 2) { erro.textContent = "Escreva o seu nome ou o da loja."; el("lojista_nome").focus(); return; }
+  if ((el("lojista_whats").value || "").replace(/\D/g, "").length < 10) { erro.textContent = "Escreva o WhatsApp com DDD."; el("lojista_whats").focus(); return; }
 
   b.disabled = true; b.textContent = "enviando…";
   const v = (id) => { const e = el(id); return e ? (e.value || "").trim() : ""; };
