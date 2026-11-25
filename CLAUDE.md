@@ -3874,8 +3874,16 @@ IA_SEGREDO; a leitura volta à mensagem por `ia_gravar_leitura()`.
 **Leitura que falha não segura a resposta**: ela sai como "não lida" e
 a instrução manda perguntar o carro.
 
-**O que ainda não existe:** os lembretes da véspera e do dia, que a
-instrução diz serem automáticos.
+**Os lembretes da véspera e do dia existem desde 25/11/2026 (0177)** — a Schell: *"a Flávia não está fazendo
+confirmação de agendamento e está tendo muita falta… tiramos a Ana e nosso fluxo caiu muito"*. A instrução dizia ao
+cliente que eram automáticos, e quem os mandava era a Ana. Agora o cron (`lembrar`, em `ia/atender.js`) manda um por
+volta, e o banco escolhe (`ia_lembrete_proximo`): véspera (horário amanhã, ainda não confirmado, 9h–19h30) e dia
+(horário hoje, faltando 50 min ou mais, a partir das 8h), nunca para quem marcou há menos de 2 horas, só pelo número em
+que o cliente já conversa (comercial, com mensagem nas últimas 6 horas) e nunca com a loja falando ali na última hora.
+Um por lead, tipo e horário (`ia_lembrete`; remarcou, vale o novo). Os ids vão para `ia_lembrete.wa_ids`, e
+`ia_fila`, `ia_estado_conversa` e `wa_lead_avanca` olham essa tabela também — sem isso o lembrete pareceria uma pessoa
+assumindo a conversa e a Flávia não responderia o "confirmo". O "confirmo" vira ✓ pela leitura do agendado (decisão
+65). Interruptor: `config_loja.ia_lembrete` (ligado; sem tela ainda). Os textos: `textoLembrete` em `ia/flavia.js`.
 
 ### 66. A Flávia procura quem não veio (0084)
 

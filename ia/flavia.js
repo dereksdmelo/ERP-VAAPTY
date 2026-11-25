@@ -292,6 +292,34 @@ function aberturaRetomada(lead, agora, iaNome) {
   ];
 }
 
+/* O LEMBRETE DO AGENDADO (0177, 25/11/2026, a Schell: "a Flávia não está fazendo confirmação de agendamento e está
+ * tendo muita falta"). Na véspera ela lembra e pede confirmação; no dia, lembra a hora, manda o endereço sozinho (copia
+ * no Maps) e, se ele ainda não confirmou, pede. O "confirmo" do cliente é lido pela leitura do agendado (decisão 65), e
+ * quem desmarca cai na fila normal da Flávia, que remarca. */
+function horaFalada(hm) {
+  const [h, m] = String(hm || "").split(":");
+  return `${Number(h)}h${m && m !== "00" ? m : ""}`;
+}
+function textoLembrete(lead, agora, iaNome) {
+  const nome = nomeParaChamar(lead && lead.nome);
+  const dia = String(lead.horario || "").slice(0, 10), hora = horaFalada(String(lead.horario || "").slice(11, 16));
+  const carro = String((lead && lead.carro) || "").trim();
+  if (lead.tipo === "vespera") {
+    const semana = DIAS[diaDaSemana(dia)];
+    return [
+      `Oii${nome ? ` ${nome}` : ""}, tudo bem? Aqui é a ${iaNome || "Flávia"}, da Vaapty 😊`,
+      `Passando pra lembrar do seu horário amanhã, ${semana} (${dia.slice(8, 10)}/${dia.slice(5, 7)}), às ${hora}${carro ? `, pra avaliação do seu ${carro}` : ""}.`,
+      "Posso contar com você? Me confirma por aqui, por favor.",
+    ];
+  }
+  const saud = Number(String(agora).slice(11, 13)) < 12 ? "Bom dia" : "Boa tarde";
+  return [
+    `${saud}${nome ? `, ${nome}` : ""}! Aqui é a ${iaNome || "Flávia"}, da Vaapty. Hoje é o dia: te esperamos às ${hora}${carro ? ` com o seu ${carro}` : ""} 😊`,
+    ENDERECO,
+    lead.status === "confirmado" ? "Qualquer imprevisto, me avisa por aqui." : "Me confirma se está tudo certo pra hoje?",
+  ];
+}
+
 function instrucao(cfg, agora, livres, exemplos, retomada) {
   const nome = String(cfg.ia_nome || "Flávia").trim();
   return `Você é a ${nome}, do atendimento da Vaapty Joinville no WhatsApp.
@@ -432,5 +460,5 @@ function lerSaida(texto, livres) {
 
 module.exports = {
   CONFIG_PADRAO, ENDERECO, POR_HORARIO, paredeDe, horariosDoDia, horariosLivres,
-  conversaEmTexto, historicoEmTexto, pontosDe, instrucao, especialDoDia, lerSaida, semNumeros, aberturaRetomada, nomeParaChamar,
+  conversaEmTexto, historicoEmTexto, pontosDe, instrucao, especialDoDia, lerSaida, semNumeros, aberturaRetomada, nomeParaChamar, textoLembrete,
 };
