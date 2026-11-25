@@ -3903,7 +3903,7 @@ retomada (decisão 66) só saía pelo número da Prospecção Ativa, que caiu em
 agendado, sem atendimento aberto hoje para o telefone e sem mensagem do cliente na última hora: "Estamos te esperando…
 ainda consegue vir hoje?"; (2) a retomada do "não veio" sai pelo número EM QUE O CLIENTE JÁ CONVERSA (com `ia_responde`
 e `ia_retoma`, ligado nos três da Flávia), cada horário perdido uma vez (`ia_retomada.horario`; era cada lead uma vez
-na vida), só os perdidos de `config_loja.ia_retoma_desde` (25/11) em diante — os antigos não são chamados sem alguém
+na vida), só os perdidos de `config_loja.ia_retoma_desde` em diante (nasceu 25/11; o Derek recuou para 15/11 no mesmo dia, para chamar os antigos, 20 por dia) — os antigos não são chamados sem alguém
 decidir —, e quem recebeu o `atrasou` só é retomado no dia seguinte; (3) os lembretes saem só por número em que a
 Flávia responde (no da Camila a outra IA manda os dela). A conversa conta como retomada por 7 dias. **Na agenda, o
 horário novo de quem faltou leva a marca "reagendado"** e "faltou em dd/mm" (`faltaAntes`); o horário perdido continua
