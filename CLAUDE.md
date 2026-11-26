@@ -3933,6 +3933,15 @@ depois"*):** contado de quando a loja falou e o cliente parou, 20 min, 2 h, 5 h,
 espera também um mínimo desde o anterior (20 min, 1h30, 3 h, 22 h), para o silêncio da noite não virar três mensagens
 seguidas de manhã. Teto de 150 por dia. A 1ª é uma frase curtinha puxando a conversa; a 2ª já traz o próximo passo.
 
+**O assunto que não é vender carro vai para o ADM (0182, 26/11/2026, o Derek: *"o cliente já fechou e quer discutir um
+pagamento, ou uma multa… direcionar para o número do administrativo… e enviar uma mensagem para o whats do
+administrativo avisando do caso"*).** Pós-venda (pagamento, multa, contrato, documento, transferência, retirada),
+lojista, despachante, cartório: a Flávia não resolve; passa ao cliente o WhatsApp do administrativo (o número de
+operação com "adm" no nome, `ia_adm_da_conversa`, escrito por `foneLegivel` com o nono dígito) e marca `administrativo`
+na saída com o assunto. O `ia/atender.js` (`avisarAdm`) manda, do número em que o cliente escreveu para o do adm, o
+aviso com nome, telefone, assunto, a última mensagem e o link do wa.me — chega na caixa do WhatsApp do adm no ERP. Um
+aviso por conversa a cada 24 h (`ia_encaminhamento`), e o follow-up (0180) não insiste em conversa encaminhada.
+
 ### 66. A Flávia procura quem não veio (0084)
 
 O Derek, em 28/10/2026, depois de ver 67 "não veio" e só dois

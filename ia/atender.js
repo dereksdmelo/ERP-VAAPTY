@@ -103,6 +103,10 @@ async function atenderFila(env) {
       if (linha.ia_nome) cfg.ia_nome = linha.ia_nome;
       if (Array.isArray(linha.bloqueios)) cfg.bloqueios = linha.bloqueios; if (Array.isArray(linha.horarios_especiais)) cfg.horarios_especiais = linha.horarios_especiais;
       const livres = FLAVIA.horariosLivres(cfg, agora, (ctx && ctx.ocupados) || []);
+      // O número do administrativo, para o assunto que não é vender carro (0182).
+      let adm = null;
+      try { adm = await rpc("ia_adm_da_conversa", { p_segredo: SEG, p_conversa: item.conversa_id }); } catch (e) {}
+      if (adm && adm.telefone) cfg.adm_fone = FLAVIA.foneLegivel(adm.telefone);
       // Conversa que a Flávia abriu procurando quem não veio (0084): ela
       // precisa saber o que está retomando.
       let retomada = null;
@@ -179,12 +183,45 @@ async function atenderFila(env) {
             p_origem: ctx && ctx.conversa && ctx.conversa.anuncio ? "facebook" : (DO_CANAL[canal] || "outro") });
         } catch (e) {}
       }
+      // ASSUNTO DO ADMINISTRATIVO (0182, 26/11/2026, o Derek): o cliente que já fechou e fala de pagamento, multa,
+      // documento… A Flávia passou o número do adm ao cliente; aqui o adm é avisado do caso, pelo mesmo número em que
+      // o cliente escreveu, uma vez por conversa a cada 24 h. Falha aqui não desfaz a resposta ao cliente.
+      if (enviados.length && p.administrativo && adm && adm.telefone && !adm.avisado_em) {
+        try { await avisarAdm(env, rpc, { canal, conversa_id: item.conversa_id, cliente: para, nome: ctx && ctx.conversa && ctx.conversa.nome,
+          motivo: p.administrativo, ultima: msgs.filter((m) => m && !m.eco && m.texto).slice(-1)[0], adm }); }
+        catch (e) { console.error("flavia: aviso ao adm", String((e && e.message) || e).slice(0, 200)); }
+      }
       feitos.push({ conversa: item.conversa_id, enviadas: enviados.length, erro: erro || undefined });
     } catch (e) {
       try { await fim("falhou", { erro: String((e && e.message) || e) }); } catch (x) {}
     }
   }
   return { fila: fila.length, feitos };
+}
+
+/* O aviso ao WhatsApp do administrativo (0182). Sai do número em que o cliente escreveu para o número do adm — que é
+ * um número da loja ligado à ponte, então a mensagem também aparece na caixa do WhatsApp do adm, no ERP. */
+async function avisarAdm(env, rpc, c) {
+  const SEG = env.IA_SEGREDO;
+  const ult = c.ultima && c.ultima.texto ? String(c.ultima.texto).replace(/\s+/g, " ").slice(0, 300) : "";
+  const nome = FLAVIA.nomeParaChamar(c.nome);
+  const aviso = [
+    "🔔 Caso para o administrativo",
+    `Cliente: ${nome || "sem nome"} — ${FLAVIA.foneLegivel(c.cliente)}`,
+    `Assunto: ${c.motivo}`,
+    ult ? `Última mensagem dele: "${ult}"` : "",
+    `Ele escreveu no WhatsApp ${c.canal}. A Flávia passou o número do adm para ele chamar aqui.`,
+    `Chamar: https://wa.me/${String(c.cliente || "").replace(/\D/g, "")}`,
+  ].filter(Boolean).join("\n");
+  let para = String(c.adm.telefone || "").replace(/\D/g, "");
+  if (para.length <= 11) para = `55${para}`;
+  const r = await env.PONTE.fetch(`https://ponte/enviar?canal=${encodeURIComponent(c.canal)}`, {
+    method: "POST", signal: AbortSignal.timeout(40000), headers: { "x-ponte-segredo": env.PONTE_SEGREDO, "Content-Type": "application/json" },
+    body: JSON.stringify({ para, conteudo: { type: "text", text: { body: aviso } } }),
+  });
+  const e = await r.json().catch(() => ({ ok: false, erro: `a ponte respondeu ${r.status}` }));
+  await rpc("ia_encaminhamento_gravar", { p_segredo: SEG, p_conversa: c.conversa_id, p_motivo: c.motivo, p_canal: c.adm.canal,
+    p_telefone: para, p_aviso: aviso, p_estado: e && e.ok ? "enviada" : "falhou", p_erro: e && e.ok ? null : (e && e.erro) || "a ponte não mandou" });
 }
 
 /* A RETOMADA DE QUEM NÃO VEIO (0084, 28/10/2026). Uma mensagem por volta

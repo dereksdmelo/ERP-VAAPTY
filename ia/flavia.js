@@ -272,6 +272,16 @@ function nomeParaChamar(bruto) {
   if (p.length < 2 || /\d|@/.test(String(bruto || "").split(/\s+/)[0] || "")) return "";
   return p.charAt(0).toUpperCase() + p.slice(1).toLowerCase();
 }
+/* O telefone como se lê: 5547999998888 → (47) 99999-8888. */
+function foneLegivel(bruto) {
+  let d = String(bruto || "").replace(/\D/g, "");
+  if (d.length >= 12 && d.startsWith("55")) d = d.slice(2);
+  // O WhatsApp guarda o celular sem o nono dígito: 47 9999-8888 vira 47 99999-8888.
+  if (d.length === 10 && /[6-9]/.test(d[2])) d = `${d.slice(0, 2)}9${d.slice(2)}`;
+  if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return d;
+}
 function quandoFoi(horario, agora) {
   const dia = String(horario || "").slice(0, 10), hm = String(horario || "").slice(11, 16);
   if (!dia || !hm) return "";
@@ -387,7 +397,7 @@ Se a última mensagem da LOJA foi um lembrete do horário ("Aguardo sua confirma
 - "Só quero ver se vale a pena": só faz sentido fechar se for bom para ele; o papel da Vaapty é buscar a melhor proposta na rede.
 - "Que horas vocês abrem?": diga o horário de atendimento (está em "A loja", abaixo) — e pergunte se fica melhor de manhã ou à tarde.
 - Cliente longe, que não pode vir e quer negociar à distância: a avaliação é na loja, com o carro. Não prometa "trabalhar o carro" de longe e nunca diga que a Vaapty negocia direto com os compradores sem ganhar comissão — não é verdade. Ofereça horário para quando ele puder vir.
-- Pós-venda — quem já fechou negócio e fala de documento, retirada, pagamento ou de um negociador: não resolva nem prometa nada; diga numa frase que vai avisar a equipe, e pare.
+- Assunto que NÃO é vender carro — quem já fechou negócio com a loja e fala de pagamento, multa, contrato, documento, transferência, retirada ou de um negociador; ou lojista, despachante, cartório, fornecedor: não é com você. Não resolva, não explique e não prometa nada. ${cfg.adm_fone ? `Diga que quem cuida disso é o nosso administrativo, passe o WhatsApp dele — ${cfg.adm_fone} — para ele chamar lá, e diga que você já avisou o pessoal do caso. Preencha "administrativo" com o assunto em uma frase (ex.: "cliente do Gol 2015 que já fechou quer saber do pagamento"). Se a loja JÁ passou esse número nesta conversa, só lembre o número numa frase e deixe "administrativo" vazio.` : `Diga numa frase que vai avisar a equipe do administrativo, e pare. Preencha "administrativo" com o assunto em uma frase.`}
 
 ## Nunca
 - Dar preço, faixa de preço ou estimativa.
@@ -440,10 +450,11 @@ ${exemplosEmTexto(exemplos)}
 ## Formato da resposta
 Você recebe a conversa até agora; LOJA são as mensagens que a loja já mandou, CLIENTE as do cliente. ${insistencia ? "O cliente parou de responder: escreva a mensagem de retomada da seção acima." : "Responda à última mensagem do cliente."}
 Devolva SÓ um objeto JSON, sem cercas de código:
-{"mensagens": ["primeira mensagem", "segunda, se precisar"], "agendar": "", "encerrar": false}
+{"mensagens": ["primeira mensagem", "segunda, se precisar"], "agendar": "", "encerrar": false, "administrativo": ""}
 - "mensagens": de 1 a 3 mensagens, na ordem em que seriam enviadas.
 - "agendar": quando o cliente escolheu um horário da lista nesta mensagem, a data e hora no formato AAAA-MM-DDTHH:MM (ex.: "${(livres[0] && `${livres[0].iso}T${livres[0].horarios[0]}`) || "2026-10-20T09:00"}"); senão, "".
-- "encerrar": true só se o cliente pediu para parar, disse que não quer ou que já vendeu.`;
+- "encerrar": true só se o cliente pediu para parar, disse que não quer ou que já vendeu.
+- "administrativo": o assunto em uma frase, só quando a mensagem é um assunto do administrativo (veja "Assunto que NÃO é vender carro"); senão, "".`;
 }
 
 /* O FOLLOW-UP DE QUEM PAROU DE RESPONDER (0180, 26/11/2026). O Derek: "quando o cliente para de responder, como a IA
@@ -502,10 +513,10 @@ function lerSaida(texto, livres) {
   const oferecidos = new Set((livres || []).flatMap((d) => d.horarios.map((h) => `${d.iso}T${h}`)));
   const foraDaLista = !!agendar && RX_QUANDO.test(agendar) && !oferecidos.has(agendar);
   if (!RX_QUANDO.test(agendar) || foraDaLista) agendar = "";
-  return { mensagens, agendar, encerrar: o.encerrar === true, fora_da_lista: foraDaLista };
+  return { mensagens, agendar, encerrar: o.encerrar === true, fora_da_lista: foraDaLista, administrativo: String(o.administrativo || "").trim().slice(0, 300) };
 }
 
 module.exports = {
   CONFIG_PADRAO, ENDERECO, POR_HORARIO, paredeDe, horariosDoDia, horariosLivres,
-  conversaEmTexto, historicoEmTexto, pontosDe, instrucao, especialDoDia, lerSaida, semNumeros, aberturaRetomada, nomeParaChamar, textoLembrete,
+  conversaEmTexto, historicoEmTexto, pontosDe, instrucao, especialDoDia, lerSaida, semNumeros, aberturaRetomada, nomeParaChamar, textoLembrete, foneLegivel,
 };
