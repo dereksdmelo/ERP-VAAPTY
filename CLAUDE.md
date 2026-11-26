@@ -5329,7 +5329,9 @@ mesma chamada idempotente do botão).
 anexado é o sem assinatura"*).** Assinado pelo assinador próprio (decisão 42), o `documento` continua sendo a
 folha em branco e a assinatura mora em `assinatura`. O check list lê o estado das assinaturas
 (`?recurso=assinar-estado`), põe a via assinada primeiro ("✓ Pré-contrato assinado"), e o visor a abre
-montada pelo servidor (`?recurso=assinado`, a folha mais o bloco da assinatura).
+montada pelo servidor (`?recurso=assinado`, a folha mais o bloco da assinatura). **E o atendimento também mostra** (26/11/2026, o Derek:
+*"imprimir os termos e pré-contratos assinados dentro de um atendimento"*): `DocumentosAssinados todos`, embaixo dos
+documentos gerados no Fechamento, para quem conduz — relido ao voltar à aba, impresso por `abrirDocumento`.
 
 **O protocolo de retirada sai do check list (0163, 20/11/2026, a Bruna pelo botão de suporte, aprovado pelo
 Derek).** No item "Protocolo de Retirada", "gerar o protocolo" (`ProtocoloRetirada`) monta a folha "Retirada de

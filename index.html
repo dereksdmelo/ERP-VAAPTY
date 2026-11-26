@@ -8273,6 +8273,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                     </div>
                   </div>
                 )}
+                <DocumentosAssinados atendimentoId={atendimento ? atendimento.id : null} perfil={perfil} todos />
                 <p className="text-[11px] leading-relaxed" style={{ color: C.mute }}>
                   Os documentos saem com o texto que a casa assina e com os dados do cliente preenchidos. Só os dados bancários ficam em branco: o sistema não guarda conta nem chave PIX.
                 </p>
@@ -27656,10 +27657,20 @@ function ContratoDoNegocio({ atendimento, checklist, perfil, aoSalvarChecklist }
  * disparado depois de uma espera é bloqueado, e a impressão quebraria
  * em silêncio.
  */
-function DocumentosAssinados({ atendimentoId, perfil }) {
+function DocumentosAssinados({ atendimentoId, perfil, todos }) {
   const [lista, setLista] = useState([]);
   const [erro, setErro] = useState("");
-  const pode = !!(perfil && (perfil.administrativo || perfil.papel === "gerente"));
+  const [volta, setVolta] = useState(0);
+  // `todos`: dentro do atendimento (26/11/2026, o Derek: "imprimir os termos e pré-contratos assinados dentro de um
+  // atendimento") vale para quem o conduz; a RLS da `assinatura` é que decide quem lê.
+  const pode = !!(todos || (perfil && (perfil.administrativo || perfil.papel === "gerente")));
+
+  // O cliente assina no celular dele enquanto a tela está aberta: relê ao voltar para a aba.
+  useEffect(() => {
+    const v = () => { if (document.visibilityState === "visible") setVolta((n) => n + 1); };
+    document.addEventListener("visibilitychange", v);
+    return () => document.removeEventListener("visibilitychange", v);
+  }, []);
 
   useEffect(() => {
     if (!atendimentoId) return;
@@ -27681,20 +27692,22 @@ function DocumentosAssinados({ atendimentoId, perfil }) {
       } catch (e) { if (vivo) setErro(e.message); }
     })();
     return () => { vivo = false; };
-  }, [atendimentoId]);
+  }, [atendimentoId, volta]);
 
+  // Pela `abrirDocumento` (decisão 15): escrever numa janela aberta daqui e imprimir congela as duas abas. Ela vem
+  // depois do `await`; se o navegador bloquear, o aviso "O documento não abriu?" dá o link.
+  const [abrindo, setAbrindo] = useState("");
   const abrir = async (codigo) => {
-    const j = window.open("", "_blank");
-    if (j) j.document.write("<p style='font:14px system-ui;padding:24px'>Montando o documento…</p>");
+    setAbrindo(codigo); setErro("");
     try {
       const r = await fetchAut(`/api/documento?recurso=assinado&codigo=${encodeURIComponent(codigo)}`);
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.erro || "Não consegui abrir.");
-      if (j) { j.document.open(); j.document.write(d.html); j.document.close(); }
+      const a = abrirDocumento(d.html);
+      if (!a.ok) throw new Error(a.erro);
     } catch (e) {
       setErro(e.message);
-      if (j) j.close();
-    }
+    } finally { setAbrindo(""); }
   };
 
   if (!pode || (!lista.length && !erro)) return null;
@@ -27712,10 +27725,10 @@ function DocumentosAssinados({ atendimentoId, perfil }) {
             <span style={{ color: C.mute }}>
               {e.nome} · {new Date(e.assinado_em).toLocaleString("pt-BR")}
             </span>
-            <button onClick={() => abrir(e.codigo)}
+            <button onClick={() => abrir(e.codigo)} disabled={!!abrindo}
               className="rounded px-2 py-0.5 text-[11px] font-semibold"
               style={{ background: C.roxoFraco, color: C.roxo }}>
-              abrir e salvar em PDF
+              {abrindo === e.codigo ? "montando…" : "imprimir / salvar em PDF"}
             </button>
             <a href={`/verificar.html?c=${encodeURIComponent(e.codigo)}`} target="_blank" rel="noopener noreferrer"
               className="text-[11px] font-semibold" style={{ color: C.verde, fontFamily: F.mono }}>
