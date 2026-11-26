@@ -354,7 +354,7 @@ async function insistir(env) {
   if (linha.ia_nome) cfg.ia_nome = linha.ia_nome;
   if (Array.isArray(linha.bloqueios)) cfg.bloqueios = linha.bloqueios; if (Array.isArray(linha.horarios_especiais)) cfg.horarios_especiais = linha.horarios_especiais;
   const livres = FLAVIA.horariosLivres(cfg, agora, (ctx && ctx.ocupados) || []);
-  const sistema = FLAVIA.instrucao(cfg, agora, livres, (ctx && ctx.exemplos) || [], null, { n: alvo.n, max: alvo.max, desde: alvo.desde });
+  const sistema = FLAVIA.instrucao(cfg, agora, livres, (ctx && ctx.exemplos) || [], null, { n: alvo.n, max: alvo.max, desde: alvo.desde, nome: FLAVIA.nomeParaChamar(alvo.nome) });
 
   let r;
   try {

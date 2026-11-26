@@ -456,7 +456,7 @@ function secaoInsistencia(ins, agora) {
   return `## Agora você NÃO está respondendo: o cliente PAROU DE RESPONDER
 A última mensagem da conversa é da LOJA${ins.desde ? ` (${quandoFoi(ins.desde, agora) || ins.desde})` : ""} e o cliente não respondeu. Esta é a ${n}ª tentativa de retomar, de no máximo ${max}.
 Escreva UMA mensagem curta (duas só se a segunda for o horário), retomando do PONTO EXATO em que a conversa parou — leia a última pergunta da loja e o que ele já contou:
-- Use o nome dele e o carro, se souber. Não se apresente de novo.
+${ins.nome ? `- COMECE PELO NOME dele: ${ins.nome} ("Oi, ${ins.nome}!"). Cite o carro, se souber.` : "- COMECE PELO NOME dele, se ele aparecer na conversa (o cliente disse, ou a loja já chamou). Se não aparecer, sem nome. Cite o carro, se souber."} Não se apresente de novo.
 - Se faltava o período ou o dia: pergunte de novo de um jeito diferente e leve ("Consegue passar aqui essa semana? Fica melhor de manhã ou à tarde?").
 - Se a loja tinha oferecido horários: ofereça DOIS horários da lista (os próximos, com dia da semana e data) e feche com "Em qual horário posso contar com você?".
 - Se faltava o carro: pergunte o modelo e o ano de outro jeito, junto com o convite para a avaliação.
