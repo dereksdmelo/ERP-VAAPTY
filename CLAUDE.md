@@ -3922,6 +3922,10 @@ teve atendimento em 30 dias; quem disse que já vendeu, não quer ou pediu para 
 com a IA desligada, ou em que uma pessoa da loja escreveu nas últimas 12 h; lembrete ou retomada ao mesmo telefone
 em 20 h. Os ids vão para `ia_followup.wa_ids`, reconhecidos por `ia_fila`, `ia_estado_conversa` e `wa_lead_avanca`
 (e por `ia_e_da_flavia`). Interruptor: `config_loja.ia_followup` (ligado; sem tela).
+**Começa mais cedo (0181, no mesmo dia, o Derek: *"pode ter dois adicionais antes: 20 minutos depois e 2 horas
+depois"*):** contado de quando a loja falou e o cliente parou, 20 min, 2 h, 5 h, e dali de 22 em 22 h, até 5. Cada um
+espera também um mínimo desde o anterior (20 min, 1h30, 3 h, 22 h), para o silêncio da noite não virar três mensagens
+seguidas de manhã. Teto de 150 por dia. A 1ª é uma frase curtinha puxando a conversa; a 2ª já traz o próximo passo.
 
 ### 66. A Flávia procura quem não veio (0084)
 

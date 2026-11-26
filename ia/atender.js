@@ -313,7 +313,7 @@ async function lembrar(env) {
 
 /* O FOLLOW-UP DE QUEM PAROU DE RESPONDER (0180, 26/11/2026). O Derek: "quando o cliente para de responder, como a IA
  * continua insistindo na conversa". Um por volta do cron, no máximo; o banco decide qual conversa e se é hora
- * (`ia_followup_proximo`: 1º 4 h depois da última mensagem da loja, os seguintes 22 h depois, até 3, das 8h30 às 18h30).
+ * (`ia_followup_proximo`, 0181: 20 min, 2 h e 5 h depois de a loja falar, dali de 22 em 22 h, até 5, das 8h30 às 18h30).
  * O texto quem escreve é a Flávia, lendo a conversa — a mesma instrução do atendimento, com a seção da insistência.
  * Mesma ordem dos outros: os ids gravados ANTES de a mensagem entrar na conversa, senão a fila acharia que uma pessoa
  * assumiu e não responderia quando o cliente voltasse. */

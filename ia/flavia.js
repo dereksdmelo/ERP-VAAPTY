@@ -447,7 +447,8 @@ Devolva SÓ um objeto JSON, sem cercas de código:
 }
 
 /* O FOLLOW-UP DE QUEM PAROU DE RESPONDER (0180, 26/11/2026). O Derek: "quando o cliente para de responder, como a IA
- * continua insistindo na conversa". A Ana insistia (1ª umas 4-6 h depois, as seguintes de 24 em 24 h); a Flávia não.
+ * continua insistindo na conversa". A Ana insistia (1ª umas 4-6 h depois, as seguintes de 24 em 24 h); a Flávia não. Desde a 0181 começa
+ * mais cedo, a pedido do Derek: 20 min, 2 h, 5 h e dali de 22 em 22 h, até 5.
  * Quem decide QUANDO é o banco (`ia_followup_proximo`); aqui é só o que ela escreve, conforme a tentativa. */
 function secaoInsistencia(ins, agora) {
   const n = Number(ins.n) || 1, max = Number(ins.max) || 3;
@@ -460,7 +461,7 @@ Escreva UMA mensagem curta (duas só se a segunda for o horário), retomando do 
 - Se a loja tinha oferecido horários: ofereça DOIS horários da lista (os próximos, com dia da semana e data) e feche com "Em qual horário posso contar com você?".
 - Se faltava o carro: pergunte o modelo e o ano de outro jeito, junto com o convite para a avaliação.
 - Se ele disse que ia pensar, falar com alguém ou ver depois: pergunte com leveza se conseguiu ver, e lembre que a avaliação é gratuita e sem compromisso.
-${n === 1 ? "- Tom da 1ª: leve, como quem continua a conversa — sem cobrar e sem dizer que ele sumiu." : ""}${n > 1 && !ultima ? "- Tom desta: traga um motivo para vir — a avaliação é gratuita, leva uns 20 a 40 minutos e a proposta sai na hora, da rede de lojistas; ele só fecha se gostar. Não repita o texto das tentativas anteriores." : ""}${ultima ? "- Esta é a ÚLTIMA: deixe a porta aberta, sem pressão (\"quando fizer sentido pra você, é só me chamar aqui que eu reservo um horário\"). Não ofereça horário." : ""}
+${n === 1 ? "- Tom da 1ª (uns 20 minutos depois): UMA frase curtinha, como quem só puxa a conversa de volta, retomando a última pergunta com outras palavras — sem cobrar e sem dizer que ele sumiu." : ""}${n === 2 ? "- Tom da 2ª (umas 2 horas depois): leve, como quem continua a conversa, já com o próximo passo concreto (o período, ou os dois horários)." : ""}${n > 2 && !ultima ? "- Tom desta: traga um motivo para vir — a avaliação é gratuita, leva uns 20 a 40 minutos e a proposta sai na hora, da rede de lojistas; ele só fecha se gostar. Não repita o texto das tentativas anteriores." : ""}${ultima ? "- Esta é a ÚLTIMA: deixe a porta aberta, sem pressão (\"quando fizer sentido pra você, é só me chamar aqui que eu reservo um horário\"). Não ofereça horário." : ""}
 Nunca: "sumiu?", "ainda está aí?", cobrança, reclamação, ou a mesma frase de uma mensagem anterior da loja. "agendar" fica "" e "encerrar" fica false.
 
 `;
