@@ -3909,6 +3909,20 @@ Flávia responde (no da Camila a outra IA manda os dela). A conversa conta como 
 horário novo de quem faltou leva a marca "reagendado"** e "faltou em dd/mm" (`faltaAntes`); o horário perdido continua
 riscado como "remarcou".
 
+**O follow-up de quem parou de responder (0180, 26/11/2026, o Derek: *"quando o cliente para de responder, como a IA
+continua insistindo na conversa"*).** Não insistia: a Flávia só falava quando o cliente escrevia. A Ana mandava 600-650
+por semana no número dela; desde 23/11, nenhum — 255 conversas paradas com a loja por último. O ritmo medido nas
+conversas da Ana: o 1º uns 4-6 h depois, os seguintes de 24 em 24 h; o cliente voltou em ~30% das que chegaram ao 2º e
+3º. Aqui (`ia_followup_proximo`, `insistir` em `ia/atender.js`): 1º 4 h depois da última mensagem da loja, os seguintes
+22 h depois, até `config_loja.ia_followup_max` (3), segunda a sábado das 8h30 às 18h30, um a cada 1-2 min e até 80 por
+dia, o de quem sumiu há menos tempo primeiro. O texto é a própria Flávia, lendo a conversa (`secaoInsistencia` em
+`ia/flavia.js`): o 1º retoma do ponto em que parou, o do meio traz o motivo para vir, o último deixa a porta aberta. Fica
+de fora: lead agendado, confirmado, que veio, que faltou (é da retomada), perdido, excluído ou fora da região; quem
+teve atendimento em 30 dias; quem disse que já vendeu, não quer ou pediu para parar; conversa encerrada pela Flávia,
+com a IA desligada, ou em que uma pessoa da loja escreveu nas últimas 12 h; lembrete ou retomada ao mesmo telefone
+em 20 h. Os ids vão para `ia_followup.wa_ids`, reconhecidos por `ia_fila`, `ia_estado_conversa` e `wa_lead_avanca`
+(e por `ia_e_da_flavia`). Interruptor: `config_loja.ia_followup` (ligado; sem tela).
+
 ### 66. A Flávia procura quem não veio (0084)
 
 O Derek, em 28/10/2026, depois de ver 67 "não veio" e só dois

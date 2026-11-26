@@ -311,6 +311,98 @@ async function lembrar(env) {
   return { lead: lead.lead_id, tipo: lead.tipo, enviadas: enviados.length, erro: erro || undefined };
 }
 
+/* O FOLLOW-UP DE QUEM PAROU DE RESPONDER (0180, 26/11/2026). O Derek: "quando o cliente para de responder, como a IA
+ * continua insistindo na conversa". Um por volta do cron, no máximo; o banco decide qual conversa e se é hora
+ * (`ia_followup_proximo`: 1º 4 h depois da última mensagem da loja, os seguintes 22 h depois, até 3, das 8h30 às 18h30).
+ * O texto quem escreve é a Flávia, lendo a conversa — a mesma instrução do atendimento, com a seção da insistência.
+ * Mesma ordem dos outros: os ids gravados ANTES de a mensagem entrar na conversa, senão a fila acharia que uma pessoa
+ * assumiu e não responderia quando o cliente voltasse. */
+async function insistir(env) {
+  const URL_BASE = env.SUPABASE_URL, ANON = env.SUPABASE_ANON_KEY, SEG = env.IA_SEGREDO, CHAVE = env.ANTHROPIC_API_KEY;
+  if (!URL_BASE || !ANON || !SEG || !CHAVE || !env.PONTE || !env.PONTE_SEGREDO) return { pulado: "falta configuração" };
+  if (Date.now() < pausaAte) return { pulado: "pausada depois de falha" };
+  const MODELO = env.IA_MODELO_FLAVIA || env.IA_MODELO || "claude-haiku-4-5-20251001";
+  const rpc = async (nome, corpo) => {
+    const r = await fetch(`${URL_BASE}/rest/v1/rpc/${nome}`, {
+      method: "POST", signal: AbortSignal.timeout(20000),
+      headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, "Content-Type": "application/json" },
+      body: JSON.stringify(/^wa_/.test(nome) ? { ...corpo, p_segredo: SEG } : corpo),
+    });
+    const t = await r.text();
+    if (!r.ok) throw new Error(`${nome}: ${t.slice(0, 200)}`);
+    try { return t ? JSON.parse(t) : null; } catch (e) { return null; }
+  };
+  const alvo = await rpc("ia_followup_proximo", { p_segredo: SEG });
+  if (!alvo || !alvo.conversa_id) return { nada: true };
+  const canal = alvo.canal;
+  const gravar = (estado, extra) => rpc("ia_followup_gravar", { p_segredo: SEG, p_conversa: alvo.conversa_id, p_n: alvo.n, p_canal: canal,
+    p_telefone: String(alvo.telefone || ""), p_mensagens: extra.mensagens || [], p_wa_ids: extra.wa_ids || [], p_estado: estado, p_erro: extra.erro || null });
+  const est = await env.PONTE.fetch(`https://ponte/estado?canal=${encodeURIComponent(canal)}`,
+    { headers: { "x-ponte-segredo": env.PONTE_SEGREDO }, signal: AbortSignal.timeout(20000) })
+    .then((r) => r.json()).catch(() => null);
+  if (!est || est.estado !== "conectado") return { pulado: `${canal} não está conectado` };
+
+  const ctx = await rpc("ia_contexto", { p_segredo: SEG, p_conversa: alvo.conversa_id });
+  const msgs = (ctx && ctx.msgs) || [];
+  // O cliente pode ter respondido entre a escolha e agora: aí é a fila normal que responde.
+  const ult = msgs.filter((m) => m && m.tipo !== "reacao").slice(-1)[0];
+  if (!ult || !ult.eco) return { pulado: "o cliente respondeu" };
+  const agora = FLAVIA.paredeDe(new Date().toISOString());
+  const linha = (ctx && ctx.config) || {};
+  const cfg = { ...FLAVIA.CONFIG_PADRAO };
+  Object.keys(cfg).forEach((k) => { if (linha[k] !== undefined && linha[k] !== null) cfg[k] = typeof linha[k] === "string" ? linha[k].slice(0, 5) : linha[k]; });
+  if (linha.ia_nome) cfg.ia_nome = linha.ia_nome;
+  if (Array.isArray(linha.bloqueios)) cfg.bloqueios = linha.bloqueios; if (Array.isArray(linha.horarios_especiais)) cfg.horarios_especiais = linha.horarios_especiais;
+  const livres = FLAVIA.horariosLivres(cfg, agora, (ctx && ctx.ocupados) || []);
+  const sistema = FLAVIA.instrucao(cfg, agora, livres, (ctx && ctx.exemplos) || [], null, { n: alvo.n, max: alvo.max, desde: alvo.desde });
+
+  let r;
+  try {
+    r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST", signal: AbortSignal.timeout(45000),
+      headers: { "x-api-key": CHAVE, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
+      body: JSON.stringify({ model: MODELO, max_tokens: 600, system: sistema,
+        messages: [{ role: "user", content: FLAVIA.conversaEmTexto(msgs, null, (ctx && ctx.outras) || []) }] }),
+    });
+  } catch (e) { pausaAte = Date.now() + 2 * 60000; return { pulado: "IA sem resposta" }; }
+  const corpo = await r.text();
+  if (!r.ok) {
+    // IA fora do ar não gasta a tentativa: pausa e volta depois.
+    if (r.status === 401 || r.status === 403 || r.status === 429 || r.status >= 500 || /credit balance/i.test(corpo)) {
+      pausaAte = Date.now() + 2 * 60000;
+      return { pulado: `IA ${r.status}` };
+    }
+    await gravar("falhou", { erro: `IA ${r.status}: ${corpo.slice(0, 200)}` });
+    return { erro: `IA ${r.status}` };
+  }
+  let saida = "";
+  try { const d = JSON.parse(corpo); saida = ((d.content || []).find((x) => x.type === "text") || {}).text || ""; } catch (e) {}
+  const p = FLAVIA.lerSaida(saida, livres);
+  if (!p || p.formato_livre || p.encerrar) { await gravar("falhou", { erro: p && p.encerrar ? "a IA preferiu encerrar" : "resposta fora do formato" }); return { erro: "fora do formato" }; }
+
+  const para = String(alvo.telefone || "").replace(/\D/g, "");
+  const enviados = [], wa_ids = [];
+  let erro = "";
+  for (const texto of p.mensagens.slice(0, 2)) {
+    const res = await env.PONTE.fetch(`https://ponte/enviar?canal=${encodeURIComponent(canal)}`, {
+      method: "POST", signal: AbortSignal.timeout(40000), headers: { "x-ponte-segredo": env.PONTE_SEGREDO, "Content-Type": "application/json" },
+      body: JSON.stringify({ para, conteudo: { type: "text", text: { body: texto }, digitando: ESPERA_ENTRE(texto) } }),
+    });
+    const e = await res.json().catch(() => ({ ok: false, erro: `a ponte respondeu ${res.status}` }));
+    if (!e || !e.ok) { erro = (e && e.erro) || "a ponte não mandou"; break; }
+    enviados.push(texto); wa_ids.push(e.id || `fu-${alvo.conversa_id}-${alvo.n}-${enviados.length}`);
+  }
+  if (!enviados.length && /desconectado|QR|ponte/i.test(erro)) return { pulado: erro };
+  await gravar(enviados.length ? "enviada" : "falhou", { mensagens: enviados, wa_ids, erro });
+  for (let i = 0; i < enviados.length; i++) {
+    try {
+      await rpc("wa_receber", { p_canal: canal, p_telefone: para, p_nome: "", p_wa_id: wa_ids[i], p_eco: true,
+        p_tipo: "texto", p_texto: enviados[i], p_anexo: null, p_quando: new Date(Date.now() + i).toISOString(), p_anuncio: null });
+    } catch (e) {}
+  }
+  return { conversa: alvo.conversa_id, n: alvo.n, enviadas: enviados.length, erro: erro || undefined };
+}
+
 /* TODA CHAMADA DE FORA TEM PRAZO (23/10/2026). Uma pergunta pendurada —
  * um container da ponte que não responde — segurava a execução do cron
  * e o Cloudflare não começava a seguinte: das 11h19 em diante não rodou
@@ -399,4 +491,4 @@ async function lerLeads(env) {
   return { lidos: feitos };
 }
 
-module.exports = { retomar, atenderFila, lerLeads, lembrar };
+module.exports = { retomar, atenderFila, lerLeads, lembrar, insistir };
