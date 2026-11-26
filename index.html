@@ -2950,9 +2950,13 @@ function unirRegistros(local, remoto, chaveDe) {
       // dos 5 minutos) não se perde porque o outro ainda não sabia
       // (04/11/2026, o termo sem link; 09/11/2026, a rodada repetida).
       const i = vistos[k], y = out[i];
-      if (y && x && typeof y === "object" && typeof x === "object") {
-        const junto = { ...y };
-        Object.keys(x).forEach((c) => { const v = junto[c]; if (v === undefined || v === null || v === "" || v === false) junto[c] = x[c]; });
+      // O EXTRATO CORRIGIDO (26/11/2026): a rodada reimpressa guarda `refeitoEm`, e a correção mais nova manda
+      // (o outro lado só preenche o que ela tem vazio) — sem isto o outro aparelho, que ainda tem o número errado, o devolveria por cima.
+      const rx = Number((x || {}).refeitoEm) || 0, ry = Number((y || {}).refeitoEm) || 0;
+      const [nov, vel] = rx > ry ? [x, y] : [y, x];
+      if (nov && vel && typeof nov === "object" && typeof vel === "object") {
+        const junto = { ...nov };
+        Object.keys(vel).forEach((c) => { const v = junto[c]; if (v === undefined || v === null || v === "" || v === false) junto[c] = vel[c]; });
         out[i] = junto;
       }
       return;
@@ -5742,6 +5746,9 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   const [erroCliente, setErroCliente] = useState("");
   const [erroCanais, setErroCanais] = useState("");
   const [novaRodada, setNovaRodada] = useState({ impresso: "", contra: "" });
+  // O extrato impresso errado se corrige na mesma rodada (26/11/2026, o Derek: "às vezes sem querer faço o extrato
+  // errado e preciso emitir o segundo extrato pra corrigir"). Só a ÚLTIMA rodada, antes de sair a seguinte.
+  const [corrigindo, setCorrigindo] = useState(null);
   const [novaInd, setNovaInd] = useState({ nome: "", fone: "" });
   const [envioLeads, setEnvioLeads] = useState("");
   const [erroFoto, setErroFoto] = useState("");
@@ -8083,6 +8090,39 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                         <div className="mt-1 flex items-baseline justify-between">
                           <span className="text-[17px]" style={{ fontFamily: F.mono, fontWeight: 700, color: C.laranja }}>{brl(r.contra)}</span>
                           <span className="text-[11px]" style={{ color: C.mute }}>contra do cliente</span>
+                        </div>
+                      )}
+                      {i === n - 1 && (corrigindo === i ? (
+                        <div className="mt-2 rounded-md p-2" style={{ background: "#fff", border: `1px solid ${C.roxo}` }}>
+                          <div className="mb-1 flex items-center justify-between text-[11px]" style={{ color: C.roxo }}>
+                            <span className="font-semibold">Corrigir o {i + 1}º extrato</span>
+                            <button onClick={() => setCorrigindo(null)} className="underline" style={{ color: C.mute }}>cancelar</button>
+                          </div>
+                          <SimuladorPropostas
+                            alvoPadrao={f.por || f.fipe} veiculo={f.modelo} negociador={f.negociador}
+                            rotuloImprimir={`Reimprimir o ${i + 1}º extrato corrigido`}
+                            aoImprimir={(res) => {
+                              const copia = f.rodadas.slice();
+                              copia[i] = { ...r, impresso: String(res.melhor), refeitoEm: Date.now(),
+                                           corrigido: [...(r.corrigido || []), { impresso: r.impresso, em: new Date().toISOString() }] };
+                              set("rodadas", copia);
+                              gerarDocumento("extrato_ofertas", `Extrato de ofertas ${i + 1} (corrigido)`, extratoOfertas(dadosDoc, res, i + 1), i + 1);
+                              setCorrigindo(null);
+                            }} />
+                          <p className="mt-1 text-[10px]" style={{ color: C.mute }}>
+                            Continua sendo a {i + 1}ª rodada: o número novo substitui o errado, e a folha antiga fica no registro.
+                            {r.contra ? " A contraproposta registrada fica como está." : ""}
+                          </p>
+                        </div>
+                      ) : (
+                        <button onClick={() => setCorrigindo(i)}
+                          className="mt-1 text-[11px] underline" style={{ color: C.roxo }}>
+                          corrigir este extrato
+                        </button>
+                      ))}
+                      {(r.corrigido || []).length > 0 && (
+                        <div className="mt-1 text-[10px]" style={{ color: C.mute }}>
+                          corrigido · antes: {r.corrigido.map((c) => brl(c.impresso)).join(", ")}
                         </div>
                       )}
                       <button disabled={!podeImprimir}

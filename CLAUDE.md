@@ -1269,6 +1269,12 @@ Antes disso tudo aparecia junto e a ordem ficava na cabeça do
 negociador. Cada impressão cria a rodada, com a Melhor Proposta como
 valor impresso; a contraproposta do cliente responde a ela.
 
+**O extrato impresso errado se corrige na mesma rodada (26/11/2026, o Derek: *"às vezes sem querer eu faço o extrato
+errado e aí preciso emitir o segundo extrato pra corrigir"*).** Na última rodada, antes de sair a seguinte, "corrigir
+este extrato" abre o simulador de novo e reimprime no mesmo número ("Extrato de ofertas N (corrigido)"); o valor
+errado fica em `corrigido` e a folha antiga no registro, e a contraproposta fica. A rodada ganha `refeitoEm`, e
+`unirRegistros` deixa a correção mais nova mandar — sem isso o outro aparelho devolveria o número errado.
+
 **Os cinco minutos entre uma rodada e a seguinte não são enfeite**
 (`RODADA_SEG`): é o tempo em que o negociador some para consultar a
 mesa. Sem ele o próximo extrato sai na hora e o cliente entende que o
