@@ -215,7 +215,7 @@ async function esteira(req, res, tok) {
       : new Date(Date.now() - 120 * 86400000).toISOString().slice(0, 10);
     const ate = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.ate || "")) ? `&data=lte.${req.query.ate}` : "";
     const ats = await banco(`${URL_BASE}/rest/v1/atendimento?select=*,` +
-      `veiculo(id,placa,marca_modelo),checklist(revisado_em,revisado_por,pago_em,pago_por,pago_obs,arquivado_em,arquivado_por,adm_conferido_em,valor_venda,valor_cliente,` +
+      `veiculo(id,placa,marca_modelo),checklist(revisado_em,revisado_por,pago_em,pago_por,pago_obs,pagamentos,arquivado_em,arquivado_por,adm_conferido_em,valor_venda,valor_cliente,` +
       `valor_quitacao,valor_debitos,valor_cautelar,banco_favorecido,banco_documento,banco_nome,banco_agencia,banco_conta,banco_tipo,banco_pix)` +
       `&status=eq.fechado&data=gte.${de}${ate}&order=data.desc&limit=300`, { headers: cabecalhos(tok) }) || [];
     const ids = ats.map((a) => a.id);
@@ -316,6 +316,27 @@ async function esteira(req, res, tok) {
     if (etapaDe(cl, ap) !== "pagar") return res.status(409).json({ erro: `Só se paga depois da revisão do adm e de ${APROVACOES_MINIMAS} aprovações.` });
     await gravarCl({ pago_em: agora, pago_por: eu.id, pago_obs: texto(c.obs) });
     return res.status(200).json({ ok: true });
+  }
+  /* ADIANTAMENTO AO CLIENTE (0184, 27/11/2026, a Amanda pelo suporte: "ter a opção de pagar parcial para o
+   * cliente, às vezes realizamos adiantamento"). Uma lista no check list, não uma etapa: o adiantamento pode sair
+   * antes das aprovações, e o negócio continua onde está até o "Marcar como pago", que é o fim. Lança e tira só
+   * quem marca o pagamento (financeiro ou gerente), e só enquanto ele não foi marcado. */
+  if (acao === "adiantamento") {
+    if (!eu.fin) return res.status(403).json({ erro: "Só o financeiro ou o gerente lança adiantamento." });
+    const cl = umaLinha(await banco(`${REST}?select=pago_em,pagamentos&atendimento_id=eq.${aid}&limit=1`, { headers: cabecalhos(tok) }));
+    if (cl && cl.pago_em) return res.status(409).json({ erro: "Este negócio já foi marcado como pago. Desfaça o pago para mexer nos adiantamentos." });
+    const lista = Array.isArray(cl && cl.pagamentos) ? cl.pagamentos : [];
+    if (c.remover) {
+      await gravarCl({ pagamentos: lista.filter((x) => x.id !== String(c.remover)) });
+      return res.status(200).json({ ok: true });
+    }
+    const valor = Math.round((Number(c.valor) || 0) * 100) / 100;
+    if (!(valor > 0)) return res.status(400).json({ erro: "Digite o valor do adiantamento." });
+    const data = /^\d{4}-\d{2}-\d{2}$/.test(String(c.data || "")) ? c.data : new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+    const novo = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), valor, data, obs: texto(c.obs),
+      por: eu.id, por_nome: eu.nome || "", em: agora };
+    await gravarCl({ pagamentos: lista.concat([novo]) });
+    return res.status(200).json({ ok: true, adiantamento: novo });
   }
   /* ARQUIVAR (0094): o adm termina de juntar os comprovantes e fecha a
    * pasta. A trava é a do grupo Arquivamento do check list: todo item

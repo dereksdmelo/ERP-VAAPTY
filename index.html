@@ -29925,6 +29925,9 @@ const desembolsoDe = (cl, a) => {
   const cliente = numeroBR(c.valor_cliente) || 0, quitacao = numeroBR(c.valor_quitacao) || 0, debitos = numeroBR(c.valor_debitos) || 0;
   return { cliente, quitacao, debitos, total: cliente + quitacao + debitos };
 };
+// Os adiantamentos ao cliente (0184): o que já saiu antes do "Marcar como pago".
+const adiantadoDe = (cl) => ((cl && Array.isArray(cl.pagamentos)) ? cl.pagamentos : []).reduce((t, x) => t + (Number(x.valor) || 0), 0);
+const faltaPagar = (a) => Math.max(0, desembolsoDe(a.checklist, a).total - adiantadoDe(a.checklist));
 const quando = (t) => (t ? new Date(t).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "");
 
 /* AS TRANSFERÊNCIAS DOS CARROS VENDIDOS AOS LOJISTAS (0092, 28/10/2026).
@@ -30221,6 +30224,7 @@ function TelaADM({ perfil, comp, mes, modo = "revisar" }) {
   const [previsao, setPrevisao] = useState(false);
   const [motivo, setMotivo] = useState("");
   const [obsPago, setObsPago] = useState("");
+  const [adi, setAdi] = useState({ valor: "", data: "", obs: "" });
   const [faltam, setFaltam] = useState(null);
   const [erroAcao, setErroAcao] = useState("");
   const [verArquivados, setVerArquivados] = useState(false);
@@ -30256,7 +30260,7 @@ function TelaADM({ perfil, comp, mes, modo = "revisar" }) {
   };
   const agir = async (acao, corpo) => {
     setIndo(true); setErroAcao(""); setFaltam(null);
-    try { await moverEsteira(acao, { atendimento_id: foco.id, ...corpo }); setMotivo(""); setObsPago(""); await carregar(); }
+    try { await moverEsteira(acao, { atendimento_id: foco.id, ...corpo }); setMotivo(""); setObsPago(""); setAdi({ valor: "", data: "", obs: "" }); await carregar(); }
     catch (e) { setErroAcao(e.message); if (e.faltam) setFaltam(e.faltam); }
     setIndo(false);
   };
@@ -30280,7 +30284,8 @@ function TelaADM({ perfil, comp, mes, modo = "revisar" }) {
   // Revisar mostra o mês inteiro, com o que falta fazer em cima.
   const ORDEM = { revisar: 0, aprovar: 1, pagar: 2, pago: 3, arquivar: 3, arquivado: 4 };
   const lista = daFila.slice().sort((a, b) => (ORDEM[a.etapa] - ORDEM[b.etapa]) || String(b.data || "").localeCompare(String(a.data || "")));
-  const soma = (xs) => xs.reduce((t, a) => t + desembolsoDe(a.checklist, a).total, 0);
+  // O que ainda vai sair: o total menos os adiantamentos já feitos (0184).
+  const soma = (xs) => xs.reduce((t, a) => t + faltaPagar(a), 0);
 
   const TITULO = { revisar: "Negócios fechados", aprovar: "Aprovações", pagar: "Pagamentos a realizar", arquivar: "Arquivamento" };
 
@@ -30364,6 +30369,52 @@ function TelaADM({ perfil, comp, mes, modo = "revisar" }) {
                 <div><div style={{ color: C.mute }}>Débitos</div><b style={{ fontFamily: F.mono }}>{brl(dz.debitos)}</b></div>
                 <div><div style={{ color: C.mute }}>Total a sair</div><b style={{ fontFamily: F.mono, color: e.cor }}>{brl(dz.total)}</b></div>
               </div>
+              {/* ADIANTAMENTOS AO CLIENTE (0184, 27/11/2026, a Amanda pelo suporte: "ter a opção de pagar parcial
+                  para o cliente, às vezes realizamos adiantamento"). Saem antes do "Marcar como pago", em qualquer
+                  etapa; o "pago" continua sendo o fim. */}
+              {(() => {
+                const lista = (foco.checklist && Array.isArray(foco.checklist.pagamentos)) ? foco.checklist.pagamentos : [];
+                const ja = adiantadoDe(foco.checklist);
+                const pago = !!(foco.checklist && foco.checklist.pago_em);
+                const podeMexer = eu.fin && !pago;
+                if (!lista.length && !podeMexer) return null;
+                return (
+                  <div className="rounded-md px-3 py-2" style={{ background: "#FBFAFC", border: `1px solid ${C.line}` }}>
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <span className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: C.mute }}>Adiantamentos ao cliente</span>
+                      {lista.length > 0 && (
+                        <span className="text-[12.5px]" style={{ fontFamily: F.mono }}>
+                          já saiu <b>{brl(ja)}</b> · falta <b style={{ color: e.cor }}>{brl(Math.max(0, dz.total - ja))}</b>
+                        </span>
+                      )}
+                    </div>
+                    {lista.map((x) => (
+                      <div key={x.id} className="mt-1 flex flex-wrap items-baseline gap-x-3 text-[12.5px]">
+                        <b style={{ fontFamily: F.mono }}>{brl(Number(x.valor) || 0)}</b>
+                        <span style={{ color: C.mute }}>{x.data ? String(x.data).split("-").reverse().join("/") : ""}{x.por_nome ? ` · ${x.por_nome}` : ""}</span>
+                        {x.obs && <span>{x.obs}</span>}
+                        {podeMexer && <button onClick={() => { if (window.confirm(`Tirar o adiantamento de ${brl(Number(x.valor) || 0)}?`)) agir("adiantamento", { remover: x.id }); }}
+                          disabled={indo} className="underline" style={{ color: C.mute }}>tirar</button>}
+                      </div>
+                    ))}
+                    {podeMexer && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <input value={adi.valor} onChange={(ev) => setAdi({ ...adi, valor: ev.target.value })} placeholder="Valor" inputMode="decimal"
+                          className="w-28 rounded-md border px-2.5 py-1.5 text-right text-[13px]" style={{ borderColor: C.line, fontFamily: F.mono }} />
+                        <input type="date" value={adi.data} onChange={(ev) => setAdi({ ...adi, data: ev.target.value })}
+                          className="rounded-md border px-2 py-1.5 text-[13px]" style={{ borderColor: C.line }} title="Dia em que saiu (em branco: hoje)" />
+                        <input value={adi.obs} onChange={(ev) => setAdi({ ...adi, obs: ev.target.value })} placeholder="Observação: motivo, conta, comprovante…"
+                          className="min-w-0 flex-1 rounded-md border px-2.5 py-1.5 text-[13px]" style={{ borderColor: C.line }} />
+                        <button onClick={() => agir("adiantamento", { valor: numeroBR(adi.valor), data: adi.data || null, obs: adi.obs })}
+                          disabled={indo || !(numeroBR(adi.valor) > 0)}
+                          className="rounded-md px-3 py-1.5 text-[13px] font-semibold" style={{ color: C.roxo, border: `1px solid ${C.roxo}`, opacity: numeroBR(adi.valor) > 0 ? 1 : 0.5 }}>
+                          Lançar adiantamento
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               {foco.checklist && foco.checklist.banco_favorecido && (
                 <div className="rounded-md px-3 py-2 text-[12.5px]" style={{ background: "#FBFAFC", border: `1px solid ${C.line}` }}>
                   <b>{foco.checklist.banco_favorecido}</b>{foco.checklist.banco_documento ? ` · ${foco.checklist.banco_documento}` : ""}
@@ -30577,7 +30628,7 @@ function TelaADM({ perfil, comp, mes, modo = "revisar" }) {
               </div>
               <div className="text-[11px]" style={{ color: C.mute, fontFamily: F.mono }}>
                 {a.data ? String(a.data).split("-").reverse().join("/") : "sem data"}
-                {modo === "pagar" ? (dz.total ? ` · a sair ${brl(dz.total)}` : "") : a.valor_fechado ? ` · ${brl(Number(a.valor_fechado))}` : ""}
+                {modo === "pagar" ? (dz.total ? (adiantadoDe(a.checklist) > 0 ? ` · já saiu ${brl(adiantadoDe(a.checklist))} · falta ${brl(faltaPagar(a))}` : ` · a sair ${brl(dz.total)}`) : "") : a.valor_fechado ? ` · ${brl(Number(a.valor_fechado))}` : ""}
                 {/* Zero aqui seria mentira na previsão de caixa: é o
                     check list que o negociador não preencheu. */}
                 {modo === "pagar" && !dz.total && <span style={{ color: C.laranja, fontFamily: F.body }}> · check list sem valores — o total não entra na soma</span>}

@@ -5646,9 +5646,14 @@ débitos do check list). A esteira lê `valor_compra` e as linhas de custo
 (realizado, ou o previsto ainda não pago) e manda `desembolso`; sem carro no
 estoque, vale o check list.
 
-**O que ficou de fora:** pagamento parcial (o cliente hoje e a quitação
-amanhã) — a observação do "pago" é onde se anota, por enquanto; e o
-lançamento no financeiro, que continua vindo do extrato.
+**Os adiantamentos ao cliente (0184, 27/11/2026, a Amanda pelo suporte: *"ter a opção de pagar parcial para o
+cliente, às vezes realizamos adiantamento"*, aprovado pelo Derek).** `checklist.pagamentos` é uma lista
+({valor, data, obs, por_nome}), lançada em Pagamentos a realizar (`?recurso=esteira&acao=adiantamento`, só financeiro
+ou gerente, em qualquer etapa e só antes do "Marcar como pago", que continua sendo o fim). A tela mostra "já saiu ·
+falta", o cartão da fila também, e a soma do caixa (e a previsão) conta só o que falta. Não é uma etapa nova: o
+negócio continua onde estava.
+
+**O que ficou de fora:** o lançamento no financeiro, que continua vindo do extrato.
 
 ### 68. A transferência dos carros vendidos aos lojistas (0092)
 
