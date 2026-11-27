@@ -31669,7 +31669,8 @@ function AvisosDaFila({ perfil, aoAbrir, aoIrParaFila }) {
  * abertura da página — e de novo quando a aba volta a ficar à vista
  * depois de muito tempo escondida, que é a pessoa pegando o computador
  * de volta. Não é batimento: estar com a aba aberta não é estar
- * disponível; quem prova isso é a resposta ao lembrete.
+ * disponível; quem prova isso é a resposta ao lembrete — ou mexer no
+ * sistema (clique ou tecla, logo abaixo).
  */
 function SinalAbriu() {
   useEffect(() => {
@@ -31682,7 +31683,21 @@ function SinalAbriu() {
       escondidaDesde = 0;
     };
     document.addEventListener("visibilitychange", aoMudar);
-    return () => document.removeEventListener("visibilitychange", aoMudar);
+    /* MEXER NO SISTEMA TAMBÉM CONTA (27/11/2026, o Marcos perdeu a vez fazendo recuperação, com a conversa do cliente
+     * aberta: só abrir a página contava). Clique, toque ou tecla com a aba à vista manda `ativo`, no máximo de cinco
+     * em cinco minutos — a janela da fila é de trinta. Quem respondeu almoço ou pausa continua fora (o servidor vê). */
+    let ultimoAtivo = Date.now();
+    const aoUsar = () => {
+      if (document.hidden || Date.now() - ultimoAtivo < 5 * 60000) return;
+      ultimoAtivo = Date.now();
+      mexerNaVez("ativo").catch(() => {});
+    };
+    const evs = ["pointerdown", "keydown", "wheel", "touchstart"];
+    evs.forEach((e) => window.addEventListener(e, aoUsar, { capture: true, passive: true }));
+    return () => {
+      document.removeEventListener("visibilitychange", aoMudar);
+      evs.forEach((e) => window.removeEventListener(e, aoUsar, { capture: true }));
+    };
   }, []);
   return null;
 }

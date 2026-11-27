@@ -4097,6 +4097,12 @@ sistema em casa à noite não pode pôr ninguém na fila. Responder
 última resposta de cada um vem por `agenda_ultimo_sinal()`, que devolve
 a hora e o tipo — nunca o texto.
 
+**Mexer no sistema conta como presença (27/11/2026, o Marcos: *"eu tava mexendo no sistema, tinha acabado de abrir
+uma conversa com o cliente, e ele deu que eu tava inativo"* — fazendo recuperação, perdeu a vez duas vezes).** Só abrir
+a página e responder o lembrete renovavam os trinta minutos. Agora clique, toque ou tecla com a aba à vista manda
+`?acao=ativo` (`SinalAbriu`, no máximo de cinco em cinco minutos) — o mesmo "abriu", menos para quem respondeu almoço
+ou pausa: esse continua fora até dizer que voltou.
+
 **Quem foi anunciado segura a vez (0103, 03/11/2026).** O Derek: *"todos
 estavam atendendo e o Carlos seria o próximo… o Dimas terminou de
 atender, aí de repente começou a ser a vez do Dimas"*. A regra acima põe

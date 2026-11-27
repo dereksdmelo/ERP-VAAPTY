@@ -1623,7 +1623,24 @@ async function vez(req, res, tok) {
   const acao = String(req.query.acao || "");
   const hoje = hojeAqui();
 
-  if (req.method === "POST" && acao === "abriu") {
+  /* USAR O SISTEMA É ESTAR NA LOJA (27/11/2026, o Marcos: "eu tava mexendo no sistema, tinha acabado de abrir uma
+   * conversa com o cliente, e ele deu que eu tava inativo" — fazendo recuperação, perdeu a vez). Só abrir a página e
+   * responder o lembrete contavam; agora clicar ou digitar conta também (`ativo`, de cinco em cinco minutos no máximo,
+   * pela tela). É o "abriu", com uma diferença: quem respondeu almoço ou pausa continua fora — mexer no celular no
+   * almoço não é estar livre para cliente. */
+  if (req.method === "POST" && acao === "ativo") {
+    if (!eu) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
+    const sinais = await banco(`${URL_BASE}/rest/v1/rpc/agenda_ultimo_sinal`, { method: "POST", headers: json(tok), body: JSON.stringify({ p_dia: hoje }) })
+      .catch(() => []);
+    const meu = (sinais || []).find((x) => x.perfil_id === eu);
+    if (meu && TIPOS_FORA.indexOf(meu.tipo) >= 0) {
+      const pres = await banco(`${REST("presenca")}?select=abriu_em,chegou_em&perfil_id=eq.${eu}&dia=eq.${hoje}`, { headers: cabecalhos(tok) }).catch(() => []);
+      const p = (pres || [])[0] || {};
+      const antes = Math.max(Date.parse(p.abriu_em) || 0, Date.parse(p.chegou_em) || 0);
+      if (Date.parse(meu.ultimo) >= antes) return res.status(200).json({ ok: true, fila: false, pausa: true });
+    }
+  }
+  if (req.method === "POST" && (acao === "abriu" || acao === "ativo")) {
     // Só quem atende entra na fila: abrir o sistema como pré-venda ou
     // financeiro não cria presença nenhuma.
     if (!eu) return res.status(401).json({ erro: "Sessão expirada. Entre de novo." });
