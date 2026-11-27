@@ -92,9 +92,12 @@ function anos(ano) {
   let t = String(ano || "").trim();
   const d = t.replace(/\D/g, "");
   if (d.length === 8 && /^(19|20)\d{2}(19|20)\d{2}$/.test(d)) t = `${d.slice(0, 4)}/${d.slice(4)}`;
-  const p = t.split(/[\/\-\s.]+/).filter(Boolean).map((x) => inteiro(x));
+  // Ano impossível não é gravado (27/11/2026: o Grand Siena OZK2H76 entrou com o ano-modelo 22015, um dígito a
+  // mais). Vazio no banco é honesto; 22015 vai para o Shinkai e para o contrato.
+  const teto = new Date().getFullYear() + 2;
+  const p = t.split(/[\/\-\s.]+/).filter(Boolean).map((x) => inteiro(x)).map((n) => (n >= 1950 && n <= teto ? n : null));
   if (p.length < 2) return { ano_fabricacao: p[0] || null, ano_modelo: p[0] || null };
-  return { ano_fabricacao: p[0] || null, ano_modelo: p[1] || p[0] || null };
+  return { ano_fabricacao: p[0] || null, ano_modelo: p[1] || null };
 }
 
 // De qual campo da tela veio cada coluna. Serve para não apagar no

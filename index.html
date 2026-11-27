@@ -511,6 +511,10 @@ async function consultarPlaca(placa, nova) {
     // ao lado do campo.
     e.assinatura = !!d.assinatura;
     e.limite = !!d.limite;
+    // A BASE NÃO TEM O CARRO (27/11/2026, o Grand Siena OZK2H76 do André Bruno: "Dados do veículo não foram
+    // encontrados", código 763, numa frase pequena e laranja que não dizia o que fazer). É a resposta deles com
+    // a conta em dia e cota sobrando — 422 sem assinatura nem limite.
+    e.naoAchou = r.status === 422 && !e.assinatura && !e.limite;
     throw e;
   }
   return d;
@@ -5937,7 +5941,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
     const minha = ++buscaVez.current;
     setErroBusca(""); setAchado(null); setBuscando(true); setCambioBusca(f.cambio || ""); setNaoEraNenhum(false);
     try { const d = await consultarPlaca(placaBusca, nova === true); if (minha !== buscaVez.current) return; setAchado(d); setCota(await consultarCota()); }
-    catch (e) { if (minha !== buscaVez.current) return; setErroBusca(e.message); setPlacaSemAssinatura(e.assinatura ? "assinatura" : e.limite ? "limite" : false); }
+    catch (e) { if (minha !== buscaVez.current) return; setErroBusca(e.message); setPlacaSemAssinatura(e.assinatura ? "assinatura" : e.limite ? "limite" : e.naoAchou ? "naoachou" : false); }
     if (minha === buscaVez.current) setBuscando(false);
   };
   const escolherVersao = (v) => {
@@ -7192,12 +7196,18 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                   style={{ background: C.roxoFraco, border: `1px solid ${C.line}`, color: C.ink }}>
                   <strong>{placaSemAssinatura === "limite"
                     ? "Acabaram as consultas de placa de hoje, não é o carro."
+                    : placaSemAssinatura === "naoachou"
+                    ? "A consulta por placa não tem este carro na base dela — não é erro de digitação nem do carro."
                     : "Isso é a assinatura da consulta por placa, não o carro."}</strong>{" "}
                   O atendimento segue: preencha marca, modelo, ano e chassi pelo documento
                   do cliente e pegue o valor em <strong>Conferir na tabela FIPE</strong>,
                   logo abaixo — ela não tem limite e é a fonte melhor, porque devolve o
                   código de autenticação da FIPE em vez de adivinhar a versão.
-                  {placaSemAssinatura === "limite" ? (
+                  {placaSemAssinatura === "naoachou" ? (
+                    <div className="mt-1" style={{ color: C.mute }}>
+                      Confira se a placa está certa ({placaBusca}). Estando, siga pelo documento — tentar de novo não muda a resposta.
+                    </div>
+                  ) : placaSemAssinatura === "limite" ? (
                     <div className="mt-1" style={{ color: C.mute }}>
                       Placa que já foi consultada este mês não gasta consulta de novo. Para aumentar o limite, o Derek muda o plano em placafipe.com.br.
                     </div>

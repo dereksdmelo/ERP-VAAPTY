@@ -250,6 +250,12 @@ ficha e manda escolher o carro na tabela FIPE oficial ou digitar em "Completar
 a ficha" — o atendimento não trava. Só a última consulta vale (`buscaVez`): a
 resposta atrasada de uma busca anterior não cai por cima.
 
+**Quando a Placa Fipe não tem o carro (27/11/2026, o André Bruno com o Grand Siena OZK2H76).** Ela responde
+"Dados do veículo não foram encontrados" (código 763) com a conta em dia, e a tela mostrava só essa frase, pequena.
+Agora esse caso (`naoAchou`: 422 sem assinatura nem limite) abre o mesmo aviso do limite: conferir a placa, preencher
+pelo documento e pegar o valor em "Conferir na tabela FIPE". E ano fora de 1950 até o ano que vem + 1 não é gravado
+(`anos()` no `api/veiculo.js`): a ficha dele tinha o ano-modelo 22015.
+
 ### 4. Cache mensal da consulta de placa
 
 O plano atual da Placa Fipe dá **20 consultas por dia**. O valor FIPE
