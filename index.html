@@ -2494,7 +2494,7 @@ const VAZIO = {
   // escuta: só liga depois do consentimento, e guarda quando ele foi dado
   escutaOk: false, escutaEm: null, escutaVersao: "", transcricao: "",
   // N
-  rodadas: [], objecao: "",
+  rodadas: [], rodadasExtra: 0, objecao: "",
   // T
   aceiteFinal: false, valorFechado: "", formaFechamento: "",
   cautelarEnviado: false, contratoAssinado: false,
@@ -6944,7 +6944,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
   const irParaCampo = (rotulo, etapaId) => {
     const alvo = semAcento(rotulo).toLowerCase();
     const raiz = document.getElementById("vp-atendimento-corpo") || document;
-    const casa = [...raiz.querySelectorAll("label > span, button span, section > h3")]
+    const casa = [...raiz.querySelectorAll("label > span, button span, section h3")]
       .filter((x) => !x.closest("aside") && semAcento(x.textContent || "").toLowerCase().trim().startsWith(alvo));
     // Primeiro dentro da etapa (entre o cabeçalho dela e o da seguinte):
     // "Placa" e "FIPE" também existem na consulta da Pesquisa.
@@ -7946,15 +7946,19 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
              aparecia junto e o negociador tinha que lembrar da ordem. */
           const R = f.rodadas;
           const n = R.length;
+          /* MAIS UMA RODADA (27/11/2026, o André Bruno pelo suporte: "o cliente é recuperação e quero fazer uma nova
+             contraproposta com termo"). As três continuam sendo o caminho; quem volta depois delas ganha mais uma
+             rodada pelo botão do fim — extrato, contraproposta e termo de aceite, como as outras. */
+          const limite = 3 + Math.max(0, Number(f.rodadasExtra) || 0);
           const atual = n ? R[n - 1] : null;
           const faltaContra = !!atual && !atual.contra;
-          const podeContar = !!atual && !!atual.contra && !atual.esperaEm && n < 3;
+          const podeContar = !!atual && !!atual.contra && !atual.esperaEm && n < limite;
           const sobra = atual && atual.esperaEm
             ? Math.max(0, RODADA_SEG - Math.floor((agora - atual.esperaEm) / 1000))
             : null;
           const noRelogio = sobra != null && sobra > 0;
-          const liberado = n === 0 || (n < 3 && !!atual.contra && sobra === 0);
-          const fim = n === 3;
+          const liberado = n === 0 || (n < limite && !!atual.contra && sobra === 0);
+          const fim = n >= limite;
 
           const passo = (num, rot, estado) => (
             <div className="flex items-center gap-2">
@@ -7987,11 +7991,11 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
             {/* o caminho, sempre à vista */}
             <div className="rounded-lg p-3" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
               <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-                {[1, 2, 3].map((k) => (
+                {Array.from({ length: limite }, (_, i) => i + 1).map((k) => (
                   <React.Fragment key={k}>
                     {passo(k, `Extrato ${k}`, n >= k ? "feito" : (liberado && n === k - 1 ? "agora" : "espera"))}
-                    {k < 3 && passo("↓", `Contra ${k}`, (R[k - 1] && R[k - 1].contra) ? "feito" : (faltaContra && n === k ? "agora" : "espera"))}
-                    {k < 3 && passo("⏱", "5 min", (R[k - 1] && R[k - 1].esperaEm && (n > k || sobra === 0)) ? "feito" : ((podeContar || noRelogio) && n === k ? "agora" : "espera"))}
+                    {k < limite && passo("↓", `Contra ${k}`, (R[k - 1] && R[k - 1].contra) ? "feito" : (faltaContra && n === k ? "agora" : "espera"))}
+                    {k < limite && passo("⏱", "5 min", (R[k - 1] && R[k - 1].esperaEm && (n > k || sobra === 0)) ? "feito" : ((podeContar || noRelogio) && n === k ? "agora" : "espera"))}
                   </React.Fragment>
                 ))}
                 {passo("✎", "Pré-contrato", fim ? "agora" : "espera")}
@@ -8000,7 +8004,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
 
             {/* 1. o extrato da vez */}
             {liberado && (
-              <Bloco titulo={`Extrato de ofertas — ${n + 1}º de três`}
+              <Bloco titulo={`Extrato de ofertas — ${n + 1}º de ${limite === 3 ? "três" : limite}`}
                 sub="Sorteie a rodada e imprima. A folha sai igual ao que está aqui.">
                 <SimuladorPropostas
                   alvoPadrao={f.por || f.fipe} veiculo={f.modelo} negociador={f.negociador}
@@ -8070,7 +8074,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
 
             {/* 4. acabaram as três: vai para o fechamento */}
             {fim && (
-              <Bloco titulo="Três rodadas feitas" sub="Daqui o caminho é o pré-contrato, no Tome a iniciativa.">
+              <Bloco titulo={limite === 3 ? "Três rodadas feitas" : `${n} rodadas feitas`} sub="Daqui o caminho é o pré-contrato, no Tome a iniciativa.">
                 <button disabled={!podeImprimir}
                   onClick={() => gerarDocumento("pre_contrato", "Pré-contrato", preContrato(dadosDoc))}
                   className="w-full rounded-md py-3 text-[14px] font-semibold"
@@ -8082,6 +8086,11 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                   style={{ borderColor: C.roxo, color: C.roxo }}>
                   Ir para o Tome a iniciativa
                 </button>
+                <button onClick={() => set("rodadasExtra", (Number(f.rodadasExtra) || 0) + 1)}
+                  className="mt-2 w-full text-[12px] underline" style={{ color: C.mute }}>
+                  O cliente voltou (recuperação)? Fazer mais uma rodada
+                </button>
+                {faltaContra && <p className="mt-1 text-center text-[11px]" style={{ color: C.mute }}>A contraproposta desta rodada fica registrada acima, antes do próximo extrato.</p>}
               </Bloco>
             )}
 
@@ -8247,6 +8256,13 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                   </select>
                 </Campo>
               </div>
+              {/* ONDE SE DESCONTA (27/11/2026, o André Bruno pelo suporte: "sem a opção para deduzir comissão e
+                  cautelar"). A conta — com comissão ou limpo, cautelar, débitos — mora no Check list do negócio, mais
+                  abaixo; a "Forma" daqui é só o tipo de fechamento. */}
+              <button type="button" onClick={() => irParaCampo("Check list do negócio", "T")}
+                className="mt-2 text-left text-[11.5px] underline decoration-dotted underline-offset-2" style={{ color: C.roxo }}>
+                Descontar comissão, cautelar e débitos: na conta do Check list do negócio →
+              </button>
             </Bloco>
 
             <Bloco titulo="Pré-contrato e cautelar"
@@ -8549,31 +8565,33 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                 aprovar, e a pergunta "onde está o contrato?" não tinha
                 resposta na tela. Agora o bloco está sempre lá e diz o
                 que falta para abrir. */}
-            {!contratoLiberado && (
+            {/* OS DADOS ANTES DO LAUDO (27/11/2026, o André Bruno pelo suporte: "poderia liberar para cadastrar o restante
+                dos dados do cliente antes de chegar a cautelar?"). Renavam, chassi e o cliente se preenchem a qualquer hora;
+                o que espera o laudo é só imprimir e mandar assinar. */}
+            {(
               <Bloco titulo="Contrato de aceite de proposta"
-                sub="O último papel — e só depois do laudo.">
+                sub={contratoLiberado ? "É o cliente que assina — ele vende o carro. Sai com a conta do negócio e os dados bancários que estão acima."
+                  : "O último papel — sai depois do laudo. Os dados abaixo já podem ser preenchidos."}>
+                {!contratoLiberado && (
+                  <div className="mb-3">
                 <div className="rounded-md px-3 py-3" style={{ background: AMARELO.fundo, border: `1px solid ${AMARELO.borda}` }}>
-                  {/* O AVISO LEVA AONDE SE CORRIGE (09/11/2026, o Derek: "se o cara só esqueceu de ticar que o
-                      carro foi pra cautelar, ele clica aí e já leva direto onde deveria ter ticado"). */}
-                  <button type="button" className="text-left text-[13px] font-semibold underline decoration-dotted underline-offset-2" style={{ color: AMARELO.texto }}
-                    title="Ir para onde se marca isso"
-                    onClick={() => irParaCampo(!f.cautelarResultado ? (f.cautelarEnviado ? "Resultado da cautelar" : "Carro enviado para a cautelar") : "Pré-contrato e cautelar", "T")}>
-                    {!f.cautelarResultado
-                      ? (f.cautelarEnviado ? "Aguardando o resultado da cautelar." : "O carro ainda não foi para a cautelar.")
-                      : "Cautelar reprovada: falta imprimir o novo pré-contrato."} →
-                  </button>
-                  <p className="mt-1 text-[11px] leading-snug" style={{ color: C.mute }}>
-                    {!f.cautelarResultado
-                      ? "O contrato sai depois do laudo, aprovado ou reprovado — antes disso o negócio ainda pode voltar à mesa, e contrato refeito é contrato que confunde o cliente."
-                      : "O pré-contrato anterior morreu com o laudo. Refaça o valor no bloco acima e imprima o novo pré-contrato; o contrato abre em seguida."}
-                  </p>
-                </div>
-              </Bloco>
-            )}
-
-            {contratoLiberado && (
-              <Bloco titulo="Contrato de aceite de proposta"
-                sub="É o cliente que assina — ele vende o carro. Sai com a conta do negócio e os dados bancários que estão acima.">
+                    {/* O AVISO LEVA AONDE SE CORRIGE (09/11/2026, o Derek: "se o cara só esqueceu de ticar que o
+                        carro foi pra cautelar, ele clica aí e já leva direto onde deveria ter ticado"). */}
+                    <button type="button" className="text-left text-[13px] font-semibold underline decoration-dotted underline-offset-2" style={{ color: AMARELO.texto }}
+                      title="Ir para onde se marca isso"
+                      onClick={() => irParaCampo(!f.cautelarResultado ? (f.cautelarEnviado ? "Resultado da cautelar" : "Carro enviado para a cautelar") : "Pré-contrato e cautelar", "T")}>
+                      {!f.cautelarResultado
+                        ? (f.cautelarEnviado ? "Aguardando o resultado da cautelar." : "O carro ainda não foi para a cautelar.")
+                        : "Cautelar reprovada: falta imprimir o novo pré-contrato."} →
+                    </button>
+                    <p className="mt-1 text-[11px] leading-snug" style={{ color: C.mute }}>
+                      {!f.cautelarResultado
+                        ? "O contrato sai depois do laudo, aprovado ou reprovado — antes disso o negócio ainda pode voltar à mesa, e contrato refeito é contrato que confunde o cliente."
+                        : "O pré-contrato anterior morreu com o laudo. Refaça o valor no bloco acima e imprima o novo pré-contrato; o contrato abre em seguida."}
+                    </p>
+                  </div>
+                  </div>
+                )}
                 <div className="space-y-2.5">
                   {/* O renavam também aqui: ele não vem da consulta de
                       placa, e é no contrato que a falta aparece. Quem
@@ -8643,7 +8661,7 @@ function VaaptyAponte({ perfil, atendimento, aoVoltar }) {
                   </p>
                   {erroCliente && <p className="text-[11.5px]" style={{ color: C.laranja }}>{erroCliente}</p>}
 
-                  {(() => {
+                  {contratoLiberado && (() => {
                     const faltaCarro = [["renavam", "renavam"], ["placa", "placa"], ["chassi", "chassi"],
                                         ["marca", "marca"], ["modelo", "modelo"], ["cor", "cor"], ["km", "KM"]]
                       .filter(([k]) => !String(f[k] || "").trim()).map((x) => x[1]);
@@ -20428,6 +20446,9 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento, aoVerConversa }) {
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState("");
   const [ligando, setLigando] = useState(null);
+  // A conversa lida AQUI, por cima da agenda (27/11/2026, a Amanda pelo suporte: "opção de abrir a conversa do
+  // cliente"). O "conversa" levava para a tela de Conversas e a pessoa perdia o lugar na agenda.
+  const [lendo, setLendo] = useState(null);
   // Os dias bloqueados (0155) aparecem na grade; o gerente bloqueia daqui mesmo.
   const cfgAg = useConfigLoja();
   const [cfgVivo, setCfgVivo] = useState(null);
@@ -20771,8 +20792,8 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento, aoVerConversa }) {
                                     style={{ borderColor: C.laranja, color: C.laranja }}>não veio</button>
                                 </div>
                                 <div className="grid grid-cols-2 gap-1">
-                                  {l.telefone && aoVerConversa && (
-                                    <button onClick={() => aoVerConversa(l.telefone)} className="rounded border px-1 py-1 text-[11px] font-semibold"
+                                  {l.telefone && (
+                                    <button onClick={() => setLendo(l)} className="rounded border px-1 py-1 text-[11px] font-semibold"
                                       style={{ borderColor: C.verde, color: C.verde }}>conversa</button>
                                   )}
                                   {l.telefone && (
@@ -20900,6 +20921,16 @@ function Agendamentos({ perfil, equipe, aoAbrirAtendimento, aoVerConversa }) {
         <Ligar para={ligando.telefone} nome={ligando.nome} chamadas={ligando.ligacoes}
           aoLigar={async () => { try { await registrarLigacao(ligando.id); carregar(); } catch (e) {} }}
           aoFechar={() => setLigando(null)} />
+      )}
+      {lendo && (
+        <ConversaPopup telefone={lendo.telefone} nome={lendo.nome} rotuloFechar="voltar à agenda"
+          aoLigar={() => setLigando(lendo)}
+          aoFechar={() => setLendo(null)} />
+      )}
+      {lendo && aoVerConversa && (
+        <button onClick={() => { const t = lendo.telefone; setLendo(null); aoVerConversa(t); }}
+          className="fixed bottom-4 left-1/2 z-[60] -translate-x-1/2 rounded-full px-4 py-2 text-[12.5px] font-semibold text-white shadow-lg"
+          style={{ background: C.verde }}>Responder: abrir em Conversas</button>
       )}
       {fluxoMenu && (
         <div className="fixed inset-0 z-50 flex items-end justify-center lg:items-center" style={{ background: "rgba(24,18,33,0.45)" }} onClick={() => setFluxoMenu(null)}>
@@ -22660,7 +22691,8 @@ function FinLancamentos({ comp, aoIrTitulos }) {
     try {
       const r = await fin("lancamento", { id: l.id }, finJson("PATCH", mud)); carregar(true);
       // A despesa do carro vira custo dele no servidor (27/11/2026); se não virou, diz por quê.
-      if (r && r.aviso) setErro(`Gravado, mas não virou custo do carro: ${r.aviso}`);
+      // E a linha com carro e parte acha sozinha o título do contrato (27/11/2026).
+      if (r && r.aviso) setErro(`Gravado, mas não ligou ao carro: ${r.aviso}`);
     }
     catch (e) { setErro(e.message); }
   };
@@ -26664,7 +26696,8 @@ function FinCarros({ comp }) {
   if (erro) return <p className="text-[13px]" style={{ color: C.laranja }}>{erro}</p>;
   if (!d) return <p className="text-[13px]" style={{ color: C.mute }}>Cruzando estoque e lançamentos…</p>;
   const par = (p, pago) => {
-    const ok = p > 0 && Math.abs(pago - p) < 1;
+    // O combinado pode ser negativo (o cliente devolve: quitação maior que o negócio).
+    const ok = Math.abs(p) >= 0.005 && Math.abs(pago - p) < 1;
     // Nada combinado e nada pago: um traço, para o zero não poluir nem parecer conta a fazer.
     if (!(Math.abs(p) >= 0.005) && !(Math.abs(pago) >= 0.005)) return <span style={{ color: C.line }}>—</span>;
     const cor = ok ? C.verde : pago === 0 ? C.laranja : AMARELO.texto;
@@ -26718,7 +26751,7 @@ function FinCarros({ comp }) {
         </tbody>
       </table>
       {!d.carros.length && <p className="px-3 py-6 text-center text-[13px]" style={{ color: C.mute }}>Nenhum carro entrou ou foi vendido em {rotuloMes(comp)}.</p>}
-      <p className="px-3 py-2 text-[11px]" style={{ color: C.mute }}>pago / combinado. Verde bate; laranja nada pago; amarelo parcial. Só conta o que passou no banco. Clique na linha para ver os lançamentos.</p>
+      <p className="px-3 py-2 text-[11px]" style={{ color: C.mute }}>pago / combinado. Verde bate; laranja nada pago; amarelo parcial. Só conta o que passou no banco, e o dinheiro que voltou (devolução) abate. Clique na linha para ver os lançamentos.</p>
     </div>
   );
 }

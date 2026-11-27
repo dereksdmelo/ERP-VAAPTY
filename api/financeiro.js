@@ -513,7 +513,7 @@ async function lancamento(req, res, tok) {
     // carro" (`outro`), sem item do contrato: vira uma linha de estoque_custo já paga — o mesmo "Atribuir ao carro"
     // dos títulos (0134). Quitação, débitos e cliente NÃO: esses já estão no contrato do carro e casariam duas vezes.
     // Trocar o carro de uma linha já atribuída leva o custo junto. Falha não desfaz o que foi gravado.
-    let custo = null, aviso = null;
+    let custo = null, aviso = null, ligado = null;
     if (l.estoque_id !== undefined || l.tipo_negociacao !== undefined || l.categoria_id !== undefined) {
       try {
         const t = um(await supa(`${base("fin_lancamento")}?select=*,fin_rateio(id),fin_categoria(grupo)&id=eq.${id}`, { headers: cab(tok) }));
@@ -525,11 +525,29 @@ async function lancamento(req, res, tok) {
         } else if (t && !k && t.estoque_id && t.situacao === "efetivado" && Number(t.debito) > 0 && t.tipo_negociacao === "outro" &&
             !(t.fin_rateio || []).length && t.fin_categoria && t.fin_categoria.grupo === "negociacao") {
           custo = await atribuirAoCarro(tok, t, t.estoque_id, t.categoria_id);
+        } else if (t && !k && t.estoque_id && t.situacao === "efetivado" && !t.dividido_em && !(t.fin_rateio || []).length &&
+            ["pagto_cliente", "pagto_lojista", "quitacao", "debitos"].indexOf(t.tipo_negociacao) >= 0) {
+          /* A LINHA DO BANCO ACHA O TÍTULO DO CONTRATO (27/11/2026, a Amanda pelo suporte: "já foi conciliado no
+           * extrato mas ainda consta pendente" — o Siena MGX1133 com o "Pagar ao cliente" aberto ao lado do PIX).
+           * Escolhido o carro e a parte, um título do contrato em aberto, do mesmo carro, parte e lado, vira esta
+           * linha; se ela for menor, é a baixa parcial e o título fica com o resto. Mais de um título, ou linha
+           * maior que o título: não liga, fica para o "título" da linha. */
+          const saida = Number(t.debito) > 0;
+          const ts = await supa(`${base("fin_lancamento")}?select=*&estoque_id=eq.${t.estoque_id}&situacao=eq.aberto` +
+            `&tipo_negociacao=eq.${t.tipo_negociacao}&item_contrato=not.is.null&${saida ? "debito" : "credito"}=gt.0&limit=3`, { headers: cab(tok) }) || [];
+          const valL = (Number(t.debito) || 0) + (Number(t.credito) || 0);
+          const tt = ts.length === 1 ? ts[0] : null;
+          const valT = tt ? (Number(tt.debito) || 0) + (Number(tt.credito) || 0) : 0;
+          if (tt && Math.abs(valT - valL) < 0.01) { await ligarLinhaAoTitulo(tok, t, tt); ligado = { titulo: tt.descricao, parcial: false }; }
+          else if (tt && valL < valT) {
+            await parteDoTitulo(tok, tt, valL, null, t.id);
+            ligado = { titulo: tt.descricao, parcial: true, falta: Math.round((valT - valL) * 100) / 100 };
+          }
         }
       } catch (x) { aviso = x.message; }
     }
-    const fim = custo ? um(await supa(`${base("fin_lancamento")}?select=*&id=eq.${id}`, { headers: cab(tok) })) || um(r) : um(r);
-    return res.status(200).json({ ok: true, lancamento: fim, custo: custo || undefined, aviso: aviso || undefined });
+    const fim = custo || ligado ? um(await supa(`${base("fin_lancamento")}?select=*&id=eq.${id}`, { headers: cab(tok) })) || um(r) : um(r);
+    return res.status(200).json({ ok: true, lancamento: fim, custo: custo || undefined, ligado: ligado || undefined, aviso: aviso || undefined });
   }
   if (req.method === "DELETE") {
     const id = String(req.query.id || "");
@@ -1622,7 +1640,8 @@ async function carros(req, res, tok) {
   const fim = fimDoMes(comp);
   const est = await supa(
     `${base("estoque")}?select=id,situacao,entrou_em,vendido_em,valor_compra,valor_venda,veiculo(placa,marca_modelo),comprador(nome),estoque_custo(tipo,previsto,realizado)` +
-    `&or=(and(entrou_em.gte.${comp},entrou_em.lte.${fim}),and(vendido_em.gte.${comp},vendido_em.lte.${fim}))&order=entrou_em.desc&limit=500`,
+    // Baixado não é carro do mês (saiu sem venda, decisão 23): a Amanda via o Polo QJP1C41 "no pátio" aqui.
+    `&or=(and(entrou_em.gte.${comp},entrou_em.lte.${fim}),and(vendido_em.gte.${comp},vendido_em.lte.${fim}))&situacao=neq.baixado&order=entrou_em.desc&limit=500`,
     { headers: cab(tok) });
   const ids = (est || []).map((e) => e.id);
   // Pega tudo que aponta para estes carros — pelo cabeçalho OU por uma
@@ -1664,7 +1683,14 @@ async function carros(req, res, tok) {
     const ls = porEstoque[e.id] || [];
     // Só o que passou no banco é pago: o título em aberto do contrato (0119) dobrava o número
     // (o Siena MDX9I27, 08/11/2026: 26.500 "recebidos" de 13.250).
-    const pago = (tipo, lado) => ls.filter((l) => l.tipo_negociacao === tipo && l.situacao === "efetivado").reduce((t, l) => t + (Number(l[lado]) || 0), 0);
+    // E é o SALDO da parte, não um lado só (27/11/2026, a Amanda pelo suporte): o cliente que devolve (a quitação
+    // maior que o negócio, o Sandero PGO4E75 com a compra em −130,16) e o lojista que recebe o dinheiro de volta (a
+    // venda desfeita) abatem do mesmo número. `lado` é o sentido da parte; o outro sentido desconta.
+    const pago = (tipo, lado) => {
+      const outro = lado === "debito" ? "credito" : "debito";
+      return Math.round(ls.filter((l) => l.tipo_negociacao === tipo && l.situacao === "efetivado")
+        .reduce((t, l) => t + (Number(l[lado]) || 0) - (Number(l[outro]) || 0), 0) * 100) / 100;
+    };
     const quitPrev = (e.estoque_custo || []).filter((x) => x.tipo === "quitacao").reduce((t, x) => t + val(x), 0);
     const debPrev = (e.estoque_custo || []).filter((x) => x.tipo === "debitos").reduce((t, x) => t + val(x), 0);
     return {
@@ -1701,6 +1727,27 @@ async function anexarTitulos(tok, lista) {
       valor: (Number(t.debito) || 0) + (Number(t.credito) || 0) }); });
   }
   lista.forEach((l) => { l.titulos_ligados = por[l.id] || []; });
+}
+
+/* A linha do banco vira o título (decisão 26): herda o que o título sabia, e o título sai de cena como
+ * `cancelado` com `extrato_id` apontando a linha. Usado pelo "vincular" à mão e pela Conciliação, quando a
+ * linha ganha o carro e a parte de um título do contrato em aberto. */
+async function ligarLinhaAoTitulo(tok, l, t) {
+  const mud = { conciliado: true, revisar: false };
+  if (t.competencia) mud.competencia = t.competencia;
+  if (t.conta_fixa_id) mud.conta_fixa_id = t.conta_fixa_id;
+  if (!(l.fin_rateio || []).length) {
+    ["categoria_id", "estoque_id", "tipo_negociacao", "funcionario_id", "investidor_id"].forEach((k) => { if (t[k]) mud[k] = t[k]; });
+  }
+  if (t.centro_custo_id && !l.centro_custo_id) mud.centro_custo_id = t.centro_custo_id;
+  ["favorecido_id", "favorecido"].forEach((k) => { if (t[k] && !l[k]) mud[k] = t[k]; });
+  if (t.observacao && !l.observacao) mud.observacao = t.observacao;
+  // O item do contrato (0119) passa para a linha: o título da compra ou
+  // da venda fica "identificado no extrato".
+  if (t.item_contrato) { mud.item_contrato = t.item_contrato; if (t.estoque_id) mud.estoque_id = t.estoque_id; if (t.tipo_negociacao) mud.tipo_negociacao = t.tipo_negociacao; }
+  await supa(`${base("fin_lancamento")}?id=eq.${t.id}&situacao=eq.aberto`, { method: "PATCH", headers: cab(tok),
+    body: JSON.stringify({ situacao: "cancelado", extrato_id: l.id, conta_fixa_id: null }) });
+  return supa(`${base("fin_lancamento")}?id=eq.${l.id}`, { method: "PATCH", headers: cab(tok, REP), body: JSON.stringify(mud) });
 }
 
 /* A parte paga de um título: um lançamento novo efetivado com `valor`, e
@@ -2094,21 +2141,7 @@ async function titulo(req, res, tok) {
       await parteDoTitulo(tok, t, valLinha, null, l.id);
       return res.status(200).json({ ok: true, parcial: true, falta: Math.round((valTit - valLinha) * 100) / 100 });
     }
-    const mud = { conciliado: true, revisar: false };
-    if (t.competencia) mud.competencia = t.competencia;
-    if (t.conta_fixa_id) mud.conta_fixa_id = t.conta_fixa_id;
-    if (!(l.fin_rateio || []).length) {
-      ["categoria_id", "estoque_id", "tipo_negociacao", "funcionario_id", "investidor_id"].forEach((k) => { if (t[k]) mud[k] = t[k]; });
-    }
-    if (t.centro_custo_id && !l.centro_custo_id) mud.centro_custo_id = t.centro_custo_id;
-    ["favorecido_id", "favorecido"].forEach((k) => { if (t[k] && !l[k]) mud[k] = t[k]; });
-    if (t.observacao && !l.observacao) mud.observacao = t.observacao;
-    // O item do contrato (0119) passa para a linha: o título da compra ou
-    // da venda fica "identificado no extrato".
-    if (t.item_contrato) { mud.item_contrato = t.item_contrato; if (t.estoque_id) mud.estoque_id = t.estoque_id; if (t.tipo_negociacao) mud.tipo_negociacao = t.tipo_negociacao; }
-    await supa(`${base("fin_lancamento")}?id=eq.${tid}&situacao=eq.aberto`, { method: "PATCH", headers: cab(tok),
-      body: JSON.stringify({ situacao: "cancelado", extrato_id: l.id, conta_fixa_id: null }) });
-    const r = await supa(`${base("fin_lancamento")}?id=eq.${id}`, { method: "PATCH", headers: cab(tok, REP), body: JSON.stringify(mud) });
+    const r = await ligarLinhaAoTitulo(tok, l, t);
     if (!um(r)) return recusado(res);
     const diferenca = Math.round(((Number(l.debito) || Number(l.credito) || 0) - (Number(t.debito) || Number(t.credito) || 0)) * 100) / 100;
     return res.status(200).json({ ok: true, diferenca });

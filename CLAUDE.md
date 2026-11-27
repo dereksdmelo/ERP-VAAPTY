@@ -1281,6 +1281,8 @@ este extrato" abre o simulador de novo e reimprime no mesmo número ("Extrato de
 errado fica em `corrigido` e a folha antiga no registro, e a contraproposta fica. A rodada ganha `refeitoEm`, e
 `unirRegistros` deixa a correção mais nova mandar — sem isso o outro aparelho devolveria o número errado.
 
+**Mais uma rodada depois das três (27/11/2026, o André Bruno pelo suporte: *"o cliente é recuperação e quero fazer uma nova contraproposta com termo"*).** No fim das três, "O cliente voltou (recuperação)? Fazer mais uma rodada" soma uma ao limite (`f.rodadasExtra`): extrato, contraproposta, 5 minutos e termo de aceite, como as outras. As três continuam sendo o caminho.
+
 **Os cinco minutos entre uma rodada e a seguinte não são enfeite**
 (`RODADA_SEG`): é o tempo em que o negociador some para consultar a
 mesa. Sem ele o próximo extrato sai na hora e o cliente entende que o
@@ -2780,6 +2782,8 @@ recusa quem não é gerente — quem desmarcou é "não veio" ou remarcar.
 equipe e as IAs (`IAS_AGENDAM`). Vai para `prospector_nome` e, depois de marcar o
 horário, para `agendado_por_nome` — o carimbo do banco põe quem digitou, e a
 escolha vale por cima (o PATCH aceita `agendado_por_nome`).
+
+**A conversa abre por cima da agenda (27/11/2026, a Amanda pelo suporte).** O "conversa" do cartão abre a `ConversaPopup` (ler, ligar) sem sair da Agenda; "Responder: abrir em Conversas" leva à caixa.
 
 **"Recuperação" muda a origem** (a Schell, 03/11/2026): é o cliente que a
 equipe foi buscar de volta, então o atendimento nasce `recuperacao`, com
@@ -5050,6 +5054,8 @@ da Conciliação a mandava para baixo de outra, e o próximo clique caía na lin
 nascem com o mesmo `criado_em`, e no empate de `data, criado_em` o Postgres devolve na ordem física — a linha
 atualizada vai para o fim do grupo. A ordem agora desempata por `id` (na lista da Conciliação e no fechamento).
 
+**A aba Carros é o saldo de cada parte, e a linha acha o título (27/11/2026, a Amanda pelo suporte).** Cada coluna soma o que foi no sentido da parte menos o que voltou: o cliente que devolve (a quitação maior que o negócio, compra negativa — o Sandero PGO4E75 em −130,16) e a venda desfeita com o dinheiro devolvido ao lojista (lance a devolução como "Pagto lojista") fecham. Carro baixado sai da aba. E na Conciliação, a linha do banco que ganha carro e parte (cliente, lojista, quitação, débitos) liga sozinha ao título do contrato em aberto do mesmo carro, parte e lado — se houver um só; menor que o título, é a baixa parcial (`ligarLinhaAoTitulo`, `parteDoTitulo`).
+
 **`revisar` é o que o acerto automático deixa aceso.** Casei este
 movimento com aquele título; confira. Sem esse sinalizador, conciliação
 automática vira conciliação invisível — e é o tipo de coisa que só se
@@ -5814,6 +5820,8 @@ resposta na tela. Agora o bloco está lá dizendo o que falta para
 abrir. E `contratoLiberado` cobre os dois caminhos: cautelar aprovada,
 ou **reprovada com o novo pré-contrato impresso** — reprovada sem ele
 não libera, porque o papel que segurava o negócio morreu com o laudo.
+
+**Os dados do contrato se preenchem antes do laudo (27/11/2026, o André Bruno pelo suporte).** Renavam, chassi e os dados do cliente ficam no bloco do contrato desde o começo; o que espera a cautelar é só imprimir e mandar assinar (`contratoLiberado`). E o "Quanto fechou" leva à conta do Check list, onde se desconta comissão e cautelar — a "Forma" de lá não desconta nada.
 
 **O nome do negociador vem do usuário logado.** Perguntar o nome de
 quem acabou de entrar com a própria senha é pedir duas vezes a mesma
