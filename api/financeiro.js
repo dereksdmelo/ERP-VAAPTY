@@ -504,7 +504,29 @@ async function lancamento(req, res, tok) {
     if (!Object.keys(l).length) return res.status(400).json({ erro: "Nada para atualizar." });
     const r = await supa(`${base("fin_lancamento")}?id=eq.${id}`, { method: "PATCH", headers: cab(tok, REP), body: JSON.stringify(l) });
     if (!um(r)) return recusado(res);
-    return res.status(200).json({ ok: true, lancamento: um(r) });
+    // A DESPESA DO CARRO NA CONCILIAÇÃO VIRA CUSTO DO CARRO (27/11/2026, o Derek: "quando fizesse a conciliação
+    // bancária e selecionasse a despesa referente ao carro, já fosse as despesas pro carro e constasse na
+    // rentabilidade"). Linha do banco que saiu (débito, efetivada), em Negociação, com o carro e a parte "Custo do
+    // carro" (`outro`), sem item do contrato: vira uma linha de estoque_custo já paga — o mesmo "Atribuir ao carro"
+    // dos títulos (0134). Quitação, débitos e cliente NÃO: esses já estão no contrato do carro e casariam duas vezes.
+    // Trocar o carro de uma linha já atribuída leva o custo junto. Falha não desfaz o que foi gravado.
+    let custo = null, aviso = null;
+    if (l.estoque_id !== undefined || l.tipo_negociacao !== undefined || l.categoria_id !== undefined) {
+      try {
+        const t = um(await supa(`${base("fin_lancamento")}?select=*,fin_rateio(id),fin_categoria(grupo)&id=eq.${id}`, { headers: cab(tok) }));
+        const k = String((t && t.item_contrato) || "");
+        if (t && t.atribuido_ao_carro && k.startsWith("custo:") && t.estoque_id) {
+          const cid = idOuNulo(k.slice(6));
+          if (cid) await supa(`${base("estoque_custo")}?id=eq.${cid}&estoque_id=neq.${t.estoque_id}`, { method: "PATCH", headers: cab(tok),
+            body: JSON.stringify({ estoque_id: t.estoque_id }) });
+        } else if (t && !k && t.estoque_id && t.situacao === "efetivado" && Number(t.debito) > 0 && t.tipo_negociacao === "outro" &&
+            !(t.fin_rateio || []).length && t.fin_categoria && t.fin_categoria.grupo === "negociacao") {
+          custo = await atribuirAoCarro(tok, t, t.estoque_id, t.categoria_id);
+        }
+      } catch (x) { aviso = x.message; }
+    }
+    const fim = custo ? um(await supa(`${base("fin_lancamento")}?select=*&id=eq.${id}`, { headers: cab(tok) })) || um(r) : um(r);
+    return res.status(200).json({ ok: true, lancamento: fim, custo: custo || undefined, aviso: aviso || undefined });
   }
   if (req.method === "DELETE") {
     const id = String(req.query.id || "");
@@ -952,7 +974,10 @@ async function fechamento(req, res, tok) {
 /* ------------------ DRE ------------------ */
 
 // O mesmo cálculo da tela de rentabilidade: venda − compra − custos.
-const CUSTO_DO_CARRO = ["debitos", "quitacao", "deducao"];
+// Só cautelar e comissão externa são custo da venda; todo o resto é do carro, antes da bruta (27/11/2026, a mesma
+// regra do index.html: o "Outro" do Fox QHN7976 não aparecia em Deduções).
+const CUSTO_DA_VENDA = ["cautelar", "comissao_externa"];
+const CUSTO_DO_CARRO = { indexOf: (t) => (CUSTO_DA_VENDA.indexOf(t) >= 0 ? -1 : 0) };
 function rentabilidadeDe(e) {
   const compra = Number(e.valor_compra) || 0;
   const custos = e.estoque_custo || [];

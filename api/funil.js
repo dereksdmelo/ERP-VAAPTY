@@ -49,7 +49,10 @@ const hojeAqui = () =>
  * de propósito, porque lá cautelar e comissão externa aparecem logo
  * abaixo como despesa variável e entrariam duas vezes.
  */
-const CUSTO_DO_CARRO = ["debitos", "quitacao", "deducao"];
+// Só cautelar e comissão externa são custo da venda; todo o resto é do carro, antes da bruta (27/11/2026, a mesma
+// regra do index.html: o "Outro" do Fox QHN7976 não aparecia em Deduções).
+const CUSTO_DA_VENDA = ["cautelar", "comissao_externa"];
+const CUSTO_DO_CARRO = { indexOf: (t) => (CUSTO_DA_VENDA.indexOf(t) >= 0 ? -1 : 0) };
 function liquidaDe(e) {
   const custos = Array.isArray(e.estoque_custo) ? e.estoque_custo : [];
   const val = (l) => (l.realizado == null ? Number(l.previsto) || 0 : Number(l.realizado) || 0);

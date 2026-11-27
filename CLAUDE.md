@@ -4744,6 +4744,20 @@ VEÍCULOS e a caixa TOTAL NEGOCIADORES num botão que abre em janela, no mesmo d
 lista do estoque vem inteira (teto 300), diferente do CRM paginado.
 Passou de 300 carros, isto vai para `api/veiculo.js`.
 
+**Todo custo sem coluna própria é Dedução (27/11/2026, o Derek: o Fox QHN7976 vendido, com dois Uber do recall
+lançados pela Amanda como "Outro", que saíam da líquida e não apareciam em coluna nenhuma).** Só cautelar e comissão
+externa são custo da VENDA (`CUSTO_DA_VENDA`); reparo, transporte, juros, documentação, outro e a receita extra entram
+em Deduções, antes da bruta — no `index.html`, no `api/financeiro.js` (DRE e Fechamento usam a bruta) e no
+`api/funil.js`. A líquida não muda. **A despesa do carro na conciliação vira custo do carro**: linha do banco que
+saiu, em Negociação, com o carro e a parte "Custo do carro" (o `outro`), sem item do contrato, vira linha de
+`estoque_custo` já paga no PATCH da linha (o mesmo `atribuirAoCarro` da decisão 71); a linha mostra "✓ no custo do
+carro". Quitação, débitos e cliente não, porque já estão no contrato. Trocar o carro da linha leva o custo junto.
+
+**As duas observações do carro (0183, 27/11/2026, o Derek):** `estoque.aviso` (até 80 letras, em vermelho ao lado
+do carro na lista do Estoque, ex.: "Precisa transferir") e `estoque.obs_interna` (texto livre atrás do "Ver obs" da
+ficha; a lista só marca "ver obs"). `ObsDoCarro`, no alto da ficha; grava ao sair do campo. `observacoes` (0019)
+continua sendo o que a indicação e a multa escrevem.
+
 **A semana da venda é a do DIA DA VENDA** (05/11/2026, o Derek:
 *"consideramos no dia da venda a semana pra cálculo de comissões"*), pelas
 quatro semanas da casa (1–8, 9–15, 16–22, 23–fim). A grade tem a coluna

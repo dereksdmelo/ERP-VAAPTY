@@ -15443,7 +15443,13 @@ const diaBR = (v) => {
  * paginada como o CRM) — se um dia passar de 300 carros, isto vai para
  * o servidor.
  */
-const CUSTO_DO_CARRO = ["debitos", "quitacao", "deducao"];
+// TODO CUSTO SEM COLUNA PRÓPRIA É DEDUÇÃO (27/11/2026, o Derek: o Fox QHN7976 vendido, com dois Uber do recall
+// lançados pela Amanda como "Outro", que saíam da líquida e não apareciam em coluna nenhuma). Só a cautelar e a
+// comissão externa são custo da VENDA (têm coluna depois da bruta); o resto — reparo, transporte, juros,
+// documentação, outro, e a receita extra, que é negativa — entra em Deduções, antes da bruta. A mesma regra em
+// `api/financeiro.js` e `api/funil.js`.
+const CUSTO_DA_VENDA = ["cautelar", "comissao_externa"];
+const CUSTO_DO_CARRO = { indexOf: (t) => (CUSTO_DA_VENDA.indexOf(t) >= 0 ? -1 : 0) };
 
 function rentabilidadeDe(e) {
   const c = contaDoEstoque(e);
@@ -15457,7 +15463,7 @@ function rentabilidadeDe(e) {
   const bruta = c.venda - c.compra - doCarro;
   return {
     ...c,
-    debitos: por("debitos"), quitacao: por("quitacao"), deducoes: por("deducao"),
+    debitos: por("debitos"), quitacao: por("quitacao"), deducoes: doCarro - por("debitos") - por("quitacao"),
     cautelar: por("cautelar"), comissaoExterna: por("comissao_externa"),
     bruta, liquida: bruta - daVenda,
   };
@@ -16816,6 +16822,10 @@ function TelaEstoque({ perfil, comp, mes, modo, aoAbrir }) {
               <span className="min-w-0 flex-1 truncate text-[13px]">
                 {v.marca_modelo || "—"}
                 {v.ano_modelo ? <span style={{ color: C.mute }}> {v.ano_modelo}</span> : null}
+                {/* As duas observações do carro (0183): o aviso em vermelho, e a interna só marcada aqui. */}
+                {e.aviso && <span className="ml-2 rounded px-1.5 py-0.5 text-[10.5px] font-bold uppercase"
+                  style={{ background: "#FDECEC", color: "#C62828" }}>{e.aviso}</span>}
+                {e.obs_interna && <span className="ml-1.5 text-[10.5px] font-semibold" style={{ color: C.roxo }} title={e.obs_interna}>ver obs</span>}
                 {/* Na busca vêm os três lugares juntos: o selo diz onde está. */}
                 {buscando && e.situacao !== "em_estoque" && (
                   <span className="ml-2 rounded-full px-2 py-0.5 text-[10.5px] font-semibold"
@@ -17161,6 +17171,45 @@ function NegociacaoDoCarro({ e, aoAbrir }) {
   );
 }
 
+/* AS DUAS OBSERVAÇÕES DO CARRO (0183, 27/11/2026, o Derek: "uma que aparece em vermelho do lado do nome do carro,
+ * por exemplo 'Precisa transferir', e outra interna que fica dentro, aí tem VER OBS"). O aviso é curto (80 letras) e sai
+ * em vermelho na lista do Estoque; a interna é texto livre, guardada atrás do "Ver obs". Cada uma grava ao sair do campo. */
+function ObsDoCarro({ e, aoMudou }) {
+  const [aviso, setAviso] = useState(e.aviso || "");
+  const [obs, setObs] = useState(e.obs_interna || "");
+  const [vendo, setVendo] = useState(false);
+  const [estado, setEstado] = useState("");
+  useEffect(() => { setAviso(e.aviso || ""); setObs(e.obs_interna || ""); }, [e.id, e.aviso, e.obs_interna]);
+  const gravar = async (mud) => {
+    setEstado("Gravando…");
+    try { await atualizarEstoque(e.id, mud); setEstado("Gravado."); aoMudou && aoMudou(); }
+    catch (ex) { setEstado(ex.message); }
+  };
+  return (
+    <div className="rounded-lg p-3" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[12px] font-semibold" style={{ color: "#C62828" }}>Aviso</span>
+        <input value={aviso} maxLength={80} placeholder='ex.: Precisa transferir (aparece em vermelho na lista)'
+          onChange={(ev) => setAviso(ev.target.value)}
+          onBlur={() => { if (aviso.trim() !== (e.aviso || "")) gravar({ aviso: aviso.trim() || null }); }}
+          className="min-w-[220px] flex-1 rounded border px-2 py-1 text-[13px] font-semibold outline-none"
+          style={{ borderColor: aviso ? "#E57373" : C.line, color: "#C62828" }} />
+        <button onClick={() => setVendo((x) => !x)} className="rounded-md px-2.5 py-1 text-[12px] font-semibold"
+          style={{ background: obs ? C.roxoFraco : C.bg, color: C.roxo }}>
+          {vendo ? "Fechar obs" : obs ? "Ver obs" : "+ obs interna"}
+        </button>
+        {estado && <span className="text-[11px]" style={{ color: /Grav/.test(estado) ? C.mute : C.laranja }}>{estado}</span>}
+      </div>
+      {vendo && (
+        <textarea rows={4} value={obs} autoFocus placeholder="Observação interna do carro — fica só aqui dentro."
+          onChange={(ev) => setObs(ev.target.value)}
+          onBlur={() => { if (obs.trim() !== (e.obs_interna || "")) gravar({ obs_interna: obs.trim() || null }); }}
+          className="mt-2 w-full rounded border px-2 py-1.5 text-[13px] outline-none" style={{ borderColor: C.line }} />
+      )}
+    </div>
+  );
+}
+
 function FichaEstoque({ id, perfil, aoVoltar, aoAbrir }) {
   const [e, setE] = useState(null);
   const [erro, setErro] = useState("");
@@ -17263,6 +17312,8 @@ function FichaEstoque({ id, perfil, aoVoltar, aoAbrir }) {
       <Cabecalho titulo={v.placa || "Carro"} sub={`${v.marca_modelo || "—"}${v.ano_modelo ? ` ${v.ano_modelo}` : ""}`} />
 
       {erro && <p className="text-[12px]" style={{ color: C.laranja }}>{erro}</p>}
+
+      <ObsDoCarro e={e} aoMudou={carregar} />
 
       <FotosDoCarro veiculoId={e.veiculo_id} placa={e.veiculo && e.veiculo.placa} />
 
@@ -21293,7 +21344,7 @@ function baixarCSV(nome, cabecalho, linhas) {
   a.href = URL.createObjectURL(new Blob([txt], { type: "text/csv;charset=utf-8" })); a.download = nome; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
-const TIPOS_NEG_ROT = { pagto_cliente: "Pagto cliente", quitacao: "Quitação", debitos: "Débitos", pagto_lojista: "Pagto lojista", reembolso: "Reembolso", outro: "Outro" };
+const TIPOS_NEG_ROT = { pagto_cliente: "Pagto cliente", quitacao: "Quitação", debitos: "Débitos", pagto_lojista: "Pagto lojista", reembolso: "Reembolso", outro: "Custo do carro" };
 
 function TelaFinanceiro({ perfil, comp, mes, aba, aoMudarMes, aoIrPara }) {
   /* AS ABAS SÃO DESTINOS DO PAINEL LATERAL, e a primeira é o que pede
@@ -22606,7 +22657,11 @@ function FinLancamentos({ comp, aoIrTitulos }) {
       ...y, ...mud,
       ...(mud.categoria_id !== undefined ? { fin_categoria: mud.categoria_id ? { ...(y.fin_categoria || {}), id: mud.categoria_id, nome: catNome(mud.categoria_id) } : null } : {}),
     })) });
-    try { await fin("lancamento", { id: l.id }, finJson("PATCH", mud)); carregar(true); }
+    try {
+      const r = await fin("lancamento", { id: l.id }, finJson("PATCH", mud)); carregar(true);
+      // A despesa do carro vira custo dele no servidor (27/11/2026); se não virou, diz por quê.
+      if (r && r.aviso) setErro(`Gravado, mas não virou custo do carro: ${r.aviso}`);
+    }
     catch (e) { setErro(e.message); }
   };
   const apagar = async (l) => {
@@ -22858,6 +22913,11 @@ function FinLancamentos({ comp, aoIrTitulos }) {
                             <option value="">— parte —</option>
                             {Object.keys(TIPOS_NEG_ROT).map((t) => <option key={t} value={t}>{TIPOS_NEG_ROT[t]}</option>)}
                           </select>
+                          {l.atribuido_ao_carro ? (
+                            <span className="text-[10px] font-semibold" style={{ color: C.verde }} title="Entrou nos custos do carro e na rentabilidade, em Deduções">✓ no custo do carro</span>
+                          ) : l.estoque_id && !l.item_contrato && Number(l.debito) > 0 && l.tipo_negociacao !== "outro" && (
+                            <span className="text-[10px]" style={{ color: C.mute }} title="Com a parte 'Custo do carro', a despesa entra nos custos dele e na rentabilidade">parte "Custo do carro" lança no carro</span>
+                          )}
                         </span>
                       ) : cat && cat.pede_investidor ? (
                         /* Aporte (crédito) ou resgate (débito) de um investidor ou sócio (0158). */
