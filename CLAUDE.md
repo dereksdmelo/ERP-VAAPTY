@@ -5045,6 +5045,11 @@ ir para a linha — o índice único (conta fixa, competência) da 0096 não
 aceita os dois vivos. Diferente de dividir: dividir é uma linha do
 banco que soma vários; ligar é uma linha que é um título.
 
+**A linha não pula de lugar ao ser preenchida (27/11/2026, um vídeo do financeiro).** Escolher o carro numa linha
+da Conciliação a mandava para baixo de outra, e o próximo clique caía na linha errada. As linhas de uma importação
+nascem com o mesmo `criado_em`, e no empate de `data, criado_em` o Postgres devolve na ordem física — a linha
+atualizada vai para o fim do grupo. A ordem agora desempata por `id` (na lista da Conciliação e no fechamento).
+
 **`revisar` é o que o acerto automático deixa aceso.** Casei este
 movimento com aquele título; confira. Sem esse sinalizador, conciliação
 automática vira conciliação invisível — e é o tipo de coisa que só se

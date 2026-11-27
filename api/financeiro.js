@@ -370,7 +370,10 @@ async function lancamento(req, res, tok) {
     // Só o que passou no banco: título em aberto tem tela própria, e
     // misturado aqui viraria saldo que o banco não tem.
     const lista = await supa(
-      `${base("fin_lancamento")}?select=${CAMPOS_LANC}&situacao=eq.efetivado${conta ? `&conta_id=eq.${conta}` : ""}${f}&order=data.asc,criado_em.asc&limit=2000`,
+      // O `id` desempata (27/11/2026, o vídeo do financeiro: escolher o carro numa linha a fazia pular para baixo de
+      // outra). As linhas de uma importação nascem com o MESMO `criado_em`; no empate o banco devolve na ordem física, e
+      // toda linha atualizada vai para o fim do grupo — a linha saía debaixo do cursor de quem a estava preenchendo.
+      `${base("fin_lancamento")}?select=${CAMPOS_LANC}&situacao=eq.efetivado${conta ? `&conta_id=eq.${conta}` : ""}${f}&order=data.asc,criado_em.asc,id.asc&limit=2000`,
       { headers: cab(tok) });
     // O título a que cada linha do banco se refere (07/11/2026): o que foi
     // ligado — à mão ou pela importação — fica cancelado apontando a linha.
@@ -3786,7 +3789,7 @@ async function cartao(req, res, tok) {
     const lista = [];
     for (const c of cartoes.filter((x) => !alvo || x.id === alvo.id)) {
       const { fecha, venc } = cfg(c);
-      const linhas = await supa(`${base("fin_lancamento")}?select=${CAMPOS_LANC}&conta_id=eq.${c.id}&situacao=eq.efetivado&order=data.asc,criado_em.asc&limit=8000`, { headers: cab(tok) }) || [];
+      const linhas = await supa(`${base("fin_lancamento")}?select=${CAMPOS_LANC}&conta_id=eq.${c.id}&situacao=eq.efetivado&order=data.asc,criado_em.asc,id.asc&limit=8000`, { headers: cab(tok) }) || [];
       const pagas = await supa(`${base("fin_fatura")}?select=*&conta_id=eq.${c.id}`, { headers: cab(tok) }) || [];
       const pagaPor = {}; pagas.forEach((p) => { pagaPor[p.ref] = p; });
       const porRef = {};
